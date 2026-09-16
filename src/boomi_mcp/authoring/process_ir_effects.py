@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import re
 from typing import (
-    Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Tuple,
+    Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple,
 )
 
 from ..errors import PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID
@@ -948,10 +948,13 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
 
     Read off the compiler's own lineage walk, over the process's own trusted context
     and the symbols it is compiled against, so a profile requirement resolves. No
-    declaration is needed and none is trusted: this states what a caller OWES, never
-    what the child establishes for it.
+    declaration is needed and none is trusted: this states what a caller OWES, what
+    the child may change, and what every normal completion of it establishes, each
+    read off that walk (amendment 1 rule 7).
 
     - A listener cannot be called, so its entry is ``unknown``.
+    - Both forms owe the document properties their retrieves need of a cache only a
+      caller fills, measured like a bound path (amendment 3 §7).
     - A No Data child receives one empty document per invocation. It states no
       document requirement, and its document-property reads stay its own defects.
     - A passthrough child requires what each consumer of the incoming documents names
@@ -980,6 +983,10 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     #: Stage-2 correction batch 3).
     caches_known = True
     mutated = set()
+    #: Amendment 3 §8: the caches a run of this process may REMOVE outright — its own
+    #: removes, and every removal a child it calls may make. `mutated_state` cannot answer
+    #: this: it records a write and a removal as the same fact.
+    removed = set()
     for node in prepared.cfg.nodes:
         semantic = node.semantic
         kind = semantic.semantic_kind
@@ -987,12 +994,15 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
             mutated.add((semantic.scope, semantic.name))
         elif kind in ("cache_put", "cache_remove"):
             mutated.add(("cache", semantic.cache_ref))
+            if kind == "cache_remove":
+                removed.add(semantic.cache_ref)
         elif kind == "process_call":
             contract = base.child_entry_contract(semantic.process_ref)
             if contract is None or not (contract.state_known or contract.cache_writes_known):
                 caches_known = False
             else:
                 mutated.update((key[0], key[1]) for key in contract.mutated_state if key[0] == "cache")
+                removed.update(contract.removed_caches)
             if contract is None or not contract.state_known:
                 known = False
             else:
@@ -1006,11 +1016,30 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         "state_known": known,
         "cache_writes_known": known or caches_known,
         "mutated_state": tuple(sorted(mutated)) if known or caches_known else (),
+        # Amendment 3 §8: which of those caches a run may EMPTY — every removal this walk
+        # PROVES, independently of what it cannot know about a call it could not derive.
+        # NOT gated like `mutated_state`: that list is a completeness claim ("writes
+        # nothing else"), while this one is an existence claim, and an underivable call
+        # hides removals without erasing the ones authored beside it. Gating it dropped a
+        # `cache_remove` in the child's own body the moment the child also called a
+        # process nothing derives, so a parent that filled that cache, called the child
+        # and read the cache afterwards was admitted (correction batch 18).
+        "removed_caches": tuple(sorted(removed)),
     }
+    # Amendment 1 rule 7: what every normal completion establishes, off the walk's meet
+    # over normal exits. Execution-scoped keys the child itself writes: a document
+    # property never lands on a caller's sibling copies, and a key the walk was only
+    # handed is no write of the child's.
+    listed = set(facts["mutated_state"])
+    facts["guaranteed_state"] = tuple(sorted(
+        (key[0], key[1]) for key in walk.established_at_exit
+        if key[0] != "ddp" and (key[0], key[1]) in listed
+    ))
     reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))
     facts["cache_requirements"] = tuple(sorted(
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
+    facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
     if form != PASSTHROUGH:
         facts.update(
             entry_form="scheduled",
@@ -1064,12 +1093,88 @@ def _caller_composed_paths(prepared: Any, capabilities: Any, walk: Any) -> Tuple
     ))
 
 
+def _caller_cached_properties(
+    prepared: Any, capabilities: Any, walk: Any
+) -> Tuple[Tuple[str, str, Optional[str], bool], ...]:
+    """The cached document properties a child needs its callers to have stored (#184 amendment 3 §7-§8).
+
+    MEASURED on the child's own walk, as `_caller_composed_paths` measures a bound path. A
+    property the walk found unestablished on documents retrieved from a cache only a
+    caller can have filled is a caller obligation exactly when seeding a caller cohort
+    that guarantees it clears that refusal, property by property. A step between the
+    retrieve and the use that hands on other documents keeps the refusal, and so does a
+    cache write of the child's own that may reach the retrieve: the defect stays the
+    child's. Both entry forms: a retrieve replaces whatever documents the child had.
+
+    A BOUND request path the same seed clears is a bound use of those cached properties
+    even where its own refusal recorded no row of its own: the caller-cache marker rides
+    on the stream, and a Message or a re-cache between the retrieve and the binding
+    rebuilds it. Recording the ordinary row alone left the call proving establishment
+    only, so a literal path segment the caller stored reached a bound request path
+    (correction batch 18).
+
+    Which cache such a binding belongs to is measured the same way, ONE seeded cache at a
+    time: the bound use is of the cache whose own seed clears it. Crediting it to every
+    seeded cache that needs a property of the same name refused a caller whose second
+    cache stored a literal segment no bound path ever reads.
+
+    The two-walk comparison is keyed by CACHE as well as by pointer and property NAME, for
+    the same reason: two caches needing a property of one name at ONE call pointer are two
+    obligations, and a refusal the seed cannot clear for one of them says nothing about the
+    other. Keyed on the name alone, a middle that broke either row dropped BOTH, so it
+    published no cached-property row at all for a child that has two and its own callers
+    were asked for nothing (correction batch 18).
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    candidates = sorted(
+        set(walk.unestablished_cached_keys),
+        key=lambda row: (row[0], row[1], row[2], row[3] or "", row[4]),
+    )
+    if not candidates:
+        return ()
+    seeds = tuple(sorted({(cache, name) for _p, cache, name, _r, _b in candidates}))
+    seeded = capabilities.model_copy(update={"caller_cache_cohorts": seeds})
+    after = walk_lineage(prepared, seeded)
+    still = {(row[0], row[1], row[2]) for row in after.unestablished_cached_keys}
+    rows = {(cache, name, ref, bound) for pointer, cache, name, ref, bound in candidates
+            if (pointer, cache, name) not in still}
+    cleared_bindings = set(walk.unestablished_bindings) - set(after.unestablished_bindings)
+    if cleared_bindings:
+        rides_on: Dict[str, Set[str]] = {}
+        for pointer, cache in walk.binding_cache_origins:
+            rides_on.setdefault(pointer, set()).add(cache)
+        for cache, name in seeds:
+            alone = walk_lineage(prepared, capabilities.model_copy(
+                update={"caller_cache_cohorts": ((cache, name),)}))
+            for pointer, cleared_name, request_profile_ref in (
+                cleared_bindings - set(alone.unestablished_bindings)
+            ):
+                if cleared_name != name:
+                    continue
+                rows.add((cache, cleared_name, request_profile_ref, True))
+                rows |= {
+                    (ridden, cleared_name, request_profile_ref, True)
+                    for ridden in rides_on.get(pointer, ())
+                }
+    return tuple(sorted(rows, key=lambda row: (row[0], row[1], row[2] or "", row[3])))
+
+
 def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     """The cache contents a CALLED child may be validated under (#184 amendment 1 rule 6).
 
-    One seed per cache whose consumers all name a profile, and the same component. A
-    disagreement or an unstated consumer seeds nothing, so the child keeps its own
+    One seed per cache whose consumers that NAME a profile all name the same component.
+    Consumers naming DIFFERENT components seed nothing, so the child keeps its own
     refusal: no caller could satisfy both.
+
+    A consumer that names none — an undeclared-input call, a data process, a call to a
+    child whose entry nothing derives — states nothing a caller could store or fail to
+    store, and every call skips it for exactly that reason. It is therefore not a
+    disagreement and does not void the seed. Until correction batch 18 it did, so a
+    child's map, profile source or declared-input call was refused under its caller's
+    context whenever another consumer of the same caller-filled cache stated no profile,
+    while the identical in-process graph compiled and the caller staged exactly the
+    declared profile.
     """
     from ..compiler.process_ir.contracts import component_identity
 
@@ -1078,16 +1183,17 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
         by_cache.setdefault(cache_ref, []).append(profile_ref)
     seeds = []
     for cache_ref, refs in sorted(by_cache.items()):
-        if None in refs:
+        stated = [ref for ref in refs if ref is not None]
+        if not stated:
             continue
-        identities = {component_identity(_symbol(symbols, ref)) or ref for ref in refs}
+        identities = {component_identity(_symbol(symbols, ref)) or ref for ref in stated}
         if len(identities) == 1:
-            seeds.append((cache_ref, sorted(refs)[0]))
+            seeds.append((cache_ref, sorted(stated)[0]))
     return tuple(seeds)
 
 
 def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None) -> Dict[str, tuple]:
-    """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds)``.
+    """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
     child's own walk. The members of a call cycle have no derivable entry and are
@@ -1155,13 +1261,19 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
             if own.get("entry_form") == "passthrough" else None,
             own.get("entry_form"),
             _caller_cache_seeds(own.get("cache_requirements", ()), symbols) if is_called else (),
+            # Amendment 3 §7-§8: the cached properties the child's OWN contract states,
+            # so no two parents' facts combine; each call proves them against its writes.
+            tuple(sorted({
+                (cache_ref, name)
+                for cache_ref, name, _ref, _bound in own.get("cache_property_requirements", ())
+            })) if is_called else (),
         )
     return bindings
 
 
 def _binds(binding: tuple) -> bool:
-    rows, reads, writers, entry, _form, cache_seeds = binding
-    return bool(rows or reads or writers or cache_seeds or entry is not None)
+    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds = binding
+    return bool(rows or reads or writers or cache_seeds or cohort_seeds or entry is not None)
 
 
 def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
@@ -1169,7 +1281,7 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         ProcessIRValidationCapabilitiesV1,
     )
 
-    rows, reads, writers, entry, _form, cache_seeds = binding
+    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds = binding
     fields = {
         name: getattr(capabilities, name)
         for name in ProcessIRValidationCapabilitiesV1.model_fields
@@ -1179,6 +1291,7 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         established_at_entry=tuple(sorted(set(capabilities.established_at_entry) | set(reads))),
         caller_supplied_writers=writers,
         caller_cache_contents=cache_seeds,
+        caller_cache_cohorts=cohort_seeds,
         entry_contract=entry,
     )
     return ProcessIRValidationCapabilitiesV1(**fields)

@@ -46,6 +46,7 @@ from boomi_mcp.compiler.process_ir.pipeline import (  # noqa: E402
 )
 from boomi_mcp.compiler.process_ir.semantic_validation import lineage  # noqa: E402
 from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (  # noqa: E402
+    ChildEntryContractV1,
     ExternalWriterContractV1,
     ProcessIRValidationCapabilitiesV1,
 )
@@ -86,6 +87,8 @@ def _symbols():
         sym("CACHE", "CACHE", "documentcache"),
         sym("CACHE_P1", "CACHEP1", "documentcache", cache_profile_ref="$ref:P1"),
         sym("CACHE_P2", "CACHEP2", "documentcache", cache_profile_ref="$ref:P2"),
+        # A called process; the cache-content matrix states its Data Passthrough contract.
+        sym("CHILD", "CHILD-PROC", "process"),
         # #158 listener operation declaring a request profile
         sym("LISTEN", "LISTENOP", "connector-action", connector_type="wss", action_type="Listen",
             input_profile_ref="$ref:P1", input_document_type="singlejson"),
@@ -203,6 +206,57 @@ _REFUSED = [
         "/body/steps/0/legs/0/steps/1/map_ref", None, id="upstream_call_declares_no_output"),
 ]
 
+# ARCH-184-r1-01/-02. Each consumer's only profile claim is cache content that is not the one
+# profile it requires. The pointers are the base plan's: the source's own
+# `/source_values/0/profile_ref`, and a typed call's own `/operation_ref` (§4 pointer policy).
+
+_MESSAGE = {"kind": "message", "text": "m"}
+#: The verified outside writer of `CACHE`, for a read that authors external_writer.
+_EXTERNAL_WRITER = ProcessIRValidationCapabilitiesV1(
+    external_writers=(ExternalWriterContractV1(cache_ref="$ref:CACHE"),))
+
+
+def _decision(true_steps):
+    """A Decision whose true arm runs ``true_steps``; both arms stop."""
+    return {"kind": "decision", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "a"},
+            "true_arm": {"steps": list(true_steps), "terminal": _STOP},
+            "false_arm": {"steps": [], "terminal": _STOP}}
+
+
+#: `(id, payload, pointer, capabilities)`.
+_CACHE_CONTENT_REFUSALS = [
+    ("external_writer_content_proves_no_source_profile",
+     _branch(_leg([_read(external_writer=True), _profile_writer("P1")]), _OK_LEG),
+     "/body/steps/0/legs/0/steps/1/source_values/0/profile_ref", _EXTERNAL_WRITER),
+    ("unknown_cache_write_proves_no_source_profile",
+     _branch(_leg([_call("GET_UNDECLARED")], _put()), _leg([_read(), _profile_writer("P1")])),
+     "/body/steps/0/legs/1/steps/1/source_values/0/profile_ref", None),
+    ("disagreeing_cache_writers_prove_no_source_profile",
+     _branch(_leg([_call("GET")], _put()), _leg([_call("GET"), _map("M12")], _put()),
+             _leg([_read(), _profile_writer("P1")])),
+     "/body/steps/0/legs/2/steps/1/source_values/0/profile_ref", None),
+    ("map_written_content_contradicts_a_declared_input",
+     _branch(_leg([_call("GET"), _map("M11")], _put("CACHE_P1")), _leg([_read("CACHE_P1"), _call("PATCH")])),
+     "/body/steps/0/legs/1/steps/1/operation_ref", None),
+    ("call_output_content_contradicts_a_declared_input",
+     _branch(_leg([_call("GET")], _put("CACHE_P1")), _leg([_read("CACHE_P1"), _call("PATCH")])),
+     "/body/steps/0/legs/1/steps/1/operation_ref", None),
+    ("unknown_cache_content_cannot_satisfy_a_declared_input",
+     _branch(_leg([_call("GET_UNDECLARED")], _put()), _leg([_read(), _call("PATCH")])),
+     "/body/steps/0/legs/1/steps/1/operation_ref", None),
+    ("external_writer_content_cannot_satisfy_a_declared_input",
+     _branch(_leg([_read(external_writer=True), _call("PATCH")]), _OK_LEG),
+     "/body/steps/0/legs/0/steps/1/operation_ref", _EXTERNAL_WRITER),
+    ("a_decision_between_the_read_and_the_call_erases_nothing",
+     _branch(_leg([_call("GET"), _map("M11")], _put("CACHE_P1")),
+             _leg([_read("CACHE_P1")], _decision([_call("PATCH")]))),
+     "/body/steps/0/legs/1/terminal/true_arm/steps/0/operation_ref", None),
+]
+_REFUSED += [pytest.param(payload, pointer, capabilities, id=name)
+             for name, payload, pointer, capabilities in _CACHE_CONTENT_REFUSALS]
+
 
 @pytest.mark.parametrize("payload,pointer,capabilities", _REFUSED)
 def test_a_consumer_the_reaching_stream_contradicts_is_refused_at_its_pointer(payload, pointer, capabilities):
@@ -237,6 +291,30 @@ _SATISFIED = [
         _map("M32"), _map("M32"),
         {"kind": "target", "connection_ref": "$ref:tconn", "operation_ref": "$ref:top"},
         _STOP]}}, id="legacy_source_maps_stay_unchecked"),
+    # ARCH-184-r1-01/-02: what the reaching writes stored satisfies the consumer...
+    pytest.param(_branch(_leg([_call("GET")], _put()), _leg([_read(), _profile_writer("P1")])),
+                 id="cache_origin_matching_source"),
+    pytest.param(_branch(_leg([_call("GET"), _map("M12")], _put("CACHE_P2")),
+                         _leg([_read("CACHE_P2"), _call("PATCH")])),
+                 id="cache_content_matching_the_declared_input"),
+    # ...and the consumers the rule leaves unchecked by design stay admitted: an undeclared
+    # input (D2), a stream a Message or an undeclared call produced (C7), direct call-to-call
+    # and listener-to-call (D4), and an unknown write into a declared cache (base §4).
+    pytest.param(_branch(_leg([_call("GET_UNDECLARED")], _put()), _leg([_read(), _call("PATCH_UNDECLARED")])),
+                 id="an_undeclared_input_stays_unchecked"),
+    pytest.param(_branch(_leg([_call("GET")], _put()), _leg([_read(), _MESSAGE, _call("PATCH")])),
+                 id="a_message_after_the_read_ends_the_cache_claim"),
+    pytest.param(_branch(_leg([{"kind": "message", "text": "not-json"}, _profile_writer("P2")]), _OK_LEG),
+                 id="a_message_built_source_stays_unverified"),
+    pytest.param(_branch(_leg([_call("GET_UNDECLARED"), _profile_writer("P2")]), _OK_LEG),
+                 id="an_undeclared_call_output_source_stays_unverified"),
+    pytest.param(_branch(_leg([_call("GET"), _call("PATCH")]), _OK_LEG),
+                 id="direct_call_to_call_stays_unchecked"),
+    pytest.param({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "listener", "operation_ref": "$ref:LISTEN"}, _call("PATCH"), _STOP]}},
+        id="a_listener_request_feeding_a_call_stays_unchecked"),
+    pytest.param(_branch(_leg([_call("GET_UNDECLARED")], _put("CACHE_P1")), _OK_LEG),
+                 id="an_unknown_write_into_a_declared_cache_is_admitted"),
 ]
 
 
@@ -376,3 +454,191 @@ def test_a_call_leg_beside_a_legacy_target_leg_is_still_checked():
     payload = _branch(_leg([_call("GET"), _map("M32")]), _leg([], _TARGET))
     diagnostics = _both_routes(payload)
     assert (_PROFILE, "/body/steps/0/legs/0/steps/1/map_ref") in diagnostics, diagnostics
+
+
+# ---------------------------------------------------------------------------
+# ARCH-184-r1-01/-02: one cache-content judgement for every typed consumer
+# ---------------------------------------------------------------------------
+
+#: A leg storing documents of one profile in `CACHE`: P1 is GET's output, P2 that output
+#: mapped through M12, and None an undeclared GET's output, whose profile nothing states.
+_WRITER_LEGS = {
+    "P1": _leg([_call("GET")], _put()),
+    "P2": _leg([_call("GET"), _map("M12")], _put()),
+    None: _leg([_call("GET_UNDECLARED")], _put()),
+}
+#: A Data Passthrough child that requires P1 of the documents a waited call hands it.
+_CHILD_REQUIRES_P1 = ChildEntryContractV1(
+    process_ref="$ref:CHILD", entry_form="passthrough", document_requirements=("$ref:P1",))
+#: Every branch of the stream step that judges documents by profile (pinned from source
+#: below): `consumer -> (the profile it requires, its steps after the read, its terminal,
+#: its pointer below the reading leg)`.
+_TYPED_CONSUMERS = {
+    "map": ("P1", [_map("M12")], None, "/steps/1/map_ref"),
+    "property_source": ("P1", [_profile_writer("P1")], None, "/steps/1/source_values/0/profile_ref"),
+    "declared_input_call": ("P2", [_call("PATCH")], None, "/steps/1/operation_ref"),
+    "passthrough_child_call": (
+        "P1", [], {"kind": "process_call", "process_ref": "$ref:CHILD"}, "/terminal/process_ref"),
+}
+#: The consumers the rule leaves unchecked by design, by name: a call that declares no
+#: input (D2), and documents a Message rewrote after the read (C7).
+_UNCHECKED_CONSUMERS = {
+    "undeclared_input_call": ([_call("PATCH_UNDECLARED")], "/steps/1/operation_ref"),
+    "source_after_a_message": ([_MESSAGE, _profile_writer("P1")], "/steps/2/source_values/0/profile_ref"),
+    "declared_input_call_after_a_message": ([_MESSAGE, _call("PATCH")], "/steps/2/operation_ref"),
+}
+
+
+def _content_states(required):
+    """Every content state of one cache, as ``(profiles written, external writer, satisfied)``.
+
+    The writes store each subset of {the required profile, the other one, a profile nothing
+    states}, and the read does or does not author external_writer, which adds content whose
+    profile nothing states. ``satisfied`` is the authority's own rule: the cache holds
+    exactly the required profile.
+    """
+    import itertools
+
+    other = "P2" if required == "P1" else "P1"
+    profiles = (required, other, None)
+    for size in range(len(profiles) + 1):
+        for written in itertools.combinations(profiles, size):
+            for external in (False, True):
+                yield written, external, set(written) | ({None} if external else set()) == {required}
+
+
+def _read_after(written, external, steps, terminal=None):
+    """``(payload, reading leg's pointer)``: legs store ``written`` in `CACHE`, the last reads it."""
+    legs = [_OK_LEG] + [_WRITER_LEGS[profile] for profile in written]
+    legs.append(_leg([_read(external_writer=True) if external else _read()] + list(steps), terminal))
+    return _branch(*legs), "/body/steps/0/legs/{0}".format(len(legs) - 1)
+
+
+@pytest.mark.parametrize("consumer", sorted(_TYPED_CONSUMERS))
+def test_every_typed_consumer_judges_cache_content_by_one_rule(consumer):
+    """The coverage claim: over every content state one cache can hold, each typed consumer is
+    refused exactly when the reaching writes did not store the one profile it requires.
+
+    The waited Data Passthrough child call judges by its own comparison, and this matrix pins
+    that comparison equal to the shared judgement on every state."""
+    required, steps, terminal, tail = _TYPED_CONSUMERS[consumer]
+    capabilities = ProcessIRValidationCapabilitiesV1(
+        external_writers=_EXTERNAL_WRITER.external_writers, child_entry_contracts=(_CHILD_REQUIRES_P1,))
+    wrong = []
+    for written, external, satisfied in _content_states(required):
+        payload, leg = _read_after(written, external, steps, terminal)
+        refused = (_PROFILE, leg + tail) in _both_routes(payload, capabilities)
+        if refused == satisfied:
+            wrong.append((written, external, "refused" if refused else "admitted"))
+    assert wrong == [], wrong
+
+
+@pytest.mark.parametrize("consumer", sorted(_UNCHECKED_CONSUMERS))
+def test_a_consumer_the_rule_excludes_by_name_is_never_refused_for_cache_content(consumer):
+    steps, tail = _UNCHECKED_CONSUMERS[consumer]
+    refused = []
+    for written, external, _satisfied in _content_states("P1"):
+        payload, leg = _read_after(written, external, steps)
+        if (_PROFILE, leg + tail) in _both_routes(payload, _EXTERNAL_WRITER):
+            refused.append((written, external))
+    assert refused == [], refused
+
+
+def test_the_cache_content_judgement_is_load_bearing(monkeypatch):
+    """Non-vacuity, both directions. With the judgement satisfied by any cache content, every
+    cache-content refusal above is admitted, and so is a map reading the wrong content; with
+    no content tracked, the matching controls are refused."""
+    wrong_map = ("cache_origin_wrong_map", _branch(_leg([_call("GET")], _put()), _leg([_read(), _map("M32")])),
+                 "/body/steps/0/legs/1/steps/1/map_ref", None)
+    rows = _CACHE_CONTENT_REFUSALS + [wrong_map]
+    for name, payload, pointer, capabilities in rows:
+        assert (_PROFILE, pointer) in _both_routes(payload, capabilities), name
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "cache_content_judgement",
+                        lambda stream, identity: None if stream.origin != "cache" else True)
+        for name, payload, pointer, capabilities in rows:
+            assert (_PROFILE, pointer) not in _both_routes(payload, capabilities), name
+    matching = {
+        "/body/steps/0/legs/1/steps/1/map_ref":
+            _branch(_WRITER_LEGS["P1"], _leg([_read(), _map("M12")])),
+        "/body/steps/0/legs/1/steps/1/source_values/0/profile_ref":
+            _branch(_WRITER_LEGS["P1"], _leg([_read(), _profile_writer("P1")])),
+        "/body/steps/0/legs/1/steps/1/operation_ref":
+            _branch(_WRITER_LEGS["P2"], _leg([_read(), _call("PATCH")])),
+    }
+    for pointer, payload in matching.items():
+        assert (_PROFILE, pointer) not in _both_routes(payload), pointer
+    monkeypatch.setattr(lineage._State, "content_of", lambda self, cache_ref: frozenset())
+    for pointer, payload in matching.items():
+        assert (_PROFILE, pointer) in _both_routes(payload), pointer
+
+
+def test_every_branch_that_judges_a_profile_routes_cache_content_through_the_judgement():
+    """The sibling sweep, read from source: every branch of the stream step that reports a
+    profile mismatch asks `cache_content_judgement`, or is excluded here by name with its
+    reason, so a consumer added later cannot judge cache content by a rule of its own."""
+    import ast
+
+    tree = ast.parse(Path(lineage.__file__).read_text(encoding="utf-8"))
+    step = next(node for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef) and node.name == "_advance_stream")
+
+    def calls(node, name):
+        return any(isinstance(sub, ast.Call) and getattr(sub.func, "id", None) == name
+                   for sub in ast.walk(node))
+
+    def kinds(test):
+        return {comparator.value
+                for compare in ast.walk(test)
+                if isinstance(compare, ast.Compare) and getattr(compare.left, "id", None) == "kind"
+                for comparator in compare.comparators if isinstance(comparator, ast.Constant)}
+
+    routed, unrouted = set(), set()
+    for branch in step.body:
+        if isinstance(branch, ast.If) and calls(branch, "mismatch"):
+            (routed if calls(branch, "cache_content_judgement") else unrouted).update(kinds(branch.test))
+    assert routed == {"connector_call", "map", "set_property"}, routed
+    # A waited Data Passthrough child call compares the stream itself, and the matrix above pins
+    # its verdict equal to the judgement's on every content state. A cache write, either branch,
+    # is not a consumer: it records what it stores, and an unknown write is admitted (base §4).
+    assert unrouted == {"cache_put", "process_call"}, unrouted
+
+
+def test_an_unknown_write_into_a_declared_cache_satisfies_no_typed_consumer_after_it():
+    """Base §4: an undeclared GET written into a cache that declares a profile is admitted and
+    makes the content unknown ("make differing/unknown writes UNKNOWN"). The declaration is not
+    the content, so a typed consumer of the read in the next leg is refused even when it needs
+    exactly the declared profile."""
+    for cache, consumer, tail in (
+        ("CACHE_P1", _map("M12"), "/map_ref"),
+        ("CACHE_P1", _profile_writer("P1"), "/source_values/0/profile_ref"),
+        ("CACHE_P2", _call("PATCH"), "/operation_ref"),
+    ):
+        diagnostics = _both_routes(_branch(_leg([_call("GET_UNDECLARED")], _put(cache)),
+                                           _leg([_read(cache), consumer])))
+        assert (_PROFILE, "/body/steps/0/legs/1/steps/1" + tail) in diagnostics, diagnostics
+        assert (_PROFILE, "/body/steps/0/legs/0/terminal/cache_ref") not in diagnostics, diagnostics
+
+
+def test_the_served_pages_state_the_cache_content_rule():
+    """Served contract: both property steps say what a profile source needs after a cache read
+    and where it is not verified, and a connector call says what a declared input needs of
+    cache content."""
+    from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
+
+    facts = {}
+    pending = [process_ir_authoring_revision_payload()]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            if str(value.get("contract_entry_id", "")).startswith("node."):
+                facts[value["contract_entry_id"]] = " ".join(value.get("ordering_facts") or ())
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    for entry_id in ("node.set_ddp", "node.set_dpp"):
+        assert ("After a cache read it must name the one profile every cache write reaching the "
+                "read stored") in facts[entry_id], facts[entry_id]
+        assert "a profile source there is not verified" in facts[entry_id], facts[entry_id]
+    assert ("A call that declares an input profile and receives documents read from a cache must "
+            "declare the one profile every cache write reaching the read stored") in facts["node.connector_call"]

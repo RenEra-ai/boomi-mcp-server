@@ -434,6 +434,13 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "consume what it did not return.",
             "Whether a call may sit inside a retried region comes from its replay "
             "classification; no caller-supplied evidence can lift a refusal.",
+            "A call that declares an input profile and receives documents read from a "
+            "cache must declare the one profile every cache write reaching the read "
+            "stored, and is refused at its operation_ref otherwise, including when "
+            "those writes stored different profiles or documents whose profile nothing "
+            "states, or the read authors external_writer. A call that declares no input "
+            "profile is not checked, and neither is the profile one connector call "
+            "hands directly to the next.",
         ),
         # No generic document semantics ON PURPOSE. What a connector call takes
         # and returns is decided by its family/action row, and the rows disagree:
@@ -601,9 +608,18 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "established.",
             "A profile source reads an element of the documents at that point. On a "
             "scheduled root's empty start document it is refused, because there is "
-            "nothing to read. After a step that produces documents, its profile must "
-            "be the one those documents carry. On a passthrough entry it states what "
-            "the process requires of the documents its callers hand over.",
+            "nothing to read. After a connector call or listener that declares the "
+            "profile of its documents, or after a map, the source must name that "
+            "profile. After a cache read it must name the one profile every cache "
+            "write reaching the read stored; when those writes stored different "
+            "profiles or documents whose profile nothing states, or the read authors "
+            "external_writer, no profile source is accepted there. On a passthrough "
+            "entry it states what the process requires of the documents its callers "
+            "hand over.",
+            "After a Message, a Data Process, or a connector call or listener that "
+            "declares no profile, nothing states the profile of the documents, so a "
+            "profile source there is not verified. In the legacy source/target "
+            "dialect it stays unchecked, as a map does.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _RELATED: ("state_visibility.ddp",),
@@ -623,9 +639,18 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "reordering the paths is the fix.",
             "A profile source reads an element of the documents at that point. On a "
             "scheduled root's empty start document it is refused, because there is "
-            "nothing to read. After a step that produces documents, its profile must "
-            "be the one those documents carry. On a passthrough entry it states what "
-            "the process requires of the documents its callers hand over.",
+            "nothing to read. After a connector call or listener that declares the "
+            "profile of its documents, or after a map, the source must name that "
+            "profile. After a cache read it must name the one profile every cache "
+            "write reaching the read stored; when those writes stored different "
+            "profiles or documents whose profile nothing states, or the read authors "
+            "external_writer, no profile source is accepted there. On a passthrough "
+            "entry it states what the process requires of the documents its callers "
+            "hand over.",
+            "After a Message, a Data Process, or a connector call or listener that "
+            "declares no profile, nothing states the profile of the documents, so a "
+            "profile source there is not verified. In the legacy source/target "
+            "dialect it stays unchecked, as a map does.",
         ),
         _DOCS: ("required", "documents", "per_document"),
         _RELATED: ("state_visibility.dpp",),
@@ -657,9 +682,14 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "read, flow control, a message or a data process) and the called "
             "process is a Data Passthrough process in the same request, called with "
             "wait=true, whose entry requirements the server derives and checks at "
-            "the call. Steps before a call into a No Data process or into a process "
-            "whose entry cannot be derived are refused. A step before a root call "
-            "is refused. A catch body admits only notify steps ahead of the call.",
+            "the call. Steps before a call into a No Data process, into a process "
+            "whose entry cannot be derived, or into a Data Passthrough process that "
+            "hands the documents on to a process whose entry cannot be derived are "
+            "refused. In a Data Passthrough process these rules hold across a Branch "
+            "or Decision after native work, with the last step ahead of it counting "
+            "as the step before the call; any other process keeps the empty-prefix "
+            "placement there. A step before a root call is refused. A catch body "
+            "admits only notify steps ahead of the call.",
             "On a catch body terminal a call must be authored wait=true and "
             "abort_on_error=true. abort_on_error defaults to false, so it has to "
             "be written explicitly; the default is refused, never rewritten.",
@@ -676,15 +706,27 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "A No Data child, a process with no explicit entry, runs once per arriving "
             "document, each run on one empty document of its own: the parent's "
             "documents and their document properties never reach it. Where more than "
-            "one document can reach the call, a No Data child that may change the "
-            "process properties or cache it reads first is refused.",
+            "one document can reach the call, a No Data child is refused when it may "
+            "change a cache it reads first, or when it reads state first and its own "
+            "state effects are unknown. A process property it reads and rewrites is "
+            "checked for establishment only: a later run finds it set, with whatever "
+            "value an earlier run left.",
             "Both forms share the calling execution's process properties and document "
             "caches, so state a child reads before writing it must be established "
             "before the call, and what a child may put in a cache is unknown to later "
             "reads. A child that consumes a cache it reads before writing it is checked "
-            "at the call against the profile the caller's own writes stored there. A "
-            "child's writes establish nothing after the call unless a verified "
-            "subprocess effect declaration says so.",
+            "at the call against the profile the caller's own writes stored there. The "
+            "documents it retrieves from that cache carry the document properties and "
+            "writers the caller's writes stored with them, so a property the child "
+            "reads, or binds a request path to, after the retrieve is checked at the "
+            "call against the caller's own writes to that cache. A call with wait=true "
+            "and abort_on_error=true on a path that provably carries exactly one "
+            "document establishes, for later paths, the process properties and caches "
+            "its child writes on every normal completion. After any other call with "
+            "wait=true those writes reach later paths only when a verified subprocess "
+            "effect declaration states them; after wait=false nothing carries them, "
+            "declared or not. A document property a child writes never reaches later "
+            "paths, with or without a declaration.",
         ),
         _DOCS: ("required", "documents", "unspecified"),
         _CAPS: ("process_call_connector_mixing", "terminal_process_call",
@@ -1023,12 +1065,18 @@ _SEMANTIC_RULES: Tuple[Tuple[str, str, str, str, Tuple[str, ...], Tuple[str, ...
         "script digest is RECOMPUTED from the resolved source rather than taken "
         "from the declaration. What the effect IS always comes from a "
         "server-side authority. A declaration that disagrees with the derived "
-        "effect is rejected; one the server cannot corroborate is inert.",
+        "effect is rejected; one the server cannot corroborate establishes "
+        "nothing.",
         (),
         ("semantic_rule.effect.map_inspection",
          "semantic_rule.effect.script_registry",
          "semantic_rule.effect.subprocess_inspection",
-         "semantic_rule.effect.external_writer"),
+         "semantic_rule.effect.external_writer",
+         # The authority prose folded into this entry defers to the process call entry
+         # for WHICH call establishes a called child's writes for later paths, rather
+         # than keeping a second copy of gates that entry owns. The pointer has to
+         # resolve, so it is served here as well as read in the sentence.
+         "node.process_call"),
     ),
     (
         "semantic_rule.effect.map_inspection",
@@ -1217,7 +1265,7 @@ _REVIEWED_PLACEMENT_PROSE: Mapping[str, Tuple[str, ...]] = MappingProxyType({
     "process_call": (
         'To run several children, give each its own path — separate branch paths, or separate wrappers — rather than chaining calls.',
         "A process call may not share a root-to-leaf path with a connector call while that combination is capability-gated; sibling paths are independent and do not count as sharing. A catch body is the one exception: a recovery call is not blocked by a connector that ran upstream of the handler, because that connector's documents are what the recovery receives.",
-        'Nothing may follow a process call. Author it as the terminal of its path, with no stop after it; a root sequence containing a call holds that call and nothing else. In a branch path or a decision true arm, steps may come before the call only when the step immediately before it is one live captures attest there (a map, a property write, a cache read, flow control, a message or a data process) and the called process is a Data Passthrough process in the same request, called with wait=true, whose entry requirements the server derives and checks at the call. Steps before a call into a No Data process or into a process whose entry cannot be derived are refused. A step before a root call is refused. A catch body admits only notify steps ahead of the call.',
+        'Nothing may follow a process call. Author it as the terminal of its path, with no stop after it; a root sequence containing a call holds that call and nothing else. In a branch path or a decision true arm, steps may come before the call only when the step immediately before it is one live captures attest there (a map, a property write, a cache read, flow control, a message or a data process) and the called process is a Data Passthrough process in the same request, called with wait=true, whose entry requirements the server derives and checks at the call. Steps before a call into a No Data process, into a process whose entry cannot be derived, or into a Data Passthrough process that hands the documents on to a process whose entry cannot be derived are refused. In a Data Passthrough process these rules hold across a Branch or Decision after native work, with the last step ahead of it counting as the step before the call; any other process keeps the empty-prefix placement there. A step before a root call is refused. A catch body admits only notify steps ahead of the call.',
         'On a catch body terminal a call must be authored wait=true and abort_on_error=true. abort_on_error defaults to false, so it has to be written explicitly; the default is refused, never rewritten.',
     ),
     # state-ordering semantics; names no admission
@@ -1921,11 +1969,43 @@ _EFFECT_AUTHORITY_PROSE = {
         "combined with an authored external_writer flag it downgrades the "
         "missing-writer error to a named warning. Without that flag the declaration is "
         "valid and simply inert.",
+    # THREE universals this row has carried were measured FALSE on the server that serves
+    # it, each at a shape the sentence quantified over. "every strict finding it might
+    # have cleared still fires" fails at a gated call, where the child's own walk clears
+    # the read with no declaration anywhere (ARCH-184-r1-06). Its replacement, "the
+    # findings it clears are cleared at every caller", fails at the three ungated callers,
+    # where the walk carries nothing past the call — and contradicted `node.process_call`,
+    # which states those gates on the same payload. The blanket "is INERT: it adds nothing
+    # to the analysis and clears no finding of its own" fails at an external-writer
+    # declaration, which passes identity with no server-side content authority and still
+    # replaces a blocking missing-writer error with a named warning; the server's own
+    # resolver refuses to call that one inert, and reports it inert only on a read that
+    # does not author the flag.
+    #
+    # So the content claim (true at every measured shape) is now stated separately from
+    # the inert claim (which has exactly one measured exception, and that exception
+    # supplies no content either); WHICH call establishes a child's writes is deferred to
+    # `node.process_call` rather than copied; and "the child's writes" is scoped to the
+    # process properties and caches that entry names, because a child's DOCUMENT property
+    # is carried by neither route — measured at all four caller shapes, with and without a
+    # verified declaration, where only the diagnostic code changes.
     "none:every-strict-finding-stands":
         "A declaration that is omitted, or that passes identity with no server-side "
-        "authority behind its content, is INERT: it establishes nothing and every "
-        "strict finding still fires. Inert is not an error — an unregistered script is "
-        "a legal thing to author, it just proves nothing.",
+        "authority behind its content, establishes no read and no write: the content of "
+        "an effect never comes from a declaration, so one about a step the server cannot "
+        "inspect establishes nothing about that step. Such a declaration is reported "
+        "INERT, with one exception that still supplies no content: an external-writer "
+        "declaration, on a cache_get that authors external_writer, replaces that read's "
+        "blocking missing-writer error with a named warning; on a read without the flag "
+        "it is inert like the rest. Where the server has an authority of its own — a "
+        "called child whose process definition it walks — that walk is used with no "
+        "declaration anywhere: at a call the process call entry says establishes the "
+        "process properties and caches the child writes, those writes are established "
+        "and the strict findings they clear are cleared. At every other call the walk "
+        "carries nothing past the call, and those writes reach later paths only when a "
+        "verified declaration states them. A document property a child writes is never "
+        "carried past the call, by the walk or by a declaration. Inert is not an error — "
+        "an unregistered script is a legal thing to author, it just proves nothing.",
 }
 
 

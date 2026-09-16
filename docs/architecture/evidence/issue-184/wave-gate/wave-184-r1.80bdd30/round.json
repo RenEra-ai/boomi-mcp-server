@@ -1,0 +1,12 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave-184-r1.80bdd30",
+ "files": {
+  "wave-gate/wave-184-r1.80bdd30/wave.log": "284b0eb41cb1cb79facb55ed77c7f3116676c0dff999198169b17f92e6ee7dc5"
+ },
+ "logical_loop": "L4 (composite wave gate)",
+ "source_run_dir": "/tmp/wave-184-r1.80bdd30",
+ "status": "failed",
+ "verdict": null,
+ "wave_sha": "80bdd30bfead2f0534937295d7fe32e489b7cf86"
+}

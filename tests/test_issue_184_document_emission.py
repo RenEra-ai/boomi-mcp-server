@@ -24,7 +24,10 @@ It pins six things:
    triggered-replacement kinds), the step and terminal positions, and every successor
    the slot admits. Both compiler entry points are measured and must agree.
 4. **Positives.** Each terminal cache action a terminal union admits compiles, and its
-   rendered shape has no outgoing wire.
+   rendered shape has no outgoing wire. A forged wire is refused by the registry's
+   preflight and, with the preflight skipped, by the sink renderer itself (amendment 3
+   §4); a two-way pin over the rendering module derives its sink renderers from the
+   authority.
 5. **Trigger.** A read after an exhausted path is refused; a read on a triggered path
    compiles with its one wire.
 6. **Mutants.** Four measured mutants (inverted consumption, an omitted alias, a
@@ -50,6 +53,7 @@ import functools
 import hashlib
 import importlib
 import importlib.util
+import inspect
 import json
 import re
 import sys
@@ -67,6 +71,7 @@ for _p in (str(_ROOT), str(_ROOT / "src")):
 
 from boomi_mcp.categories.components import process_graph_verifier as graph_verifier  # noqa: E402
 from boomi_mcp.categories.components.builders import process_flow_builder as legacy_builder  # noqa: E402
+from boomi_mcp.categories.components.builders.process_emitters import rendering  # noqa: E402
 from boomi_mcp.compiler.process_ir import body_capabilities as bc  # noqa: E402
 from boomi_mcp.compiler.process_ir import connector_capabilities as CC  # noqa: E402
 from boomi_mcp.compiler.process_ir import contracts as compiler_contracts  # noqa: E402
@@ -88,6 +93,7 @@ from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
     PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID,
+    PROCESS_IR_COMPILE_INTERNAL,
     PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
     PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
@@ -453,7 +459,7 @@ def _check_consumers_read_the_authority():
     consumers = _authority_consumer_modules()
     bound = {name for name, (_mod, imports) in consumers.items() if imports}
     assert {model.__name__, registry.__name__, lowering.__name__, connector_resolution.__name__,
-            lineage.__name__, graph_verifier.__name__, legacy_builder.__name__} <= bound, sorted(bound)
+            lineage.__name__, graph_verifier.__name__, legacy_builder.__name__, rendering.__name__} <= bound, sorted(bound)
     for name, (module, imports) in consumers.items():
         for source_name, local_name in imports:
             assert getattr(module, local_name) is getattr(emission, source_name), (name, local_name)
@@ -1556,8 +1562,10 @@ def test_a_terminal_cache_action_compiles_with_no_outgoing_wire(context, kind):
     _check_terminal_cache_action_compiles(context, kind)
 
 
-def _check_an_outgoing_cache_wire_is_refused_before_bytes():
-    forged_keys = set()
+def _wired_sinks():
+    """``[(forged sink node, forged plan)]``: every zero-emission sink a compiled Branch-leg
+    terminal renders, its plan node forged to wire it onward to the leg's Stop."""
+    wired = []
     for context, kind in _TERMINAL_POSITIVES:
         if context != bc.BRANCH_LEG:
             continue
@@ -1569,20 +1577,197 @@ def _check_an_outgoing_cache_wire_is_refused_before_bytes():
         wire = EmissionTransitionV1(local_ordinal=1, dragpoint_name=sink.shape_id + ".dragpoint1",
                                     to_shape_id=stop.shape_id, x=1.0, y=1.0, provenance="cfg_edge")
         nodes[index] = sink.model_copy(update={"outgoing": (wire,)})
-        reg = registry.registration_for(sink.emitter_input.emitter_kind)
-        assert not registry._cardinality_ok(reg.outgoing, sink.emitter_input, nodes[index])
+        wired.append((nodes[index], plan.model_copy(update={"nodes": tuple(nodes)})))
+    return wired
+
+
+def _check_an_outgoing_cache_wire_is_refused_before_bytes():
+    forged_keys = set()
+    for forged, plan in _wired_sinks():
+        reg = registry.registration_for(forged.emitter_input.emitter_kind)
+        assert not registry._cardinality_ok(reg.outgoing, forged.emitter_input, forged)
         with pytest.raises(ProcessIRCompileError) as exc:
-            registry.emit_process(plan.model_copy(update={"nodes": tuple(nodes)}), _symbols())
+            registry.emit_process(plan, _symbols())
         assert [(d.code, d.phase, d.path) for d in exc.value.diagnostics][:1] == [
-            (PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID, "xml_emission", sink.source_path)], exc.value.diagnostics
-        forged_keys.add(sink.emitter_input.emitter_kind)
+            (PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID, "xml_emission", forged.source_path)], exc.value.diagnostics
+        # Amendment 3 §4: with the preflight skipped, the registry's own emitter hands the
+        # wire to the renderer, which refuses it itself instead of drawing it.
+        with pytest.raises(ValueError, match="no outgoing wire"):
+            reg.emit(forged.emitter_input, registry.EmitterContext(
+                node=forged, resolved_symbols=(), capability_level=registry.CAPABILITY_PROCESS_IR_V1))
+        forged_keys.add(forged.emitter_input.emitter_kind)
     assert forged_keys == emission.ZERO_EMISSION_EMITTER_KINDS, forged_keys
 
 
 def test_an_outgoing_cache_wire_is_refused_at_emitter_preflight():
     """A forged plan wiring a cache sink onward is refused by the registry's preflight,
-    before any bytes exist, at the sink's pointer. The verifier is not the first guard."""
+    before any bytes exist, at the sink's pointer. The verifier is not the first guard.
+    With the preflight skipped, the registry's own emitter for each sink raises from the
+    renderer (ARCH-184-r1-08: at ``80bdd30`` it returned the shape wired to the Stop)."""
     _check_an_outgoing_cache_wire_is_refused_before_bytes()
+
+
+# ---------------------------------------------------------------------------
+# 4a. The sink renderers refuse a wire themselves (amendment 3 §4, ARCH-184-r1-08)
+# ---------------------------------------------------------------------------
+
+#: The finding's own spelling: one wire from ``shape1`` to ``shape2``.
+_WIRED_CTX = rendering.ShapeRenderContext(shape_id="shape1", x=96.0, y=48.0, transitions=(
+    rendering.RenderTransition(dragpoint_name="shape1.dragpoint1", to_shape_id="shape2", x=272.0, y=56.0),))
+_BARE_CTX = rendering.ShapeRenderContext(shape_id="shape1", x=96.0, y=48.0)
+_SHAPE_TYPE_ATTRIBUTE = re.compile(r'shapetype="([^"{}]*)"')
+
+
+def _rendering_source():
+    return Path(rendering.__file__).read_text(encoding="utf-8")
+
+
+def _rendering_functions(source):
+    """``{module-level function: facts}`` read from the rendering module's source.
+
+    Per function: the ``shapetype`` values its template literals emit, how many
+    ``shapetype`` attributes those literals open (a dynamic value opens one without a
+    literal), the literal first argument of each ``_sink_dragpoints`` call, and the names
+    it calls. A docstring is not a template and is skipped.
+    """
+    facts = {}
+    for fn in ast.parse(source).body:
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        body = fn.body[1:] if ast.get_docstring(fn) is not None else fn.body
+        literals = [node.value for stmt in body for node in ast.walk(stmt)
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+        calls = [node for stmt in body for node in ast.walk(stmt)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+        facts[fn.name] = {
+            "shape_types": [value for text in literals for value in _SHAPE_TYPE_ATTRIBUTE.findall(text)],
+            "shapetype_attributes": sum(text.count('shapetype="') for text in literals),
+            "sink_calls": [call.args[0].value if call.args and isinstance(call.args[0], ast.Constant) else None
+                           for call in calls if call.func.id == "_sink_dragpoints"],
+            "called": {call.func.id for call in calls},
+        }
+    return facts
+
+
+def _sink_renderers(functions):
+    """``[(zero-emission shape type, renderer name)]``: the functions whose template emits
+    one of the authority's zero-emission shape types."""
+    return sorted((kind, name) for name, f in functions.items() for kind in set(f["shape_types"])
+                  if kind in emission.ZERO_EMISSION_EMITTER_KINDS)
+
+
+def _check_the_sink_renderers_are_the_authoritys(source):
+    functions = _rendering_functions(source)
+    authority = emission.ZERO_EMISSION_EMITTER_KINDS
+    # The pin reads literal shape types only, so a dynamic one would hide a renderer from it.
+    dynamic = sorted(name for name, f in functions.items() if len(f["shape_types"]) != f["shapetype_attributes"])
+    assert not dynamic, dynamic
+    # Authority to module: every zero-emission shape type has a renderer. Each one emits
+    # that shape type alone, asks the guard for exactly it, and has no other dragpoint route.
+    renderers = _sink_renderers(functions)
+    assert {kind for kind, _name in renderers} == authority, renderers
+    for kind, name in renderers:
+        facts = functions[name]
+        assert set(facts["shape_types"]) == {kind} and facts["sink_calls"] == [kind], (name, facts)
+        assert not facts["called"] & {"render_dragpoints", "_dragpoints_block"}, (name, sorted(facts["called"]))
+    # Module to authority: every guard call names an authority kind, inside that kind's renderer.
+    callers = {name: f["sink_calls"] for name, f in functions.items() if f["sink_calls"]}
+    assert set(callers) == {name for _kind, name in renderers}, (sorted(callers), renderers)
+    assert all(kind in authority for calls in callers.values() for kind in calls), callers
+
+
+def test_the_rendering_module_derives_its_sink_renderers_from_the_authority():
+    """Two-way pin over ``rendering.py``: the coverage claim of the renderer guard.
+
+    Every function whose template emits a zero-emission shape type (the authority's
+    ``ZERO_EMISSION_EMITTER_KINDS``, which are also the platform shape types) asks
+    ``_sink_dragpoints`` for its own shape type and has no other route to a dragpoint.
+    Every ``_sink_dragpoints`` call names an authority kind, inside that kind's renderer.
+    The case set is the authority's, so a new zero-emission kind fails here until its
+    renderer reads the guard.
+    """
+    _check_the_sink_renderers_are_the_authoritys(_rendering_source())
+
+
+def test_the_sink_renderer_pin_sees_a_renderer_that_draws_its_own_wire():
+    """Mutation controls for the pin, each an in-memory edit of the module's source.
+
+    1. The Add to Cache renderer back on ``_dragpoints_block``, as at ``80bdd30``.
+    2. The Remove from Cache renderer asking the guard for the other sink's shape type.
+    3. The Retrieve from Cache renderer, which continues, calling the guard.
+    4. The Add to Cache shape type rendered from a variable, which hides it from the pin.
+
+    Each fails the pin; the unmutated source passes it.
+    """
+    source = _rendering_source()
+    _check_the_sink_renderers_are_the_authoritys(source)
+    mutants = (
+        ('_sink_dragpoints("doccacheload", ctx.transitions)', "_dragpoints_block(ctx.transitions)"),
+        ('_sink_dragpoints("doccacheremove", ctx.transitions)', '_sink_dragpoints("doccacheload", ctx.transitions)'),
+        ("empty_cache_behavior_xml = _escape_xml(empty_cache_behavior)",
+         'empty_cache_behavior_xml = _escape_xml(empty_cache_behavior) + _sink_dragpoints("doccacheretrieve", ())'),
+        ('shapetype="doccacheload"', 'shapetype="{shape_type}"'),
+    )
+    for old, new in mutants:
+        assert source.count(old) == 1, old
+        _expect_failure(_check_the_sink_renderers_are_the_authoritys, source.replace(old, new))
+
+
+def _render_with_placeholders(renderer, ctx):
+    """Call a renderer with a placeholder for each of its keyword-only fields."""
+    fields = {name: name for name, parameter in inspect.signature(renderer).parameters.items()
+              if parameter.kind is parameter.KEYWORD_ONLY}
+    return renderer(ctx, **fields)
+
+
+def test_a_zero_emission_renderer_refuses_a_wire_without_its_caller():
+    """ARCH-184-r1-08, amendment 3 §4: each sink renderer refuses a wire on its own.
+
+    Called directly, with no registry preflight and no legacy guard in front of it, the
+    renderer of every zero-emission shape type raises ``ValueError`` on a context carrying
+    one wire; at ``80bdd30`` both returned ``toShape="shape2"``. On a bare context the same
+    renderer draws the terminal ``<dragpoints/>`` form.
+    """
+    renderers = _sink_renderers(_rendering_functions(_rendering_source()))
+    assert {kind for kind, _name in renderers} == emission.ZERO_EMISSION_EMITTER_KINDS, renderers
+    for shape_type, name in renderers:
+        renderer = getattr(rendering, name)
+        with pytest.raises(ValueError, match="no outgoing wire"):
+            _render_with_placeholders(renderer, _WIRED_CTX)
+        bare = _render_with_placeholders(renderer, _BARE_CTX)
+        assert 'shapetype="{0}"'.format(shape_type) in bare and "toShape" not in bare, bare
+        assert bare.endswith("<dragpoints/></shape>"), bare
+
+
+def test_the_sink_guard_answers_every_emitter_key_from_the_authority():
+    """``_sink_dragpoints`` over every emitter key the registry registers, bare and wired.
+
+    It draws ``<dragpoints/>`` exactly for a zero-emission shape type with no wire. It
+    raises for a wire on a sink, and for every key the authority says continues or ends
+    some other way (a retrieve, a stop, a process call), with or without a wire.
+    """
+    keys = registry.registry_keys()
+    assert emission.ZERO_EMISSION_EMITTER_KINDS < keys, sorted(keys)
+    for key in sorted(keys):
+        for ctx in (_BARE_CTX, _WIRED_CTX):
+            if key in emission.ZERO_EMISSION_EMITTER_KINDS and not ctx.transitions:
+                assert rendering._sink_dragpoints(key, ctx.transitions) == "<dragpoints/>"
+            else:
+                with pytest.raises(ValueError):
+                    rendering._sink_dragpoints(key, ctx.transitions)
+
+
+def test_a_process_call_still_renders_the_wire_it_is_handed():
+    """Control: the guard is keyed on the authority's zero-emission shapes, not on every
+    terminal. ``render_processcall`` keeps its transition-driven dragpoints for #175's
+    returning call: a wired context still draws its wire (the registry's zero-outgoing
+    cardinality and the graph verifier refuse that pairing), and a bare one draws the
+    terminal form."""
+    wired = rendering.render_processcall(_WIRED_CTX, userlabel="c", process_id="CHILD", wait=True, abort=True)
+    assert wired.endswith('<dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape2" '
+                          'x="272.0" y="56.0"/></dragpoints></shape>'), wired
+    bare = rendering.render_processcall(_BARE_CTX, userlabel="c", process_id="CHILD", wait=True, abort=True)
+    assert bare.endswith("<dragpoints/></shape>"), bare
 
 
 # ---------------------------------------------------------------------------
@@ -2046,10 +2231,12 @@ def test_mutant_outgoing_cache_wire_in_registry_is_caught(monkeypatch):
     Patched in ``compiler/process_ir/emitter_registry.py``: ``_cache_cardinality`` and
     ``_cardinality_ok``, then the registrations and ``_REGISTRY`` re-evaluated from them.
     Fails: ``test_registry_cardinality_is_the_rows_continuation`` and
-    ``test_an_outgoing_cache_wire_is_refused_at_emitter_preflight``. Measured: the forged
-    wire then passes preflight and is caught only after rendering, by the graph verifier
-    (``PROCESS_IR_COMPILE_VERIFIER_FAILED``). A terminal sink with no wire still compiles,
-    so the mutant PERMITS a wire rather than requiring one.
+    ``test_an_outgoing_cache_wire_is_refused_at_emitter_preflight``. Measured next line of
+    defence: the forged wire passes preflight and the sink renderer refuses it (amendment 3
+    §4), so no bytes exist and ``emit_process`` reports ``PROCESS_IR_COMPILE_INTERNAL`` at
+    ``xml_emission`` with an empty path. At ``80bdd30`` the renderer drew the wire and only
+    the graph verifier caught it (``PROCESS_IR_COMPILE_VERIFIER_FAILED``). A terminal sink
+    with no wire still compiles, so the mutant PERMITS a wire rather than requiring one.
     """
     _check_registry_cardinality_is_the_rows_continuation()
     _check_an_outgoing_cache_wire_is_refused_before_bytes()
@@ -2070,6 +2257,11 @@ def test_mutant_outgoing_cache_wire_in_registry_is_caught(monkeypatch):
     assert registry.registration_for("doccacheload").outgoing == zero_or_one
     _expect_failure(_check_registry_cardinality_is_the_rows_continuation)
     _expect_failure(_check_an_outgoing_cache_wire_is_refused_before_bytes)
+    for forged, plan in _wired_sinks():
+        with pytest.raises(ProcessIRCompileError) as exc:
+            registry.emit_process(plan, _symbols())
+        assert [(d.code, d.phase, d.path) for d in exc.value.diagnostics] == [
+            (PROCESS_IR_COMPILE_INTERNAL, "xml_emission", "")], (forged.source_path, exc.value.diagnostics)
     for context, kind in _TERMINAL_POSITIVES:
         _check_terminal_cache_action_compiles(context, kind)
 

@@ -255,7 +255,13 @@ def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
         return row.model_copy(update={
             "required_reads": keys(row.required_reads),
             "mutated_state": keys(row.mutated_state),
+            "guaranteed_state": keys(row.guaranteed_state),
             "cache_requirements": cache_pairs(row.cache_requirements),
+            "removed_caches": tuple(canonical.get(ref, ref) for ref in row.removed_caches),
+            "cache_property_requirements": tuple(
+                (canonical.get(item[0], item[0]),) + tuple(item[1:])
+                for item in row.cache_property_requirements
+            ),
         })
 
     return capabilities.model_copy(update={
@@ -276,6 +282,7 @@ def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
         "established_at_entry": keys(capabilities.established_at_entry),
         "child_entry_contracts": tuple(contract(row) for row in capabilities.child_entry_contracts),
         "caller_cache_contents": cache_pairs(capabilities.caller_cache_contents),
+        "caller_cache_cohorts": cache_pairs(capabilities.caller_cache_cohorts),
         "entry_contract": (
             contract(capabilities.entry_contract)
             if capabilities.entry_contract is not None

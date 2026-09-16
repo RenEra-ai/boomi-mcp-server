@@ -198,8 +198,8 @@ _REMEDIATION: Dict[str, str] = {
         "state explicitly with a property step. A declaration alone is not "
         "enough: its CONTENT must be backed by a server-side authority — "
         "inspection of the resolved map or child process, or a vetted script "
-        "registry entry — and a declaration with no such backing is inert. An "
-        "undeclared or inert effect never establishes state."
+        "registry entry — and a declaration with no such backing is inert. A "
+        "missing or inert declaration never establishes state."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED: (
         "No change required. Confirm the external writer really does run before "
@@ -270,7 +270,8 @@ _COMPILER_WORDED_CODES: Tuple[str, ...] = (
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_POLICY_SCOPE_INVALID,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION,
     # Translated as above AND raised by lineage's own profile checks at maps, cache
-    # writes, profile sources and calls, every one of which the compiler's text names.
+    # writes, profile sources, declared-input connector calls fed by a cache read, and
+    # process calls, every one of which the compiler's text names.
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     # Raised by this validator's ports of the compiler's own rules: the flow walks
     # (`flow.collect_reachability_findings` and `collect_terminal_findings`, the walks

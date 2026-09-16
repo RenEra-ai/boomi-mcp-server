@@ -918,6 +918,19 @@ def _unmet_standalone_requirements(record: Any, supplied: Any) -> List[str]:
     return unmet
 
 
+def _recorded_standalone_entries(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The standalone-entry records a build carries, per process key (#184 amendment 1 §3).
+
+    A typed build records them under ``authoring``; a raw ``integration_spec`` build has no
+    ``authoring`` key and records them on the build record itself. The two never mix: a
+    typed record is read only under ``authoring``, so one that lost its field stays
+    unrecorded rather than borrowing the other location.
+    """
+    holder = entry.get("authoring") if "authoring" in entry else entry
+    records = holder.get("standalone_entry") if isinstance(holder, dict) else None
+    return records if isinstance(records, dict) else {}
+
+
 def _standalone_entry_refusal(
     build_id: str,
     target: ResolvedBuildTarget,
@@ -932,7 +945,7 @@ def _standalone_entry_refusal(
     document and no inherited properties or cache (capture
     `cap184-passthrough-standalone`). A called contract is therefore no evidence that a
     test run or a schedule works. The requirements are the ones recorded with the
-    typed build; a test run may supply dynamic process properties, a schedule supplies
+    build, typed or raw; a test run may supply dynamic process properties, a schedule supplies
     none. Package and deployment without either stay available.
     """
     from ...authoring.process_entry import PASSTHROUGH, RecordedEntryUnreadable
@@ -963,8 +976,8 @@ def _standalone_entry_refusal(
         return None
     if form != PASSTHROUGH:
         return None
-    authoring = entry.get("authoring") if isinstance(entry.get("authoring"), dict) else {}
-    records = authoring.get("standalone_entry") if isinstance(authoring.get("standalone_entry"), dict) else {}
+    # A typed build records under `authoring`, a raw build on its own record (amendment 1 §3).
+    records = _recorded_standalone_entries(entry)
     record = records.get(target.process_key)
     contexts = []
     if run_test:

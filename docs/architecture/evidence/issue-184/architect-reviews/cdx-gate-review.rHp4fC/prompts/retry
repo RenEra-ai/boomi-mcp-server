@@ -1,0 +1,13 @@
+Approvals, write access and network tools are unavailable in this read-only review session, and nothing further will arrive. Emit the FULL architect implementation review for issue #184 NOW as plain text, from what you have already read:
+
+1. One line `Reviewed files:` naming the files you read.
+2. Every finding, most severe first. Each gets:
+   - a priority label `[P0]`–`[P3]`;
+   - the file and line;
+   - the plan-of-record section it concerns (quote the requirement);
+   - the concrete input with the wrong behaviour or missing realization.
+
+   If there are none, say so.
+3. For each plan correction C1–C25 in `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`, one short line: accepted, or rejected with the finding it maps to. Judge C25 explicitly: it refuses a request in which a component the request writes is also named by another spec.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.

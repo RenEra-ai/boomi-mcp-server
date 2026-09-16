@@ -8711,13 +8711,27 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution, exist
     again for the same root, because the pre-write result is cached and handed
     to the execution turn. The typed route does not call it at all: it arrives
     with a compile-certified stored plan.
+
+    #184 architect finding 7: the root compiles under the per-root trusted context the typed
+    route derives, from the same derivation, over every canonical root of this spec. It is
+    derived HERE rather than by a caller, so the pre-write pass and the in-loop fallback
+    cannot differ, and the plan records it as ``effect_capabilities`` for the dry emit and
+    the wet apply to recompile with. A root nothing binds in gets ``None``, the strict compile.
     """
     from ..authoring.contract import get_authoring_revisions
     from ..authoring.process_materialization import build_materialization_plan
+    from ..authoring.workflow import derive_root_capabilities
     from ..compiler.process_ir.emitter_registry import emitter_revision
 
     symbols = _build_canonical_symbols(
         spec=spec, resolution=resolution, conflict_policy=conflict_policy, existing_ids=existing_ids
+    )
+    capabilities = derive_root_capabilities(
+        [(u.envelope.component_key, u.process_ir) for u in (spec.processes or ())],
+        symbols,
+        spec.components,
+        conflict_policy=conflict_policy,
+        snapshot=resolution,
     )
     return build_materialization_plan(
         envelope=unit.envelope,
@@ -8727,6 +8741,7 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution, exist
         compiler_revision=get_authoring_revisions()["compiler_revision"],
         emitter_revision=emitter_revision(),
         materializer_revision=_materializer_revision(),
+        capabilities=capabilities.get(unit.envelope.component_key),
     )
 
 
@@ -11235,6 +11250,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             process_writes=process_writes,
             apply_warnings=apply_warnings,
             planned=planned,
+            precompiled_plans=precompiled_plans,
         )
     except _ApplyExecutionError:
         raise
@@ -11267,6 +11283,7 @@ def _finalize_apply_success(
     process_writes: List[Dict[str, Any]],
     apply_warnings: List[str],
     planned: Dict[str, Any],
+    precompiled_plans: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Record the successful apply and build its envelope. Extracted for AR2-03.
 
@@ -11314,6 +11331,15 @@ def _finalize_apply_success(
             process_mutations=process_mutations,
             process_readbacks=process_readbacks,
         )
+    else:
+        # #184 amendment 1 §3 (build recording): a RAW build that built a passthrough
+        # canonical root records what a direct run of it would lack, read off the plans its
+        # pre-write pass compiled, so orchestration can judge a test run or a schedule of it.
+        # Only such a build records it, so a legacy record keeps exactly its five keys. No
+        # plans records nothing, which orchestration reads as unrecorded and refuses.
+        standalone = _standalone_entry_records_of(precompiled_plans or {})
+        if standalone:
+            build_record["standalone_entry"] = standalone
     _BUILD_REGISTRY[build_id] = build_record
 
     apply_result = {
@@ -11455,16 +11481,21 @@ def _authoring_build_provenance(
 
 
 def _standalone_entry_records(bundle) -> Dict[str, Any]:
+    """What each passthrough root of a TYPED build requires of a caller, per process key."""
+    return _standalone_entry_records_of(getattr(bundle, "materialization_plans", None) or {})
+
+
+def _standalone_entry_records_of(plans) -> Dict[str, Any]:
     """What each passthrough root requires of a caller, per process key (#184 amendment 3 §8).
 
-    Read off the entry contract its plan was compiled under. A passthrough process run
+    Read off the entry contract its plan was compiled under: a typed build's stored plans or
+    a raw build's pre-write plans (amendment 1 §3, build recording). A passthrough process run
     directly starts as No Data with one empty document (capture
     `cap184-passthrough-standalone`), so deployment orchestration refuses a direct test
     run or schedule of one that needs a caller, before anything is mutated. Counts and
     closed flags, plus the dynamic process property names a test run could supply.
     """
     records: Dict[str, Any] = {}
-    plans = getattr(bundle, "materialization_plans", None) or {}
     for key in sorted(plans):
         plan = plans[key]
         if getattr(plan, "execution_profile", None) != "passthrough":

@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-for _p in (str(_ROOT), str(_ROOT / "src")):
+for _p in (str(_ROOT), str(_ROOT / "src"), str(_ROOT / "tests")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -280,3 +280,72 @@ def test_the_root_read_kinds_are_the_connector_walks_document_producers():
     assert connector_resolution.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS == {
         emission.DOCUMENT_EMISSION_V1[kind].semantic_kind for kind in model.ROOT_ENTRY_READ_KINDS
     }
+
+
+# ---------------------------------------------------------------------------
+# Amendment 3 §12: Decision interposition keeps the whole evidence key (ARCH-184-r1-03)
+# ---------------------------------------------------------------------------
+
+#: One authored step per attested predecessor kind, spelled against the symbol table of
+#: `tests/test_issue_184_child_entries.py`, whose lineage helpers the rows below run.
+_INTERPOSED_PREDECESSORS = {
+    "map_ref": {"kind": "map_ref", "map_ref": "$ref:M12"},
+    "set_ddp": _SET_DDP,
+    "set_dpp": _SET_DPP,
+    "cache_get": {"kind": "cache_get", "cache_ref": "$ref:CACHE"},
+    "document_cache_retrieve": {"kind": "document_cache_retrieve", "cache_ref": "$ref:CACHE"},
+    "flow_control": {"kind": "flow_control", "for_each_count": 5},
+    "message": {"kind": "message", "text": "m"},
+    "data_process": {"kind": "data_process", "steps": [{
+        "operation": "split_documents", "profile_type": "json", "profile_ref": "$ref:P1",
+        "link_element_key": "1", "link_element_name": "root"}]},
+}
+_ATTESTED_PAIRS = sorted(
+    {(context, kind) for context, kind, _form, _wait in model.PROCESS_CALL_ATTESTED_PREDECESSORS}
+)
+
+
+def test_every_attested_predecessor_has_an_interposed_spelling():
+    """Both directions, so a newly attested kind fails until the rows below spell it."""
+    assert set(_INTERPOSED_PREDECESSORS) == {kind for _context, kind in _ATTESTED_PAIRS}
+
+
+def _interposed(context, step, call):
+    """``[passthrough, step, decision]`` whose TRUE arm authors no step, and ``call``'s pointer.
+
+    The call is that arm's terminal, or the first leg terminal of a Branch there.
+    """
+    pointer = "/body/steps/2/true_arm/terminal"
+    terminal = call
+    if context == "branch_leg":
+        pointer += "/legs/0/terminal"
+        terminal = {"kind": "branch", "legs": [
+            {"steps": [], "terminal": call},
+            {"steps": [{"kind": "message", "text": "m"}], "terminal": _STOP},
+        ]}
+    decision = {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "a"},
+                "true_arm": {"steps": [], "terminal": terminal},
+                "false_arm": {"steps": [], "terminal": _STOP}}
+    return _root({"kind": "passthrough", "label": "Receive"}, step, decision), pointer
+
+
+@pytest.mark.parametrize("context,kind", _ATTESTED_PAIRS)
+def test_native_work_before_an_interposed_decision_keeps_the_whole_evidence_key(context, kind):
+    """Every attested `(context, predecessor)` row, with a Decision between the native step
+    and the call: admitted for a waited Data Passthrough child, and refused at the call for a
+    No Data child and for a child with no derivable contract, on both compile routes."""
+    import test_issue_184_child_entries as entries
+
+    def refused(child_key, *children):
+        call = {"kind": "process_call", "process_ref": "$ref:" + child_key}
+        parent, pointer = _interposed(context, _INTERPOSED_PREDECESSORS[kind], call)
+        roots = [("PARENT", parent)] + list(children)
+        refusal = (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, pointer)
+        return refusal in entries._errors(roots, "PARENT"), refusal in entries._compile_errors(roots, "PARENT")
+
+    takes_anything = _root({"kind": "passthrough", "label": "Receive"}, {"kind": "message", "text": "m"}, _STOP)
+    assert refused("CHILD", ("CHILD", takes_anything)) == (False, False)
+    assert refused("NODATA", ("NODATA", entries._NODATA)) == (True, True)
+    assert refused("EXTERNAL") == (True, True)

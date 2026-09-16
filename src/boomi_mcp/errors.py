@@ -1317,9 +1317,10 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary=(
                 "The documents reaching a map_ref, a cache write, a Set Properties "
-                "profile source or a process call carry a profile other than the one "
-                "that step requires, a required profile is absent, or an operation's "
-                "profile reference names no profile component."
+                "profile source, a connector call's declared input or a process call "
+                "carry a profile other than the one that step requires, a required "
+                "profile is absent, or an operation's profile reference names no "
+                "profile component."
             ),
             owner="#140",
         ),

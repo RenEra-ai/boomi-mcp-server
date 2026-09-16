@@ -1256,17 +1256,30 @@ def _compiler_revision_payload() -> dict:
         ),
         (
             # #184 amendment 3 §7. The property-survival verdicts and the proved
-            # document count the retrieve overlay's current-document carry needs.
+            # document count the retrieve overlay's current-document carry needs, and
+            # (ARCH-184-r1-09) what each cell and the retrieve overlay decide.
             "property_survival",
-            lambda: {
-                "cells": sorted(
-                    [cell[0], cell[1] or "", verdict]
-                    for cell, verdict in _import(
-                        "semantic_validation.lineage"
-                    ).PROPERTY_SURVIVAL_V1.items()
-                ),
-                "overlay_count": _import("semantic_validation.lineage").COUNT_ONE,
-            },
+            _property_survival_behaviour_oracle,
+        ),
+        (
+            # #184 correction batch 18. Where a property read is proved, by reader and
+            # by where its writer sits: the verdicts the state-visibility rows describe.
+            "lineage_reads",
+            _lineage_read_behaviour_oracle,
+        ),
+        (
+            # #184 correction batch 18 (ARCH-184-r1-01/-02). Every consumer of a cache
+            # read, over every content state one cache can hold.
+            "cache_content_consumers",
+            _cache_content_consumer_oracle,
+        ),
+        (
+            # #184 correction batch 18 (ARCH-184-r1-09, second instance). What a call
+            # does to its caller's execution state: what it guarantees, whether a
+            # derived child is still opaque, whose obligation a cached property is, and
+            # that one cache stated through two references is one cache.
+            "child_call_state",
+            _child_call_state_oracle,
         ),
         (
             # #184 amendment 3 §8. The prefix evidence key and the child entry
@@ -1360,7 +1373,11 @@ def _child_entry_behaviour_oracle():
 
     A behaviour oracle rather than a copy of the rules: it plans a parent and a child
     through the same derivation and discharge the server uses, so a change to either
-    moves the revision even when no table did.
+    moves the revision even when no table did. The calls come from a closed vocabulary
+    (ARCH-184-r1-03): where the call sits after the parent's native work (its own leg's
+    prefix, a Decision interposed after that prefix, or a Branch interposed after native
+    work at the root), under a Data Passthrough and a scheduled parent, into a No Data, a
+    passthrough and an underivable child, waiting or not.
     """
     from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
     from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
@@ -1376,42 +1393,68 @@ def _child_entry_behaviour_oracle():
     ))
     entry = {"kind": "passthrough"}
     stop = {"kind": "stop"}
+    message = {"kind": "message", "text": "m"}
     mapped = {"kind": "map_ref", "map_ref": "$ref:M11"}
+
+    def decided(terminal):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "a"},
+                "true_arm": {"steps": [], "terminal": terminal},
+                "false_arm": {"steps": [], "terminal": stop}}
+
+    def branch(prefix, terminal):
+        return {"kind": "branch", "legs": [
+            {"steps": list(prefix), "terminal": terminal},
+            {"steps": [message], "terminal": stop},
+        ]}
+
     children = {
         "no_data": [{"kind": "decision", "comparison": "equals",
                      "left": {"value_type": "static", "static_value": "a"},
                      "right": {"value_type": "static", "static_value": "a"},
-                     "true_arm": {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
+                     "true_arm": {"steps": [message], "terminal": stop},
                      "false_arm": {"steps": [], "terminal": stop}}],
         "passthrough": [entry, mapped, stop],
+        # Not a root of the request, so nothing derives its entry.
+        "unknown": None,
     }
+    # The parent's body around one call, after `work`, the parent's native steps.
+    placements = {
+        "passthrough_leg": lambda work, call: [entry, branch(work, call)],
+        "passthrough_leg_then_decision": lambda work, call: [entry, branch(work, decided(call))],
+        "passthrough_work_then_branch": lambda work, call: [entry] + list(work) + [branch((), call)],
+        "scheduled_leg": lambda work, call: [branch(work, call)],
+        "scheduled_leg_then_decision": lambda work, call: [branch(work, decided(call))],
+    }
+    works = {"map": (mapped,), "none": ()}
     verdicts = []
     for form in sorted(children):
-        child = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": children[form]}})
-        for wait in (True, False):
-            for prefix in ((), (mapped,)):
-                parent = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
-                    entry,
-                    {"kind": "branch", "legs": [
-                        {"steps": list(prefix), "terminal": {"kind": "process_call", "process_ref": "$ref:child", "wait": wait}},
-                        {"steps": [{"kind": "message", "text": "m"}], "terminal": stop},
-                    ]},
-                ]}})
-                roots = [("parent", parent), ("child", child)]
-                resolution = resolve_process_ir_effect_declarations(
-                    roots, None, symbols, [], child_roots={"$ref:" + key: ir for key, ir in roots})
-                capabilities = resolution.capabilities_by_root.get("parent")
-                report = (
-                    validate_process_ir(parent, symbols, capabilities=capabilities)
-                    if capabilities is not None
-                    else validate_process_ir(parent, symbols)
-                )
-                row = capabilities.child_entry_contract("$ref:child") if capabilities is not None else None
-                verdicts.append([
-                    form, wait, bool(prefix),
-                    sorted([item.code, item.path] for item in report.errors),
-                    None if row is None else row.model_dump(mode="json"),
-                ])
+        child = (
+            None if children[form] is None
+            else model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": children[form]}})
+        )
+        for placement in sorted(placements):
+            for work in sorted(works):
+                for wait in (True, False):
+                    call = {"kind": "process_call", "process_ref": "$ref:child", "wait": wait}
+                    parent = model.parse_process_ir_v1({"version": "1", "body": {
+                        "kind": "sequence", "steps": placements[placement](works[work], call)}})
+                    roots = [("parent", parent)] + ([] if child is None else [("child", child)])
+                    resolution = resolve_process_ir_effect_declarations(
+                        roots, None, symbols, [], child_roots={"$ref:" + key: ir for key, ir in roots})
+                    capabilities = resolution.capabilities_by_root.get("parent")
+                    report = (
+                        validate_process_ir(parent, symbols, capabilities=capabilities)
+                        if capabilities is not None
+                        else validate_process_ir(parent, symbols)
+                    )
+                    row = capabilities.child_entry_contract("$ref:child") if capabilities is not None else None
+                    verdicts.append([
+                        form, placement, work, wait,
+                        sorted([item.code, item.path] for item in report.errors),
+                        None if row is None else row.model_dump(mode="json"),
+                    ])
     return {
         "prefix_key": sorted(_plain(list(row)) for row in model.PROCESS_CALL_ATTESTED_PREDECESSORS),
         "verdicts": verdicts,
@@ -1788,11 +1831,21 @@ def _child_forwarding_behaviour_oracle():
         sym("m22", "transform.map", input_profile_ref="$ref:p2", output_profile_ref="$ref:p2"),
         sym("cache", "documentcache"),
     ) + tuple(
-        sym(key, "process") for key in ("parent", "mid", "writer", "reader", "bound", "child", "enrich")
+        sym(key, "process") for key in (
+            "parent", "mid", "writer", "reader", "bound", "child", "enrich", "external", "opaque",
+            "reader_x", "reads_x", "writer_k", "writer_one", "writer_call", "writer_na", "leaf",
+            "rewriter", "remover", "forwarder",
+        )
+    ) + (
+        # A second reference to the component `child` names.
+        ComponentSymbolV1(ref="$ref:child_alias", component_id="CHILD", component_type="process"),
     ))
     stop = {"kind": "stop"}
     message = {"kind": "message", "text": "m"}
     get_p1 = {"kind": "connector_call", "operation_ref": "$ref:get_p1"}
+    to_p2 = {"kind": "map_ref", "map_ref": "$ref:m12"}
+    read_cache = {"kind": "cache_get", "cache_ref": "$ref:cache"}
+    awaited = {"wait": True, "abort_on_error": True}
 
     def doc(*steps):
         return {"version": "1", "body": {"kind": "sequence", "steps": list(steps)}}
@@ -1800,8 +1853,22 @@ def _child_forwarding_behaviour_oracle():
     def legs(*items):
         return doc({"kind": "branch", "legs": list(items)})
 
-    def call(key):
-        return {"kind": "process_call", "process_ref": "$ref:" + key}
+    def call(key, **extra):
+        return dict({"kind": "process_call", "process_ref": "$ref:" + key}, **extra)
+
+    def sets(name):
+        return {"kind": "set_dpp", "name": name, "source_values": [{"value_type": "static", "value": "v"}]}
+
+    def reads(name):
+        return {"kind": "set_dpp", "name": "OUT_" + name, "source_values": [
+            {"value_type": "dpp", "property_name": name}]}
+
+    def arms(true_steps, false_steps, true_terminal=None):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "a"},
+                "true_arm": {"steps": list(true_steps), "terminal": true_terminal or stop},
+                "false_arm": {"steps": list(false_steps), "terminal": stop}}
 
     def put():
         return {"kind": "cache_put", "cache_ref": "$ref:cache"}
@@ -1862,6 +1929,146 @@ def _child_forwarding_behaviour_oracle():
                 )),
             ],
         ),
+        # ARCH-184-r1-04: a forwarder hands its caller its child's unknown consumption, both
+        # when nothing derives the child's entry and when the child states nothing it reads.
+        "a_forwarder_to_an_unknown_child": (None, [
+            ("parent", passthrough([to_p2], call("mid"))),
+            ("mid", doc({"kind": "passthrough"}, call("external"))),
+        ]),
+        "a_forwarder_to_an_opaque_child": (None, [
+            ("parent", passthrough([to_p2], call("mid"))),
+            ("mid", doc({"kind": "passthrough"}, call("opaque"))),
+            ("opaque", doc({"kind": "passthrough"}, {"kind": "data_process", "steps": [{
+                "operation": "split_documents", "profile_type": "json", "profile_ref": "$ref:p1",
+                "link_element_key": "1", "link_element_name": "root"}]}, stop)),
+        ]),
+        # A call naming its child through a second reference to the same component.
+        "a_call_through_an_alias_of_its_child": (None, [
+            ("parent", passthrough([to_p2], call("child_alias"))),
+            ("child", doc({"kind": "passthrough"}, {"kind": "map_ref", "map_ref": "$ref:m22"}, stop)),
+        ]),
+        # ARCH-184-r1-05: documents a caller cached carry the properties it stored with them,
+        # through a forwarder, to a bound request path and to an ordinary read.
+        "a_cached_property_chain": (None, [
+            ("parent", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                            {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [message], "terminal": stop},
+                         {"steps": [], "terminal": call("reader_x")},
+                         {"steps": [], "terminal": call("reads_x")})),
+            ("reader_x", doc(read_cache, bound("X"), stop)),
+            ("reads_x", doc(read_cache, {"kind": "set_dpp", "name": "Y", "source_values": [
+                {"value_type": "ddp", "property_name": "X"}]}, stop)),
+        ]),
+        # A middle process that stages the property itself still carries the grandchild's
+        # row to its own callers: the cache is shared, so the X-LESS documents this outer
+        # caller stores in it reach the grandchild's retrieve and are refused at the call
+        # (correction batch 18).
+        "an_outer_caller_of_a_cache_writer": (None, [
+            ("parent", legs({"steps": [get_p1], "terminal": put()},
+                            {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                         {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", doc(read_cache, bound("X"), stop)),
+        ]),
+        # The other half of the same rule: a caller that stores NOTHING in that cache
+        # stores nothing wrong, so it compiles — at one level of forwarding and at two —
+        # while the row it carries keeps travelling up.
+        "a_caller_that_stores_nothing_in_the_shared_cache": (None, [
+            ("parent", legs({"steps": [message], "terminal": stop},
+                            {"steps": [], "terminal": call("forwarder")})),
+            ("forwarder", legs({"steps": [message], "terminal": stop},
+                               {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                         {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", doc(read_cache, bound("X"), stop)),
+        ]),
+        # A consumer of the same caller-filled cache that states no profile states nothing a
+        # caller could store: it does not void the seed the cache's typed consumer needs.
+        "a_cache_a_consumer_states_no_profile_for": (None, [
+            ("parent", legs(staged, {"steps": [], "terminal": call("child")})),
+            ("child", legs(
+                {"steps": [read_cache, {"kind": "data_process", "steps": [{
+                    "operation": "split_documents", "profile_type": "json", "profile_ref": "$ref:p1",
+                    "link_element_key": "1", "link_element_name": "root"}]}], "terminal": stop},
+                {"steps": [read_cache, {"kind": "map_ref", "map_ref": "$ref:m22"}], "terminal": stop},
+            )),
+        ]),
+        # A bound use past a Message: the caller-cache marker rides on the stream, so the
+        # binding records no row of its own, and the cohort seeded for the property clears
+        # it all the same. The row is the BOUND one, and a literal segment is refused.
+        "a_bound_use_past_a_message": (None, [
+            ("parent", legs({"steps": [get_p1, {"kind": "set_ddp", "name": "X", "source_values": [
+                {"value_type": "static", "value": "/c/1"}]}], "terminal": put()},
+                {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", doc(read_cache, {"kind": "set_dpp", "name": "Y", "source_values": [
+                {"value_type": "ddp", "property_name": "X"}]}, message, bound("X"), stop)),
+        ]),
+        # ARCH-184-r1-06: what a waited, abort-on-error call that provably runs its child
+        # establishes for a later leg. A write on every normal completion (K), on one arm
+        # only (K1), beside an arm that ends in a call (K2), and behind abort_on_error=false
+        # (K3).
+        "a_guarantee_chain_with_a_later_leg_read": (None, [
+            ("parent", legs(
+                {"steps": [], "terminal": call("writer_k", **awaited)},
+                {"steps": [], "terminal": call("writer_one", **awaited)},
+                {"steps": [], "terminal": call("writer_call", **awaited)},
+                {"steps": [], "terminal": call("writer_na", wait=True, abort_on_error=False)},
+                {"steps": [reads("K"), reads("K1"), reads("K2"), reads("K3")], "terminal": stop},
+            )),
+            ("writer_k", doc(arms([sets("K")], [sets("K")]))),
+            ("writer_one", doc(arms([sets("K1")], [message]))),
+            ("writer_call", doc(arms([], [sets("K2")], call("leaf", **awaited)))),
+            ("writer_na", doc(arms([sets("K3")], [sets("K3")]))),
+            ("leaf", doc(arms([message], [message]))),
+        ]),
+        # A Data Passthrough parent proves no count, so its call may never run the child.
+        "a_guarantee_needs_a_proved_run": (None, [
+            ("parent", doc({"kind": "passthrough"}, {"kind": "branch", "legs": [
+                {"steps": [], "terminal": call("writer_k", **awaited)},
+                {"steps": [reads("K")], "terminal": stop},
+            ]})),
+            ("writer_k", doc(arms([sets("K")], [sets("K")]))),
+        ]),
+        # Amendment 3 §8: a terminal remove invalidates an execution-cache guarantee. The
+        # child fills the cache on one leg and empties it on the next, so its caller's
+        # later read is refused; the grandchild chain removes it one level down.
+        "a_guarantee_across_a_cache_removal": (None, [
+            ("parent", legs({"steps": [], "terminal": call("remover", **awaited)},
+                            {"steps": [read_cache, message], "terminal": stop})),
+            ("remover", legs(staged, {"steps": [], "terminal": {
+                "kind": "cache_remove", "cache_ref": "$ref:cache"}})),
+        ]),
+        "a_guarantee_a_grandchild_removes": (None, [
+            ("parent", legs({"steps": [], "terminal": call("mid", **awaited)},
+                            {"steps": [read_cache, message], "terminal": stop})),
+            ("mid", legs(staged, {"steps": [], "terminal": call("remover", **awaited)})),
+            ("remover", legs({"steps": [], "terminal": {
+                "kind": "cache_remove", "cache_ref": "$ref:cache"}},
+                {"steps": [message], "terminal": stop})),
+        ]),
+        # One caller-filled cache carrying BOTH a content requirement and a cached-property
+        # requirement: the child maps the retrieved documents and binds a request path to a
+        # property the caller stored with them.
+        "a_cache_seeded_for_content_and_a_property": (None, [
+            ("parent", legs({"steps": [get_p1, to_p2, dynamic("X")], "terminal": put()},
+                            {"steps": [], "terminal": call("child")})),
+            ("child", legs(
+                {"steps": [read_cache, {"kind": "map_ref", "map_ref": "$ref:m22"}], "terminal": stop},
+                {"steps": [read_cache, bound("X")], "terminal": stop})),
+        ]),
+        # Amendment 1 rule 8: a No Data child run once per arriving document may rewrite a
+        # process property it requires, and may not change a cache it requires.
+        "a_per_document_no_data_rewrite": (None, [
+            ("parent", doc({"kind": "passthrough"}, {"kind": "branch", "legs": [
+                {"steps": [sets("K")], "terminal": stop},
+                {"steps": [], "terminal": call("rewriter")},
+                {"steps": [get_p1], "terminal": put()},
+                {"steps": [], "terminal": call("remover")},
+            ]})),
+            ("rewriter", doc(arms([reads("K"), sets("K")], [message]))),
+            ("remover", legs({"steps": [read_cache, message], "terminal": stop},
+                             {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:cache"}})),
+        ]),
     }
     verdicts = {}
     for name, (declarations, chain) in sorted(chains.items()):
@@ -1884,6 +2091,780 @@ def _child_forwarding_behaviour_oracle():
                 ],
             }
         verdicts[name] = {"resolved": bool(resolution.ok), "roots": roots}
+    return verdicts
+
+
+def _property_survival_behaviour_oracle():
+    """The property-survival row (#184 amendment 3 §7 and §10).
+
+    ``cells`` and ``overlay_count`` state the survival table and the count the retrieve
+    overlay's current-document carry needs, as labels. Labels are not behaviour:
+    relabelling a cache read's cell moved the revision without changing a verdict, while
+    changing the overlay's writer selection changed verdicts and left the revision where
+    it was (ARCH-184-r1-09). So the row also records what each cell and the overlay decide.
+    """
+    lineage = _import("semantic_validation.lineage")
+    return {
+        "cells": sorted(
+            [cell[0], cell[1] or "", verdict] for cell, verdict in lineage.PROPERTY_SURVIVAL_V1.items()
+        ),
+        "overlay_count": lineage.COUNT_ONE,
+        "cell_verdicts": _survival_cell_verdicts(),
+        "overlay_verdicts": _retrieve_overlay_behaviour_oracle(),
+    }
+
+
+def _lineage_behaviour_symbols():
+    """The symbols the lineage oracles below validate against."""
+    from ..compiler.process_ir import connector_capabilities
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    rest = connector_capabilities.REST_FAMILY
+    return SymbolTableV1(symbols=(
+        ComponentSymbolV1(ref="$ref:RCONN", component_id="RCONN", component_type="connector-settings",
+                          connector_type=rest),
+        ComponentSymbolV1(ref="$ref:GET", component_id="GETOP", component_type="connector-action",
+                          connector_type=rest, action_type="GET", connection_ref="$ref:RCONN"),
+        ComponentSymbolV1(ref="$ref:CACHE", component_id="CACHE", component_type="documentcache"),
+        ComponentSymbolV1(ref="$ref:P1", component_id="PROFILE-ONE", component_type="profile.json"),
+    ))
+
+
+def _property_x_steps():
+    """``(literal X, X a process property composes, a GET bound to X, a read of X)``."""
+    return (
+        {"kind": "set_ddp", "name": "X", "source_values": [{"value_type": "static", "value": "v"}]},
+        {"kind": "set_ddp", "name": "X", "source_values": [
+            {"value_type": "static", "value": "/c/"},
+            {"value_type": "dpp", "property_name": "key", "default_value": ""}]},
+        {"kind": "connector_call", "operation_ref": "$ref:GET", "path_binding": {"property_name": "X"}},
+        {"kind": "set_dpp", "name": "Y", "source_values": [{"value_type": "ddp", "property_name": "X"}]},
+    )
+
+
+def _survival_cell_verdicts():
+    """What each stream-replacing cell of the survival table decides (#155, #184 A5).
+
+    Per cell that is not the overlay's: X is composed, the cell's step runs, then a request
+    path is bound to X and X is read. Every cell needs a spelling here, so a cell added to
+    the table without one makes the row unavailable, which fails loudly.
+    """
+    lineage = _import("semantic_validation.lineage")
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+
+    grouping = {"profile_type": "json", "profile_ref": "$ref:P1", "link_element_key": "1",
+                "link_element_name": "root"}
+    spellings = {
+        ("message", None): {"kind": "message", "text": "m"},
+        ("data_process", "split_documents"): {"kind": "data_process", "steps": [
+            dict(grouping, operation="split_documents")]},
+        ("data_process", "combine_documents"): {"kind": "data_process", "steps": [
+            dict(grouping, operation="combine_documents")]},
+        ("data_process", "custom_scripting"): {"kind": "data_process", "steps": [
+            {"operation": "custom_scripting", "script": "// emits its own documents"}]},
+    }
+    _static_x, dynamic_x, bound_x, read_x = _property_x_steps()
+    get = {"kind": "connector_call", "operation_ref": "$ref:GET"}
+    symbols = _lineage_behaviour_symbols()
+    verdicts = []
+    for cell, verdict in sorted(
+        lineage.PROPERTY_SURVIVAL_V1.items(), key=lambda item: (item[0][0], item[0][1] or "")
+    ):
+        if verdict == lineage._CACHE_OVERLAY:
+            continue
+        ir = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            get, dynamic_x, spellings[cell], bound_x, read_x, {"kind": "stop"}]}})
+        report = validate_process_ir(ir, symbols)
+        verdicts.append([cell[0], cell[1] or "", sorted([item.code, item.path] for item in report.errors)])
+    return verdicts
+
+
+def _state_keys(keys):
+    """State keys as sorted ``[scope, name]`` pairs; a key with no name spells as ``""``."""
+    return sorted([key[0], key[1] or ""] for key in keys)
+
+
+def _state_content(facts):
+    """Cache content facts as sorted ``[cache ref, profile identity or []]`` rows."""
+    return sorted([fact[0], list(fact[1]) if fact[1] else []] for fact in facts)
+
+
+def _state_cohorts(facts):
+    """Cache property cohorts as sorted rows, ``possible`` tagged known or unknown.
+
+    Tagged rather than left as ``None``, so every row sorts against every other one:
+    "a property nothing here names may also be stored" and "these are the properties"
+    are different answers, and the fingerprint has to see both.
+    """
+    return sorted(
+        [
+            fact[0],
+            _state_keys(fact[1].guaranteed),
+            ["unknown", []] if fact[1].possible is None else ["known", _state_keys(fact[1].possible)],
+            sorted([key[0], key[1] or "", token] for key, token in fact[1].alternatives),
+            fact[1].count,
+        ]
+        for fact in facts
+    )
+
+
+#: How each component of the lineage lattice's state is recorded in the revision, keyed
+#: by the component's own name.
+_STATE_COMPONENT_PROJECTIONS = {
+    "document": _state_keys,
+    "execution": _state_keys,
+    "content": _state_content,
+    "cohorts": _state_cohorts,
+}
+
+
+def _overlay_state_projection(state):
+    """Every component of the state a retrieve hands on (#184 ARCH-184-r1-09).
+
+    Keyed by the lattice's OWN components, so a component added to the state without a
+    projection raises here, the row reads "unavailable" and the guard fails loudly. The
+    overlay answers with a whole state and the row recorded one fact of it: a retrieve
+    that dropped the cached cohorts, or the process properties, or the cache's own
+    establishment, changed what the server accepts while the served revision stood still.
+    """
+    return {
+        component: _STATE_COMPONENT_PROJECTIONS[component](getattr(state, component))
+        for component in type(state).__slots__
+    }
+
+
+def _retrieve_overlay_behaviour_oracle():
+    """What a triggered cache read hands on, as verdicts (#184 amendment 3 §7 and §10, ARCH-184-r1-09).
+
+    Two halves, both read off the lineage module at call time.
+
+    - Public verdicts: fixed staged graphs, validated once per read kind the walk routes to
+      the overlay, so the cohort a cache write freezes, the meet over cohorts, writer
+      selection and the singleton bound each decide a recorded verdict. The read kinds are
+      the lineage module's own binding of the routing authority, the one the walk consults;
+      a test pins them equal to the survival table's overlay cells both ways.
+    - The transfer: `_overlay_cache_read` itself over its documented case space, every
+      cohort shape and count, none, one or two cohorts, by stream count, outside writer and
+      current writer. That includes the one-current/one-cached carry no public graph reaches
+      yet, so a change there reports drift rather than changing acceptance silently.
+    """
+    lineage = _import("semantic_validation.lineage")
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+
+    static_x, dynamic_x, bound_x, read_x = _property_x_steps()
+    stop = {"kind": "stop"}
+    put = {"kind": "cache_put", "cache_ref": "$ref:CACHE"}
+    remove = {"kind": "cache_remove", "cache_ref": "$ref:CACHE"}
+    symbols = _lineage_behaviour_symbols()
+
+    def leg(steps, terminal):
+        return {"steps": list(steps), "terminal": terminal}
+
+    def staged(*legs):
+        return model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "connector_call", "operation_ref": "$ref:GET"}, {"kind": "branch", "legs": list(legs)},
+        ]}})
+
+    def staged_after(prefix, *legs):
+        """``staged``, with ``prefix`` steps between the leading call and the Branch."""
+        return model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "connector_call", "operation_ref": "$ref:GET"}, *prefix,
+            {"kind": "branch", "legs": list(legs)},
+        ]}})
+
+    set_k = {"kind": "set_dpp", "name": "K", "source_values": [{"value_type": "static", "value": "v"}]}
+    read_k = {"kind": "set_dpp", "name": "OUT", "source_values": [
+        {"value_type": "dpp", "property_name": "K"}]}
+    graphs = {}
+    for kind in sorted(lineage.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS):
+        read = {"kind": kind, "cache_ref": "$ref:CACHE"}
+        cases = {
+            # The cached writer composes X, so a bound path rests on it.
+            "cached_dynamic_writer_bound": staged(leg([dynamic_x], put), leg([read, bound_x], stop)),
+            "no_cached_writer_bound": staged(leg([], put), leg([read, bound_x], stop)),
+            # One cached writer composes X and another writes a literal: every alternative must pass.
+            "mixed_cached_writers_bound": staged(
+                leg([dynamic_x], put), leg([static_x], put), leg([read, bound_x], stop)),
+            # X on the current document, over cached documents that lack it.
+            "current_writer_bound_over_cached_absence": staged(
+                leg([], put), leg([dynamic_x, read, bound_x], stop)),
+            # One cohort carries X and one does not, so the meet lacks it.
+            "one_sided_cohorts_ordinary_read": staged(
+                leg([static_x], put), leg([], put), leg([read, read_x], stop)),
+            "removed_cohort_ordinary_read": staged(
+                leg([static_x], put), leg([], remove), leg([read, read_x], stop)),
+            "current_only_ordinary_read": staged(leg([], put), leg([static_x, read, read_x], stop)),
+            # A read does not consume the cohorts the cache holds: only a whole-cache
+            # removal clears them (§7), so a SECOND read still carries the stored
+            # writers to a bound path and to an ordinary read.
+            "second_read_bound": staged(leg([dynamic_x], put), leg([read, read, bound_x], stop)),
+            "second_read_ordinary": staged(leg([static_x], put), leg([read, read, read_x], stop)),
+            # The cache's own establishment is execution state, which the retrieve hands
+            # on: reading twice is not reading a cache nothing wrote.
+            "read_twice_over_one_write": staged(leg([], put), leg([read, read], stop)),
+            # So are the process properties: a retrieve replaces the documents, never the
+            # execution state, so a property set before it is still readable after it.
+            "property_read_after_the_read": staged_after(
+                [set_k], leg([], put), leg([read, read_k], stop)),
+            # And a whole-cache removal takes that establishment away again (§8).
+            "removed_then_read": staged(leg([static_x], put), leg([], remove), leg([read], stop)),
+        }
+        for name, ir in sorted(cases.items()):
+            report = validate_process_ir(ir, symbols)
+            graphs[kind + ":" + name] = sorted([item.code, item.path] for item in report.errors)
+
+    x = (lineage.DDP, "X")
+    shapes = {
+        "present": (frozenset({x}), frozenset({x}), frozenset({(x, "cached")})),
+        "present_unattributed": (frozenset({x}), frozenset({x}), frozenset()),
+        "maybe_named": (frozenset(), frozenset({x}), frozenset({(x, "cached")})),
+        "unknown_properties": (frozenset(), None, frozenset()),
+        "absent": (frozenset(), frozenset(), frozenset()),
+    }
+    variants = sorted(
+        (name + "@" + count, lineage._Cohort(*shape, count))
+        for name, shape in shapes.items()
+        for count in (lineage.COUNT_ONE, lineage.COUNT_UNKNOWN)
+    )
+    cohort_sets = [()] + [(variant,) for variant in variants] + [
+        (first, second) for index, first in enumerate(variants) for second in variants[index + 1:]
+    ]
+    # What the path carries INTO the retrieve besides the cache's cohorts. The execution
+    # state and the cache's content are not a read's to drop — §7 clears them only at a
+    # whole-cache removal — so both are seeded here and both are recorded below, over
+    # every case. Without a seeded one the row could not tell a retrieve that hands them
+    # on from one that drops them, which is the half ARCH-184-r1-09 left open.
+    carried_states = {
+        "nothing_else": (frozenset(), frozenset()),
+        "a_property_the_cache_and_its_content": (
+            frozenset({(lineage.DPP, "K"), (lineage.CACHE, "$ref:CACHE")}),
+            frozenset({("$ref:CACHE", ("PROFILE-ONE", "json"))}),
+        ),
+    }
+    transfer = []
+    for cohort_set in cohort_sets:
+        for carried in sorted(carried_states):
+            execution, content = carried_states[carried]
+            for stream_count in (lineage.COUNT_ONE, lineage.COUNT_UNKNOWN):
+                for external in (False, True):
+                    for current in (False, True):
+                        document = frozenset({x}) if current else frozenset()
+                        state = lineage._State(
+                            document=document, execution=execution, content=content,
+                            cohorts=frozenset(
+                                ("$ref:CACHE", cohort) for _label, cohort in cohort_set),
+                        )
+                        after, writers, on_documents, invalidated, count = lineage._overlay_cache_read(
+                            lineage._RetrieveAtCall("$ref:CACHE", external), state,
+                            {x: ("current",)} if current else {}, document, frozenset(),
+                            lineage._Stream(lineage.STREAM_KNOWN, count=stream_count),
+                        )
+                        transfer.append([
+                            [label for label, _cohort in cohort_set], carried, stream_count,
+                            external, current,
+                            after.establishes(x), sorted(writers.get(x) or ()), x in on_documents,
+                            x in invalidated, lineage.CACHE_TRANSFER_UNPROVED in invalidated, count,
+                            _overlay_state_projection(after),
+                        ])
+    return {"graphs": graphs, "transfer": transfer}
+
+
+def _child_call_state_oracle():
+    """What a call does to its CALLER's execution state, as verdicts (#184 amendment 1 rule 7, §8).
+
+    A product of closed vocabularies, not a scenario list: what the child does to the
+    state, x how the call is made (waiting, aborting on error), x where the caller reads
+    what the call may have changed. Three of correction batch 18's own rules decide these
+    verdicts and no table states them — what a waited, abort-on-error call GUARANTEES a
+    reader in another leg (read both as a write in that leg and as an establishing write
+    anywhere), whether a derived child whose state effects are all known is still opaque,
+    and whose obligation a property the child uses on documents retrieved from a
+    caller-filled cache is. Reverting any of them changed what the server accepts while
+    the served revision stood still (ARCH-184-r1-09's class, found inside its own fix).
+
+    Two further families ride on the same symbols: the same property forwarded through a
+    middle process, and each cache-keyed fact of a child contract stated through a SECOND
+    reference to the one document cache, which only the cache-identity canonicalization
+    makes one fact.
+    """
+    from ..compiler.process_ir import connector_capabilities
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        ChildEntryContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    rest = connector_capabilities.REST_FAMILY
+
+    def sym(key, component_type, **fields):
+        return ComponentSymbolV1(
+            ref="$ref:" + key, component_id=key.upper(), component_type=component_type, **fields
+        )
+
+    symbols = SymbolTableV1(symbols=(
+        sym("conn", "connector-settings", connector_type=rest),
+        sym("get", "connector-action", connector_type=rest, action_type="GET", connection_ref="$ref:conn"),
+        sym("get_p1", "connector-action", connector_type=rest, action_type="GET",
+            connection_ref="$ref:conn", output_profile_ref="$ref:p1"),
+        sym("p1", "profile.json"),
+        sym("cache", "documentcache"),
+        # A SECOND reference to the one document cache the row above names.
+        ComponentSymbolV1(ref="$ref:cache_alias", component_id="CACHE", component_type="documentcache"),
+    ) + tuple(sym(key, "process") for key in ("parent", "mid", "child")))
+
+    stop = {"kind": "stop"}
+    message = {"kind": "message", "text": "m"}
+    entry = {"kind": "passthrough"}
+    get_p1 = {"kind": "connector_call", "operation_ref": "$ref:get_p1"}
+    script = {"kind": "data_process", "steps": [
+        {"operation": "custom_scripting", "script": "// nothing states what this does"}]}
+
+    def doc(*steps):
+        return model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": list(steps)}})
+
+    def legs(*items):
+        return doc({"kind": "branch", "legs": list(items)})
+
+    def call(key, **extra):
+        return dict({"kind": "process_call", "process_ref": "$ref:" + key}, **extra)
+
+    def sets(name):
+        return {"kind": "set_dpp", "name": name, "source_values": [{"value_type": "static", "value": "v"}]}
+
+    def reads_property(name):
+        return {"kind": "set_dpp", "name": "OUT_" + name, "source_values": [
+            {"value_type": "dpp", "property_name": name}]}
+
+    def reads_document_property(name):
+        return {"kind": "set_dpp", "name": "OUT_" + name, "source_values": [
+            {"value_type": "ddp", "property_name": name}]}
+
+    def tracked(property_id):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "track", "property_id": property_id},
+                "right": {"value_type": "static", "static_value": "x"},
+                "true_arm": {"steps": [message], "terminal": stop},
+                "false_arm": {"steps": [], "terminal": stop}}
+
+    def arms(true_steps, false_steps):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "a"},
+                "true_arm": {"steps": list(true_steps), "terminal": stop},
+                "false_arm": {"steps": list(false_steps), "terminal": stop}}
+
+    def put(ref="cache"):
+        return {"kind": "cache_put", "cache_ref": "$ref:" + ref}
+
+    def remove(ref="cache"):
+        return {"kind": "cache_remove", "cache_ref": "$ref:" + ref}
+
+    def read_cache(ref="cache"):
+        return {"kind": "cache_get", "cache_ref": "$ref:" + ref}
+
+    def dynamic(name):
+        return {"kind": "set_ddp", "name": name, "source_values": [
+            {"value_type": "static", "value": "/c/"},
+            {"value_type": "dpp", "property_name": "key", "default_value": ""}]}
+
+    def bound(name):
+        return {"kind": "connector_call", "operation_ref": "$ref:get",
+                "path_binding": {"property_name": name}}
+
+    def reported_by(report):
+        """Both buckets. A call to a child whose every state effect the server's own walk
+        proves is no longer an unknown effect, and that answer is a WARNING: recording
+        only what blocks would leave the rule deciding it outside the revision."""
+        return {
+            "errors": sorted([item.code, item.path] for item in report.errors),
+            "warnings": sorted([item.code, item.path] for item in report.warnings),
+        }
+
+    def verdicts_of(roots, reported, declarations=None):
+        """Resolve a chain through the server's own resolver and report each root asked."""
+        parsed = [(key, ir) for key, ir in roots]
+        resolution = resolve_process_ir_effect_declarations(
+            parsed, declarations, symbols, [],
+            child_roots={"$ref:" + key: ir for key, ir in parsed})
+        answers = {}
+        for key in reported:
+            ir = dict(parsed)[key]
+            context = resolution.capabilities_by_root.get(key)
+            answers[key] = reported_by(
+                validate_process_ir(ir, symbols, capabilities=context)
+                if context is not None
+                else validate_process_ir(ir, symbols)
+            )
+        return resolution, answers
+
+    #: What the CHILD does to the execution state.
+    children = {
+        "writes_a_property_on_every_completion": doc(arms([sets("K")], [sets("K")])),
+        # Its own effects are not all knowable, so nothing it does is guaranteed.
+        "writes_a_property_after_an_uninspectable_step": doc(get_p1, script, sets("K"), stop),
+        "fills_the_cache": legs({"steps": [get_p1], "terminal": put()},
+                                {"steps": [message], "terminal": stop}),
+        "fills_then_empties_the_cache": legs({"steps": [get_p1], "terminal": put()},
+                                             {"steps": [], "terminal": remove()}),
+    }
+    #: How the call is made.
+    call_forms = {
+        "waited_abort": {"wait": True, "abort_on_error": True},
+        "waited_continue": {"wait": True, "abort_on_error": False},
+        "unwaited": {"wait": False, "abort_on_error": False},
+    }
+    #: What the caller reads of what the call may have changed. A strict reader and a
+    #: non-strict one (a Decision operand, which tolerates absence but not a writer it
+    #: can never see) ask different questions of the same write.
+    reads = {
+        "the_property": ([reads_property("K")], stop),
+        "the_property_non_strictly": ([], tracked("process.K")),
+        "the_cache": ([read_cache(), message], stop),
+    }
+
+    def caller(what, position):
+        """The caller's body: the read and the call, in the order ``position`` names.
+
+        Before the call is the leg-order case — the write exists, in a leg that has not
+        run yet — and after it is the one a guarantee can clear.
+        """
+        steps, terminal = reads[what]
+
+        def built(made):
+            reading = {"steps": list(steps), "terminal": terminal}
+            calling = {"steps": [], "terminal": made}
+            return legs(*((calling, reading) if position == "after_the_call" else (reading, calling)))
+
+        return built
+
+    #: Where the caller reads it: the product of what is read and when.
+    callers = {
+        what + "_" + position: caller(what, position)
+        for what in sorted(reads)
+        for position in ("after_the_call", "before_the_call")
+    }
+    calls = []
+    for child in sorted(children):
+        for caller in sorted(callers):
+            for form in sorted(call_forms):
+                roots = [("parent", callers[caller](call("child", **call_forms[form]))),
+                         ("child", children[child])]
+                resolution, answers = verdicts_of(roots, ("parent",))
+                context = resolution.capabilities_by_root.get("parent")
+                row = context.child_entry_contract("$ref:child") if context is not None else None
+                calls.append([child, caller, form, answers["parent"],
+                              None if row is None else row.model_dump(mode="json")])
+
+    #: A property the child uses on documents a caller cached, through a middle process:
+    #: one case per requirement channel the contract carries it on.
+    uses = {
+        "a_bound_request_path": bound("X"),
+        "an_ordinary_read": {"kind": "set_dpp", "name": "Y", "source_values": [
+            {"value_type": "ddp", "property_name": "X"}]},
+    }
+    forwarded = {}
+    for use in sorted(uses):
+        roots = [
+            ("parent", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                            {"steps": [], "terminal": call("mid")})),
+            ("mid", legs({"steps": [read_cache()], "terminal": call("child", wait=True)},
+                         {"steps": [message], "terminal": stop})),
+            ("child", doc(entry, uses[use], stop)),
+        ]
+        resolution, answers = verdicts_of(roots, ("parent", "mid", "child"))
+        context = resolution.capabilities_by_root.get("parent")
+        row = context.child_entry_contract("$ref:mid") if context is not None else None
+        forwarded[use] = {"roots": answers,
+                          "row_at_the_caller": None if row is None else row.model_dump(mode="json")}
+
+    # The THIRD channel, and the only one that carries a SCHEDULED child's document
+    # property across a call: the child's read is not authored where the middle process
+    # can walk it but stated by a verified subprocess summary, and a scheduled child's
+    # derived contract drops every document-property read. The middle process therefore
+    # owes the row for its caller-filled cache on the strength of the summary alone, so
+    # this case records what that row is worth — the caller that stored the property is
+    # admitted, the caller that stored documents without it is refused.
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        StateEffectV1,
+        SubprocessSummaryV1,
+    )
+    from .process_ir_effects import derive_child_entry_facts, derive_subprocess_effect
+
+    declared_child = doc(arms([reads_document_property("X")], [reads_document_property("X")]))
+    declared_reads, declared_writes, _replay_safe = derive_subprocess_effect(
+        declared_child, capabilities=None, symbols=symbols).effect
+    summarised = ProcessIRValidationCapabilitiesV1(subprocess_summaries=(
+        SubprocessSummaryV1(process_ref="$ref:child", effect=StateEffectV1(
+            reads=tuple(declared_reads), writes=tuple(declared_writes))),))
+    declaring_mid = legs(
+        {"steps": [read_cache()], "terminal": call("child", wait=True, abort_on_error=True)},
+        {"steps": [message], "terminal": stop})
+    mid_row = ChildEntryContractV1(process_ref="$ref:mid", **derive_child_entry_facts(
+        declaring_mid, symbols, summarised))
+    held_by_the_caller = ProcessIRValidationCapabilitiesV1(child_entry_contracts=(mid_row,))
+    forwarded["a_declared_read"] = {
+        "roots": {
+            "mid": reported_by(validate_process_ir(
+                declaring_mid, symbols, capabilities=summarised)),
+            "a_caller_that_stored_it": reported_by(validate_process_ir(
+                legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                     {"steps": [], "terminal": call("mid")}),
+                symbols, capabilities=held_by_the_caller)),
+            "a_caller_that_stored_documents_without_it": reported_by(validate_process_ir(
+                legs({"steps": [get_p1], "terminal": put()},
+                     {"steps": [], "terminal": call("mid")}),
+                symbols, capabilities=held_by_the_caller)),
+        },
+        "row_at_the_caller": mid_row.model_dump(mode="json"),
+    }
+
+    #: Each cache-keyed fact of a child contract, stated through a SECOND reference to the
+    #: one cache: only the cache-identity canonicalization makes the two spellings one, so
+    #: a fact that stopped going through it would refuse a graph that runs.
+    alias_cases = {
+        "cache_property_requirements": lambda ref: [
+            ("parent", legs({"steps": [get_p1, dynamic("X")], "terminal": put(ref)},
+                            {"steps": [], "terminal": call("child")})),
+            ("child", doc(read_cache(), bound("X"), stop)),
+        ],
+        "guaranteed_state": lambda ref: [
+            ("parent", legs({"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                            {"steps": [read_cache(), message], "terminal": stop})),
+            ("child", legs({"steps": [get_p1], "terminal": put(ref)},
+                           {"steps": [message], "terminal": stop})),
+        ],
+        "removed_caches": lambda ref: [
+            ("parent", legs({"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                            {"steps": [read_cache(), message], "terminal": stop})),
+            ("child", legs({"steps": [get_p1], "terminal": put()},
+                           {"steps": [], "terminal": remove(ref)})),
+        ],
+    }
+    # The cohorts a caller stored land on the child of the cached-property chain, so that
+    # chain answers for both facts; it is run once per fact so each has its own recorded
+    # verdicts and neither rests on the other's.
+    alias_cases["caller_cache_cohorts"] = alias_cases["cache_property_requirements"]
+
+    def stated_by_a_caller(field, ref):
+        """The same fact handed in as trusted context, with ``ref`` naming the cache.
+
+        The derivation canonicalizes the graph it walks, so a fact it derives is already
+        in one spelling before the contract is built. A fact a CALLER states arrives in
+        whatever spelling the caller used, and only the canonicalization at the
+        validation boundary makes it the same cache as the one the graph reads.
+        """
+        cache_key = ("cache", "$ref:" + ref)
+        if field == "guaranteed_state":
+            return legs(
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                {"steps": [read_cache(), message], "terminal": stop},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled", mutated_state=(cache_key,),
+                guaranteed_state=(cache_key,), state_known=True, cache_writes_known=True)
+        if field == "removed_caches":
+            return legs(
+                {"steps": [get_p1], "terminal": put()},
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                {"steps": [read_cache(), message], "terminal": stop},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled", mutated_state=(cache_key,),
+                removed_caches=("$ref:" + ref,), state_known=True, cache_writes_known=True)
+        if field == "cache_property_requirements":
+            return legs(
+                {"steps": [get_p1, dynamic("X")], "terminal": put()},
+                {"steps": [], "terminal": call("child")},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled",
+                cache_property_requirements=(("$ref:" + ref, "X", None, True),))
+        # `caller_cache_cohorts` states what a caller stored to the child that reads it.
+        return doc(read_cache(), bound("X"), stop), None
+
+    # Each case twice: with one reference throughout, and with the second reference in
+    # the place the fact is stated. The two must receive the SAME verdicts — that is what
+    # "one component" means — so the row records both rather than only the aliased one.
+    spellings = {"through_one_reference": "cache", "through_two_references": "cache_alias"}
+    aliased = {}
+    for field in sorted(alias_cases):
+        aliased[field] = {"derived_from_the_child": {}, "stated_by_a_caller": {}}
+        for spelling in sorted(spellings):
+            ref = spellings[spelling]
+            _resolution, answers = verdicts_of(alias_cases[field](ref), ("parent", "child"))
+            aliased[field]["derived_from_the_child"][spelling] = answers
+            graph, row = stated_by_a_caller(field, ref)
+            capabilities = ProcessIRValidationCapabilitiesV1(
+                child_entry_contracts=() if row is None else (row,),
+                caller_cache_cohorts=(("$ref:" + ref, "X"),) if row is None else (),
+            )
+            aliased[field]["stated_by_a_caller"][spelling] = reported_by(
+                validate_process_ir(graph, symbols, capabilities=capabilities))
+    return {"calls": calls, "forwarded_cached_properties": forwarded, "one_cache_two_refs": aliased}
+
+
+def _lineage_read_behaviour_oracle():
+    """Where a property read is proved, by reader and by where its writer sits (#143, #154, #184 D12).
+
+    The state-visibility rows state the model as labels; these are the verdicts the walk
+    decides with it. A closed vocabulary: a strict, a defaulted and a non-strict (Decision
+    ``track``) reader of a process property and a strict and a non-strict reader of a
+    document property, each with its writer absent, before the Branch, in an earlier leg,
+    in a later leg, or earlier in the reader's own leg. Every graph starts with a call, as
+    a flow must.
+    """
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+
+    stop = {"kind": "stop"}
+    message = {"kind": "message", "text": "m"}
+    get = {"kind": "connector_call", "operation_ref": "$ref:GET"}
+
+    def tracked(property_id):
+        return {"kind": "decision", "comparison": "equals",
+                "left": {"value_type": "track", "property_id": property_id},
+                "right": {"value_type": "static", "static_value": "x"},
+                "true_arm": {"steps": [message], "terminal": stop},
+                "false_arm": {"steps": [], "terminal": stop}}
+
+    def read(scope, name, **extra):
+        return {"kind": "set_dpp", "name": "OUT", "source_values": [
+            dict({"value_type": scope, "property_name": name}, **extra)]}
+
+    writers = {
+        "dpp": {"kind": "set_dpp", "name": "K", "source_values": [{"value_type": "static", "value": "v"}]},
+        "ddp": {"kind": "set_ddp", "name": "D", "source_values": [{"value_type": "static", "value": "v"}]},
+    }
+    readers = {
+        "defaulted_dpp": ("dpp", [read("dpp", "K", default_value="")], stop),
+        "strict_ddp": ("ddp", [read("ddp", "D")], stop),
+        "strict_dpp": ("dpp", [read("dpp", "K")], stop),
+        "track_ddp": ("ddp", [], tracked("dynamicdocument.D")),
+        "track_dpp": ("dpp", [], tracked("process.K")),
+    }
+
+    def branch(*legs):
+        return {"kind": "branch", "legs": [{"steps": list(steps), "terminal": terminal} for steps, terminal in legs]}
+
+    placements = {
+        "unwritten": lambda writer, steps, terminal: [branch(([message], stop), (steps, terminal))],
+        "before_the_branch": lambda writer, steps, terminal: [
+            writer, branch(([message], stop), (steps, terminal))],
+        "earlier_leg": lambda writer, steps, terminal: [branch(([writer], stop), (steps, terminal))],
+        "later_leg": lambda writer, steps, terminal: [branch((steps, terminal), ([writer], stop))],
+        "earlier_in_its_leg": lambda writer, steps, terminal: [
+            branch(([message], stop), ([writer] + steps, terminal))],
+    }
+    symbols = _lineage_behaviour_symbols()
+    verdicts = []
+    for reader in sorted(readers):
+        scope, steps, terminal = readers[reader]
+        for placement in sorted(placements):
+            ir = model.parse_process_ir_v1({"version": "1", "body": {
+                "kind": "sequence", "steps": [get] + placements[placement](writers[scope], steps, terminal)}})
+            report = validate_process_ir(ir, symbols)
+            verdicts.append([reader, placement, sorted([item.code, item.path] for item in report.errors)])
+    return verdicts
+
+
+def _cache_content_consumer_oracle():
+    """Every consumer of documents read from a cache, by every content state it can hold (#184).
+
+    ARCH-184-r1-01/-02: each typed consumer once judged its own hand-picked subset of what
+    a cache read hands on. The matrix is generated from two closed vocabularies: the
+    consumers of a stream (a map, a profile-valued property source, a call declaring an
+    input and a waited Data Passthrough child call, plus the two the rule leaves unchecked
+    by name, a call declaring no input and a source after a Message), by every content
+    state of one cache (each subset of the writes storing P1, P2 or a profile nothing
+    states, with and without an outside writer).
+    """
+    import itertools
+
+    from ..compiler.process_ir import connector_capabilities
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        ChildEntryContractV1,
+        ExternalWriterContractV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+    from ..compiler.process_ir.semantic_validation.pipeline import validate_process_ir
+    from ..models import process_ir as model
+
+    rest = connector_capabilities.REST_FAMILY
+
+    def sym(ref, component_type, **fields):
+        return ComponentSymbolV1(ref="$ref:" + ref, component_id=ref.upper(), component_type=component_type,
+                                 **fields)
+
+    symbols = SymbolTableV1(symbols=(
+        sym("rconn", "connector-settings", connector_type=rest),
+        sym("get", "connector-action", connector_type=rest, action_type="GET", connection_ref="$ref:rconn",
+            output_profile_ref="$ref:p1"),
+        sym("get_undeclared", "connector-action", connector_type=rest, action_type="GET",
+            connection_ref="$ref:rconn"),
+        sym("patch", "connector-action", connector_type=rest, action_type="PATCH", connection_ref="$ref:rconn",
+            input_profile_ref="$ref:p2"),
+        sym("patch_undeclared", "connector-action", connector_type=rest, action_type="PATCH",
+            connection_ref="$ref:rconn"),
+        sym("m12", "transform.map", input_profile_ref="$ref:p1", output_profile_ref="$ref:p2"),
+        sym("p1", "profile.json"),
+        sym("p2", "profile.json"),
+        sym("cache", "documentcache"),
+        sym("child", "process"),
+    ))
+    outside = (ExternalWriterContractV1(cache_ref="$ref:cache"),)
+    requires_p1 = (ChildEntryContractV1(
+        process_ref="$ref:child", entry_form="passthrough", document_requirements=("$ref:p1",)),)
+    stop = {"kind": "stop"}
+    message = {"kind": "message", "text": "m"}
+    put = {"kind": "cache_put", "cache_ref": "$ref:cache"}
+    to_p2 = {"kind": "map_ref", "map_ref": "$ref:m12"}
+    source_p1 = {"kind": "set_ddp", "name": "X", "source_values": [
+        {"value_type": "profile", "profile_ref": "$ref:p1", "profile_type": "json",
+         "element_id": "3", "element_name": "id"}]}
+
+    def call(ref):
+        return {"kind": "connector_call", "operation_ref": "$ref:" + ref}
+
+    consumers = {
+        "declared_input_call": ([call("patch")], stop),
+        "map": ([to_p2], stop),
+        "passthrough_child_call": ([], {"kind": "process_call", "process_ref": "$ref:child"}),
+        "property_source": ([source_p1], stop),
+        "source_after_a_message": ([message, source_p1], stop),
+        "undeclared_input_call": ([call("patch_undeclared")], stop),
+    }
+    writes = {
+        "p1": {"steps": [call("get")], "terminal": put},
+        "p2": {"steps": [call("get"), to_p2], "terminal": put},
+        "unstated": {"steps": [call("get_undeclared")], "terminal": put},
+    }
+    verdicts = []
+    for consumer in sorted(consumers):
+        steps, terminal = consumers[consumer]
+        # The child's row is stated only where a call names it: a row nothing calls is
+        # itself refused, and would sit beside every other consumer's verdict.
+        capabilities = ProcessIRValidationCapabilitiesV1(
+            external_writers=outside,
+            child_entry_contracts=requires_p1 if terminal["kind"] == "process_call" else (),
+        )
+        for size in range(len(writes) + 1):
+            for written in itertools.combinations(sorted(writes), size):
+                for external in (False, True):
+                    read = {"kind": "cache_get", "cache_ref": "$ref:cache"}
+                    if external:
+                        read["external_writer"] = True
+                    legs = [{"steps": [message], "terminal": stop}] + [writes[item] for item in written] + [
+                        {"steps": [read] + list(steps), "terminal": terminal}]
+                    ir = model.parse_process_ir_v1({"version": "1", "body": {
+                        "kind": "sequence", "steps": [{"kind": "branch", "legs": legs}]}})
+                    report = validate_process_ir(ir, symbols, capabilities=capabilities)
+                    verdicts.append([
+                        consumer, list(written), external,
+                        sorted([item.code, item.path] for item in report.errors),
+                    ])
     return verdicts
 
 

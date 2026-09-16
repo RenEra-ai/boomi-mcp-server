@@ -1588,6 +1588,61 @@ def _literal_profile_indexes(boomi_client: Any, normalized: Any):
         return None
 
 
+def resolve_root_context(
+    process_roots: Any,
+    symbols: Any,
+    components: Any,
+    *,
+    conflict_policy: str,
+    snapshot: Any,
+    declarations: Any = None,
+    literal_indexes: Any = None,
+) -> Any:
+    """THE per-root trusted context, derived once for every route that compiles a canonical root.
+
+    #184 architect finding 7. The typed route derived child entry contracts here and handed
+    them to its compiles, while the raw ``integration_spec`` route compiled the same roots
+    strict: one two-root request was admitted typed and refused raw, and an unwaited
+    passthrough call was refused typed and created raw. Both routes now call this function,
+    so what one knows about a child the other knows too.
+
+    ``declarations`` is the typed route's effect channel. With ``None`` the resolver still
+    derives every child entry contract (amendment 3 §8) and reports no finding. Each child's
+    contract is derived against the symbols that child root is compiled with, projected with
+    the route's own resolution snapshot, so its profile requirements resolve.
+    """
+    from ..compiler.process_ir.connector_resolution import project_grants_for_root
+    from .process_ir_effects import resolve_process_ir_effect_declarations
+
+    roots = tuple(process_roots)
+    return resolve_process_ir_effect_declarations(
+        roots,
+        declarations,
+        symbols,
+        list(components),
+        child_roots={"$ref:" + key: root for key, root in roots},
+        conflict_policy=conflict_policy,
+        literal_indexes=literal_indexes,
+        symbols_for=lambda key, root: project_grants_for_root(
+            root, symbols, process_root_ref=key, snapshot=snapshot
+        ),
+    )
+
+
+def derive_root_capabilities(
+    process_roots: Any, symbols: Any, components: Any, *, conflict_policy: str, snapshot: Any
+) -> Dict[str, Any]:
+    """``{root key: trusted context or None}`` for a route with no effect declarations.
+
+    The raw ``integration_spec`` route carries no declaration channel, so the resolution
+    reports no finding and this map is its whole answer. ``None`` for a root keeps the strict
+    compile.
+    """
+    return resolve_root_context(
+        process_roots, symbols, components, conflict_policy=conflict_policy, snapshot=snapshot
+    ).capabilities_by_root
+
+
 def _validate_processes(
     normalized: _NormalizedIntent,
     declarations: Any = None,
@@ -1795,19 +1850,18 @@ def _validate_processes(
     # derived server-side, and each root gets only the contracts that bind inside
     # it. When the caller declared nothing this returns `None` per root, which is
     # the pre-#154 argument exactly.
-    from .process_ir_effects import resolve_process_ir_effect_declarations
-
+    #
+    # #184 architect finding 7: the SHARED derivation, which the raw route's plan builder
+    # calls too, so the two routes compile each root under one context.
     # #184: with no symbol table (a write conflict) nothing binds and no root is validated.
     validated_roots = normalized.process_roots if symbols is not None else ()
-    resolution = resolve_process_ir_effect_declarations(
+    resolution = resolve_root_context(
         validated_roots,
-        declarations if symbols is not None else None,
         symbols if symbols is not None else SymbolTableV1(symbols=()),
-        list(normalized.integration_spec.components),
-        child_roots={
-            "$ref:" + key: root for key, root in validated_roots
-        },
+        normalized.integration_spec.components,
         conflict_policy=conflict_policy,
+        snapshot=snapshot,
+        declarations=declarations if symbols is not None else None,
         # #179. The plan's own profile indexes. Without them the effect gate
         # asked the plan authority a question it answered "index unavailable",
         # and that early refusal MASKED every check ordered after it — plus the
@@ -1815,11 +1869,6 @@ def _validate_processes(
         # when the index is None. A map the plan refuses could therefore derive
         # a trusted effect.
         literal_indexes=literal_indexes,
-        # #184 amendment 3 §8: a child's entry contract is derived against the symbols
-        # that child root is compiled with, so its profile requirements resolve.
-        symbols_for=lambda key, root: project_grants_for_root(
-            root, symbols, process_root_ref=key, snapshot=snapshot
-        ),
     )
     for finding in resolution.findings:
         errors += 1

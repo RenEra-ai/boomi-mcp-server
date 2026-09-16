@@ -91,12 +91,16 @@ def _symbols():
             connection_ref="$ref:RCONN", output_profile_ref="$ref:P1"),
         sym("PATCH", "PATCHOP", "connector-action", connector_type=rest, action_type="PATCH",
             connection_ref="$ref:RCONN", input_profile_ref="$ref:P2"),
+        # A call that consumes the documents and declares no input profile (D2).
+        sym("PATCH_UNDECLARED", "PATCHOP2", "connector-action", connector_type=rest,
+            action_type="PATCH", connection_ref="$ref:RCONN"),
         sym("M12", "M12", "transform.map", input_profile_ref="$ref:P1", output_profile_ref="$ref:P2"),
         sym("M22", "M22", "transform.map", input_profile_ref="$ref:P2", output_profile_ref="$ref:P2"),
         sym("P1", "PROFILE-ONE", "profile.json"),
         sym("P2", "PROFILE-TWO", "profile.json"),
         sym("CACHE", "CACHE", "documentcache"),
         sym("CACHE_ALIAS", "CACHE", "documentcache"),
+        sym("CACHE2", "CACHE2", "documentcache"),
         sym("CHILD_ALIAS", "CHILD-PROC", "process"),
     ) + tuple(sym(key, key + "-PROC", "process") for key in _PROCESS_KEYS))
 
@@ -292,16 +296,35 @@ def test_a_no_data_child_after_a_prefix_is_refused_and_its_empty_prefix_call_is_
 
 
 def test_an_interposed_decision_keeps_the_prefix_obligation():
-    """Native work, then a Decision, then a call whose arm authors no step.
+    """Native work, then a Decision, then a call whose arm authors no step (ARCH-184-r1-03).
 
-    The call keeps the legacy empty-prefix placement (amendment 1 rule 4): the #141
-    capture attests `decision -> true -> processcall` after a leg step, so even a
-    child with no derivable contract is not refused. The Decision erases no
-    obligation (rule 3): a known child's contract is discharged at that call."""
-    unknown = [("PARENT", _parent(_P2_PREFIX, _decision(_call("EXTERNAL"))))]
-    assert (_PLACEMENT, _LEG + "/true_arm/terminal") not in _errors(unknown, "PARENT")
+    A Data Passthrough parent carries its native-work marker across the control
+    (amendment 1 rule 3), and newly authored passthrough entry cannot use the legacy
+    empty-prefix placement (rule 4). The call is keyed on the marker: a child with no
+    derivable contract and a No Data child are refused at the call, a passthrough child
+    is admitted, and a known child's contract is still discharged there. The same holds
+    at the root, behind a Branch, and behind two Decisions."""
+    arm = _LEG + "/true_arm/terminal"
+    refused = (("EXTERNAL", []), ("NODATA", [("NODATA", _NODATA)]))
+    for key, extra in refused:
+        roots = [("PARENT", _parent(_P2_PREFIX, _decision(_call(key))))] + extra
+        assert (_PLACEMENT, arm) in _errors(roots, "PARENT"), key
+        assert (_PLACEMENT, arm) in _compile_errors(roots, "PARENT"), key
+    admitted = [("PARENT", _parent(_P2_PREFIX, _decision(_call("CHILD")))), ("CHILD", _CHILD)]
+    assert _errors(admitted, "PARENT") == []
+    assert _compile_errors(admitted, "PARENT") == []
     mismatched = [("PARENT", _parent(_P2_PREFIX, _decision(_call("CHILD_P1")))), ("CHILD_P1", _CHILD_P1)]
-    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _LEG + "/true_arm/terminal/process_ref") in _errors(mismatched, "PARENT")
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, arm + "/process_ref") in _errors(mismatched, "PARENT")
+    spellings = (
+        (lambda call: _doc(_ENTRY, _MAP, _decision(call)), "/body/steps/2/true_arm/terminal"),
+        (lambda call: _doc(_ENTRY, _MAP, _branch([], call)), "/body/steps/2/legs/0/terminal"),
+        (lambda call: _doc(_ENTRY, _MAP, _decision(_decision(call))),
+         "/body/steps/2/true_arm/terminal/true_arm/terminal"),
+    )
+    for spell, pointer in spellings:
+        for key, extra in refused:
+            assert (_PLACEMENT, pointer) in _errors([("PARENT", spell(_call(key)))] + extra, "PARENT"), (pointer, key)
+        assert _errors([("PARENT", spell(_call("CHILD"))), ("CHILD", _CHILD)], "PARENT") == [], pointer
 
 
 def test_the_prefix_key_admits_only_the_captured_form_and_wait():
@@ -375,17 +398,45 @@ def test_a_no_data_child_does_not_owe_its_document_property_reads_to_a_caller():
     assert (PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE, "/body/steps/0/true_arm/steps/0") in _errors(roots, "READS_X")
 
 
-def test_a_no_data_child_run_per_document_may_not_change_the_state_it_requires():
-    def parent(child_key):
+def test_a_no_data_child_run_per_document_may_not_change_the_state_it_requires(monkeypatch):
+    """Amendment 1 rule 8, answered by the lattice per component (ledger row C20a).
+
+    The passthrough parent's stream may carry several documents, so the No Data child may
+    run several times. A process property is never un-established, so a child that reads
+    K and rewrites it leaves K established for its next run. A cache it requires and may
+    write or remove is refused, because the lattice cannot express a possible removal."""
+    def parent(child_key, first=None):
         return _doc(_ENTRY, {"kind": "branch", "legs": [
-            {"steps": [_SET_K], "terminal": _STOP},
+            first or {"steps": [_SET_K], "terminal": _STOP},
             {"steps": [], "terminal": _call(child_key)},
         ]})
 
-    refused = [("PARENT", parent("MUTATES_K")), ("MUTATES_K", _MUTATES_K)]
-    assert (_PLACEMENT, "/body/steps/1/legs/1/terminal") in _errors(refused, "PARENT")
+    placement = (_PLACEMENT, "/body/steps/1/legs/1/terminal")
+    rewrites_k = [("PARENT", parent("MUTATES_K")), ("MUTATES_K", _MUTATES_K)]
+    assert placement not in _errors(rewrites_k, "PARENT")
     stable = [("PARENT", parent("NEEDS_K")), ("NEEDS_K", _NEEDS_K)]
-    assert (_PLACEMENT, "/body/steps/1/legs/1/terminal") not in _errors(stable, "PARENT")
+    assert placement not in _errors(stable, "PARENT")
+
+    staged = {"steps": [_MAP], "terminal": _put("$ref:CACHE")}
+    reads_then_removes = _legs(
+        {"steps": [_read_cache("$ref:CACHE"), _MSG], "terminal": _STOP},
+        {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:CACHE"}},
+    )
+    removal = [("PARENT", parent("CACHE_CHILD", staged)), ("CACHE_CHILD", reads_then_removes)]
+    assert placement in _errors(removal, "PARENT")
+    # A typed consumer of the cache (PATCH declares P2) and a later leg appending to it.
+    # No map or script, so the child's state is known and only the cache term refuses it.
+    appends_to_its_typed_cache = _legs(
+        {"steps": [_read_cache("$ref:CACHE"), _PATCH], "terminal": _STOP},
+        {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GET"}], "terminal": _put("$ref:CACHE")},
+    )
+    typed = [("PARENT", parent("CACHE_CHILD_P1", staged)), ("CACHE_CHILD_P1", appends_to_its_typed_cache)]
+    assert placement in _errors(typed, "PARENT")
+    # Mutant: without the cache term only the unknown-state refusal is left, and both
+    # children that may change the cache they read are admitted.
+    monkeypatch.setattr(lineage, "_repetition_unstable_caches", lambda contract, cache_refs: ())
+    assert placement not in _errors(removal, "PARENT")
+    assert placement not in _errors(typed, "PARENT")
 
 
 def test_a_child_may_leave_unknown_content_in_a_shared_cache():
@@ -497,9 +548,13 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
     """Amendment 3 §10: a BEHAVIOUR change moves the compiler revision.
 
     Each perturbation changes what the server accepts, not a sentence: admitting every
-    prefix key, marking a split as keeping document properties, and dropping a
-    document-emission row. The three revision rows read their authorities at call
-    time, so each perturbation is visible, and the baseline returns afterwards.
+    prefix key, marking a split as keeping document properties, dropping a
+    document-emission row, and four changes to the retrieve overlay (ARCH-184-r1-09):
+    dropping the cached writer alternatives, dropping the carried writers, freezing no
+    writer at a cache write, and assuming the one-current/one-cached singleton. Each of
+    the four flips a staged graph's verdict inside the property-survival row, for every
+    read kind. The revision rows read their authorities at call time, so each
+    perturbation is visible, and the baseline returns afterwards.
     """
     from types import MappingProxyType
 
@@ -520,6 +575,56 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
         rows.pop("stop")
         patched.setattr(emission, "DOCUMENT_EMISSION_V1", MappingProxyType(rows))
         assert authoring_contract._compiler_revision() != baseline
+
+    real_overlay, real_freeze = lineage._overlay_cache_read, lineage._cohort_at_write
+
+    def with_cohorts(state, cohorts):
+        return lineage._State(state.document, state.execution, state.content, frozenset(cohorts))
+
+    def without_cached_alternatives(semantic, state, writers, on_documents, invalidated, stream):
+        stripped = with_cohorts(
+            state, ((ref, cohort._replace(alternatives=frozenset())) for ref, cohort in state.cohorts))
+        after, carried, documents, dropped, count = real_overlay(
+            semantic, stripped, writers, on_documents, invalidated, stream)
+        return with_cohorts(after, state.cohorts), carried, documents, dropped, count
+
+    def without_carried_writers(*args):
+        after, carried, documents, dropped, count = real_overlay(*args)
+        return after, {key: value for key, value in carried.items() if key[0] != lineage.DDP}, documents, dropped, count
+
+    def assuming_the_singleton(semantic, state, writers, on_documents, invalidated, stream):
+        ones = with_cohorts(state, ((ref, cohort._replace(count=lineage.COUNT_ONE)) for ref, cohort in state.cohorts))
+        after, carried, documents, dropped, count = real_overlay(
+            semantic, ones, writers, on_documents, invalidated, stream._replace(count=lineage.COUNT_ONE))
+        return with_cohorts(after, state.cohorts), carried, documents, dropped, count
+
+    def freezing_no_writer(on_documents, writers, stream):
+        return real_freeze(on_documents, writers, stream)._replace(alternatives=frozenset())
+
+    def overlay_graphs():
+        row = authoring_contract._compiler_revision_payload()["property_survival"]
+        assert row != "unavailable"
+        return row["overlay_verdicts"]["graphs"]
+
+    kinds = sorted(lineage.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS)
+    unperturbed = overlay_graphs()
+    # Non-vacuity: before anything is perturbed, the cached writer admits its bound path
+    # and a current-only write proves nothing past the read.
+    for kind in kinds:
+        assert unperturbed[kind + ":cached_dynamic_writer_bound"] == [], kind
+        assert unperturbed[kind + ":current_only_ordinary_read"] != [], kind
+    for name, replacement, flipped in (
+        ("_overlay_cache_read", without_cached_alternatives, "cached_dynamic_writer_bound"),
+        ("_overlay_cache_read", without_carried_writers, "cached_dynamic_writer_bound"),
+        ("_cohort_at_write", freezing_no_writer, "cached_dynamic_writer_bound"),
+        ("_overlay_cache_read", assuming_the_singleton, "current_only_ordinary_read"),
+    ):
+        with monkeypatch.context() as patched:
+            patched.setattr(lineage, name, replacement)
+            graphs = overlay_graphs()
+            assert all(graphs[kind + ":" + flipped] != unperturbed[kind + ":" + flipped] for kind in kinds), (
+                replacement.__name__, graphs)
+            assert authoring_contract._compiler_revision() != baseline, replacement.__name__
     assert authoring_contract._compiler_revision() == baseline
 
 # ---------------------------------------------------------------------------
@@ -574,6 +679,34 @@ def test_the_callers_cache_proof_is_load_bearing(monkeypatch):
 
     monkeypatch.setattr(process_ir_effects, "_caller_cache_seeds", lambda requirements, symbols: ())
     assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/1/map_ref") in _errors(roots, "CACHE_CHILD")
+
+
+def test_one_rule_judges_cache_content_in_process_and_across_a_call():
+    """ARCH-184-r1-02: a consumer in the caller and the same consumer in a child are judged alike.
+
+    The caller stages GETP1's P1 output in CACHE, and `[cache_get, PATCH]` needs P2 of it. In
+    process it is refused at the call's own `/operation_ref`; as a No Data child it is refused at
+    the caller's `/process_ref`, from the same content. A caller staging P2 through the map
+    satisfies both. Called, the child is valid under its requirement; run alone it proves nothing
+    about the cache, so it is refused at its call, exactly as its map would be."""
+    code = PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+    consumer = [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}, _PATCH]
+    for stage, refused in (([], True), ([_MAP], False)):
+        staging = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}] + stage,
+                   "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}}
+        in_process = [("PARENT", _doc({"kind": "branch", "legs": [
+            staging, {"steps": consumer, "terminal": _STOP}]}))]
+        called = [("PARENT", _doc({"kind": "branch", "legs": [
+            staging, {"steps": [], "terminal": _call("CACHE_CHILD")}]})),
+            ("CACHE_CHILD", _doc(*consumer, _STOP))]
+        in_process_pointer = (code, "/body/steps/0/legs/1/steps/1/operation_ref")
+        assert (in_process_pointer in _errors(in_process, "PARENT")) == refused
+        assert (in_process_pointer in _compile_errors(in_process, "PARENT")) == refused
+        assert ((code, "/body/steps/0/legs/1/terminal/process_ref") in _errors(called, "PARENT")) == refused
+        assert _errors(called, "CACHE_CHILD") == []
+    irs, _resolution = _resolve(called)
+    standalone = validate_process_ir(irs["CACHE_CHILD"], _symbols())
+    assert (code, "/body/steps/1/operation_ref") in [(item.code, item.path) for item in standalone.errors]
 
 
 def _entry_by_id(value, entry_id):
@@ -850,3 +983,348 @@ def test_a_call_whose_unknown_effects_are_a_map_writes_no_unlisted_cache():
     _irs, resolution = _resolve(hides)
     assert resolution.capabilities_by_root["MID"].child_entry_contract("$ref:HIDES").cache_writes_known is False
     assert _FORWARDED_READ in _errors(hides, "MID")
+
+
+# ---------------------------------------------------------------------------
+# Architect evaluation 1 (ARCH-184-r1-03, ARCH-184-r1-04), correction batch 18
+# ---------------------------------------------------------------------------
+
+
+def test_a_scheduled_parent_keeps_the_legacy_empty_prefix_placement_after_a_decision():
+    """Rule 4's compatibility path stays open for a scheduled parent: the #141 capture
+    attests `decision -> true -> processcall` after a leg step, whatever the child's form.
+    Typed native work before the Decision keeps it too, as C21a scopes the finding."""
+    arm = "/body/steps/0/legs/0/terminal/true_arm/terminal"
+    for prefix in ([_MSG], [_read_cache("$ref:CACHE"), _MAP]):
+        for key, extra in (("EXTERNAL", []), ("NODATA", [("NODATA", _NODATA)])):
+            roots = [("PARENT", _doc(_branch(prefix, _decision(_call(key)))))] + extra
+            assert (_PLACEMENT, arm) not in _errors(roots, "PARENT"), (prefix, key)
+            assert (_PLACEMENT, arm) not in _compile_errors(roots, "PARENT"), (prefix, key)
+
+
+def test_the_native_marker_is_load_bearing(monkeypatch):
+    """Non-vacuity, both halves: key the call on its own body alone, or carry no marker
+    past a step, and the interposed Decision hides the native work again."""
+    roots = [("PARENT", _parent(_P2_PREFIX, _decision(_call("EXTERNAL"))))]
+    refusal = (_PLACEMENT, _LEG + "/true_arm/terminal")
+    assert refusal in _errors(roots, "PARENT")
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_prefix_predecessor", lambda context, own, marker, parent_form: own)
+        assert refusal not in _errors(roots, "PARENT")
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_native_work_marker", lambda incoming, semantic_kind, authored_kind: incoming)
+        assert refusal not in _errors(roots, "PARENT")
+    assert refusal in _errors(roots, "PARENT")
+
+
+def test_the_prefix_predecessor_reads_the_marker_only_where_a_prefix_key_exists():
+    """The whole decision, row by row. The own body's step wins; an empty prefix body keys
+    a Data Passthrough parent's call on the marker; every other parent keeps rule 4's
+    legacy placement; and a call outside a prefix context (a root call, a catch body's
+    recovery call) has no key, so no marker stands in. No public graph reaches that last
+    row after native work today (a root call takes no step before it, and no try_catch
+    follows a passthrough entry), so it is pinned here, on the predicate."""
+    rows = (
+        (("branch_leg", "message", "map_ref", "passthrough"), "message"),
+        (("branch_leg", "message", "map_ref", "scheduled"), "message"),
+        (("decision_true_arm", None, "map_ref", "passthrough"), "map_ref"),
+        (("branch_leg", None, "map_ref", "passthrough"), "map_ref"),
+        (("decision_true_arm", None, None, "passthrough"), None),
+        (("decision_true_arm", None, "map_ref", "scheduled"), None),
+        (("branch_leg", None, "map_ref", "listener"), None),
+        ((None, None, "notify", "passthrough"), None),
+    )
+    for arguments, expected in rows:
+        assert lineage._prefix_predecessor(*arguments) == expected, arguments
+
+
+def test_the_process_call_page_states_the_forwarder_and_interposition_placement():
+    """Served contract: the node page a caller reads for calls states both new refusals
+    (ARCH-184-r1-03, -04) and the parents rule 4 keeps on the legacy placement."""
+    from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
+
+    node = _entry_by_id(process_ir_authoring_revision_payload(), "node.process_call")
+    assert node is not None
+    facts = " ".join(node.get("ordering_facts") or ())
+    for clause in (
+        "or into a Data Passthrough process that hands the documents on to a process whose "
+        "entry cannot be derived are refused",
+        "In a Data Passthrough process these rules hold across a Branch or Decision after "
+        "native work, with the last step ahead of it counting as the step before the call",
+        "any other process keeps the empty-prefix placement there",
+    ):
+        assert clause in facts, clause
+
+
+def _typed_request(units, components):
+    """A typed authoring request: ``units`` are ``(key, ProcessIR payload, depends_on)``."""
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "E184 forwarding",
+        "units": [{"envelope": {"component_key": key, "name": "E184 " + key, "action": "create",
+                                "depends_on": list(depends_on)}, "process_ir": payload}
+                  for key, payload, depends_on in units],
+        "components": components, "conflict_policy": "reuse"}})
+
+
+def test_an_unknown_grandchild_leaves_its_forwarders_requirement_unknown():
+    """ARCH-184-r1-04: MID only hands its caller's documents to EXTERNAL, which no root of
+    the request states, so MID requires an unknown consumption of them (amendment 1 §2:
+    an undeclared consumption never becomes NONE). The caller's prefix is refused exactly
+    as the same prefix calling EXTERNAL directly, on every route; MID stays valid."""
+    from test_issue_158_listener_deployment import _reference_child
+    from test_issue_184_component_identity import _map, _profile
+    from boomi_mcp.authoring.workflow import (
+        AuthoringWorkflowError,
+        compile_authoring_request_v1,
+        plan_authoring_request_v1,
+    )
+
+    roots = [("PARENT", _parent(_P2_PREFIX, _call("MID"))), ("MID", _doc(_ENTRY, _call("EXTERNAL")))]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID").document_requirements == (None,)
+    assert (_PLACEMENT, _LEG) in _errors(roots, "PARENT")
+    assert (_PLACEMENT, _LEG) in _compile_errors(roots, "PARENT")
+    assert _errors(roots, "MID") == []
+    assert _compile_errors(roots, "MID") == []
+
+    request = _typed_request(
+        [("root", _parent([{"kind": "map_ref", "map_ref": "$ref:m12"}], _call("mid")), ("mid", "p1", "p2", "m12")),
+         ("mid", _doc(_ENTRY, _call("external")), ("external",))],
+        [_profile("p1", "a1"), _profile("p2", "b2"), _map("m12", "p1", "p2", "a1", "b2"),
+         _reference_child("external", "reference-external-cid-184")])
+    refusal = (_PLACEMENT, _LEG, "root")
+    planned = plan_authoring_request_v1(request, boomi_client=None, profile="qa_profile", account_id="qa_account")[0]
+    causes = {(cause, item.path, item.subject_id) for item in planned.errors for cause in item.cause_codes}
+    assert refusal in causes, causes
+    assert not any(subject == "mid" for _cause, _path, subject in causes), causes
+    with pytest.raises(AuthoringWorkflowError) as excinfo:
+        compile_authoring_request_v1(request, boomi_client=None, profile="qa_profile", account_id="qa_account")
+    assert refusal in {
+        (cause, item.path, item.subject_id) for item in excinfo.value.diagnostics for cause in item.cause_codes
+    }, excinfo.value.diagnostics
+
+
+def test_a_known_childs_unstated_consumer_is_forwarded_too():
+    """ARCH-184-r1-04: ENRICH states nothing about what its split reads, so MID, which only
+    hands it the documents, owes its caller the same unknown. Controls: the prefix calling an
+    unknown child directly is refused, the legacy empty-prefix call is kept, and a No Data
+    grandchild receives none of the documents, so its forwarder owes nothing of them."""
+    mid, enrich = ("MID", _doc(_ENTRY, _call("ENRICH"))), ("ENRICH", _doc(_ENTRY, _SPLIT, _STOP))
+    roots = [("PARENT", _parent(_P2_PREFIX, _call("MID"))), mid, enrich]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID").document_requirements == (None,)
+    assert (_PLACEMENT, _LEG) in _errors(roots, "PARENT")
+    assert (_PLACEMENT, _LEG) in _compile_errors(roots, "PARENT")
+    assert _errors(roots, "MID") == []
+    # CONTROLS
+    assert (_PLACEMENT, _LEG) in _errors([("PARENT", _parent(_P2_PREFIX, _call("EXTERNAL")))], "PARENT")
+    assert (_PLACEMENT, _LEG) not in _errors([("PARENT", _parent([], _call("MID"))), mid, enrich], "PARENT")
+    nodata = [("PARENT", _parent(_P2_PREFIX, _call("MID"))), ("MID", _doc(_ENTRY, _call("NODATA"))),
+              ("NODATA", _NODATA)]
+    _irs, resolution = _resolve(nodata)
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID").document_requirements == ()
+    assert (_PLACEMENT, _LEG) not in _errors(nodata, "PARENT")
+
+
+#: `ChildEntryContractV1` fields that are not requirements a caller discharges, by name and
+#: with the reason. Every other field is one, so a pure forwarder must present it.
+_CONTRACT_FIELDS_NOT_FORWARDED = {
+    "process_ref": "the row's key, naming the child the row describes",
+    "entry_form": "the forwarder's own entry, read off its own root",
+    "mutated_state": "effect side: what the child may change, applied by each call's own rules",
+    "state_known": "effect side: whether the child's state effects are all known",
+    "cache_writes_known": "effect side: whether the child's cache writes are all listed",
+    "guaranteed_state": (
+        "effect side: what every normal completion of the child establishes, applied by each "
+        "call's own guarantee rule"),
+    "removed_caches": (
+        "effect side: which caches the child may empty, applied by each call's own rule for "
+        "what a call un-establishes"),
+}
+
+#: Per requirement field, one child whose own contract states a value other than the field's
+#: default, so what the forwarder presents is compared against something.
+_FORWARDING_CASES = {
+    "document_requirements": ("CHILD", _CHILD),
+    "required_reads": ("NEEDS_K", _NEEDS_K),
+    "required_writers": ("BOUND", _BOUND),
+    "cache_requirements": ("CACHE_CHILD", _cache_child("$ref:M22")),
+    # A No Data child binding its request path to X of the documents it retrieves from a
+    # cache nothing in it fills (ARCH-184-r1-05).
+    "cache_property_requirements": ("CACHE_CHILD", _doc(_read_cache("$ref:CACHE"), _BOUND_GET, _STOP)),
+}
+
+#: What a direct call demands of a child whose entry nothing derives: a consumption of the
+#: documents it is handed that nothing states, and nothing else a caller could discharge.
+_UNKNOWN_CHILD_REQUIRES = {"document_requirements": (None,)}
+
+
+def test_every_requirement_field_has_a_forwarding_case():
+    """The coverage claim, derived from the contract model: a field added later fails here
+    until it has a forwarding case or a named reason it is not a requirement."""
+    fields = set(ChildEntryContractV1.model_fields)
+    assert set(_CONTRACT_FIELDS_NOT_FORWARDED) <= fields, sorted(set(_CONTRACT_FIELDS_NOT_FORWARDED) - fields)
+    assert fields - set(_CONTRACT_FIELDS_NOT_FORWARDED) == set(_FORWARDING_CASES), {
+        "without_a_case": sorted(fields - set(_CONTRACT_FIELDS_NOT_FORWARDED) - set(_FORWARDING_CASES)),
+        "case_for_no_requirement": sorted(set(_FORWARDING_CASES) - (fields - set(_CONTRACT_FIELDS_NOT_FORWARDED))),
+    }
+    assert set(_UNKNOWN_CHILD_REQUIRES) <= set(_FORWARDING_CASES)
+
+
+def test_a_pure_forwarder_presents_every_requirement_of_its_child():
+    """ARCH-184-r1-04's invariant: MID only hands its caller's documents to one child, so for
+    every requirement field MID's row equals its child's, and an unknown child's is exactly
+    what a direct call demands of it. Each case's child states a non-default value."""
+    fields = sorted(set(ChildEntryContractV1.model_fields) - set(_CONTRACT_FIELDS_NOT_FORWARDED))
+    defaults = {name: ChildEntryContractV1.model_fields[name].default for name in fields}
+    drift = {}
+    for field, (key, child) in sorted(_FORWARDING_CASES.items()):
+        roots = [("PARENT", _parent([], _call("MID"))), ("MID", _parent([], _call(key))), (key, child)]
+        _irs, resolution = _resolve(roots)
+        own = resolution.capabilities_by_root["MID"].child_entry_contract("$ref:" + key)
+        presented = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID")
+        assert getattr(own, field) != defaults[field], (field, key)
+        for name in fields:
+            if getattr(presented, name) != getattr(own, name):
+                drift[(key, name)] = {"child": getattr(own, name), "forwarder": getattr(presented, name)}
+    roots = [("PARENT", _parent([], _call("MID"))), ("MID", _parent([], _call("EXTERNAL")))]
+    _irs, resolution = _resolve(roots)
+    presented = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID")
+    for name in fields:
+        expected = _UNKNOWN_CHILD_REQUIRES.get(name, defaults[name])
+        if getattr(presented, name) != expected:
+            drift[("EXTERNAL", name)] = {"child": expected, "forwarder": getattr(presented, name)}
+    assert drift == {}, drift
+
+
+def test_a_forwarder_to_an_unknown_child_is_refused_a_direct_run_before_mutation(monkeypatch):
+    """ARCH-184-r1-04 on the typed build: the forwarder's recorded entry says it consumes
+    its caller's documents, so a direct test run of it is refused before anything reaches
+    the account. Deploying it without a test run stays available."""
+    from test_issue_158_listener_deployment import (
+        _AccountSurface,
+        _deploy,
+        _error_codes,
+        _reference_child,
+        _request,
+        _typed_build,
+        _unit,
+    )
+    from boomi_mcp.categories.integration_builder import _BUILD_REGISTRY
+
+    applied, _boundary = _typed_build(_request(
+        [_unit(_doc(dict(_ENTRY, label="E184 forwarder"), _call("external")), ("external",),
+               key="mid", name="E184 Forwarder")],
+        [_reference_child("external", "reference-external-cid-184")],
+    ))
+    build_id = applied["build_id"]
+    record = _BUILD_REGISTRY[build_id]["authoring"]["standalone_entry"]["mid"]
+    assert record["consumes_caller_documents"] is True, record
+    code = PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED
+    refused = _deploy(build_id, dry_run=True, run_test=True)
+    assert _error_codes(refused) == [code], refused
+    assert refused["errors"][0]["details"]["requirements"] == ["caller_documents"]
+    assert code not in _error_codes(_deploy(build_id, dry_run=True))
+    surface = _AccountSurface().install(monkeypatch)
+    real = _deploy(build_id, dry_run=False, run_test=True)
+    assert _error_codes(real) == [code], real
+    assert (surface.calls, surface.package_boundary, surface.reads) == ([], [], [])
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 18, pre-commit verification: what voids a caller's cache seed
+# ---------------------------------------------------------------------------
+
+#: Consumers of a caller-filled cache that state NO profile. Each records a
+#: ``(cache, None)`` requirement: a call that declares no input consumes the documents in
+#: a way nothing states (D2), and so does a data process.
+_STATES_NO_PROFILE = {
+    "an_undeclared_input_call": {"kind": "connector_call", "operation_ref": "$ref:PATCH_UNDECLARED"},
+    "a_data_process": _SPLIT,
+}
+#: Typed consumers of the same read, each requiring P2, with the pointer each is refused at.
+_STATES_A_PROFILE = {
+    "a_declared_input_call": (_PATCH, "/operation_ref"),
+    "a_map": ({"kind": "map_ref", "map_ref": "$ref:M22"}, "/map_ref"),
+    "a_profile_source": ({"kind": "set_ddp", "name": "S", "source_values": [
+        {"value_type": "profile", "profile_ref": "$ref:P2", "profile_type": "json",
+         "element_id": "3", "element_name": "id"}]}, "/source_values/0/profile_ref"),
+}
+
+
+def _two_consumers(first, second):
+    """A No Data child: one leg reads CACHE and runs ``first``, the next runs ``second``."""
+    return _legs({"steps": [_read_cache("$ref:CACHE"), first], "terminal": _STOP},
+                 {"steps": [_read_cache("$ref:CACHE"), second], "terminal": _STOP})
+
+
+@pytest.mark.parametrize("typed", sorted(_STATES_A_PROFILE))
+@pytest.mark.parametrize("unstated", sorted(_STATES_NO_PROFILE))
+def test_a_consumer_that_states_no_profile_does_not_void_the_callers_cache_seed(unstated, typed):
+    """Amendment 1 rule 6: the seed is what the cache's consumers NAME.
+
+    A consumer naming no profile states nothing a caller could store or fail to store —
+    every call skips it for exactly that reason — so it is not a disagreement. Voiding the
+    seed refused a called child's map, profile source or declared-input call beside such a
+    consumer of the same cache, while the identical in-process graph compiled and the
+    caller staged exactly the declared profile."""
+    consumer, _tail = _STATES_A_PROFILE[typed]
+    other = _STATES_NO_PROFILE[unstated]
+    roots = [("PARENT", _stage_then_call("CACHE_CHILD")),
+             ("CACHE_CHILD", _two_consumers(other, consumer))]
+    _irs, resolution = _resolve(roots)
+    assert resolution.capabilities_by_root["CACHE_CHILD"].caller_cache_contents == (("$ref:CACHE", "$ref:P2"),)
+    for key in ("PARENT", "CACHE_CHILD"):
+        assert _errors(roots, key) == [], key
+        assert _compile_errors(roots, key) == [], key
+    # The in-process twin, admitted before this batch and still admitted.
+    in_process = _legs({"steps": [_GETP1, _MAP], "terminal": _put("$ref:CACHE")},
+                       {"steps": [_read_cache("$ref:CACHE"), other], "terminal": _STOP},
+                       {"steps": [_read_cache("$ref:CACHE"), consumer], "terminal": _STOP})
+    assert _errors([("PARENT", in_process)], "PARENT") == []
+
+
+@pytest.mark.parametrize("typed", sorted(_STATES_A_PROFILE))
+def test_the_seed_still_needs_one_named_profile_and_the_writes_that_store_it(typed):
+    """The refusals that stand: a caller whose writes store another profile is refused at
+    its own call, and consumers of one cache naming DIFFERENT profiles seed nothing, so no
+    caller could satisfy both and the child keeps its own refusal."""
+    consumer, tail = _STATES_A_PROFILE[typed]
+    wrong_profile = [("PARENT", _legs({"steps": [_GETP1], "terminal": _put("$ref:CACHE")},
+                                      {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                     ("CACHE_CHILD", _two_consumers(_STATES_NO_PROFILE["a_data_process"], consumer))]
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref") in _errors(
+        wrong_profile, "PARENT")
+    disagreeing = [("PARENT", _stage_then_call("CACHE_CHILD")),
+                   ("CACHE_CHILD", _two_consumers(_MAP, consumer))]
+    refused = {(code, path) for code, path in _errors(disagreeing, "CACHE_CHILD")}
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/steps/1" + tail) in refused, refused
+
+
+def test_the_unstated_consumer_rule_is_load_bearing(monkeypatch):
+    """Non-vacuity: with the pre-batch seed rule in its place — any consumer naming no
+    profile voids the seed — the called child is refused at its own consumer again."""
+    from boomi_mcp.authoring import process_ir_effects
+    from boomi_mcp.compiler.process_ir.contracts import component_identity
+
+    def voided_by_an_unstated_consumer(requirements, symbols):
+        by_cache = {}
+        for cache_ref, profile_ref in requirements:
+            by_cache.setdefault(cache_ref, []).append(profile_ref)
+        seeds = []
+        for cache_ref, refs in sorted(by_cache.items()):
+            if None in refs:
+                continue
+            identities = {component_identity(process_ir_effects._symbol(symbols, ref)) or ref for ref in refs}
+            if len(identities) == 1:
+                seeds.append((cache_ref, sorted(refs)[0]))
+        return tuple(seeds)
+
+    roots = [("PARENT", _stage_then_call("CACHE_CHILD")),
+             ("CACHE_CHILD", _two_consumers(_STATES_NO_PROFILE["an_undeclared_input_call"], _PATCH))]
+    assert _errors(roots, "CACHE_CHILD") == []
+    monkeypatch.setattr(process_ir_effects, "_caller_cache_seeds", voided_by_an_unstated_consumer)
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/steps/1/operation_ref") in _errors(
+        roots, "CACHE_CHILD")

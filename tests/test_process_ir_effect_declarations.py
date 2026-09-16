@@ -2929,6 +2929,10 @@ def test_the_exit_role_partition_is_total():
     That is how a routed `target` and then a staging `cache_put` were each
     missed. This pins the exclusion against the compiler's own vocabulary, so a
     seventh role forces a decision instead of defaulting to the unsafe side.
+
+    #184 amendment 1 rule 7 (ledger row C20a): a terminal `process_call` completes
+    its path too. Excluded, it let a process with one arm ending in a call that
+    writes nothing promise what its other arm wrote.
     """
     import typing
 
@@ -2943,7 +2947,7 @@ def test_the_exit_role_partition_is_total():
     # everything else COMPLETES; which completions a Branch may meet together
     # is decided per compartment at the Branch, not by suppressing path ends.
     assert roles - _ABNORMAL_EXIT_ROLES == {
-        "stop", "return_documents", "routed_target", "cache_stage"}, roles
+        "stop", "return_documents", "routed_target", "cache_stage", "process_call"}, roles
 
 
 def _catch_terminal_child(catch_terminal_is_cache_put, catch_writes_k):

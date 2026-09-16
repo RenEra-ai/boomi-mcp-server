@@ -16,11 +16,16 @@ Determinism / byte-parity rules (do not "clean up"):
   spellings (``<parameters/>``, ``<dragpoints/>``), child order and the absence
   of a trailing newline are all load-bearing — the goldens compare raw bytes.
 * Renderers never reserialize through ``ElementTree``; they build strings.
-* Renderers are PURE: they raise nothing and validate nothing, with one exception:
-  a closed-vocabulary dispatch raises on a value outside its vocabulary instead of
-  rendering another value's bytes (``render_exception_parameters``). The legacy
-  adapters (``legacy.py``) keep the historical ``BuilderValidationError``
-  bypass-guards; the ProcessIR registry does its own fail-closed preflight.
+* Renderers are PURE: they raise nothing and validate nothing, with two exceptions,
+  each raising ``ValueError`` instead of rendering bytes the platform would misread.
+  A closed-vocabulary dispatch raises on a value outside its vocabulary instead of
+  rendering another value's bytes (``render_exception_parameters``). A shape that
+  emits zero documents refuses an outgoing wire instead of drawing one the platform
+  never follows (``_sink_dragpoints``, keyed on the document-emission authority,
+  #184 amendment 3 §4). The legacy adapters (``legacy.py``) keep the historical
+  ``BuilderValidationError`` bypass-guards and the ProcessIR registry does its own
+  fail-closed preflight; both refuse first, so a renderer's own refusal is reached
+  only by a caller that bypasses them.
 
 This module imports nothing from ``process_flow_builder`` (that would close an
 import cycle). It owns the emission-domain constants the templates need; the
@@ -33,6 +38,12 @@ import json
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+# #184 amendment 3 §4: the zero-emission shape types are READ from the
+# document-emission authority, not respelled here. That module is a leaf that imports
+# nothing from this package, so taking it from there closes no cycle.
+from .....models.process_ir_document_semantics import (
+    ZERO_EMISSION_EMITTER_KINDS as _ZERO_EMISSION_SHAPE_TYPES,
+)
 from .....models.process_ir_tokens import (
     CAUGHT_ERROR_PROPERTY_ID as _CAUGHT_ERROR_PROPERTY_ID,
 )
@@ -248,13 +259,33 @@ def render_dragpoints(transitions: Tuple[RenderTransition, ...]) -> str:
 
 
 def _dragpoints_block(transitions: Tuple[RenderTransition, ...]) -> str:
-    """The conditional block form used by doccacheload / doccacheremove /
-    processcall: an empty ``<dragpoints/>`` when terminal (no transitions), else
-    the wrapped children.
+    """The conditional block form used by processcall: an empty ``<dragpoints/>``
+    when terminal (no transitions), else the wrapped children.
+
+    ``render_processcall`` is its only caller, because a call's wiring stays
+    transition-driven for #175's returning call. The zero-emission shapes use
+    ``_sink_dragpoints``, which refuses a wire instead of rendering it.
     """
     if not transitions:
         return "<dragpoints/>"
     return f"<dragpoints>{render_dragpoints(transitions)}</dragpoints>"
+
+
+def _sink_dragpoints(shape_type: str, transitions: Tuple[RenderTransition, ...]) -> str:
+    """The dragpoints of a shape that emits zero documents: always ``<dragpoints/>``.
+
+    #184 amendment 3 §4: Add to Cache and an all-document Remove from Cache hand on
+    no documents, so the platform never follows a wire drawn after them. The
+    renderer refuses such a wire itself, even when every check in front of it is
+    bypassed, rather than render it. ``shape_type`` must be one of the
+    document-emission authority's zero-emission shape types, so no renderer can
+    claim that terminality for a shape the authority says continues.
+    """
+    if shape_type not in _ZERO_EMISSION_SHAPE_TYPES:
+        raise ValueError("not a zero-emission shape type")
+    if transitions:
+        raise ValueError("a zero-emission shape has no outgoing wire")
+    return "<dragpoints/>"
 
 
 # ---------------------------------------------------------------------------
@@ -608,10 +639,11 @@ def render_doccacheremove(
 ) -> str:
     """All-document Remove from Cache. It hands on no documents, so its canonical
     form is terminal (``<dragpoints/>``), the form the platform stores
-    (``tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml``). Pure like
-    every renderer here: callers that must refuse a successor do so before
-    rendering (the registry's cardinality preflight, the legacy adapter guard)."""
-    dragpoints_xml = _dragpoints_block(ctx.transitions)
+    (``tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml``). A wire
+    in ``ctx`` raises ``ValueError`` (``_sink_dragpoints``, #184 amendment 3 §4):
+    the renderer refuses it itself, behind the registry's cardinality preflight and
+    the legacy adapter guard, which refuse it first."""
+    dragpoints_xml = _sink_dragpoints("doccacheremove", ctx.transitions)
     userlabel = _escape_xml(userlabel or "")
     doc_cache_id = _escape_xml(str(doc_cache_id or "").strip())
     return (
@@ -906,9 +938,11 @@ def render_exception(
 
 def render_doccacheload(ctx: ShapeRenderContext, *, userlabel: str, doc_cache_id: str) -> str:
     """Verified document-cache Add-to-Cache shape. Add to Cache hands on no
-    documents, so its canonical form is terminal (empty dragpoints); callers refuse
-    a successor before rendering."""
-    dragpoints_xml = _dragpoints_block(ctx.transitions)
+    documents, so its canonical form is terminal (empty dragpoints). A wire in
+    ``ctx`` raises ``ValueError`` (``_sink_dragpoints``, #184 amendment 3 §4), behind
+    the registry's cardinality preflight and the legacy adapter guard, which refuse
+    it first."""
+    dragpoints_xml = _sink_dragpoints("doccacheload", ctx.transitions)
     return (
         f'<shape image="doccacheload_icon" name="{ctx.shape_id}" '
         f'shapetype="doccacheload" userlabel="{_escape_xml(userlabel)}" '

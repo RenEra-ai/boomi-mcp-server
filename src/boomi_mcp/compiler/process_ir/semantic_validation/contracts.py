@@ -54,7 +54,7 @@ import json
 import re
 from typing import Any, Dict, FrozenSet, Iterable, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # --------------------------------------------------------------------------
 # vocabularies
@@ -420,8 +420,10 @@ class ChildEntryContractV1(_ValidationModel):
       ``unknown`` when the child's entry cannot be derived (a listener, a cycle).
     - ``document_requirements``: per consumer of a passthrough child's incoming
       documents, the AUTHORED profile ref it requires, or None where nothing states
-      one. Refs, not resolved ids, so the contract survives placeholder-to-real-id
-      conversion; each call resolves them against its own symbols.
+      one. None also stands for a consumer the child hands the documents on to and
+      nothing states: a called process whose entry cannot be derived, or a waited
+      passthrough child's own None. Refs, not resolved ids, so the contract survives
+      placeholder-to-real-id conversion; each call resolves them against its own symbols.
     - ``required_reads``: state keys the child reads before establishing them. A No
       Data child's document properties are not among them: they cannot arrive.
     - ``required_writers``: document properties a passthrough child's bound request
@@ -430,7 +432,28 @@ class ChildEntryContractV1(_ValidationModel):
     - ``cache_requirements``: per consumer of documents the child reads from a cache
       no write in the child reached, ``(cache ref, AUTHORED profile ref or None)``. A
       caller's writes must have stored exactly that profile (amendment 1 rule 6).
+    - ``cache_property_requirements``: per document property the child uses on
+      documents it retrieved from such a cache, ``(cache ref, property name, request
+      profile ref or None, bound)``. Every document a caller's writes stored there must
+      carry it (amendment 3 §7), and a bound request path additionally needs each of
+      their writers to pass the binding checks at the call.
     - ``mutated_state``: execution-scoped keys the child may write or remove.
+    - ``guaranteed_state``: execution-scoped keys the child establishes on every normal
+      completion, a subset of ``mutated_state``. A waited call with ``abort_on_error``
+      that provably runs the child establishes them for later paths (amendment 1 rule
+      7). No document property is among them: a child's document properties never
+      land on its caller's sibling copies.
+    - ``removed_caches``: the document caches the child may REMOVE outright, its own
+      terminal removes and every removal it inherits from a child it calls — every removal
+      the walk PROVES, whether or not the child's cache writes are all known. Not a subset
+      of ``mutated_state``, which lists writes and removals alike without telling them
+      apart and is stated only when the cache writes are all known: that list is a
+      completeness claim and this one an existence claim, and a call nothing derives hides
+      removals without erasing the ones authored beside it. A removal invalidates an
+      execution-cache guarantee even though it emits no documents (amendment 3 §8), so a
+      call un-establishes each of these before applying what the child guarantees;
+      unknowable cache writes are answered on the write side instead, as an unknown
+      possibility that leaves the establishment alone.
     - ``state_known``: False when some step's state effects are unknown; then
       ``mutated_state`` is incomplete and proves nothing about process properties.
     - ``cache_writes_known``: True when ``mutated_state`` lists every document cache the
@@ -446,9 +469,27 @@ class ChildEntryContractV1(_ValidationModel):
     required_reads: Tuple[Tuple[str, str], ...] = ()
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
+    cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     mutated_state: Tuple[Tuple[str, str], ...] = ()
+    guaranteed_state: Tuple[Tuple[str, str], ...] = ()
+    removed_caches: Tuple[str, ...] = ()
     state_known: bool = False
     cache_writes_known: bool = False
+
+    @model_validator(mode="after")
+    def _guarantees_are_execution_state_it_writes(self):
+        """A guarantee is an execution-scoped write the child makes (amendment 1 rule 7).
+
+        A document property is refused: neither form establishes one on the caller's
+        sibling copies. A key the child is not recorded as writing is refused too, so a
+        guarantee can never promise state the possible-effect side does not list.
+        """
+        if any(key[0] == "ddp" for key in self.guaranteed_state):
+            raise ValueError("a child guarantees no document property to its caller")
+        written = {(key[0], key[1]) for key in self.mutated_state}
+        if any((key[0], key[1]) not in written for key in self.guaranteed_state):
+            raise ValueError("a guaranteed key must be one the child may write")
+        return self
 
 
 class ProcessIRValidationCapabilitiesV1(_ValidationModel):
@@ -491,6 +532,11 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: first holds, as ``(cache ref, profile ref)``. Seeded as that cache's content only
     #: when every consumer names one profile; every call proves it against its writes.
     caller_cache_contents: Tuple[Tuple[str, str], ...] = ()
+    #: #184 amendment 3 §7-§8: for a CALLED child, the document properties the documents
+    #: its callers stored in a cache it reads first carry, as ``(cache ref, property
+    #: name)``. Seeded as one cohort per cache whose writer is the caller; every call
+    #: proves it against each cohort its own writes left there.
+    caller_cache_cohorts: Tuple[Tuple[str, str], ...] = ()
     #: #184 amendment 3 §8: the contract THIS process presents to its callers, derived
     #: for a passthrough root. Recorded with the build so a direct test run or a
     #: schedule, which starts the process as No Data, is refused before any mutation.

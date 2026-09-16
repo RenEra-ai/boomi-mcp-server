@@ -293,11 +293,16 @@ _REMEDIATION = {
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "Give every step the profile it requires from the documents that reach it. A "
         "map's source profile is the profile those documents carry: a call's output, an "
-        "earlier map's target, or what a cache holds. Inside an error-handling body its "
-        "target profile is also the following call's input profile. A cache write stores "
-        "the profile its cache declares, a Set Properties profile source names the profile "
-        "that reaches it, and a waited call hands a Data Passthrough child the profile its "
-        "consumers need, including in a cache the child reads first. An operation's profile "
+        "earlier map's target, or what a cache holds, and a map feeding a connector call "
+        "produces that call's declared input profile, inside an error-handling body too. "
+        "A cache write stores the profile its cache declares, a Set Properties profile "
+        "source names the profile that reaches it, and a waited call hands a Data "
+        "Passthrough child the profile its consumers need, including in a cache the child "
+        "reads first. After a cache read, a map, a profile source, a waited call into a "
+        "Data Passthrough child and a connector call's declared input each need the one "
+        "profile every cache write reaching the read stored: writes of different profiles "
+        "or of documents whose profile nothing states, and a read that authors "
+        "external_writer, satisfy none of them. An operation's profile "
         "reference must name a profile component. A component named only by reference "
         "states no profile of its own, so declare the configuration apply writes into it."
     ),
@@ -499,9 +504,10 @@ _MESSAGES = {
         "accepting a replayed producer requires a region that retries"
     ),
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
-        "the documents reaching a map, a cache write, a profile source or a call carry a "
-        "profile other than the one it requires or one nothing states, or an operation's "
-        "profile reference names no profile component"
+        "the documents reaching a map, a cache write, a profile source, a connector call's "
+        "declared input or a process call carry a profile other than the one it requires "
+        "or one nothing states, or an operation's profile reference names no profile "
+        "component"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "a connector call's document cardinality is impossible at its position"

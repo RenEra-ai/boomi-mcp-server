@@ -6142,6 +6142,16 @@ def test_audit_ledger_attestations_have_durable_matching_evidence():
         # archived so the ledger can name it without naming something the archive
         # does not hold.
         "architect-reviews/cdx-gate-review.GPK3M5": "failed",
+        # #184 §6 evaluation 1, the two attempts before it: every turn of both
+        # gate sessions ended empty on the Codex account's usage limit — the
+        # first at ultra effort, the second at max, so the effort was not the
+        # cause. Each was collected `--outcome failed`; the collector refused to
+        # attest (`declared_failed`) and confirmed teardown. Neither produced a
+        # decision-bearing result, so neither is an evaluation or spends the
+        # capped §6 window. Evaluation 1 is cdx-gate-review.j1rWJg, run on the
+        # byte-identical prompt once the account's credits were restored.
+        "architect-reviews/cdx-gate-review.rHp4fC": "refused",
+        "architect-reviews/cdx-gate-review.rVaM2q": "refused",
         # failed run, replaced by cdx-review.Kkf8n6 over the same scope
         "commit-reviews/cdx-review.kXfU2v": "failed",
         # #155 L2 issue-level round 8: the turn ended `status:"failed"` with

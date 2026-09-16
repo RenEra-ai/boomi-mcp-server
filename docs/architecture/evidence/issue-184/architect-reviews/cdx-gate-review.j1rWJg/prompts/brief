@@ -1,0 +1,193 @@
+# Architect implementation review — issue #184 (M12.24: ProcessIR native document-sequence composition and non-returning staged workflows, bridge A)
+
+You are the architect who wrote the plans of record inlined below: the base design plan, then amendments 1, 2 and 3. Amendment 3 governs wherever they differ. Review the IMPLEMENTATION on branch `codex/issue-184` at HEAD against those plans. This is a read-only review; you may not edit anything.
+
+## Scope
+
+- The implementation is `git diff 73b9d3ddc8e547eba09b857275050fb336c06b59..HEAD`: everything after the Stage-1 step-0 baseline. The baseline commit `73b9d3d` itself only freezes the legacy mapped both-sides oracle before any behavioural edit (dark; no `src/` change from the branch point `cbab28f`).
+- The changed files are listed at the end of this brief, excluding the archived evidence under `docs/architecture/evidence/issue-184/` (captures, commit-review archives, predicate probes). Read evidence only when a claim depends on it.
+- The repository's own completion gates already ran on this tree:
+  - Stage-1 live QA rounds r1–r2;
+  - seventeen Stage-2 commit-review rounds (r1–r17), the last of them over the final correction, with their support QA rounds r3–r18.
+
+  The full non-KB suite passes: `13004 passed, 19 skipped` at `61ec8e1`, the last source commit; later commits only archive evidence. Do not repeat those reviews of general correctness. Your question is whether the implementation realizes the PLANS.
+
+## What to judge
+
+1. **Coverage of the plans.** Is every requirement of the plans of record (amendment 3 first) implemented and witnessed by tests? Name any plan section that was dropped, narrowed, or only partly realized. Pay particular attention to:
+   - admission rows, refusal rows, and their served codes and pointers;
+   - child entry contracts, the stream/profile proof, cache-content facts and document-property invalidation;
+   - terminal-call prefix admission and both child entry forms;
+   - served contract text and revisions, docs, and the live evidence rows the plans require.
+2. **The recorded plan corrections.** `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`, section "Plan corrections", rows C1–C25, records every place the implementation realized a plan requirement differently, with its rationale and witnessing tests. For each row, decide whether it is an acceptable realization of the plan's intent or a deviation that must be corrected.
+   - **C25 is a scope decision recorded for this review. Judge it explicitly.** Amendment 1's profile-fact rule and amendment 3's component identity both assume one configuration describes each existing component a request names. C25 refuses, with the served code `INTEGRATION_COMPONENT_WRITE_CONFLICT`, any request in which a component the request WRITES is also named by another spec: a second writer, a `reference_only` spec, a create the conflict policy reuses, or a connector update apply only binds. The other spec may name the component by its id in any spelling or by the exact name apply matches. C25 refuses these instead of deciding which spec's configuration describes the component. Plan, compile and apply read one binding for this: the component plan apply builds with the account (correction batch 10).
+     - Its revision note records why: each such rule tried in correction batches 6–8 was wrong in a new corner, as the Stage-2 rows show.
+     - Specs naming a component nothing in the request writes still bind one component, each described by its own configuration.
+     - Also judge whether the refusal narrows any admission the plans require.
+   - C24 records the declared-binding realization of amendment 1's profile-fact rule.
+3. **The owner decisions recorded in the ledger.**
+   - "Owner decision recorded at step 0 — both child entry forms": ProcessIR must support BOTH a Data Passthrough child, which receives the caller's documents, and a No Data child, which runs once per arriving document as its own execution. Check that both are realized as the plans describe.
+   - "Owner decision recorded 2026-09-14 — an unreadable account degrades the typed plan": when a client is in hand and the component plan cannot be built from the account, plan and compile keep working and serve one advisory naming every verdict that plan decides and nobody judged; apply's recompute against the readable account refuses a binding the account decides differently. The fail-closed block of correction batch 11 is withdrawn. Degradation is confined to plan and compile: a typed apply whose own recompile cannot build the component plan from the account refuses with `AUTHORING_APPLY_VALIDATION_REQUIRED` before comparing any binding, and writes nothing (correction batch 13). Judge whether the implementation realizes this decision without narrowing what the plans require, and whether the advisory is complete.
+4. **The pre-implementation and inherited findings.**
+   - E0-184-01..03 and E1-184-01..02 are pre-implementation live-evidence findings. The ledger records them fixed in revision rows `E0-184-01a` … `E1-184-02a`, each citing its witnesses and the live validation of QA round r14.
+   - The `cache-step-document-emission` structural fix's sibling inventory is recorded under the defect-class table, and its planned witness module is `tests/test_issue_184_document_emission.py` (correction batch 14).
+   - INH-EVAL-155-02 and -02a are inherited and stay open until A8 holds on the final tree.
+   - Judge whether each disposition realizes what the plans promised, whether the sibling inventory and the coverage claim are complete against amendment 3 §12's sweep list, and what remains.
+
+## Constraints
+
+- Do NOT call Boomi MCP tools, GitHub tools or any network tool. A headless turn parks on an elicitation it cannot answer. Ground every claim in the source, tests, ledger and plans in this checkout.
+- You may run targeted tests to check a claim:
+  `PYTHONPATH=src BOOMI_LOCAL=true BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider <node ids>`.
+  Do not run the full suite.
+- Report only concrete, verifiable findings. For each finding give:
+  - a priority label from `[P0]` (breaks the plan's core contract) to `[P3]` (minor);
+  - the file and line;
+  - the plan section it concerns (quote the requirement);
+  - the concrete input and the wrong behaviour or missing realization.
+  A plan correction you accept needs no finding. Do not report prose, comment or historical-count nits.
+
+## Output
+
+Start with one line `Reviewed files:` naming the files you actually read. Then list the findings, most severe first, or state that there are none. Then, for each plan correction C1–C25, one short line: accepted, or rejected with the finding it maps to.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
+
+## Changed files (excluding `docs/architecture/evidence/issue-184/`)
+
+- `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`
+- `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+- `docs/architecture/PROCESS_IR_COMPILER_V1.md`
+- `docs/architecture/PROCESS_IR_V1.md`
+- `src/boomi_mcp/authoring/contract.py`
+- `src/boomi_mcp/authoring/governance.py`
+- `src/boomi_mcp/authoring/process_entry.py`
+- `src/boomi_mcp/authoring/process_ir_effects.py`
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+- `src/boomi_mcp/authoring/process_materialization.py`
+- `src/boomi_mcp/authoring/workflow.py`
+- `src/boomi_mcp/categories/components/builders/process_emitters/legacy.py`
+- `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`
+- `src/boomi_mcp/categories/components/builders/process_flow_builder.py`
+- `src/boomi_mcp/categories/components/process_component_materializer.py`
+- `src/boomi_mcp/categories/components/process_graph_verifier.py`
+- `src/boomi_mcp/categories/deployment/orchestration.py`
+- `src/boomi_mcp/categories/integration_builder.py`
+- `src/boomi_mcp/categories/meta_tools.py`
+- `src/boomi_mcp/compiler/process_ir/body_capabilities.py`
+- `src/boomi_mcp/compiler/process_ir/connector_resolution.py`
+- `src/boomi_mcp/compiler/process_ir/contracts.py`
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+- `src/boomi_mcp/compiler/process_ir/emitter_registry.py`
+- `src/boomi_mcp/compiler/process_ir/entry_policy.py`
+- `src/boomi_mcp/compiler/process_ir/execution_profile.py`
+- `src/boomi_mcp/compiler/process_ir/invariants.py`
+- `src/boomi_mcp/compiler/process_ir/lowering.py`
+- `src/boomi_mcp/compiler/process_ir/pipeline.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/context.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/effects.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/pipeline.py`
+- `src/boomi_mcp/errors.py`
+- `src/boomi_mcp/models/_process_ir_compat.py`
+- `src/boomi_mcp/models/process_ir.py`
+- `src/boomi_mcp/models/process_ir_document_semantics.py`
+- `src/boomi_mcp/patterns/primitives/document_cache_put.py`
+- `src/boomi_mcp/patterns/primitives/document_cache_remove.py`
+- `src/boomi_mcp/patterns/primitives/document_cache_retrieve.py`
+- `src/boomi_mcp/patterns/primitives/throw_exception.py`
+- `src/boomi_mcp/recipes/engine.py`
+- `src/boomi_mcp/recipes/materialization.py`
+- `tests/_process_ir_capability_witnesses.py`
+- `tests/_process_ir_diagnostic_emissions.py`
+- `tests/_wave_gate_golden_corpus.py`
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+- `tests/fixtures/golden_xml/document_cache_remove.xml`
+- `tests/fixtures/golden_xml/flow_sequence_cache_load_retrieve_remove.xml`
+- `tests/fixtures/golden_xml/flow_sequence_cache_put_get.xml`
+- `tests/fixtures/golden_xml/issue155_source_dynamic_path_profile.xml`
+- `tests/fixtures/golden_xml/issue184_both_sides_dynamic_path.xml`
+- `tests/fixtures/golden_xml/issue184_cache_notify_archetype_terminal.xml`
+- `tests/fixtures/golden_xml/issue184_cache_notify_connector_terminal.xml`
+- `tests/fixtures/golden_xml/issue184_cache_notify_terminal.xml`
+- `tests/fixtures/golden_xml/issue184_cache_remove_terminal_branch.xml`
+- `tests/fixtures/golden_xml/issue184_cache_stage_read.xml`
+- `tests/fixtures/golden_xml/issue184_cache_stage_read_remove.xml`
+- `tests/fixtures/golden_xml/issue184_catch_exception_without_cache_put.xml`
+- `tests/fixtures/golden_xml/issue184_source_dynamic_path_dpp.xml`
+- `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+- `tests/fixtures/process_ir/emitter_parity/linear_flow.process.xml`
+- `tests/fixtures/process_ir/flow_sequence_compat_cases.json`
+- `tests/fixtures/process_ir/issue154/PROVENANCE.md`
+- `tests/fixtures/process_ir/issue155/PROVENANCE.md`
+- `tests/fixtures/process_ir/issue184/PROVENANCE.md`
+- `tests/fixtures/process_ir/issue184/both_sides_dynamic_path.json`
+- `tests/fixtures/process_ir/issue184/cache_remove_terminal_branch.json`
+- `tests/fixtures/process_ir/issue184/cache_stage_read.json`
+- `tests/fixtures/process_ir/issue184/cache_stage_read_remove.json`
+- `tests/fixtures/process_ir/issue184/catch_exception_without_cache_put.json`
+- `tests/fixtures/process_ir/issue184/source_dynamic_path_dpp.json`
+- `tests/fixtures/process_ir/passthrough/passthrough_entry.json`
+- `tests/fixtures/process_ir/process_ir_compiler_v1.json`
+- `tests/fixtures/process_ir/process_ir_v1.json`
+- `tests/fixtures/process_ir/process_ir_v1.schema.json`
+- `tests/fixtures/process_ir/semantic_report_linear_flow.json`
+- `tests/fixtures/wave_gate/goldens.jsonl`
+- `tests/fixtures/wave_gate/test_nodes.jsonl`
+- `tests/patterns/test_database_to_api_sync_dlq.py`
+- `tests/patterns/test_m10_primitive_builder_contract.py`
+- `tests/patterns/test_primitives_source_transform.py`
+- `tests/patterns/test_recipe_preset_parity.py`
+- `tests/test_builder_xml_invariants.py`
+- `tests/test_cache_property_lineage.py`
+- `tests/test_connector_call_resolution.py`
+- `tests/test_doctrine_emitter_consistency.py`
+- `tests/test_integration_builder.py`
+- `tests/test_issue_151_reachability_freeze.py`
+- `tests/test_issue_153_canonical_apply_e2e.py`
+- `tests/test_issue_154_grammar_goldens.py`
+- `tests/test_issue_155_identity_projection.py`
+- `tests/test_issue_158_entry_invariants.py`
+- `tests/test_issue_158_listener_model.py`
+- `tests/test_issue_158_wss_identity.py`
+- `tests/test_issue_178_ledger_is_derived_from_its_archive.py`
+- `tests/test_issue_184_absent_stream.py`
+- `tests/test_issue_184_caller_entry_stream.py`
+- `tests/test_issue_184_child_entries.py`
+- `tests/test_issue_184_component_identity.py`
+- `tests/test_issue_184_cutover.py`
+- `tests/test_issue_184_ddp_invalidation.py`
+- `tests/test_issue_184_document_emission.py`
+- `tests/test_issue_184_lineage_controller.py`
+- `tests/test_issue_184_native_sequences.py`
+- `tests/test_issue_184_passthrough_entry.py`
+- `tests/test_issue_184_stream_profiles.py`
+- `tests/test_issue_184_symbol_profile_facts.py`
+- `tests/test_legacy_adapter_cutover.py`
+- `tests/test_legacy_process_ir_adapters.py`
+- `tests/test_m12_11_authoring_plan.py`
+- `tests/test_process_emitter_parity.py`
+- `tests/test_process_emitter_registry.py`
+- `tests/test_process_execution_profile.py`
+- `tests/test_process_flow_builder.py`
+- `tests/test_process_flow_builder_trycatch_dlq.py`
+- `tests/test_process_graph_verifier.py`
+- `tests/test_process_ir_authoring_contract.py`
+- `tests/test_process_ir_authoring_contract_parity.py`
+- `tests/test_process_ir_compiler_invariants.py`
+- `tests/test_process_ir_effect_declarations.py`
+- `tests/test_process_ir_entrypoint_diagnostic_parity.py`
+- `tests/test_process_ir_flow_sequence_codec.py`
+- `tests/test_process_ir_models.py`
+- `tests/test_process_ir_notify_recovery.py`
+- `tests/test_process_ir_rich_control_bodies.py`
+- `tests/test_process_ir_semantic_effects.py`
+- `tests/test_process_ir_semantic_lineage.py`
+- `tests/test_process_ir_semantic_pipeline.py`
+- `tests/test_process_ir_semantic_validation.py`
+- `tests/test_process_ir_served_text_enforcement.py`
+- `tests/test_schema_template_process_flow.py`
+- `tests/test_wave_gate.py`
+- `tests/test_wave_gate_goldens.py`

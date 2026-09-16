@@ -865,32 +865,122 @@ def test_the_served_profile_mismatch_text_names_every_reporting_site():
 
     code = "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"
     compiler = _ROOT / "src" / "boomi_mcp" / "compiler" / "process_ir"
-    tails = set()
+    sites = set()
     for module in (compiler / "semantic_validation" / "lineage.py", compiler / "connector_resolution.py"):
         lines = module.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines):
             if code in line or "mismatch(" in line or "_profile_failure(" in line:
                 window = "\n".join(lines[max(0, index - 8): index + 8])
-                tails.update(re.findall(r'"(?:\{0\})?(/[a-z_]+(?:/\{0\}/[a-z_]+)?)"', window))
+                sites.update(
+                    (module.name, tail)
+                    for tail in re.findall(r'"(?:\{0\})?(/[a-z_]+(?:/\{0\}/[a-z_]+)?)"', window))
+    # Keyed by module (ARCH-184-r1-02): lineage's cache-fed declared-input call reports at
+    # `/operation_ref`, a tail connector resolution already reported at, so a set of tails alone
+    # could not see that a new rule had started raising the code.
     keywords = {
-        "/map_ref": "map",
-        "/cache_ref": "cache write",
-        "/process_ref": "call",
-        "/source_values/{0}/profile_ref": "profile source",
-        "/operation_ref": "operation",
+        ("lineage.py", "/map_ref"): "map",
+        ("lineage.py", "/cache_ref"): "cache write",
+        ("lineage.py", "/process_ref"): "call",
+        ("lineage.py", "/source_values/{0}/profile_ref"): "profile source",
+        ("lineage.py", "/operation_ref"): "declared input",
+        ("connector_resolution.py", "/map_ref"): "map",
+        ("connector_resolution.py", "/operation_ref"): "operation",
     }
     # Both directions: every reporting site is one this pin knows, and every word it requires
     # still stands for a site in the source.
-    assert tails == set(keywords), sorted(tails)
+    assert sites == set(keywords), sorted(sites)
     served = next(row for row in compiler_diagnostic_specs() if row["code"] == code)
     # Each served text on its own (QA-184-s1-r6-01): joined, a site named only by the
     # remediation passed for a message that omitted it.
     texts = {"message": served["message"], "remediation": served["remediation"],
              "summary": ERROR_TAXONOMY[code].summary}
-    missing = sorted((name, tail) for name, text in texts.items()
-                     for tail, word in keywords.items() if word not in text.lower())
+    missing = sorted((name, site) for name, text in texts.items()
+                     for site, word in keywords.items() if word not in text.lower())
     assert missing == [], missing
     assert "named only by reference" in served["remediation"]
+
+
+def _rest_operation(key, method, response=None, request=None):
+    """A REST operation spec authored like `_get`'s, declaring only the profiles it is given."""
+    config = {"component_type": "connector-action", "connector_type": "rest",
+              "operation_mode": "execute", "component_name": key, "connection_ref_key": "conn",
+              "method": method, "path": "/admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a",
+              "return_application_errors": True, "track_response": True}
+    depends_on = ["conn"]
+    if response is not None:
+        config.update(response_profile_id="$ref:" + response, response_profile_type="json")
+        depends_on.append(response)
+    if request is not None:
+        config.update(request_profile_id="$ref:" + request, request_profile_type="json")
+        depends_on.append(request)
+    return {"key": key, "type": "connector-action", "name": key, "action": "create",
+            "depends_on": depends_on, "config": config}
+
+
+def test_the_typed_route_judges_cache_content_at_every_typed_consumer():
+    """ARCH-184-r1-01 and ARCH-184-r1-02, on the route a caller reaches.
+
+    One leg stages documents in `c_p1`, which declares p1, and the next reads them back. A PATCH
+    declaring input p2, after a map that wrote p1, is refused at its own `/operation_ref`. A profile
+    source naming p1, after an undeclared GET's write, is refused at `/source_values/0/profile_ref`:
+    the cache's declaration is not its content. Control: the same source after a GET that declares
+    p1 compiles and is bound to a revision."""
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    components = [
+        {"key": "conn", "type": "connector-settings", "name": "Sandbox CDS Mock REST (no-auth)",
+         "action": "create",
+         "config": {"connector_type": "rest", "component_name": "Sandbox CDS Mock REST (no-auth)",
+                    "base_url": "http://host.docker.internal:8081", "auth": "NONE"}},
+        _profile("p1", "key"),
+        _profile("p2", "other"),
+        _rest_operation("op_get", "GET", response="p1"),
+        _rest_operation("op_undeclared", "GET"),
+        _rest_operation("op_patch", "PATCH", request="p2"),
+        _map("m11", "p1", "p1", "key", "key"),
+        _cache("c_p1", "p1", "key", "new"),
+    ]
+    get = _step("connector_call", operation_ref="$ref:op_get")
+    source = _step("set_ddp", name="X", source_values=[
+        {"value_type": "profile", "element_id": "3", "element_name": "key (Root/Object/key)",
+         "profile_ref": "$ref:p1", "profile_type": "profile.json"}])
+
+    def staged(stage_steps, consumer):
+        legs = [{"steps": list(stage_steps), "terminal": _step("cache_put", cache_ref="$ref:c_p1")},
+                {"steps": [_step("cache_get", cache_ref="$ref:c_p1"), consumer], "terminal": _step("stop")}]
+        return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+            "intent_kind": "process_ir", "integration_name": "cache_content",
+            "units": [{"envelope": {"component_key": "root", "name": "root", "action": "create",
+                                    "depends_on": [spec["key"] for spec in components]},
+                       "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                           _step("branch", legs=legs)]}}}],
+            "components": components, "conflict_policy": "reuse"}})
+
+    def compiled(request):
+        with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            return compile_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa",
+                                                account_id="qa_account")[0]
+
+    def blocked_at(diagnostics, pointer):
+        return any(item.code == "AUTHORING_COMPILE_BLOCKED" and item.path == pointer
+                   and _MISMATCH in item.cause_codes for item in diagnostics)
+
+    refused = (
+        (staged([get, _step("map_ref", map_ref="$ref:m11")], _step("connector_call", operation_ref="$ref:op_patch")),
+         "/body/steps/0/legs/1/steps/1/operation_ref"),
+        (staged([_step("connector_call", operation_ref="$ref:op_undeclared")], source),
+         "/body/steps/0/legs/1/steps/1/source_values/0/profile_ref"),
+    )
+    for request, pointer in refused:
+        planned = plan_authoring_request_v1(request, profile="qa_profile", account_id="qa_account")[0]
+        assert blocked_at(planned.errors, pointer), planned.errors
+        with pytest.raises(Exception) as blocked:
+            compiled(request)
+        assert blocked_at(getattr(blocked.value, "diagnostics", ()), pointer), blocked.value
+    assert compiled(staged([get], source)).revision_binding is not None
 
 
 # ---------------------------------------------------------------------------

@@ -48,32 +48,47 @@ if str(_SRC) not in sys.path:
 #: with the reason. Keyed by `(repo-relative path, entry name)`. Read by the
 #: test — not documentation. A row here that no longer matches a strict call is
 #: also a failure, so a fixed site cannot leave a stale exemption behind.
+#:
+#: #184 architect finding 7 removed the raw `integration_spec` plan builder's row. Its
+#: reason ("no context in existence to thread") went false when amendment 3 §8 made the
+#: resolver derive child entry contracts without declarations; the builder now derives
+#: that context itself, and this sweep enforces the call.
 STRICT_BY_DESIGN = {
     (
         "src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py",
         "compile_process_ir_v1",
     ): (
-        "the LEGACY dialect adapter. A legacy document has no effect "
-        "declarations to resolve — the channel is part of the typed authoring "
-        "surface — so strict is the correct question here, not an omission."
-    ),
-    (
-        "src/boomi_mcp/categories/integration_builder.py",
-        "build_materialization_plan",
-    ): (
-        "the RAW `integration_spec` route's plan builder. That route carries no "
-        "`effect_declarations` field at all — only the typed AuthoringRequestV1 "
-        "does — so there is no context in existence to thread here. The typed "
-        "route never calls this function; it arrives with a compile-certified "
-        "stored plan."
+        "the LEGACY dialect adapter: amendment 3 §8 carries child context to "
+        "canonical roots, and a legacy document names no canonical child root "
+        "and declares no effects, so strict is the question, not an omission."
     ),
     (
         "src/boomi_mcp/categories/integration_builder.py",
         "validate_legacy_process_config",
     ): (
-        "the legacy dialect config bridge. It validates a raw legacy component "
-        "config, which has no typed declaration channel, so there is again no "
-        "context to pass rather than a context being withheld."
+        "the legacy dialect config bridge: amendment 3 §8 carries child context "
+        "to canonical roots, and a raw legacy component config has no canonical "
+        "child root and no declaration channel, so no context is withheld."
+    ),
+    (
+        "src/boomi_mcp/authoring/contract.py",
+        "validate_process_ir",
+    ): (
+        "the revision oracles that record what the lineage and identity rules "
+        "decide (#184 architect finding 9). Every strict call here validates a "
+        "graph this module fixes, against a symbol table it also fixes — "
+        "hand-built in each of these oracles except the component-identity "
+        "one, which projects a fixed component plan through the shared symbol "
+        "builder on purpose. Where a strict verdict runs, it IS the "
+        "measurement: the child-entry rows, which record BOTH verdicts for one "
+        "parent (with the caller context that oracle derived, and without it), "
+        "the forwarding chains, the survival-table cells, the retrieve "
+        "overlay, the lineage read placements, and the child-call state rows "
+        "for a root the oracle derived no context for. A trusted context "
+        "threaded in here would make the recorded revision follow the resolver "
+        "instead of the rules these oracles exist to pin; where an oracle "
+        "needs the context-aware verdict it builds its own capabilities and "
+        "passes them, in the same loop."
     ),
 }
 

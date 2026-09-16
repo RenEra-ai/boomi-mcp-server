@@ -898,8 +898,16 @@ def test_the_three_lattice_consumers_ask_three_different_questions():
     * `_visit`            — does this write ESTABLISH state downstream? async: no
     * `_written_anywhere` — did anyone write this key AT ALL?          async: yes
     * `_leg_write_index`  — WHERE is the write?                        async: yes
+
+    #184 amendment 1 rule 7 adds a derived child's guarantee, which only a call
+    that waits and aborts on error establishes. `_established_anywhere` and
+    `_leg_write_index` ask that path-independent half; the traversal asks the
+    whole predicate, which adds the path's proof that the child ran; and
+    `_written_anywhere` is asked only about document properties, which no
+    guarantee holds.
     """
     import inspect
+    import re
 
     from boomi_mcp.compiler.process_ir.semantic_validation import lineage
 
@@ -910,6 +918,12 @@ def test_the_three_lattice_consumers_ask_three_different_questions():
 
     # and the establishment question must consult the predicate
     assert "_establishes_downstream(" in inspect.getsource(lineage._established_anywhere)
+
+    # the derived guarantee: its path-independent half in both indexes that count it
+    for fn in (lineage._leg_write_index, lineage._established_anywhere):
+        assert "_awaited_guarantee(" in inspect.getsource(fn), fn.__name__
+    assert "_awaited_guarantee(" not in inspect.getsource(lineage._written_anywhere)
+    assert re.search(r"(?<![A-Za-z_])_child_guarantee\(", inspect.getsource(lineage._walk_lineage))
 
 
 def test_a_nonstrict_ddp_read_still_fails_on_a_cross_copy_async_write():
