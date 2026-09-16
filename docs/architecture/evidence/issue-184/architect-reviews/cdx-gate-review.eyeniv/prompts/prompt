@@ -1,0 +1,1264 @@
+# Architect implementation review, evaluation 2 — issue #184 (M12.24: ProcessIR native document-sequence composition and non-returning staged workflows, bridge A)
+
+You are the architect who wrote the plans of record inlined below: the base design plan, then amendments 1, 2 and 3. Amendment 3 governs wherever they differ. Review the IMPLEMENTATION on branch `codex/issue-184` at HEAD against those plans. This is a read-only review; you may not edit anything.
+
+## Scope
+
+- Your evaluation 1 ran over `80bdd30` and returned ISSUES FOUND with nine findings. Its review is archived at `docs/architecture/evidence/issue-184/architect-reviews/cdx-gate-review.j1rWJg/review.md`. The ledger records each finding as a row `ARCH-184-r1-01` … `ARCH-184-r1-09` in `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`, section "Finding rows", with its reconciliation, disposition and witnessing tests.
+- This evaluation judges the CORRECTION DELTA, `git diff 80bdd30bfead2f0534937295d7fe32e489b7cf86..HEAD`: correction batch 18 and its validation archives. Its changed files are listed at the end of this brief, excluding the archived evidence under `docs/architecture/evidence/issue-184/`. Do not re-review the whole implementation. `git diff 73b9d3ddc8e547eba09b857275050fb336c06b59..HEAD` is the whole implementation, if a claim needs context.
+- The repository's own gates already ran on this delta:
+  - the full non-KB suite passes: `13226 passed, 19 skipped` at `6ac8031e783b2a68a545368db5085a649b118175`;
+  - the repository's own gates ran on this delta and their findings are dispositioned in the ledger: Codex commit review round r18 over `61ec8e1..6ac8031` (three P2 findings, all corrected in batch 19), live QA round r19 at `6ac8031` (broad, one Medium, refuted by measurement), Codex commit review round r19 over `6ac8031..4c67685` (one P2, refuted as stated with the residual limit recorded), and live QA round r20 at `4c67685` (affected, one Medium). Each round is archived under `docs/architecture/evidence/issue-184/`, and each finding carries exactly one disposition with its evidence.
+
+## What to judge
+
+1. **Each evaluation-1 finding.** For `ARCH-184-r1-01` … `-09`, decide whether the correction realizes the plan requirement you named, with tests that witness it. Also decide whether its fix, or the invariant that replaced a hand list, reaches every sibling the plans require.
+2. **`ARCH-184-r1-01` was reconciled as PARTLY valid. Judge that scoped refutation explicitly.** Its confirmed half is corrected: a profile-valued source is now refused where its only profile claim is cache content that is not one proved identity. Its two literal forms stay admitted by design:
+   - (a) A profile-valued source after a Message. This is C7, kept, with its scope stated in the new row C7a. A Message may author a document of that profile. Amendment 2 §4 limits the entry refusal to the empty entry. Amendment 3 kept the completed proof. The set_ddp and set_dpp pages now serve such a source as not verified (the implementation plan's D2 disclosure).
+   - (b) An undeclared GET written into a cache that declares a profile. Base §4 designs this as an admitted event that makes the content UNKNOWN ("make differing/unknown writes UNKNOWN"; "present `None` means UNKNOWN"). The downstream typed consumer is refused.
+
+   If you still hold that the plans require refusing either literal form, quote the sentence that requires it. Otherwise accept the scoping.
+3. **The revised plan-correction rows.** `C5a`, `C7a`, `C13a`, `C14a`, `C20a` and `C21a` are appended after C25; the originals are retained unchanged. Accept or reject each.
+4. **Scope deliberately kept fail-closed.** Judge whether each item narrows a plan requirement:
+   - current-only N × M carry of cached document properties stays OPEN, and the caller's cached cohort never becomes a current-document overlay;
+   - rule 8 still refuses a per-document No Data child that requires a cache it may write, because the state lattice cannot express a possible removal. A child's per-document rewrite of a process property is admitted, because establishment only grows. The served text says establishment is checked, not the value one run reads from the previous one;
+   - a scheduled parent keeps rule 4's legacy empty-prefix placement after an interposed control (the #141 capture);
+   - undeclared-input calls and direct call-to-call stay unchecked (D2, D4);
+   - a guarantee from a called child needs `wait` and `abort_on_error`, and a path that provably runs the call.
+5. **Regressions against what evaluation 1 accepted.** Name anything in the correction delta that breaks a plan correction you accepted (C1–C4, C6, C8–C12, C15–C19, C22–C25) or either owner decision recorded in the ledger.
+
+## Constraints
+
+- Do NOT call Boomi MCP tools, GitHub tools or any network tool. A headless turn parks on an elicitation it cannot answer. Ground every claim in the source, tests, ledger and plans in this checkout.
+- You may run targeted tests to check a claim:
+  `PYTHONPATH=src BOOMI_LOCAL=true BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider <node ids>`.
+  Do not run the full suite. A probe that builds a mocked client must stub `boomi_mcp.categories.integration_builder.paginate_metadata`: the mocked pager otherwise never ends.
+- Report only concrete, verifiable findings. For each finding give:
+  - a priority label from `[P0]` (breaks the plan's core contract) to `[P3]` (minor);
+  - the file and line;
+  - the plan section it concerns (quote the requirement);
+  - the concrete input and the wrong behaviour or missing realization.
+
+  A correction you accept needs no finding. Do not report prose, comment or historical-count nits.
+
+## Output
+
+1. Start with one line `Reviewed files:` naming the files you actually read.
+2. List the findings, most severe first, or state that there are none.
+3. For each evaluation-1 finding `ARCH-184-r1-01` … `-09`, one short line: fixed, or not fixed with the finding it maps to. For ARCH-184-r1-01, also state whether you accept the scoped refutation.
+4. For each revised correction row `C5a`, `C7a`, `C13a`, `C14a`, `C20a` and `C21a`, one short line: accepted, or rejected with the finding it maps to.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
+
+## Changed files in the correction delta (excluding `docs/architecture/evidence/issue-184/`)
+
+- `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`
+- `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+- `src/boomi_mcp/authoring/contract.py`
+- `src/boomi_mcp/authoring/process_ir_effects.py`
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+- `src/boomi_mcp/authoring/workflow.py`
+- `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`
+- `src/boomi_mcp/categories/deployment/orchestration.py`
+- `src/boomi_mcp/categories/integration_builder.py`
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/context.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+- `src/boomi_mcp/errors.py`
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+- `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+- `tests/fixtures/process_ir/semantic_report_linear_flow.json`
+- `tests/fixtures/wave_gate/test_nodes.jsonl`
+- `tests/test_issue_180_compile_entry_context.py`
+- `tests/test_issue_184_child_entries.py`
+- `tests/test_issue_184_child_state_transfer.py`
+- `tests/test_issue_184_component_identity.py`
+- `tests/test_issue_184_document_emission.py`
+- `tests/test_issue_184_native_sequences.py`
+- `tests/test_issue_184_raw_route_context.py`
+- `tests/test_issue_184_revision_coverage.py`
+- `tests/test_issue_184_stream_profiles.py`
+- `tests/test_process_ir_effect_declarations.py`
+- `tests/test_process_ir_semantic_lineage.py`
+- `tests/test_wave_gate.py`
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+
+--- .codex/plans/issue-184.md (base design plan) ---
+# Issue #184 — native sequence composition
+
+## 1. Grounding, decisions, and blocking inconsistencies
+
+The checkout is clean on `codex/issue-184` at `cbab28ffc176ddb2378283cf7132eb9c37afc374`. This inspection used source reads only: no Boomi MCP calls, pytest runs, or mutations.
+
+The issue’s supplied compiler/model line anchors match this checkout. The problems below concern the stated contracts, not shifted line numbers.
+
+**One conflict blocks completion as written:** the universal property-profile proof required by A3 rejects an existing active canonical survivor required by A9.
+
+- [`source_dynamic_path_profile.json`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/process_ir/issue155/source_dynamic_path_profile.json:5) reads a profile in its first `set_ddp`, before any producer.
+- The existing stream walk starts empty at [`connector_resolution.py:596`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_resolution.py:596).
+- `golden-000072` actively renders that canonical fixture through compilation; it is not a legacy `source`/`target` exemption.
+- The new rule must reject `/body/steps/0/source_values/1/profile_ref`. Keeping the active golden requires a **trusted initial-document/profile authority for scheduled ProcessIR entry**, which does not exist.
+- Do not infer GET’s output profile backward, grandfather this writer, replace the fixture with a DPP source, repoint its renderer, or weaken the manifest. Record this conflict in slice 1 and keep A9/open completion blocked until that authority or an explicit acceptance-policy amendment exists.
+
+A8 itself does **not** require that missing primitive: use an existing run-supplied DPP for the source path and a profile source for the target path after the map.
+
+The following decisions are fixed for implementation:
+
+| Decision | Chosen contract and rationale |
+|---|---|
+| Cache-content lineage representation | Keep `(CACHE, cache_ref)` unchanged. Add an immutable execution-compartment profile-fact mapping keyed by that exact key. Missing key means no reaching writer; present `None` means UNKNOWN; otherwise store `(resolved component_id, normalized profile_type)`. |
+| Cache symbol representation | Add `ComponentSymbolV1.cache_profile_ref` only. Check the cache’s configured `profile_type` during resolution against the referenced profile symbol. Do not add a companion type field: [`contracts.py:180`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/contracts.py:180) explicitly makes the profile symbol’s component type authoritative. |
+| `external_writer` profile consumers | Refuse a map or other typed-profile consumer when its only upstream profile claim comes from an external writer. Preserve the existing verified-external-writer warning. That capability confirms an outside-writer assertion, not the contents written. |
+| `call → map → branch|decision` | Admit wherever the control terminal is already legal. Copy the mapped profile into each path and check each path’s typed consumers. Do not add joins, continuations, deeper nesting, or new terminal slots. Existing lowering already supports the wiring. |
+| Call-free linear root | Admit a root beginning with a derived all-document producer, presently `cache_get` or `document_cache_retrieve`, followed by legal linear steps and `stop` or `return_documents`. Emit scheduled `start_noaction` targeting the first read; emit no `connectoraction_source`. |
+| Residual prefix diagnostic | Introduce `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED`. Use it for unsupported prefixes and unknown child-input proof at the terminal pointer. Keep the return-path-binding code for a call with continuation/successor. |
+| Terminal-call prefix vocabulary | Use the existing linear vocabulary, constrained by document/profile facts. `message` and `data_process` may occur inside a prefix, but erase profile knowledge; a later proven cache read must restore it before a typed child handoff. Their direct handoff to a profile-requiring child remains refused. |
+| Compatibility boundary | Preserve the named unchecked-map exemption for the genuine legacy dialect. A canonical call-free body is never classified as legacy merely because it contains no `connector_call`. |
+
+Two additional textual inconsistencies must be recorded:
+
+1. A1 literally requires legacy consecutive maps to become validated or refused, while scope item 2/A9 explicitly preserve their unchecked status. Apply the narrower, explicit legacy exemption; do not count that row as a new typed-proof admission.
+2. Pure-legacy cache survivors carry UNKNOWN profiles through legacy sources/maps. A map-only exemption does not establish cache-write profile compatibility. Enumerate these cases separately; do not silently broaden the legacy exemption to all new cache/property checks.
+
+`[message, stop]` is a required **negative**, not an admitted root producer. Admitting it would require a from-nothing producer authority plus live cardinality evidence, contrary to the current served `per_document` semantics.
+
+## 2. A1 placement matrix and diagnostic contract
+
+### Actual unions and authorities
+
+Let `L` denote the existing ten linear kinds:
+
+`flow_control`, `message`, `map_ref`, `data_process`, `cache_put`, `document_cache_retrieve`, `cache_get`, `cache_remove`, `set_ddp`, `set_dpp`.
+
+| Context | Actual step union | Actual terminal union | Current source |
+|---|---|---|---|
+| Root | Broad `ProcessNodeV1`; admission controlled by sequence rules | Grammar-dependent | `models/process_ir.py:2881`, `:3228` |
+| Branch leg | `L + connector_call` | `target`, `cache_put`, `stop`, `process_call`, `decision` | `:1925`, `:2370` |
+| Decision TRUE | `L + connector_call` | `target`, `stop`, `exception`, `process_call`, `branch`, `decision` | `:2450` |
+| Decision FALSE | `L + connector_call` | `stop`, `exception`, `branch`, `decision` | `:2501` |
+| Try body | `L + connector_call`, nonempty; additional scope restrictions | `stop`, `return_documents`, `continue` | `:2605`, `:2701` |
+| Catch body | `L + connector_call + notify` | `stop`, `exception`, `cache_put`, `process_call` | `:2628`, `:2735` |
+| Listener root | Separate listener grammar | Existing target/call-before-Stop forms | `:3099` |
+
+**No requested admission requires widening these unions.** Preserve the union-derived matrix in `body_capabilities.BODY_SLOT_AUTHORITIES_V1:155`; do not introduce another hand-maintained slot allowlist.
+
+Both whole-document walkers remain involved:
+
+- Model: `_walk_controls`, `models/process_ir.py:4243`.
+- Compiler: `_walk_control`, `body_capabilities.py:461`.
+- Direct compilation retains #178’s mandatory parser revalidation.
+
+For the table below:
+
+- `S` = `PROCESS_IR_SCHEMA_INVALID_CARDINALITY`
+- `U` = `PROCESS_IR_CAPABILITY_UNSUPPORTED`
+- `P` = `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`
+- `C` = `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`
+- `N` = `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`
+- `R` = `PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED`
+
+| Form and negative neighbour | Result today at `cbab28ff` | Planned result |
+|---|---|---|
+| Root `[call,map,map,call,stop]`; neighbour: wrong second-map input | `S /body`, map adjacency, `process_ir.py:3416–3428` | Admit matching profiles; reject the second map at its `/map_ref`. |
+| Root `[call,map,stop]`; neighbour: wrong map input | `S /body`, same authority | Admit a checked map suffix; no downstream call obligation. |
+| Root `[call,set_ddp,stop]`; neighbour: writer names a different profile | `U /body`, end-on-call rule, `:3437–3451` | Admit; check each profile-valued writer source at that step. |
+| Root `[call,cache_put,cache_get,stop]`; neighbour: replace read with a call | `U /body` for lawful read form; sink/read adjacency separately enforced | Admit lawful read recovery; preserve sink-consumption refusal. |
+| Root `[cache_get,map,stop]`; neighbour: `[message,stop]` | Both `S /body`, source-endpoint rule, `:3471–3474` | Structurally admit only cache-read entry. A map still requires a proven reaching cache profile. |
+| Leg `[call,map,map] → cache_put`; neighbour: map A output differs from map B input | Parses; `P` at first map’s `/map_ref`, `connector_resolution.py:650–654` | Admit matching chain; reject the actual mismatching consumer. |
+| Leg `[call,map] → cache_put`; neighbour: cache declaration differs from map output | Parses; same first-map refusal | Admit transformation into the existing staging terminal; reject mismatching sink at `/terminal/cache_ref`. |
+| Leg `[call,map,call,map] → stop`; neighbour: final map mismatches last call output | Parses; pending-map refusal | Admit checked suffix; final map owns its mismatch. |
+| Root `[call,map,branch|decision]`; neighbour: successor after control | `S /body` at map adjacency | Admit existing control terminal; preserve control-continuation refusal. |
+| Leg `[call,map] → decision`; neighbour: nested Branch terminal | Parses, then `P` at map; nested Branch remains `N` at `/terminal` | Admit Decision with independent path checks; keep nested Branch forbidden. |
+| Leg `[cache_get,map,set_ddp] → process_call` | `R /body/steps/0/legs/1/terminal`, placement-prefix arm `:2276` | Admit only with reaching cache profile, current writer profile and inspected-child input proof. |
+| TRUE arm `[cache_get,…] → process_call` | `R` at that arm’s `/terminal` | Same bounded admission. |
+| Same prefix routed through an interposed Decision into an empty-prefix call | Emits today, with cache-map/child payload unchecked | Apply the same upstream and child-input proofs. A control node cannot erase the proof obligation. |
+| Root `[cache_get,map,process_call]` | `R /body/steps/0`, root singleton verdict `:2130` | Remains refused. Re-home prefix-only root placement remediation; keep exact singleton admission unchanged. |
+| Leg `[GET,map] → process_call` | `N /…/legs/0/steps/0`, mixing precedes prefix | Preserve exactly. |
+| Connector ancestor followed by a prefixed nested terminal call | Local prefix can currently pre-empt ancestry mixing | After prefix admission, ancestor mixing wins at the terminal pointer; preserve sibling independence. |
+| FALSE-arm or try-body terminal call | Union-slot refusal, `N /…/terminal` | Unchanged; do not widen the union to manufacture a prefix diagnostic. |
+| Catch `notify* → process_call` | Existing admitted recovery form | Preserve flags, ancestry exception and terminal emission. |
+| Catch non-notify prefix → call | `R /…/steps/<offender>`, `:2291–2305` | Still refused; re-home to placement code at `/…/terminal`, recording the pointer change required by A6. |
+| Cache-origin wrong map profile in leg 2 after leg 1 writes cache | Compiles unchecked; cache read clears producer binding, `connector_resolution.py:722` | `P` at the leg-2 map’s `/map_ref`. |
+| Map or cache sink on an absent stream | Compiles in the cited call-free bodies | `C` at the consuming map/cache reference. |
+| DDP read after cache retrieval | Ordinary read currently compiles | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` at the property reader; preserve specialized `/path_binding` refusal for bound paths. |
+| Pure-legacy `[source,map,map,target,stop]`, including wrong profiles | Compiles unchecked | Preserve the explicitly served legacy exemption; never call this verified profile compatibility. |
+
+Structural parity means raw parse versus direct-model compile at the grammar boundary. **Semantic parity means `parse_and_compile_process_ir_v1` versus direct-model compilation with identical symbols/capabilities.** `parse_process_ir_v1` has no symbol-table argument and cannot itself diagnose cache, map or child-profile compatibility.
+
+## 3. First commit: freeze the A8 legacy oracle
+
+Before the behavioral slice’s step-0 baseline, create the first commit containing only the legacy oracle, its provenance, registry registration and associated manifest/test additions.
+
+### Exact configuration
+
+Create `tests/fixtures/process_ir/issue184/legacy_both_sides_config.json`:
+
+```json
+{
+  "process_kind": "database_to_api_sync",
+  "source": {
+    "connector_type": "rest",
+    "action_type": "GET",
+    "connection_id": "RCONN",
+    "operation_id": "ROP",
+    "dynamic_path": {
+      "ddp_name": "DDP_PATH_SOURCE",
+      "request_profile_id": null,
+      "profile_type": null,
+      "segments": [
+        {"type": "static", "value": "/v1/customers/"},
+        {"type": "dpp", "property_name": "seed_id"}
+      ]
+    }
+  },
+  "transform": {
+    "mode": "map_ref",
+    "map_ref": "MAP-UUID"
+  },
+  "target": {
+    "connector_type": "rest",
+    "action_type": "PATCH",
+    "connection_id": "CONN-UUID",
+    "operation_id": "OP-UUID",
+    "dynamic_path": {
+      "ddp_name": "DDP_PATH_TARGET",
+      "request_profile_id": "PROFILE-REQUEST",
+      "profile_type": "profile.json",
+      "segments": [
+        {"type": "static", "value": "/v1/requests/"},
+        {
+          "type": "profile",
+          "element_id": 3,
+          "element_name": "requestId (Root/Object/requestId)"
+        }
+      ]
+    }
+  }
+}
+```
+
+Produce it using the bare existing legacy renderer:
+
+```python
+ProcessFlowBuilder.build(
+    config,
+    name="Dynamic Path Both Sides Golden",
+    folder_name="Golden/Fixtures",
+)
+```
+
+The producer is `categories/components/builders/process_flow_builder.py`, with source insertion at `:941–970` and target insertion at `:1128–1175`. Do not use the canonical compiler, a legacy adapter, or the public `database_to_api_sync` validator, whose source validation remains database-specific.
+
+Files in this preparatory commit:
+
+| File | Change |
+|---|---|
+| `tests/_wave_gate_golden_corpus.py` | Add a loader for the frozen config, `_case_dynamic_path_both_sides()`, and `dynamic_path:both_sides` using `process-component-v1`. |
+| `tests/fixtures/golden_xml/dynamic_path_both_sides.xml` | Freeze full component bytes from two identical legacy renders. Never regenerate from the new compiler. |
+| `tests/fixtures/process_ir/issue184/PROVENANCE.md` | Record producer SHA, config, builder invocation, registry identity, full/XML-shapes hashes and lengths, and two-render equality. |
+| `tests/fixtures/wave_gate/goldens.jsonl` | Append the next unused ID—currently `golden-000079`—with owner `#184`, disposition `transitional_oracle`, active state and the legacy renderer above. Preserve existing rows. |
+| `tests/fixtures/wave_gate/test_nodes.jsonl` | Append the corresponding collected golden-test node using the next unused test ID. |
+| `tests/test_process_flow_builder_dynamic_path.py` | Assert the exact legacy five-shape spine and both nonempty dynamic-property bindings. |
+
+Validate this preparatory change as a dark change under repository policy. Commit it before printing the behavioral step-0 baseline. That later literal SHA must contain the already-frozen oracle.
+
+The canonical A8 fixture is:
+
+```text
+set_ddp DDP_PATH_SOURCE:
+    static "/v1/customers/" + dpp seed_id(default_value="")
+connector_call ROP:
+    path_binding DDP_PATH_SOURCE
+map_ref MAP
+set_ddp DDP_PATH_TARGET:
+    static "/v1/requests/" + profile PROFILE-REQUEST element 3
+connector_call OP:
+    path_binding DDP_PATH_TARGET, request_profile_ref PROFILE-REQUEST
+stop
+```
+
+Use distinct `PROFILE-READ` and `PROFILE-REQUEST` identities: GET produces the former, the map transforms it into the latter, and PATCH consumes the latter.
+
+The source DPP is supported by `DppPropertySourceV1:1002–1013` and `lineage.py:898–912`; live execution supplies a nonempty `seed_id`. Compare **raw `<shapes>` byte slices**, not XML reserialization. A canonical expected artifact may wrap the frozen legacy shapes using the existing #155 convention, but cannot obtain expected shapes from canonical output.
+
+## 4. File-by-file implementation
+
+### Model, document semantics, and placement
+
+| File | Concrete change |
+|---|---|
+| New `src/boomi_mcp/models/process_ir_document_semantics.py` | Move the existing per-kind document-semantics tuples into an import-safe immutable authority. Derive the independent-producer set from `stream_replacing AND all_documents`. Derive the broader replacement set from `stream_replacing` alone. No compiler/projection imports. |
+| [`models/process_ir.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:3228) | Remove only ordinary connector-root map adjacency and end-on-call restrictions. Add the explicit cache-read-led call-free linear root case before the legacy source rule. Preserve listener grammar, sink/read adjacency, terminal sets, source position and control-continuation rules. |
+| Same file, `process_call_placement_verdict` | Add immutable admitted-prefix contexts for Branch leg and TRUE arm, keyed by canonical context names rather than human labels. Derive prefix vocabulary from existing linear kinds. Keep step-form and connector-mixing precedence. Correct #176 attribution and terminal-form docstrings. |
+| Same file, `_walk_controls` | Preserve ancestor connector detection through newly admitted prefixes and nested controls. A sibling’s connector does not count as ancestry. Keep recovery handling separate. |
+| [`body_capabilities.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/body_capabilities.py:411) | Render the shared verdict’s new placement code. Keep union-derived slot registration unchanged. Update `_walk_control` context propagation and retain `_walk_try_catch`’s existing recovery ancestry reset. |
+| Same model/compiler placement authorities | Preserve existing listener/error-context evidence bounds explicitly. Generalized stream checks must not accidentally admit previously refused map suffixes or new compositions inside those contexts. Pin the preserved refusals with baseline cases. |
+
+The shared semantics authority avoids importing the output-only projection into the compiler. The current `DOCUMENT_STREAM_REPLACING_KINDS` includes four kinds; it must not be replaced with the two-kind all-document-producer set.
+
+### Profiles, lineage, and their shared walk
+
+| File | Concrete change |
+|---|---|
+| [`compiler/process_ir/contracts.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/contracts.py:150) | Add optional `cache_profile_ref` to `ComponentSymbolV1`, including its existing reference validation. Keep profile type on the referenced profile symbol. |
+| [`connector_resolution.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_resolution.py:489) | Extend `_PathState` with current stream profile and whether native upstream work requires child-input proof. Preserve producer/cardinality and connector history. Resolve identities through `_profile_identity` only. |
+| Same file, `_walk_paths` | Replace pending-map adjacency as the general proof with incoming-stream checks and outgoing-profile transfer. A call output, map output, listener request or proven cache read establishes profile identity; `message`, `data_process` and legacy source establish UNKNOWN profile. |
+| Same file | Check every native map input, declared-input `documents_required` call, profile-valued `set_ddp`/`set_dpp` source and supported child boundary. Resolve required profiles even if no connector-call binding exists; remove the current zero-binding early exit for native semantic checks. |
+| Same file | Keep source/action, dynamic-path, retry, replay and existing non-producing-call diagnostic precedence. Retain a named legacy unchecked-map path rather than using `saw_call == false` as a blanket exemption. |
+| [`semantic_validation/lineage.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:798) | Make its existing ordered traversal the single controller for lineage and stream-profile transfer. `_walk_paths` supplies stream-transfer behavior to this controller; do not retain two independent DFS passes or a second cache tracker. |
+| Same file, `_State` | Add immutable cache profile facts tied to execution cache keys. Copy them with execution state, meet them at convergence, accumulate agreeing writes, and make differing/unknown writes UNKNOWN. Cache removal clears the content fact. |
+| Same file, node transfer | Check consumers against incoming state; capture the incoming profile at `cache_put` before consuming the stream; restore a read’s profile from reaching lineage. The cache’s declaration validates writes but never creates writer provenance. |
+| Same file, Branch/Decision/catch | Branch gives every leg the pre-Branch document/profile state while carrying execution cache facts in authored order. Decision retains only guaranteed facts. Catch starts from scope-entry stream/profile state and carries no protected-path pending obligation. |
+| Same file, DDP invalidation | Reuse `_discards_document_properties`, derived from `PROPERTY_SURVIVAL_V1`, to invalidate ordinary DDP lattice entries as well as existing `writers`/`on_documents`. Preserve writes established on the replacing node itself. |
+| Same file, classification | Retain per-path invalidation provenance so a stale same-path DDP read becomes `PROPERTY_READ_BEFORE_WRITE`, not the existing global-writer `DDP_SCOPE_INVALID`. Preserve sibling-only scope errors, defaults and bound-path specialization. |
+| Same traversal | Remove the safety mismatch between lineage’s depth-256 cutoff and the old unbounded iterative stream walk. Use an iterative continuation stack/linear traversal so a long sequence cannot skip late profile checks. A truncated child summary remains UNKNOWN. |
+| [`semantic_validation/pipeline.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/pipeline.py:105) | Run the combined analysis once. Feed its lineage findings and original compiler diagnostics into existing report ordering, reference-dependency suppression and specialized-code precedence. |
+| `semantic_validation/flow.py` | Consume the shared analysis instead of launching another semantic walk. Thread capabilities into connector/profile validation. |
+| [`compiler/process_ir/pipeline.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/pipeline.py:56) | Preserve #178 reparse. Carry capabilities through semantic validation and diagnostic recovery; preferably recover original diagnostics from the shared result instead of replaying a capability-free walk. |
+
+### Public profile resolution and inspected children
+
+The existing public symbol builder supplies listener profiles only. Filling just the new cache field would leave A2’s public map proofs unusable.
+
+| File | Concrete change |
+|---|---|
+| `authoring/connector_resolution_snapshot.py` | Extend selected-operation facts with request/response profiles. Preserve selected-artifact precedence and unreadable/unknown states. |
+| New `authoring/component_profile_facts.py` | Add a small pure projection of profile bindings from the already-selected component config/XML. Cover operations, maps and caches; perform no fetching. Resolve structured and selected XML facts through one helper, with declared-type consistency checks. |
+| [`recipes/materialization.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/recipes/materialization.py:164) | Populate operation/map input and output refs plus cache profile refs using those facts. DB Get uses `read_profile_id`; DB Send uses `write_profile_id`; REST/SOAP use request/response profile IDs; maps use source/target profile IDs; caches use `profile_id`. |
+| `authoring/workflow.py` | Obtain selected facts before process validation, and pass the same facts into validation, artifact compilation and materialization planning. Reused maps/caches must not borrow profiles from discarded request configuration. Unknown selected metadata causes a needed proof to fail closed. |
+| [`semantic_validation/contracts.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py:409) | Add typed subprocess input-contract rows and a derived child entry-stream contract. Store profile refs, not baked account IDs, so identity is resolved in the current symbol domain. Extend binding uniqueness and unbound-capability checks. |
+| [`authoring/process_ir_effects.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_ir_effects.py:763) | Add child-input derivation parallel to effect derivation, using inspectable authored child CFGs and resolved components. Collect the first document-consuming requirement on every entry path. Missing/undeclared, incompatible path requirements, bare references, inert or truncated analysis produce UNKNOWN. |
+| Same file/resolution orchestration | Run child-input derivation even when `effect_declarations` is absent; the current early return at `:924` must not suppress it. Keep effect summaries distinct from profile proofs. Seed an inspected child’s own validation with the same requirement imposed on its caller. |
+| `authoring/process_materialization.py` | Include the new capability fields in covered plan material. Resolve profile refs consistently after placeholder conversion. Preserve relocatability, canonical capability ordering and attestation hashing. |
+| `categories/integration_builder.py` | Carry the same derived profile facts and child capabilities through raw canonical preflight and dry emission. No additional mutation route, recipe migration, or alternative compiler. |
+
+For child calls, native work before an interposed Decision still triggers the proof. Empty-prefix legacy-admitted singleton/body calls remain admitted; an empty local prefix must not hide native processing on the ancestor path.
+
+A viable inspected-child fixture is a control-only root whose first consumers declare the same input profile. Its independently validated entry contract is supplied by the parent handoff; it does not require adding a call-free map-only root grammar.
+
+### Lowering, invariants, and diagnostics
+
+| File | Concrete change |
+|---|---|
+| [`lowering.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/lowering.py:716) | Record the cache-read root entry rule. Existing generic lowering already connects Start to the read. Preserve the first root-spine connector call’s entry role, even after a producer/property prefix; nested calls remain downstream-role calls. |
+| Same file | Reuse existing terminal-call lowering: last prefix node connects directly to the call. Add no Stop, returnpaths, continuation or new emitter. |
+| [`invariants.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/invariants.py:464) | Explicitly require zero connector entry roles/source-emitter items when no root connector call exists. Pin Start’s target. Preserve terminal-call no-outgoing rules and existing Branch/catch-only `cache_stage` placement. |
+| `compiler/process_ir/entry_policy.py` | No new entry form or scheduled/listener flag. Existing `classify_entry` and `ENTRY_FORMS` remain authoritative. |
+| `errors.py` | Register the new placement code and `ErrorCodeSpec`. Broaden profile/cardinality descriptions to cover the new native consumers accurately. |
+| `models/process_ir.py` diagnostic machinery | Register the new custom error, `_CUSTOM_ERROR_CODES`, `_MESSAGES`, `_REMEDIATION`, and parser diagnostic specification. This registration is necessary for #178’s parser-error provenance check. |
+| `compiler/process_ir/diagnostics.py` | Register static message/remediation and compiler diagnostic specification. Placement remediation points to supported terminal placements and inspected input requirements, not #176. |
+| `semantic_validation/findings.py`, `flow.py`, `pipeline.py` | Ensure new placement findings retain capability phase, authored pointer, static remediation and report forwarding. Keep existing specific reference/profile precedence. |
+
+New semantic pointer policy:
+
+- Map mismatch/absence: node path + `/map_ref`.
+- Typed call mismatch: node path + `/operation_ref`.
+- Cache write mismatch/absence: node path + `/cache_ref`, including terminal sinks.
+- Property profile mismatch: node path + `/source_values/<index>/profile_ref`.
+- Unknown inspected-child requirement: terminal node path, placement code.
+- Known child requirement with incompatible payload: terminal path + `/process_ref`, profile code.
+- Unsupported prefix: terminal node path; root prefix keeps its existing root-node pointer.
+- Existing connector-mixing and bound-path pointers remain unchanged.
+
+### Served projection and revision coverage
+
+| File | Concrete change |
+|---|---|
+| [`authoring/process_ir_projection.py`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_ir_projection.py:284) | Import document semantics from the shared leaf. Update sequence, maps, profile-valued writers, cache writes/reads, terminal-call prefix and child-proof prose. Publish `cache_get` empty behavior as `stopprocess`. |
+| Same file | Keep placement rows derived from actual unions. Add conditional prefix/sequence rules without claiming extra slots. Update `_REVIEWED_PLACEMENT_PROSE` and diagnostic associations. Publish the named legacy exemption and external-writer limitation. |
+| `semantic_validation/lineage.py:144` | Update authoritative `state_visibility.ddp` and cache visibility text for general DDP loss and cache profile meet semantics. |
+| `authoring/contract.py` | Include the new document/sequence/profile/child authorities in revision material. Add behavioral perturbation tests so changing an admission or proof changes the revision; prose-only movement is insufficient evidence. |
+| `recipes/registry.py` | Include any new profile-resolution module in the recipe-layer source-digest inventory. Existing materialization/workflow changes already affect this digest. |
+| `models/process_ir_authoring.py` | Change only if the served conditional-rule representation requires it; do not expose internal capability objects or invent a new authoring field. |
+| `tests/fixtures/process_ir/process_ir_v1.schema.json` | Regenerate through `canonical_process_ir_schema_json()` if model descriptions/schema bytes change. Preserve union vocabulary. |
+
+## 5. Tests, fixtures, provenance, and DDP sweep
+
+Create focused `tests/test_issue_184_native_sequences.py`, `tests/test_issue_184_cutover.py`, and `tests/test_issue_184_contract.py`. Put complete authored fixtures and provenance under `tests/fixtures/process_ir/issue184/`.
+
+Each positive fixture records its baseline refusal or former unchecked behavior, negative neighbour, component/profile authority and expected pointer. Do not derive expected outcomes from the implementation’s new tables.
+
+| Criterion | Test files and required coverage | Expected-value provenance |
+|---|---|---|
+| **A1** | `test_process_ir_models.py`, `test_process_ir_rich_control_bodies.py`, new native-sequence tests. Literal placement matrix; union↔body-registry bidirectional pin; context/slot/kind/ancestor parity. | Baseline unions, issue probes and frozen baseline characterization. |
+| **A2** | New native-sequence tests; `test_process_materialization_plan.py`; existing public authoring action tests. Separate complete public plan→compile→materialize dry-runs for every listed form, both prefix contexts and combined example. | Existing public request/schema fixtures, builder field authorities, independent component profiles and captured wiring. |
+| **A3** | `test_process_ir_semantic_flow.py`, `test_process_ir_semantic_lineage.py`, `test_process_ir_effect_declarations.py`. First/between/final map mismatch; typed call; cache declaration; wrong property profile; child boundaries; aliases, unresolved refs, UNKNOWN facts and disagreeing writers. | Distinct fixture profile identities and independently authored map/operation/cache bindings. |
+| **A4** | New sequence tests and semantic-flow tests. Absent map/cache stream; consuming call/sink; read recovery; zero/one/many outcomes; message/data-process negatives. | Frozen document-semantics tuples and live input/output cardinality captures. Bidirectional producer-set equality plus nonempty negative witnesses. |
+| **A5** | `test_process_ir_semantic_lineage.py`, existing cache-lineage tests. Ordered/reversed legs, missing writer, same-path DDP loss, sibling isolation, postread rebinding, defaults and bound-path preservation. | Existing `cap155-r17-ddp-survival` table witness and independent wire observations. |
+| **A6** | `test_process_ir_notify_recovery.py`, rich-body tests, compiler invariants and new sequence tests. No outgoing call edge/returnpaths/Stop; appended successor; residual prefix code/pointer; unknown child; interposed-Decision bypass. | Existing terminal-call/recovery captures plus new direct-predecessor captures. |
+| **A7** | Existing connector, dynamic-path, error-handling, listener and capability-enforcement suites. Preserve mixing precedence, unknown action, source role, retry/replay and idempotency checks. | Existing registries and pre-baseline captures/goldens. |
+| **A8** | `test_issue_184_cutover.py`, dynamic-path builder tests and registered legacy/canonical golden cases. Exact raw shapes, two bindings, distinct map input/output, target writer after map, hoisted negative, public route and live composite. | First-commit legacy oracle only; actual live request paths/payloads. |
+| **A9** | Entrypoint parity, compiler/emitter tests, all active golden rows. Include a 257+ node sequence with a final mismatching consumer. | Existing survivor bytes; parser authority; immutable manifest. `golden-000072` remains an explicit completion blocker. |
+| **A10** | Contract parity/clean-room/served-text tests, `test_recipe_registry.py`, `test_issue_149_legacy_reachability_freeze.py`, `test_issue_151_reachability_freeze.py`, wave tests. | Final-tree producer APIs, independently reviewed literal contract expectations and revision perturbation witnesses. |
+
+Specific existing tests requiring adjustment:
+
+- `test_process_ir_models.py:707–719`: replace blanket prefix refusal.
+- `:824–868`: move newly admitted root forms out of parser-refusal expectations.
+- `test_process_ir_rich_control_bodies.py:1015–1054`: replace blanket pending-map refusal with positive chains and actual profile negatives.
+- `test_process_ir_entrypoint_diagnostic_parity.py:845–850`: update the prefixed descendant-call case to ancestor mixing while retaining its original baseline characterization.
+- Its non-vacuity witness at `:695–724` must remain a real parser/compiler differential when the structural guard is removed.
+- Extend `_process_ir_entrypoint_differential.py` with an explicit two-compile-route semantic helper. Its existing `mode="full"` compares parse-only with compilation and is unsuitable for asserting semantic equality.
+- Update `_process_ir_diagnostic_emissions.py` and applicable capability witnesses so every newly served diagnostic has an actual emission witness.
+- Preserve union-registry tripwires because the unions do not widen.
+
+### Same-slice DDP sweep
+
+The concrete existing fixture sweep includes:
+
+| Existing surface | Disposition |
+|---|---|
+| `tests/fixtures/process_ir/process_ir_v1.json`, `linear_flow/body/steps/9` | Reads DDP `P` after cache reads at steps 6/7, but has `default_value="d"`; remains valid under the existing default rule. |
+| `tests/fixtures/process_ir/process_ir_compiler_v1.json` | Preserve its corresponding fixture behavior; do not remove the default to manufacture a regression. |
+| `tests/fixtures/process_ir/emitter_parity/linear_flow.process.xml` | Preserve bytes. |
+| `tests/fixtures/process_ir/flow_sequence_compat_cases.json` | `full_vocabulary_linear` reads the DDP before its caches; `set_properties_ddp_dpp` is separate. Record inspected/unaffected. |
+| `test_process_ir_semantic_lineage.py:1511`, `:1532` | Preserve existing same-node-write and stale-current/bound-path controls; add ordinary-read counterparts. |
+| `composed_db_to_api_cache_fanout.xml`, `flow_sequence_cache_put_get.xml`, `flow_sequence_cache_load_retrieve_remove.xml`, `document_cache_retrieve.xml` | Preserve frozen bytes and identify their exact legacy-policy route. Do not repair a new proof failure by changing expected XML. |
+
+Derive the final sweep from every non-surviving `PROPERTY_SURVIVAL_V1` cell, including split, combine, scripting and mixed-operation cases—not just the two cache reads. Include a mutant witness that disables lattice invalidation and makes the ordinary post-cache read pass incorrectly.
+
+## 6. Scoped live QA and admission evidence
+
+This is future execution work in an interactive-capable session. No Boomi tool is required or permitted for this planning session.
+
+Provision disposable fixtures on the renera account:
+
+- A REST connection and registered GET/PATCH operations with blank bound paths where required.
+- Distinct JSON profiles for raw customer, normalized customer, handoff and request payloads.
+- Real maps for each adjacent transformation.
+- A JSON-profiled document cache with builder-valid index/key configuration.
+- An inspectable in-spec non-returning child whose entry-path input requirements agree.
+- A controlled endpoint that records GET/PATCH paths, order, document counts and payloads.
+- A verified execution-scoped cache seeding arrangement for the separate call-free root fixture. Do not assume cross-execution cache persistence.
+
+Run one scoped QA pass covering these independently:
+
+| Scenario | Required evidence |
+|---|---|
+| `call → map → stop` | Root suffix admission, mapped payload and emitted terminal wiring. |
+| `call → map → cache_put` | A2(ii) specifically; map output matches cache profile. |
+| `call → map → map → cache_put` in a leg | Both transformations occur, in order, before staging. |
+| Root `call → set_ddp → stop` and read-recovery suffix | Root suffix grammar and actual writer/read behavior. |
+| Call-free root `cache_get → … → stop` | Scheduled Start targets read, no connector source role, real seeded cached documents. An external-writer-only map remains a negative. |
+| Earlier-leg put; later-leg `cache_get → map → stop` | Correct cached-profile propagation and actual ordered payloads. |
+| Branch-leg `cache_get → map → set_ddp → process_call` | Direct terminal handoff to inspected child; no return binding or outgoing edge. |
+| Decision TRUE-arm equivalent | Separate capture for the TRUE-arm placement. |
+| `call → map → branch|decision` | Each existing legal control context receives the mapped stream; a mismatching first consumer on either path refuses. |
+| Combined two-leg example | Leg 1 completes staging before leg 2 reads; no graph join or inherited leg-1 DDP; request path is rebound after retrieval. |
+| Zero/one/many variants | Actual payload counts and execution outcomes. Empty cache follows `stopprocess`; no synthetic success document. |
+| `EVAL-155-02` composite | Supply nonempty `seed_id`; assert real GET path, mapped request, post-map target path, PATCH payload and one green composite execution. |
+| Negatives | Reversed legs, wrong cache/map/child profile, stale ordinary DDP, unknown child and same-path connector mixing all refuse before mutation. |
+
+Capture every newly admitted direct predecessor of a terminal call in both admitted contexts: map, property writers, cache reads, cache removal and flow control, with a valid reaching stream/profile.
+
+For `message` and `data_process`, capture their **interior-prefix** compositions with a later profile-restoring read. Their direct typed-child handoff remains UNKNOWN/refused. `cache_put` must be followed immediately by a read; it is never admitted directly before the call.
+
+Captures must come from UI-authored or independently built components proven executable. A readback of compiler-created XML alone is not provenance. If a proposed prefix or cache-seeding arrangement cannot be measured, retain the refusal and leave its acceptance row open.
+
+## 7. Final-tree artifacts, ordering, and completion
+
+### Rebaseline through the owning producers
+
+After all behavioral source changes:
+
+1. Obtain before/after revisions from `authoring.contract.get_authoring_revisions()` and recipe revision/source-digest material from `production_registry().snapshot()`. Record literal values in the audit ledger; do not hand-set revision strings.
+2. Regenerate the served contract snapshots using their own APIs:
+   - `process_ir_authoring_revision_payload()`
+   - `process_ir_authoring_contract_v1_json_schema()`
+   
+   Serialize exactly with `json.dumps(..., sort_keys=True, separators=(",", ":"), ensure_ascii=True)`, without an added newline, into:
+   - `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+   - `tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json`
+
+   There is no existing CLI writer for these two snapshots.
+3. Run the existing inventory tool:
+
+   ```text
+   PYTHONPATH=src .venv/bin/python scripts/rebaseline_m12_12_inventory.py
+   PYTHONPATH=src .venv/bin/python scripts/rebaseline_m12_12_inventory.py --check
+   ```
+
+   It owns:
+   - `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+   - Generated section-11 tables in `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+
+   It refreshes the capability catalog’s actual revision binding, the `AuthoringRequestV1`, `AuthoringPlanResultV1`, and `AuthoringCompileResultV1` schema bindings, and the aggregate walked-schema digest. Do not manually patch hashes or generated tables.
+
+4. Append genuinely new golden/test manifest rows from the registry and actual collection. Never regenerate immutable existing rows or hard-code historical counts.
+
+### Execution order
+
+1. Freeze and validate the legacy oracle in the first commit.
+2. Print the subsequent literal step-0 SHA.
+3. Instantiate `docs/architecture/ISSUE_184_AUDIT_LEDGER.md` with the placement matrix, decisions, inherited `EVAL-155-02`/`02a` rows, conflicts and gate roster. Create its evidence archive skeleton before its first committed validation boundary.
+4. Resolve the A3/A9 survivor conflict before beginning behavioral mutations that cannot obtain the mandatory full-suite validation. Under the unchanged issue, this is a slice-1 blocker.
+5. Implement profile resolution, typed capabilities and shared semantic authorities together; then grammar admission, lowering invariants, diagnostics and served text. Avoid an intermediate exposed grammar that compiles unchecked.
+6. Run focused unit/adversarial/public-route checks and the full non-KB suite using Python 3.11 with `PYTHONPATH=src`.
+7. Run the single scoped live QA pass. Every correction receives affected QA.
+8. Rebaseline final-tree artifacts, validate again, commit the QA-validated tree, then run the required detached Codex review against the literal step-0 SHA. Later reviews cover the complete unreviewed correction delta only.
+9. Complete architect/additive gates and the composite wave gate, including `tests/test_wave_gate.py`, every active golden, isolated deterministic rendering and plan fingerprints. Use `scripts/wave_gate.py wave --base <literal policy baseline> --require-plan-fingerprint`.
+10. Archive genuine collector attestations and confirmed teardown evidence. Preserve the ledger’s frozen path, append-only rows, complete run names and token-scanner conventions.
+
+The architect review ends after its third evaluation under the tracked amendment; this does not waive correction validation or final-tree wave currency. Critical findings remain undeferrable. A2, A3 and A8 cannot be erased by standard-residue deferral.
+
+### Handoff on actual A8 discharge
+
+- Update #159 to name #184 A8 as the spelling prerequisite, retain caller census/migration ownership, and require transfers against `EVAL-155-02`/`02a`.
+- Update #160 inherited item 1 to verify #184’s frozen-oracle/live-composite evidence and #159’s caller transfers separately; explicitly exclude hoisted-writer parity.
+- Add #176’s terminal-prefix transfer note without changing its returning-call scope.
+- Hand fixtures and obligation mappings to #185, #159 and #160.
+- Leave the closed #155 ledger byte-frozen; record the expressibility discharge in #184 only.
+
+The implementation uses existing dependencies, nodes, connector actions and emitters. The principal risks are shared-walk ordering, selected-versus-requested profile identity, child-entry proof propagation, legacy survivor conflicts and unsupported live prefix/cardinality assumptions. None should be resolved by broadening trust or changing oracle bytes.
+
+--- .codex/plans/issue-184-amendment-1.md ---
+# Issue #184 amendment: explicit passthrough entry and form-correct child contracts
+
+## 1. Decisions and evidence boundary
+
+This amendment overrides the two existing plans where specified below. The inspected checkout remains clean on `codex/issue-184` at `cbab28ffc176ddb2378283cf7132eb9c37afc374`. No files were changed, pytest was not run, and no Boomi MCP tools were called.
+
+**Declare Data Passthrough with a root-only node:**
+
+```json
+{"kind": "passthrough", "label": "Receive prepared requests"}
+```
+
+It appears exactly once, at `/body/steps/0`, and is fused into the synthesized Start. It authors neither a profile assertion nor process options.
+
+| Authored entry | Derived form | Start emitter | Execution profile |
+|---|---|---|---|
+| No explicit entry node | `scheduled` | `start_noaction` | `scheduled` |
+| First node `listener` | `listener` | `start_listen` | `listener` |
+| First node `passthrough` | `passthrough` | `start_passthrough` | `passthrough` |
+
+This follows the existing [entry-policy authority](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/entry_policy.py:73). An envelope field would introduce another authority beside the authored entry. Deriving entry from callers would make a shared root’s Start depend on its parents. Neither is acceptable.
+
+Amend #184’s “creates no scheduled/listener flag” sentence to:
+
+> Entry remains derived from the authored root through the existing entry-policy authority. This issue adds a root-only Data Passthrough entry node and creates no independently authored scheduling, listener, or subprocess-mode flag.
+
+The physical form never changes because a root has several parents or is scheduled independently. A scheduled passthrough process receives the documented No Data fallback; its **invocation context**, not its emitted Start, changes. [Official Start documentation](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/r-atm-Start_shape_7561792f-f0b8-41f5-b06d-06e2bde5b0e5)
+
+**Use these exact passthrough process-option bytes:**
+
+```xml
+<process allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" updateRunDates="false" workload="general">
+```
+
+These six attributes and `<passthroughaction/>` occur in the committed [UI-authored capture](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/live_xml/m11/process_doccacheretrieve_loadalldoc_variant.xml:1); its independent provenance is recorded in [#175’s evidence](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-175/stage1-qa-round-4.md:61). Preserve the existing scheduled and listener option strings byte-for-byte.
+
+The official documentation establishes entry behavior, not these XML attributes. The companion recommends `allowSimultaneous=false` and `updateRunDates=false`; its additional `stopProcessingIfZeroDocuments=true` is **not** present in the historical passthrough captures. Do not add it by extrapolation. Fresh live confirmation of the chosen bytes and zero-document behavior remains a pre-admission requirement.
+
+## 2. Replacement for D2: documents, requirements, and state
+
+Keep document availability separate from profile knowledge, but replace undifferentiated `ENTRY` with:
+
+- `EMPTY_ENTRY`: the single empty triggering document supplied by No Data.
+- `CALLER_ENTRY`: a passthrough root’s symbolic incoming documents, subject to caller obligations.
+- `ABSENT`, `KNOWN(identity, origin)`, and `UNKNOWN(reason)`.
+
+`EMPTY_ENTRY` is not `ABSENT`: it can trigger a Process Call once. It is also not a proven payload stream for a map or cache write. Consequently, D2’s old equivalence between `ENTRY` and “no producer” must be replaced with a consistency check that includes entry mode.
+
+### Child contract
+
+Derive one server-owned contract per inspectable child, containing:
+
+- Physical entry form.
+- Document requirement `R = NONE | KNOWN(profile_ref) | UNKNOWN`.
+- Required DDP/DPP/cache state, including cache-content profile requirements.
+- Required dynamic-path writer provenance.
+- Conservative shared-state transfer information.
+- Separate called-context and standalone-context validation results.
+
+Derive requirements from all paths while they still consume the incoming stream. A map, typed connector consumer, cache write, or profile source contributes its resolved profile requirement. An independent producer ends that path’s dependence on incoming documents. Opaque or undeclared consumption cannot become `NONE`. Profile disagreements are conflicts; unresolved identities remain failures.
+
+This derivation must run even without `effect_declarations`. It must not manufacture state effects for an opaque map or script.
+
+| Rule | Data Passthrough child | No Data child |
+|---|---|---|
+| Documents received | Parent documents reaching the call, as one group | One new empty document per invocation; no parent payload |
+| Invocation count | One invocation for the arriving group | One invocation per arriving parent document |
+| Reporting | Child appears within parent reporting; no separate child execution record | Separate execution record and log per invocation |
+| Parent profile obligation | `KNOWN(p)` must satisfy `R=KNOWN(p)`; `R=NONE` requires no profile equality; UNKNOWN requirements refuse new prefix admission | Caller-document `R` must be `NONE`; parent profile cannot satisfy a requirement on the child’s empty entry |
+| Parent `EMPTY_ENTRY` | Cannot satisfy a typed payload requirement; may satisfy a document-independent child contract | Supplies one invocation trigger |
+| Parent `ABSENT` | No implicit invocation or synthetic document | Same |
+| DDP entering child | Reaching properties travel with passed documents; bound paths additionally require writer provenance | Parent DDP and writer provenance do not enter |
+| DPP | Execution-scoped preconditions, checked independently of document profile | Same |
+| Shared cache | Caller’s reaching cache facts enter the child’s execution context | Same; cache is the payload channel when the child reads it explicitly |
+| `wait` | Must be `true` | Existing synchronous/asynchronous choices remain |
+| `abort_on_error` | Preserve authored setting; recovery requires `true` | Same |
+
+The group/per-document behavior, reporting distinction, and passthrough’s mandatory wait are stated in the [official Process Call documentation](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/r-atm-Process_Call_shape_cc0f1835-4d30-499f-8fd2-95d3c0997c85). Zero-document outcomes still require the specified live measurements.
+
+Official documentation also describes [parent-set DDPs used by children receiving those documents](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Dynamic_Document_Property_Examples_64f74c98-7490-4b78-b0a4-266db66a5f5d), and [process properties shared with children and observable after child completion](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Process_Property_components_0b0a1f0f-d712-4087-a163-35dcdc214e7a). Those facts support the rules; the new compiler compositions still need live QA. The companion’s waiting-child DPP sentence is actually in `references/steps/process_call_step.md:104`, not `process_component.md`.
+
+**Apply these additional proof rules:**
+
+1. **Each caller discharges the child contract independently.** Never combine facts from different parents to make one invocation appear valid. A child’s conditional compilation is not evidence that every caller supplies its preconditions.
+2. **Standalone analysis starts separately.** A passthrough artifact may compile under its called contract, but a requested schedule or direct test must also pass analysis with `EMPTY_ENTRY` and no inherited DDP/cache state. Actual run-supplied DPPs may be considered where the existing execution interface supplies them.
+3. **An interposed Decision does not reset obligations.** Preserve the root-to-leaf native-work marker and incoming state.
+4. **Legacy empty-prefix placement remains available, without becoming verified hand-off evidence.** Newly authored passthrough entry and known incompatible child forms cannot use this compatibility path to bypass their contracts.
+5. **Dynamic-path DDP transfer needs more than a key.** The current [binding check](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:711) requires a reaching writer and validates its composition. Carry server-derived writer facts—resolved profile references, dynamic-segment validity, unmet-read status, and document freshness—across a proven passthrough boundary. Do not seed an arbitrary “established” key and waive that check.
+6. **Cache visibility and cache type are separate facts.** Preserve `(CACHE, cache_ref)` establishment and D5’s possible-content union. Carry typed cache requirements across the child boundary; a declaration or `external_writer` assertion does not supply content provenance. The shared cache remains limited to the current execution. [Official cache documentation](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Document_Cache_components_ac6d81cd-140c-4fff-9887-793c98e7aa50)
+7. **Child state changes need conservative transfer.** Track possible writes/removals separately from guaranteed writes. A waited, successfully completed child may establish execution-state guarantees. An asynchronous call or a call allowed to continue after child failure must not establish normal-exit guarantees. Neither form establishes new DDPs on the parent’s original sibling document copies.
+8. **Repeated No Data invocations must remain valid.** If a child requires shared state and can mutate it, analyze possible subsequent invocations using the same finite state/profile lattice until stable. A later invocation whose required cache may have been removed or changed is refused as a verified composition. Do not apply a one-invocation summary N times without checking its preconditions.
+
+For #156 recovery, keep the notify-only prefix, connector-ancestry exception, `wait=true`, `abort_on_error=true`, and terminal wiring. A passthrough recovery child receives caught documents; a No Data recovery child is triggered per caught document and must produce/read its own payload. The archived [No Data child XML](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-156/captures/oracle-graphs/child_ok_emitted.xml:1) and [execution records](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-156/captures/runtime/child_subprocess_execution_records.json:1) remain valid evidence for the latter, not for caught-payload transfer.
+
+## 3. File-by-file implementation amendment
+
+Paths below are relative to `src/boomi_mcp/` unless otherwise stated. Existing #184 sequence/profile work remains required; these rows identify its concrete amended form.
+
+### Entry, lowering, and emission
+
+| File | Required change |
+|---|---|
+| `models/process_ir.py` | Add `PassthroughEntryNodeV1(kind, label)` to the broad root-node union and schema/export machinery. Keep nested body unions unchanged. Introduce a shared explicit-entry placement verdict: one entry, first root step, no listener/passthrough mixture or legacy `source` inside a passthrough root. Check it before grammar early returns. |
+| `models/process_ir.py` | Add a dedicated passthrough-root grammar. Permit initial native maps and document-consuming connector calls under the conditional entry proof, legal linear suffixes, and existing terminal Branch/Decision forms. Do not route this through the scheduled cache-producer grammar. Preserve error-context exclusions. Treat `[passthrough, process_call]` as a logical singleton; `[passthrough, prefix…, process_call]` remains a refused root prefix. |
+| `compiler/process_ir/body_capabilities.py` | Render the same entry and terminal-placement verdicts for direct-model compilation. Preserve union-derived slot rows, ancestry/mixing precedence, and recovery handling. The entry directive is neither connector mixing nor an A6 linear prefix. |
+| `compiler/process_ir/contracts.py` | Add `PassthroughSemanticV1` and `StartPassthroughInputV1` to their closed discriminators. No operation, connection, profile assertion, or authored geometry. Retain the planned `ComponentSymbolV1.cache_profile_ref` addition. |
+| `compiler/process_ir/entry_policy.py` | Add the third `ENTRY_FORMS` member. Generalize strict derivation to one explicit listener or passthrough CFG entry with one sequential successor. Passthrough absorbs its entry node; scheduled absorbs none. Construct passthrough Start input without symbol lookup. |
+| `compiler/process_ir/execution_profile.py` | Export `PASSTHROUGH`; continue delegating classification to entry policy. |
+| `compiler/process_ir/lowering.py` | Lower the new semantic node. Suppress connector entry roles for both fused-entry forms: every connector inside a passthrough root is downstream-role. Reuse descriptor-driven Start synthesis, absorption, and targeting. Preserve ordinary scheduled-root source-role rules. |
+| `compiler/process_ir/invariants.py` | Generalize explicit-entry CFG checks and zero connector-entry-role checks. Independently rederive Start kind, input, label, absorbed node, target, synthetic ownership, geometry, and sole wire. Keep terminal Process Call and `cache_stage` invariants. |
+| `categories/components/builders/process_emitters/rendering.py` | Add `render_start_passthrough`, using existing Start shape/dragpoint conventions and escaped label, with `<configuration><passthroughaction/></configuration>`. |
+| `compiler/process_ir/emitter_registry.py` | Register `start_passthrough`, shapetype `start`, `EXACT_ONE`, with no symbol requirements. No new legacy builder route. |
+| `categories/components/process_component_materializer.py` | Add the exact six-attribute passthrough options above and map the third execution profile to them. Retain unknown-profile refusal. |
+
+### Child proof, public resolution, and lineage
+
+| File | Required change |
+|---|---|
+| `compiler/process_ir/connector_resolution.py` | Extend the planned stream state with entry mode and trigger/data availability. Replace general pending-map adjacency with the planned propagation rules while retaining explicit listener/error restrictions. Check form-specific child requirements and passthrough `wait`. Walk binding-free native documents for A4. Use the existing resolved profile-identity helper. |
+| `compiler/process_ir/semantic_validation/contracts.py` | Add typed child-entry/input-contract rows and entry-context fields to `ProcessIRValidationCapabilitiesV1`. Include document/profile requirements, execution-state requirements, inherited writer facts, and conservative cache transfer data. Bind by process reference with canonical identity/uniqueness checks. Keep these server-derived, not public authoring assertions. |
+| `authoring/process_ir_effects.py` | Derive child input contracts independently of the current declarations-only early return. Process inspectable dependencies in dependency order; preserve UNKNOWN for unavailable/opaque children. Filter existing `established_at_entry` seeding by form. Replace cross-parent seeding with conditional child obligations checked at every call. Include `cache_remove` in mutation/replay analysis. |
+| `compiler/process_ir/semantic_validation/lineage.py` | Keep D12’s single iterative controller. Carry entry mode, document profile, cache-content facts, and DDP writer provenance through it. Preserve ordered Branch execution and original sibling documents. Implement child entry/exit transfer and repeated-invocation checks through this controller. |
+| Same file | Keep D5’s possible-content union alongside existing must-establishment facts. Cache removal clears content; possible removal invalidates guarantees. Preserve the planned general DDP invalidation and record same-path invalidation provenance so A5 reports read-before-write rather than sibling-scope error. |
+| `compiler/process_ir/semantic_validation/effects.py` | Apply existing asynchronous-ordering checks to the added possible cache mutations and profile facts. Do not grant downstream guarantees merely because a child declares writes. |
+| `compiler/process_ir/semantic_validation/flow.py` | Consume the combined analysis and form-specific diagnostics; no second recursive stream/cache walk. |
+| `compiler/process_ir/semantic_validation/pipeline.py` | Run the combined analysis once and preserve diagnostic ordering, reference suppression, specialized bound-path errors, and authored pointers. |
+| `compiler/process_ir/pipeline.py` | Preserve mandatory parser revalidation and pass identical trusted context through normal validation and diagnostic recovery. |
+| `recipes/materialization.py` | Populate operation/map input/output profiles and cache profile references from configurations that will actually be materialized. Keep Claude’s bounded approach: reused or unreadable selected metadata stays UNKNOWN unless the existing selected snapshot provides trustworthy facts. Never borrow profiles from discarded request config. |
+| `authoring/workflow.py` | Resolve profile facts and derive child contracts before per-root validation. Supply the same facts to validation, dry emission, compilation, and materialization planning. Record conditional entry requirements separately from standalone validity. |
+| `categories/integration_builder.py` | Carry the same facts/context through canonical preflight, dry-run, and build recording. Preserve the existing mutation route and root identity. |
+
+No new general profile-resolution module or document-semantics module is needed. Keep the model’s pinned producer set and a bidirectional test against served semantics, as Claude proposed. The new passthrough entry is not an independent cache-like producer.
+
+### Materialization, apply, and deployment
+
+| File | Required change |
+|---|---|
+| `authoring/process_materialization.py` | Extend `execution_profile` to the three-value literal. Include new child/entry capabilities and conditional invocation-contract material in fingerprinted, relocatable plan data. Profile references and writer facts must survive placeholder-to-real-ID conversion. |
+| `categories/components/canonical_process_apply.py` | Preserve recompile/rederive/compare before emission. Recompile with the same trusted child context; reject a forged execution profile or invocation contract even when the outer fingerprint has been recomputed. |
+| `authoring/process_entry.py` | Stop collapsing every non-listener canonical root to scheduled at the current `canonical_root_entry` return. Preserve the actual compiler-derived form; passthrough has no operation reference. Keep `is_listener` as exact equality. |
+| `categories/deployment/orchestration.py` | Passthrough gets no listener endpoint, API Service routing, or listener probe. Before any SDK mutation, reject a requested standalone test/schedule whose recorded conditional requirements cannot be discharged by empty-entry analysis. Package-only deployment remains available. No automatic child execution or scheduling. |
+
+Preserve orchestration’s current ambiguity refusal for builds containing several authored roots. It has no explicit root selector today. For the combined live fixtures, use the existing package/deploy operations targeting the identified parent component ID.
+
+If `orchestrate_deploy` itself must select the parent from a multi-root build, the missing primitive is an **explicit deployment process-key selector**. Do not infer the parent by excluding passthrough roots: No Data children make that incorrect. Adding this selector is not necessary for A2’s required plan→compile→materialize route.
+
+### Diagnostics and served contract
+
+| File | Required change |
+|---|---|
+| `errors.py` | Add the already-planned `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED`. Add `PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` for an incompatible requested invocation context or passthrough `wait=false`. Register both with static specifications. |
+| `models/process_ir.py` | Register parser-visible placement errors and update served node descriptions. Add `passthrough_entry` capability. Correct recovery prose that currently implies every child receives caught payloads. |
+| `compiler/process_ir/diagnostics.py` | Add matching static messages/remediation. Keep profile mismatch at `/…/process_ref`, unknown child contract at `/…/terminal`, and unsupported passthrough wait at `/…/wait`. |
+| `compiler/process_ir/semantic_validation/findings.py` | Register and forward the new invocation-context finding without losing phase or pointer. |
+| `authoring/process_ir_projection.py` | Publish `node.passthrough`, its root-only placement, entry-form choice, conditional called contract, standalone fallback, and two child-form semantic rows. Change generic Process Call grouping from unconditional `per_document` to `unspecified`, with form-specific rules linked from it. |
+| Same file | Update property/cache visibility, prefix requirements, wait/abort behavior, reporting, bound-path provenance, and No Data remediation. Keep placement rows derived from actual unions. Add new diagnostics to related rows. |
+| `authoring/contract.py` | Extend the execution-profile behavior oracle’s explicit two-profile list. Cover entry classification, option selection, child transfer, invocation-context checks, and prefix admission in revision material. Derive both revisions; do not manually bump strings. |
+| `recipes/registry.py` | Preserve its source-digest boundary. Existing workflow/materialization edits already move the recipe layer; do not add downstream compiler modules merely to change a hash. |
+
+Diagnostic policy:
+
+| Condition | Result |
+|---|---|
+| Nested passthrough | Existing node-not-allowed diagnostic at that node |
+| Duplicate/misplaced explicit entry | Schema cardinality diagnostic at the offending authored entry |
+| Listener/passthrough mixture | Shared explicit-entry refusal; identical parser/direct behavior |
+| Unsupported A6 context/predecessor or UNKNOWN child contract | Placement code at `/…/terminal` |
+| Known child profile mismatch, including a No Data child requiring parent payload | Profile mismatch at `/…/process_ref` |
+| Passthrough `wait=false` | Entry-context code at `/…/wait` |
+| Missing inherited dynamic-path writer proof | Existing specialized `/path_binding` diagnostic |
+| Standalone invocation with unmet called requirements | Entry-context refusal before deployment/execution mutation |
+
+For catch non-notify prefixes, use `/…/terminal`, as A6 explicitly requires. This supersedes Claude’s proposed preservation of `/steps/<offender>`; the offending prefix remains identifiable in the static explanation.
+
+## 4. Corrected examples and validation
+
+### Passthrough: prepared documents cross the call
+
+```text
+Parent: scheduled Start → Branch
+
+Leg 1:
+  GET → NormalizeCustomer → BuildHandoff → terminal cache_put C
+
+Leg 2:
+  cache_get C → BuildRequest → set_ddp request_path
+  → terminal process_call(PassthroughConsumer,
+                          wait=true, abort_on_error=true)
+
+PassthroughConsumer:
+  passthrough
+  → connector_call PATCH(request profile=Request,
+                         path_binding=request_path)
+  → stop
+```
+
+The parent proves cache/profile compatibility, writes the path after retrieval and mapping, and supplies both Request documents and validated DDP writer provenance. The child’s first connector is downstream-role. There is no call successor, Return Documents binding, or synthetic Stop after the parent’s call.
+
+### No Data: shared cache crosses the boundary
+
+```text
+Parent: scheduled Start → Branch
+
+Leg 1:
+  GET → NormalizeCustomer → BuildHandoff → terminal cache_put C
+
+Leg 2:
+  set_dpp(static invocation_marker)
+  → terminal process_call(NoDataConsumer,
+                          wait=true, abort_on_error=true)
+
+NoDataConsumer:
+  cache_get C → BuildRequest → set_ddp request_path
+  → connector_call PATCH(request profile=Request,
+                         path_binding=request_path)
+  → stop
+```
+
+Leg 2 operates on the Branch’s original single empty document, so it triggers one child. The child retrieves the staged group and prepares its own paths. Its document requirement is `NONE`; its typed cache requirement must be discharged by leg 1.
+
+Also retain a separate cardinality fixture calling a self-producing No Data child after N parent documents. It must produce N child executions, each beginning with an empty document.
+
+Do not describe the original N-document prefix followed by a bulk-cache-reading No Data child as equivalent: it can process N cached documents N times. Preserving per-document correlation with that spelling requires **keyed cache retrieval plus a correlation channel**, neither supplied by the current all-document cache primitive.
+
+### Acceptance amendments
+
+| Criterion | Required amendment |
+|---|---|
+| A2 | Add complete public fixtures for both child forms in Branch-leg and TRUE-arm prefix contexts. Run both corrected two-leg examples. Keep all existing sequence/suffix fixtures. |
+| A3 | Prove passthrough entry profile and DDP writer requirements; refuse No Data payload requirements; prove shared-cache requirements separately. Add multiple-parent, grandchild, alias, UNKNOWN, and standalone-context cases. |
+| A5 | Add parent→child cache visibility and child-side path rebinding. Preserve sibling DDP isolation and the exact stale-read classification. |
+| A6 | Evidence keys become `(context, direct_predecessor, child_entry_form)`. Preserve terminal integrity and connector mixing. Capture the document-hand-off and invocation-trigger cases separately. |
+| A9 | Keep existing survivor bytes. Record the unresolved golden-000072/A3 conflict below; do not silently convert it to passthrough or claim it is proved. |
+| A10 | Publish both entry choices, invocation differences, conditional requirements, diagnostics, and final derived revisions. |
+
+**Test and fixture files:**
+
+| File | Additions |
+|---|---|
+| New `tests/test_issue_184_child_entries.py` | Root grammar; three-way entry classification; caller versus empty entry; first map/connector; form-sensitive R; multiple parents; standalone checks; both examples; flags and diagnostics. |
+| `tests/test_issue_184_native_sequences.py` | Extend A2/A3/A6 matrices by child form; Decision-interposition checks; No Data trigger prefixes; repeated-invocation cache mutation negatives; existing A4 absent-stream probes. |
+| `tests/test_issue_184_cutover.py` | Retain A8 raw-shapes parity and hoisted/no-map negative witnesses unchanged. |
+| `tests/test_issue_184_contract.py` | Discoverability, form-specific grouping/reporting, static remediation, and revision perturbation witnesses. |
+| `tests/test_process_execution_profile.py` | Replace exact-two-profile expectation with three; real passthrough CFG witness and unrelated-listener-symbol decoys. |
+| `tests/test_issue_158_entry_invariants.py` | Extend existing entry adversaries to passthrough and all six wrong-form substitutions; duplicate absorption, wrong target/input/label/ownership/geometry, and connector-role mutants. |
+| `tests/test_process_emitter_registry.py`, `tests/test_process_emitter_parity.py` | Closed discriminator/registry coverage and independent passthrough Start byte comparisons. |
+| `tests/test_process_materialization_plan.py`, `tests/test_process_component_materializer.py` | Third-profile recording/options, relocation, deterministic fingerprints, and cross-root isolation. |
+| `tests/test_issue_158_listener_compile.py` | Extend its forged-profile-before-emitter tripwire pattern to passthrough plans and invocation context. |
+| `tests/test_process_ir_semantic_lineage.py` | DDP transfer versus loss, inherited writer provenance, shared cache profiles, removal, failed/async effects, and repeated No Data invocation checks. |
+| `tests/test_process_ir_effect_declarations.py` | Derivation without declarations, conditional child requirements, cache mutation summaries, opaque children, and no parent-document DDP promotion. |
+| `tests/test_process_ir_notify_recovery.py` | Preserve archived No Data behavior; add passthrough caught-payload behavior with unchanged notify/flag/terminal restrictions. |
+| `tests/test_issue_158_listener_deployment.py` | Third-form recognition, no listener publication/probe, package-only operation, and pre-SDK standalone refusal. |
+| `tests/test_process_ir_entrypoint_diagnostic_parity.py`, `tests/_process_ir_entrypoint_differential.py`, `tests/_process_ir_diagnostic_emissions.py` | Structural parity, both-compile-route semantic parity, emission witnesses, and retained non-vacuity tests. |
+
+Preserve the earlier plans’ remaining affected model/rich-body tests and survivor sweeps. The supplied scratch measurements—`12298 passed, 19 skipped` for both DDP invalidation and A4—are baseline evidence, not final-tree validation. Retain their witnesses and correct the DDP diagnostic classification.
+
+**Freeze fixtures and evidence under:**
+
+- `tests/fixtures/process_ir/issue184/`: both complete examples, negative neighbours, and provenance.
+- `docs/architecture/evidence/issue-184/captures/`: XML, manifests, hashes, runtime/counterparty observations, and execution-record correlations.
+- `tests/_wave_gate_golden_corpus.py` and the two wave manifests: append registrations; never rewrite existing rows.
+- Existing ProcessIR schema, authoring-contract snapshots, and M12 inventory artifacts: regenerate through their owning producers.
+
+**Live evidence owed before passthrough admission:**
+
+1. UI-authored or independently proven-operable passthrough Start/options matching the chosen bytes.
+2. Tagged parent documents received as one group; exact payloads/counts at the counterparty, parent log, and child-record query.
+3. No Data zero/one/many inputs, empty child entry payloads, and separate records per invocation.
+4. Distinct DDP values associated with the correct passed documents; inherited bound-path use; No Data absence; cache-read invalidation.
+5. DPP parent→child and waited child→later-parent observations for both forms.
+6. Shared cache visibility, profile-consistent contents, mutation visibility, and no carryover into an independent execution.
+7. Passthrough standalone No Data fallback, measured independently of called execution.
+8. Both recovery forms, successful handling and child failure.
+9. Every admitted direct predecessor in each admitted context and child form.
+10. All original A2 forms, both complete examples, and the unchanged A8 live composite.
+
+A save/readback alone is not execution evidence. Missing captures keep their admission rows and acceptance criteria open; removing a required row is not discharge.
+
+## 5. Reconciliation, ordering, and unresolved requirements
+
+### Claude D1–D12
+
+| Decision | Disposition |
+|---|---|
+| D1 | **Superseded in its claimed refutation.** Preserve historical scheduled-entry artifact compatibility separately; an empty document does not prove a profile requirement. Golden-000073’s genuine legacy exemption remains distinct. |
+| D2 | **Replaced** by the form-aware rules above. Keep resolved profile identities, stream replacement, legacy-path tracking, and ancestor-sensitive obligations. |
+| D3 | **Resolved and superseded.** No Data does not receive parent payloads. The owner has authorized the third entry form; no further decision on whether to support it is needed. |
+| D4 | **Kept** for ordinary connector-to-connector non-validating profile metadata. It does not exempt a newly derived child-entry requirement. |
+| D5 | **Kept and extended:** possible-content union, separate must-establishment, child transfer/removal, and repeated-invocation checks. |
+| D6 | **Kept:** external-writer-only content does not prove a typed profile. |
+| D7 | **Kept:** mapped streams may enter existing legal Branch/Decision terminals. |
+| D8 | **Kept for scheduled roots.** Passthrough has its own conditional-input grammar; it is not another from-nothing producer. |
+| D9 | **Mostly kept.** Add invocation-context diagnostics; correct catch residual-prefix pointer to `/terminal` to satisfy A6. |
+| D10 | **Kept and extended** with child form in the evidence key. Required but unmeasured rows remain open. |
+| D11 | **Kept.** Listener/error compositions remain bounded; only add mutual exclusion with the new explicit entry. |
+| D12 | **Kept.** One iterative controller, no silent depth truncation; withdraw unreachable truncation vocabulary. Repeated invocation analysis uses the finite state lattice, not recursive depth limits. |
+
+Against the architect design plan:
+
+- Supersede “no new entry form,” generic parent-to-child payload proof, cache-profile meet representation, and any caller-independent entry seeding.
+- Replace the proposed new semantics/profile-facts modules with Claude’s smaller pinned-authority and bounded materialization projection approach.
+- Keep the complete A1 matrix, A8 configuration/oracle method, canonical spelling, raw-shapes comparison, named legacy exemption, A4 producer boundary, DDP invalidation/classification, terminal integrity, diagnostic parity, final-tree gates, and original issue-transfer lineage.
+- Extend lowering, materialization, apply, deployment recognition, state summaries, revision coverage, tests, and QA as listed above.
+- Keep C0’s separate dark validation and C1 registration of the canonical A8 golden.
+- Keep cross-issue edits as prepared description changes for the owner; no cross-issue writes belong to this read-only planning session.
+
+### Commit sequence
+
+1. **C0 — A8 oracle first.** Freeze the supplied legacy artifact, configuration, provenance, registry/manifest additions, and dark checks. Record the supplied length `4471` and SHA-256 `633a197f3b67a0773a828acb378451d64183ca63a8c5ef60ddb095bbc053aede`, verifying them against the actual frozen artifact during implementation.
+2. **C0b — Independent entry evidence.** Archive the passthrough Start/options authority and live pre-admission measurements. Validate this evidence-only commit under the dark-change policy.
+3. Print and retain the literal behavioral baseline SHA. Open `docs/architecture/ISSUE_184_AUDIT_LEDGER.md` with this amendment, the A1 matrix, supplied scratch measurements, acceptance blockers, and gate roster.
+4. **C1 — Coordinated implementation.** Land profile resolution, entry form, child contracts, lineage, grammar, emission/apply, served contract, fixtures, and final-tree rebaselines together. Do not expose new admission before its proof path exists.
+5. Complete the required full non-KB Python 3.11 checks, scoped public-boundary QA, QA-validated commit, detached review, architect gate, and composite wave gate. Corrections receive affected QA and complete delta review under repository policy.
+6. Hand off the fixtures and #155 obligation mapping to #185/#159/#160; prepare the #176 terminal-prefix transfer note. Preserve the closed #155 ledger.
+
+### Requirements that remain blocked as written
+
+**A3 versus golden-000072 is not resolved by this amendment.** Its [first writer](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/process_ir/issue155/source_dynamic_path_profile.json:5) reads a profile before GET under No Data entry. Keeping that artifact accepted and byte-identical is compatibility, not universal profile proof.
+
+The missing authority is a **trusted initial-document/profile contract for that execution context**. A runtime producer or guard would change its bytes; a passthrough conversion would also change its bytes. Therefore, unchanged A9 plus universal A3 cannot both be declared complete without an explicit acceptance-policy amendment. Record the conflict and leave the criterion open; do not grandfather it as “verified.”
+
+The other necessary primitives are included in C1: conditional invocation context, inherited DDP writer provenance, typed shared-cache preconditions, and mutation-aware child transfer. If any cannot be implemented or validated, name that primitive and leave its acceptance row open.
+
+The default remains minimal scope: no new dependencies, legacy adapters, returning-call bindings, connector/process-call mixing, keyed caches, scheduling feature, or inferred deployment-parent selection.
+
+--- .codex/plans/issue-184-amendment-2.md ---
+# Amendment 2 — evidence corrections and safe survivor replacement
+
+Delta only. HEAD and amendment-1 hash match; the tree remains clean. No pytest, mutations, or Boomi MCP calls were made.
+
+1. **`models/process_ir.py`, `compiler/process_ir/connector_resolution.py`, `authoring/process_ir_projection.py`, diagnostic specifications — clarify the wait restriction.**
+
+   **Decision: (c), retain refusal, distinguish documentation from admission evidence.** The fetched Process Call page contradicts the supplied measurement: under procedure step 4, it says the passthrough checkbox “cannot be turned off.” Grouping and reporting are also documented. [Official Process Call page](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/r-atm-Process_Call_shape_cc0f1835-4d30-499f-8fd2-95d3c0997c85)
+
+   Served text: **“Passthrough calls require `wait=true`; each newly admitted invocation combination also requires archived runtime evidence.”** Retain `PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` at `/…/wait` for `false`, with remediation to select `true`. Selecting `true` alone does not establish admission.
+
+   Extend D10’s admission records with the exercised wait setting; name the pending capture `cap184-passthrough-wait-true`. This follows the existing refusal of [unattested prefixes](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/models/process_ir.py:2276).
+
+2. **`semantic_validation/contracts.py`, `authoring/process_ir_effects.py`, `semantic_validation/lineage.py` — gate rule 5’s DDP transfer explicitly.**
+
+   The fetched DDP page also contradicts the supplied absence claim: **“Abstract profiles” explicitly describes parents setting properties before passing documents to children.** Nevertheless, the proposed canonical transfer remains **live-unmeasured**, especially its bound-path provenance. [Official DDP examples](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Dynamic_Document_Property_Examples_64f74c98-7490-4b78-b0a4-266db66a5f5d)
+
+   Until attested, import **neither parent DDP establishment nor writer facts** into the child. Ordinary unsatisfied reads retain lineage errors; inherited bound paths produce `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED` at the child connector’s `/path_binding`.
+
+   After admission, transfer only server-derived, per-invocation writer facts and retain composition/profile/freshness checks. An established key alone remains insufficient: [existing binding authority](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:729).
+
+3. **`authoring/process_ir_projection.py`, `tests/fixtures/process_ir/issue184/`, capture `MANIFEST.json` — replace every dependent DDP claim.**
+
+   Change the child-form DDP row to **“inheritance supported only for attested transfer combinations; otherwise establish properties inside the child.”** A3/A5 must separately test unmeasured-transfer refusal, child-local rebinding, and subsequently admitted inheritance.
+
+   Correct the outstanding-capture example to:
+
+   ```text
+   Parent leg 2:
+     cache_get C → BuildRequest → process_call(PassthroughConsumer, wait=true)
+
+   PassthroughConsumer:
+     passthrough
+     → set_ddp request_path = static("/v1/requests/")
+                              + profile($ref:Request, element_id="3")
+     → PATCH(path_binding={
+         property_name:"request_path",
+         request_profile_ref:"$ref:Request"
+       })
+     → stop
+   ```
+
+   Live item 4 becomes named capture **`cap184-passthrough-ddp-handoff`**: independently authored/proven-operable fixtures; distinguishable documents and DDP values; child-entry observations; exact inherited request URLs and payloads; No Data absence and cache-replacement controls. Record XML hashes, flags, execution correlations and observations. Bind supported transfer rows bidirectionally to successful captures; pending rows remain unsupported. **Child-local rebinding does not discharge inherited-transfer acceptance.**
+
+4. **`compiler/process_ir/connector_resolution.py`, combined lineage controller — resolve A3.**
+
+   Refuse profile-valued property sources on `EMPTY_ENTRY`; only `CALLER_ENTRY` can derive a caller-dischargeable profile requirement. For golden-000072, emit `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`, phase `semantic_lowering`, at **`/body/steps/0/source_values/1/profile_ref`**. Evidence: the [entry-position read](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/process_ir/issue155/source_dynamic_path_profile.json:13), existing [profile diagnostic helper](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/connector_resolution.py:553), and documented empty No Data entry.
+
+5. **Golden XML, `tests/_wave_gate_golden_corpus.py`, both wave manifests — retire and replace golden-000072.**
+
+   Change only its state to `tombstone`; preserve immutable row fields. Remove `issue155_source_dynamic_path_profile.xml` and its registry case. Keep the input JSON as a refusal witness. Append a fresh #184 survivor and its pytest-node row.
+
+   **Keep golden-000072’s existing pytest node active:** it now checks retirement. Floor arithmetic is `previous minimum_active + appended − retired`; the replacement alone is net zero. These are the designed [manifest transition](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/scripts/wave_gate.py:859) and [tombstone assertions](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/test_wave_gate_goldens.py:71).
+
+   Choose **`issue184/source_dynamic_path_dpp.json`**, retaining scheduled source-role behavior:
+
+   ```text
+   set_ddp DDP_PATH_CLIENTS =
+     static("/admin/cdscm/api/v1/clients/") + dpp key
+   → GET(path_binding={property_name:"DDP_PATH_CLIENTS"})
+   → PATCH → stop
+   ```
+
+   Supply nonempty `key` through the existing execution context. Freeze expected shapes from **`cap155-e1-source-dynamic-path`**, with recorded wrapper/ID substitutions and hashes—not compiler regeneration. Its [execution input](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-155/captures/cap155-e1-source-dynamic-path/execute.json:7) and [counterparty log](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-155/captures/cap155-e1-source-dynamic-path/mock_access_log.txt:1) establish the DPP-driven request.
+
+6. **`tests/fixtures/process_ir/issue155/PROVENANCE.md`, #184 ledger, affected #184 tests — withdraw the A3/A9 conflict.**
+
+   Record golden-000072 as unsafe and therefore outside A9’s **valid-survivor** protection. This follows the existing [unsafe-oracle refusal/safe-equivalent precedent](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/process_ir/issue155/PROVENANCE.md:74); no acceptance-policy amendment is needed.
+
+   Golden-000071 remains byte-identical as a **legacy transitional oracle**, not proof of valid entry payload. Correct provenance’s implication that the DPP capture attests its profile-valued source.
+
+   Add both-compile-route EMPTY_ENTRY/CALLER_ENTRY negatives and admission-table/capture checks. Any hoisted A8 profile writer on EMPTY_ENTRY must now be asserted refused, replacing Claude’s “compiles” expectation. Preserve valid legacy exemptions.
+
+   Prepared **#160 handoff**: intentional refusal is not missing coverage; map source-role coverage to the replacement and its capture. Retain separate A8/#159 transfer obligations and leave the closed #155 ledger untouched.
+
+7. **Amendment evidence notes / `issue184/PROVENANCE.md` — remaining citation audit.**
+
+   | Citation | Correction or evidence boundary |
+   |---|---|
+   | [Start](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/r-atm-Start_shape_7561792f-f0b8-41f5-b06d-06e2bde5b0e5) | Empty No Data entry and **scheduled** passthrough fallback are documented. Generalizing fallback to direct tests is unmeasured; retain separate live admission. |
+   | [Process Property components](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Process_Property_components_0b0a1f0f-d712-4087-a163-35dcdc214e7a) | Explicitly covers both property types and both transfer directions. Retain independent-execution and parallel-thread caveats; new compositions still require item 5. |
+   | [Document Cache](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Document_Cache_components_ac6d81cd-140c-4fff-9887-793c98e7aa50) | Parent/child sharing, execution lifetime and replacement of current document properties are documented. Typed transfer and repeated-invocation summaries are compiler rules requiring the planned live checks. |
+   | Companion options / #175 capture | Six attributes are byte authority only. [#175 records missing dependencies and graph defects](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/architecture/evidence/issue-175/stage1-qa-round-4.md:86). Companion seven-attribute/zero-document claims cannot establish runtime behavior; fresh operable capture remains owed. |
+   | Companion waiting-child DPP sentence | Correct location is [`process_call_step.md:104`](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/docs/companion/boomi-integration/references/steps/process_call_step.md:104). It supplements the official property page; it is not live evidence. |
+   | #156 archived recovery | Proves the recorded No Data/self-producing recovery cases, not empty payload contents, arbitrary cardinalities or passthrough transfer. Those measurements remain open. |
+
+--- .codex/plans/issue-184-amendment-3.md (plan of record; governs where they differ) ---
+# Amendment 3 — runtime document emission, retrieve-property overlay, and attested child hand-off
+
+Delta to the plans of record at `702b883`. This amendment overrides their contradicted cache-continuation, DDP-invalidation, child-transfer and Exception-binding decisions. Preserve the completed profile proof, iterative controller, passthrough entry, native suffix work, and A8 oracle work except where amended below. The ledger records the applicable precedence and corrections; golden-000080 and golden-000081 already occupy their replacement and A8 roles. (`docs/architecture/ISSUE_184_AUDIT_LEDGER.md:14`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:152`; `tests/fixtures/wave_gate/goldens.jsonl:81`.)
+
+This was a read-only inspection of the plans, reports, source and branch diffs. No files were edited, pytest was not run, and no Boomi MCP tool was called.
+
+1. **New `src/boomi_mcp/models/process_ir_document_semantics.py` — establish the shared document-emission authority.**
+
+   Restore the import-safe leaf module proposed by the original design and withdrawn by amendment 1. Its addition is now required by the structural correction: three ledger findings share the same runtime-authority defect. No dependency is added. (`.codex/plans/issue-184.md:204`; `.codex/plans/issue-184-amendment-1.md:132`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:167`.)
+
+   Use an immutable descriptor table and pure transition helpers. Separate:
+
+   - Whether a step requires an arriving document to execute.
+   - Whether it forwards, replaces, conditionally produces, or always consumes documents.
+   - Its permitted outgoing graph structure.
+   - Authored-kind, semantic-kind and emitter-kind aliases.
+   - Evidence status and capture references.
+
+   These are separate dimensions: an emitter’s outgoing-edge cardinality is not a runtime document count.
+
+   The corrected cache rows are:
+
+   | Runtime step / authored spelling | Execution trigger | Document result | Graph continuation |
+   |---|---|---|---|
+   | Add to Cache / `cache_put` | An arriving document stream | Stores incoming documents; emits zero documents | Terminal; zero outgoing edges |
+   | Remove from Cache, `removeAllDocuments=true` / `cache_remove` | An arriving document stream, including an empty Start document | Clears the cache; emits zero documents | Terminal; zero outgoing edges |
+   | Retrieve all / `cache_get`, `document_cache_retrieve` | At least one arriving document, including the scheduled Start’s empty document | Replaces payload with retrieved documents; an empty cache produces no successor documents | One configured successor, executed only when documents are emitted |
+
+   The load result is measured with both empty and primed caches, including the skipped catch Exception. Remove followed by retrieve is independently refuted. Neither read spelling is an unconditional producer from an exhausted stream. (`agents/reports/2026-09-13-issue-184-evidence-e1.md:45`; `agents/reports/2026-09-13-issue-184-evidence-e1.md:81`; `src/boomi_mcp/models/process_ir.py:3811`.)
+
+   Cover the entire discovered canonical semantic-kind vocabulary. Connector output remains resolved from the existing connector capability authority; controls retain their established routing behavior. Represent operation-dependent and OPEN cases explicitly. Do not describe every existing operation as newly measured.
+
+   Add a capture index under `docs/architecture/evidence/issue-184/` that binds each admitted/refuted cache rule to its capture, run, submitted/stored artifact hashes and deciding observations. Check both directions: every supported rule has evidence, and every indexed deciding case maps to the intended rule. The two read aliases must demonstrably lower to the same physical step. Archive integrity continues through the existing MANIFESTs and `SHA256SUMS`; historical captures remain unchanged. (`docs/architecture/ISSUE_184_AUDIT_LEDGER.md:198`.)
+
+2. **`src/boomi_mcp/models/process_ir.py`, `compiler/process_ir/body_capabilities.py` — replace cache adjacency with terminality.**
+
+   Delete the write-then-read rule and trailing-cache exceptions. Replace them with one verdict derived from the emission authority:
+
+   > A cache action that always emits zero documents cannot have an authored successor, including a cache read, Stop, Exception, connector, property operation, control or Process Call.
+
+   This replaces `_check_cache_put_followed_by_read`, `TRAILING_CACHE_PUT_TERMINALS` and `_check_trailing_cache_put`; their current premises explicitly authorize the dead edges. (`src/boomi_mcp/models/process_ir.py:1988`; `src/boomi_mcp/models/process_ir.py:2010`; `src/boomi_mcp/models/process_ir.py:2035`.)
+
+   Apply the shared verdict to every existing cache-rule location:
+
+   - Branch legs; both Decision arms.
+   - Try and catch bodies, including serialized handler regions.
+   - Listener connector and endpoint forms.
+   - Passthrough roots.
+   - Ordinary connector roots, D8 call-free roots and legacy roots.
+
+   These locations currently call or reproduce the contradicted rules. (`src/boomi_mcp/models/process_ir.py:2567`; `src/boomi_mcp/models/process_ir.py:2648`; `src/boomi_mcp/models/process_ir.py:2892`; `src/boomi_mcp/models/process_ir.py:3239`; `src/boomi_mcp/models/process_ir.py:3360`; `src/boomi_mcp/models/process_ir.py:3503`; `src/boomi_mcp/models/process_ir.py:3793`; `src/boomi_mcp/models/process_ir.py:3828`; `src/boomi_mcp/models/process_ir.py:3895`.)
+
+   Keep `cache_put` as a terminal in its existing Branch-leg and catch-body slots. Add `CacheRemoveNodeV1` **only to `BranchLegV1.terminal`**, preserving usable all-document removal through a terminal action. Do not add root, Decision or catch terminal-remove forms. Existing `source → Branch` roots already support the safe replacement structures below. (`src/boomi_mcp/models/process_ir.py:2555`; `src/boomi_mcp/models/process_ir.py:3874`.)
+
+   Retain D8’s read-led call-free root and its existing terminal restrictions. Derive its read-entry membership from the new authority. Its read is triggered by the synthesized scheduled Start; it does not resurrect documents after a sink. `[message, stop]` remains outside this root grammar. (`src/boomi_mcp/models/process_ir.py:3811`; `.codex/plans/issue-184.claude.md:107`.)
+
+   Use existing `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` for an authored cache successor, at the consuming cache node’s `/cache_ref`. Use the same shared verdict and offending-path construction for parsed JSON and reparsed exported/mutated models. Preserve existing malformed-input, slot and connector-mixing precedence; apply the cache-continuation verdict before claiming prefix admission. No new cache-specific diagnostic code is necessary. The existing custom-error machinery supports authored offending paths. (`src/boomi_mcp/models/process_ir.py:738`; `src/boomi_mcp/models/process_ir.py:4456`.)
+
+3. **`compiler/process_ir/connector_resolution.py`, `semantic_validation/lineage.py` — distinguish a trigger from usable payload.**
+
+   Replace `_STREAM_PRODUCING_KINDS` and `_MAY_FOLLOW_NON_PRODUCER` with authority-derived queries. Their present comments and behavior incorrectly treat cache retrieval as supplying documents regardless of upstream state. (`src/boomi_mcp/compiler/process_ir/connector_resolution.py:457`; `src/boomi_mcp/compiler/process_ir/connector_resolution.py:758`.)
+
+   Track runtime trigger availability separately from stream profile:
+
+   - Scheduled `EMPTY_ENTRY` supplies one empty trigger document.
+   - Called passthrough entry supplies arriving caller documents.
+   - Listener and caught-document entry use their existing supplied-document rules.
+   - An exhausted stream supplies no trigger.
+   - Cache load/remove exhaust the current document path.
+   - A cache read replaces the stream only when triggered.
+   - Branch legs start with their original Branch input; execution cache state accumulates in authored order.
+
+   Preserve A4’s conservative refusal of maps/cache writes on empty or unproved entry payloads, with `/map_ref` and `/cache_ref` diagnostics. Describe this as the compiler’s usable-payload requirement, not evidence that No Data Start emits zero documents. Message/data-process handling does not become a from-zero producer admission. (`src/boomi_mcp/compiler/process_ir/connector_resolution.py:667`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:274`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:158`.)
+
+   **Send gate:** remove cache reads from its exceptions. A declared non-producing call followed by a cache read fails closed with `PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH`, phase `semantic_lowering`, at the sending call’s `/operation_ref`. Preserve the existing Return Documents pointer exception. Preserve Send → plain Stop only as the existing inert termination convention; it provides no evidence that Stop executes. (`src/boomi_mcp/compiler/process_ir/connector_resolution.py:625`.)
+
+   `cap184-send-then-read` remains **OPEN, not executed**. Refusal is conservative; it is not a measured assertion about that connector combination. To change it, first establish a genuinely non-producing operation, then measure its primed-cache successor with execution and wire witnesses. REST responses in the archive are not substitutes for that control. (`docs/architecture/evidence/issue-184/captures/cap184-send-then-read/RECORD.json:3`.)
+
+   Keep D12’s iterative controller. Both walks consume the same emission transition; cache/profile/property state remains owned by the lineage controller. Remove cache-read and cache-remove transitions that independently invent or preserve a stream. (`src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1178`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1185`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:161`.)
+
+4. **`compiler/process_ir/contracts.py`, `lowering.py`, `invariants.py`, `emitter_registry.py`, shared rendering and graph verification — enforce the rule below authoring.**
+
+   Generalize the existing internal `cache_stage` exit role to a terminal cache action. Its kind/position validation must permit `cache_put` in the existing Branch/catch slots and `cache_remove` only in a Branch terminal. Sharing an exit role must not accidentally admit remove in catch. Both actions have zero CFG and emission outgoing edges. (`src/boomi_mcp/compiler/process_ir/lowering.py:546`; `src/boomi_mcp/compiler/process_ir/invariants.py:439`.)
+
+   Derive `EXACT_ZERO` for `doccacheload` and `doccacheremove`; retain `EXACT_ONE` for the configured retrieve successor. Remove `ZERO_OR_ONE` if it has no remaining registrations. The current load/remove registrations are the final canonical boundary admitting the unsafe wires. (`src/boomi_mcp/compiler/process_ir/emitter_registry.py:739`.)
+
+   In `categories/components/builders/process_emitters/rendering.py`, reject outgoing transitions for load/remove even when authoring validation is bypassed. Use the existing empty-dragpoints helper for terminal remove; preserve the all-document configuration and existing nonterminal byte conventions elsewhere. (`src/boomi_mcp/categories/components/builders/process_emitters/rendering.py:248`; `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py:603`; `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py:895`.)
+
+   In `categories/components/process_graph_verifier.py`, derive load/remove terminal recognition from the same authority. A terminal remove must pass; a load/remove with any outbound wire must produce `TERMINAL_SHAPE_HAS_OUTBOUND`. Forged canonical emission plans retain `PROCESS_IR_COMPILE_EMITTER_INPUT_INVALID`, phase `xml_emission`, at the cache node. (`src/boomi_mcp/categories/components/process_graph_verifier.py:36`; `src/boomi_mcp/categories/components/process_graph_verifier.py:423`; `src/boomi_mcp/compiler/process_ir/emitter_registry.py:829`.)
+
+   Update `semantic_validation/effects.py` and child-effect inspection so cache removal is included in cache mutation/replay analysis. A terminal remove invalidates execution-cache guarantees even though it emits no documents. (`src/boomi_mcp/compiler/process_ir/semantic_validation/effects.py:106`; `src/boomi_mcp/authoring/process_ir_effects.py:833`.)
+
+5. **`categories/components/builders/process_flow_builder.py`, `compiler/process_ir/legacy_adapters/flow_sequence.py`, cache primitive metadata — correct the public legacy route in this slice.**
+
+   Public legacy behavior changes as follows:
+
+   - Refuse `transform.mode="doccacheremove"` in its existing linear transform position, using `PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID` at `transform.mode`. Remediation names a terminal Branch cache-remove action in ProcessIR.
+   - Refuse explicit load/remove successors in `flow_sequence`, including read aliases. Keep `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID`: explicit continuation blames the successor’s `.kind`; an implicit target continuation blames the final consuming cache step’s `.kind`.
+   - Refuse `reliability.dlq.mode="document_cache_ref"` combined with authored `catch_exception`.
+   - Omit only the builder’s synthetic Stop after terminal cache DLQ staging. Never silently omit an authored Exception.
+
+   Use one shared composition check at validation and emission, following the existing synthetic-Stop versus authored-Exception distinction. The current cache-specific exclusion from that check is incorrect. (`src/boomi_mcp/categories/components/builders/process_flow_builder.py:3667`; `src/boomi_mcp/categories/components/builders/process_flow_builder.py:4421`; `src/boomi_mcp/categories/components/builders/process_flow_builder.py:4429`; `src/boomi_mcp/categories/components/builders/process_flow_builder.py:4470`.)
+
+   For synthetic-Stop normalization, preserve remaining shape IDs and coordinates, reserving the removed synthetic slots where necessary. This permits the independently frozen byte transforms below without unrelated layout changes.
+
+   Correct `patterns/primitives/document_cache_remove.py` to describe terminal consumption and the refused legacy inline composition; withdraw its cross-run implication. Preserve keyed-removal refusal. (`src/boomi_mcp/patterns/primitives/document_cache_remove.py:13`; `src/boomi_mcp/patterns/primitives/document_cache_remove.py:99`; `src/boomi_mcp/patterns/primitives/document_cache_remove.py:110`.)
+
+   These fixes belong to **#184**. Critical cache emission defects cannot be deferred to #159/#160. Those issues retain caller migration and verification-before-deletion; receive the intentional-refusal and replacement mapping, not ownership of the defect. No new issue is filed. (`docs/architecture/ISSUE_184_AUDIT_LEDGER.md:177`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:180`; `docs/architecture/COMPLETION_WORKFLOW_RULES.md:38`.)
+
+6. **Golden corpus, manifests and provenance — retire all seven active cache-successor artifacts.**
+
+   The sibling sweep finds seven active rows with cache successors, including the three synthetic-Stop cases. Their current registrations are at `tests/fixtures/wave_gate/goldens.jsonl:6`, `tests/fixtures/wave_gate/goldens.jsonl:13`, `tests/fixtures/wave_gate/goldens.jsonl:19`, `tests/fixtures/wave_gate/goldens.jsonl:60` and `tests/fixtures/wave_gate/goldens.jsonl:67`.
+
+   Freeze these replacements before changing the producing implementation:
+
+   | Retired row | Fresh row at this HEAD / fixture basename | Safe replacement |
+   |---|---|---|
+   | 000012 | 000082 / `cache_remove_terminal_branch` | `source → Branch[terminal cache_remove C; routed target]` |
+   | 000018 | 000083 / `cache_stage_read_remove` | `source → Branch[terminal cache_put C; cache_get C → routed target; terminal cache_remove C]` |
+   | 000019 | 000084 / `cache_stage_read` | `source → Branch[terminal cache_put C; cache_get C → routed target]` |
+   | 000066 | 000085 / `catch_exception_without_cache_put` | Preserve the protected flow; catch ends in Exception alone |
+   | 000005 | 000086 / `cache_notify_connector_terminal` | Existing connector-scoped notify/DLQ config; remove both synthetic post-cache Stops |
+   | 000059 | 000087 / `cache_notify_terminal` | Existing notify/DLQ config; remove its synthetic post-cache Stop |
+   | 000060 | 000088 / `cache_notify_archetype_terminal` | Existing archetype config; remove both synthetic post-cache Stops |
+
+   Add authored inputs under `tests/fixtures/process_ir/issue184/` and expected XML under `tests/fixtures/golden_xml/issue184_<basename>.xml`. Preserve the renderer category needed to exercise each original route: the three notify replacements continue exercising their legacy/archetype routes; the safe staged structures use the canonical compiler.
+
+   **Expected-byte provenance:**
+
+   - **000012 replacement:** independently author the fixed Branch graph using the neutral renderer from pinned `cbab28f`. Terminal-remove byte authority is `tests/fixtures/live_xml/m11/process_cache_branch_load_remove.xml:1`, whose provenance names the platform-authored terminal remove shapes. Runtime removal is observed independently. Record the exact shape selection, IDs, layout, wrapper substitutions and empty-dragpoints normalization. (`src/boomi_mcp/patterns/primitives/document_cache_remove.py:9`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:284`.)
+   - **000018 and 000019 replacements:** independently author the ordered Branch graphs with the same pinned neutral renderer. Use terminal-load and separately triggered retrieve templates from the archived fixture composer and executed staged-cache captures. Expected layout and connections come from that fixed graph recipe, never a new-compiler render. (`docs/architecture/evidence/issue-184/captures/cap184-fixtures/instruments/g184.py:33`; `docs/architecture/evidence/issue-184/captures/cap184-fixtures/instruments/g184.py:86`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:137`.)
+   - **000066 replacement:** use the independent Exception-only control’s stored template and branch-point neutral renderer, with recorded wrapper/ID/layout substitutions. The control reaches ERROR with the caught message. This preserves throwing intent; it does **not** claim stage-and-throw equivalence. The original combination remains an explicit refusal witness. (`docs/architecture/evidence/issue-184/captures/cap184-cache-put-successor/components/p3c_catch_exception_control.stored.xml:1`; `agents/reports/2026-09-13-issue-184-evidence-e1.md:78`.)
+   - **000005/000059/000060 replacements:** apply documented byte transforms to the immutable pre-change goldens: remove only cache outgoing dragpoints and synthetic Stops `shape10/shape13`, `shape8`, and `shape10/shape13`, respectively. Assert exact occurrence counts and no remaining references; preserve every other byte. Record source, transformation-script and result hashes. Terminal-load captures establish the corrected runtime shape; the changed emitter supplies no expected bytes.
+
+   Change only each old row’s `state` to `tombstone`; delete its old expected XML and registry entry. Retain old input witnesses and old pytest nodes, which now assert retirement. Append fresh golden and test-node rows. Seven additions minus seven retirements leaves the current active floor **80** unchanged; derive test-node counts through the owning tooling. (`tests/fixtures/wave_gate/goldens.jsonl:1`; `scripts/wave_gate.py:859`; `tests/test_wave_gate_goldens.py:71`.)
+
+   Record all transforms in `tests/fixtures/process_ir/issue184/PROVENANCE.md` and the evidence archive. Correct the stage-then-raise claim in `tests/fixtures/process_ir/issue154/PROVENANCE.md`. Apply the amendment-2 unsafe-survivor precedent; preserve golden-000080/000081 and the closed #155 ledger. (`.codex/plans/issue-184-amendment-2.md:48`; `tests/fixtures/process_ir/issue155/PROVENANCE.md:89`; `tests/fixtures/process_ir/issue154/PROVENANCE.md:32`.)
+
+7. **`compiler/process_ir/semantic_validation/lineage.py` — replace A5 invalidation with bounded retrieve overlay.**
+
+   Replace both cache-read `"lost"` cells with an explicit overlay policy and evidence reference. Do not replace them with blanket `"survives"`. Current code stores cache profile facts but no cached DDP snapshots, then empties the DDP lattice and writer facts at retrieval. (`src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:219`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:413`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1385`.)
+
+   For the attested one-current/one-cached case:
+
+   ```text
+   output payload = cached payload
+   output DDPs    = current DDPs overlaid by cached DDPs
+   collision      = cached value wins
+   ```
+
+   R1–R4 separately establish collision, current-only, cached-only and mixed-key behavior. General N×M overlay remains OPEN. Cached-document DDP ownership is also independently observed with three cached documents and matching request bodies/paths. (`agents/reports/2026-09-13-issue-184-evidence-e1.md:96`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:137`.)
+
+   **Cache state and meet:**
+
+   - At each executing `cache_put`, freeze the incoming document cohort’s profile, guaranteed DDP keys, possible DDP keys/unknown-property marker and server-derived writer alternatives.
+   - Append possible cohorts; do not treat the last cache write as replacing earlier contents.
+   - Whole-cache removal clears these summaries. Possible opaque/external/child writes introduce unknown possibilities.
+   - At convergence, union possible cached cohorts; intersect guarantees over all possible cohorts. Preserve the existing distinction between cache may-content union and must-established state.
+   - Within supported singleton overlay, a guaranteed current key remains established whether the cached document omits or overrides it. Writer selection is stricter: definite cached presence selects cached writers; definite absence selects current writers; possible presence retains both alternatives, including unknown provenance.
+   - A bound path must pass for every possible selected writer. Never discard an inconvenient writer alternative.
+
+   This extends the existing cache-content lattice; it does not add another traversal. (`src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:238`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:284`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:931`.)
+
+   **Ordinary reads versus bound paths:**
+
+   Ordinary reads may use guaranteed cached keys and supported current-overlay guarantees; existing ordinary defaults remain valid. Bound paths additionally require validated writer provenance, a dynamic segment, satisfied DDP source dependencies, correct resolved profile pairing and `current`-source freshness. Restore cached writer facts as facts about the original cached document; do not re-evaluate their profile sources against another document. Bare `established_at_entry` keys never manufacture writer proof. (`src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:943`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1243`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1331`.)
+
+   Missing ordinary transfer proof retains `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` at the reader node. Missing bound provenance retains `PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED` at `/path_binding`; invalid known writers retain their specialized dynamic-segment/profile diagnostics. Do not classify unsupported same-path transfer as sibling-scope leakage.
+
+   **N×M boundary:** allow current-only carry only with internal proof of exactly one current and one cached document. Track `exactly_one` versus `unknown` conservatively from trusted entry/step facts and append history. Do not infer singleton from a profile, ordinary connector operation, fixture expectation, observed sample run or caller assertion. If the public graph supplies no such proof, refuse a dependent current-only read and require post-read establishment. Pure transfer tests are not public-route admission evidence.
+
+   The missing capture is `cap184-retrieve-ddp-overlay-nxm`: 1×M, N×1 and N×M, distinct identities, collision/absence controls, actual output counts, every payload/path and static execution witnesses. Until then, no general current-to-cached pairing claim is admitted.
+
+   **Correct the A5 probe:** the DDP-survival premise is valid, but the literal linear `cache_put → cache_get` graph is not an executable positive witness. Its retrieve is skipped. Refuse that graph for cache continuation; use an earlier terminal staging leg and a separately triggered later retrieve leg to prove cached X can feed the ordinary read and validated request path. (`agents/reports/2026-09-13-issue-184-evidence-e0.md:156`.)
+
+   Split, combine, mixed operations and generic scripting retain conservative unmeasured-property handling, except verified writes established on their emitted documents. Relabel split’s claimed measured loss as unproved; do not generalize the cache overlay to these operations. Their future captures must independently prove operation and successor execution before drawing a property conclusion. (`src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:417`; `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1394`.)
+
+8. **Child contracts: `semantic_validation/contracts.py`, `authoring/process_ir_effects.py`, `authoring/workflow.py`, lineage and public transport.**
+
+   Amendment 2’s DDP hand-off gate is discharged for the measured `wait=true` passthrough combination. The child contains no Set Properties step; three inherited paths match their own payloads. Import server-derived DDP establishment **and validated writer facts** at each proved invocation. No Data imports neither parent DDP nor its writers. (`.codex/plans/issue-184-amendment-2.md:13`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:100`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:124`.)
+
+   File obligations:
+
+   - **`semantic_validation/contracts.py`:** add typed child-entry/input contracts separate from `SubprocessSummaryV1` effects. Include entry form, conditional profile/DDP/writer/cache/DPP requirements and possible versus guaranteed execution-state effects. Bind by canonical process identity; keep these server-derived and relocatable. Existing summaries and `established_at_entry` lack these distinctions. (`src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py:402`.)
+   - **`authoring/process_ir_effects.py`:** move child derivation outside the `declarations is None` early return. Derive inspectable children in dependency order using actual selected symbols and their trusted effect context. Optional effect declarations continue to require independent verification. Replace unconditional cross-parent entry seeding with conditional requirements discharged at each call. Opaque/unavailable children remain UNKNOWN. (`src/boomi_mcp/authoring/process_ir_effects.py:927`; `src/boomi_mcp/authoring/process_ir_effects.py:1091`; `src/boomi_mcp/authoring/process_ir_effects.py:1170`.)
+   - **`authoring/workflow.py`:** derive contracts before the per-root validation loop. Validate each child conditionally and every caller independently; never combine different parents’ facts. Preserve a separate empty-entry analysis for standalone use. (`src/boomi_mcp/authoring/workflow.py:1782`.)
+   - **Lineage:** passthrough receives the arriving document group/profile and per-document facts. No Data receives one fresh empty document per arriving parent document. Both forms receive the current execution’s cache/DPP facts. Waited successful completion may establish later-parent guarantees; asynchronous or tolerated-failure paths contribute possible effects only. Child DDP writes do not establish properties on the parent’s original sibling copies. Repeated No Data invocation checks use the same finite lattice until stable. (`agents/reports/2026-09-13-issue-184-evidence-e0.md:78`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:162`; `agents/reports/2026-09-13-issue-184-evidence-e0.md:183`; `.codex/plans/issue-184-amendment-1.md:84`.)
+   - **`recipes/materialization.py`, `authoring/process_materialization.py`, `categories/integration_builder.py`, `categories/components/canonical_process_apply.py`:** carry identical selected profile facts and invocation context through validation, compile, dry emission, materialization and apply rederivation. Fingerprint and relocate process/cache/profile/writer references; reject forged context even with a recomputed outer fingerprint. Integrate the in-progress public-symbol work after inspecting its actual diff. Its obligations remain those in amendment 1. (`.codex/plans/issue-184-amendment-1.md:128`; `.codex/plans/issue-184-amendment-1.md:138`.)
+   - **`categories/deployment/orchestration.py`:** retain the planned pre-mutation empty-entry check for direct tests/schedules. Direct passthrough execution is now measured to fall back to No Data; successful called-contract validation does not establish standalone validity. Package-only behavior and existing multi-root selection restrictions remain. (`agents/reports/2026-09-13-issue-184-evidence-e0.md:200`; `.codex/plans/issue-184-amendment-1.md:141`.)
+
+   **Prefix admission:** extend the existing table key to `(context, direct_predecessor, child_entry_form, wait)`. The admitted rows are Branch leg and Decision TRUE arm, `wait=true`, passthrough child, for map, set_ddp, set_dpp, retrieve, flow control, message and data process. Both read spellings share the physical retrieve row. Parse-time admission remains conditional where child identity is unavailable; compilation must check the full key and child contract. (`src/boomi_mcp/models/process_ir.py:2138`.)
+
+   No Data prefixes are not attested by the separate per-document invocation capture. Keep them refused with `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` at `/…/terminal`; use an empty-prefix No Data call for the shared-cache positive example. `cap184-prefix-predecessors-nodata` would supply the missing context/predecessor matrix. Preserve connector mixing, root singleton rules and existing notify-only recovery restrictions.
+
+   **Wait decision:** retain passthrough `wait=false` refusal. The archive proves storage and one grouped run, with parent cleanup waiting; UI behavior and the complete ordering contract remain unobserved. Add the still-unimplemented `PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` at `/…/wait`, with remediation to select `true`. Completing the existing wait capture requires UI observation plus repeated ordering/failure controls; COMPLETE alone is insufficient. (`agents/reports/2026-09-13-issue-184-evidence-e0.md:54`; `.codex/plans/issue-184-amendment-2.md:9`.)
+
+9. **Exception `none`: model, legacy builder, primitive, lowering and shared renderer.**
+
+   The smallest evidence-certain correction is to refuse `parameter_source="none"`. The archive proves that omission of `<exParameters>` is rejected and `caught_error` succeeds; it does not prove an empty block is accepted. (`agents/reports/2026-09-13-issue-184-evidence-e1.md:154`.)
+
+   - Remove `none` from `ExceptionNodeV1` and `ThrowExceptionParameters` supported literals and served descriptions. Add an explicit field refusal for that formerly accepted value using `PROCESS_IR_CAPABILITY_UNSUPPORTED` at `/…/parameter_source`; preserve existing placeholder validation for supported bindings. (`src/boomi_mcp/models/process_ir.py:1717`; `src/boomi_mcp/patterns/primitives/throw_exception.py:65`.)
+   - Remove it from legacy `_SUPPORTED_EXCEPTION_PARAMETER_SOURCES` and every hint recommending static `none`. Keep `PROCESS_EXCEPTION_CONFIG_INVALID` at `reliability.catch_exception.parameter_source`; cover sequence Exception authoring through its shared validator. (`src/boomi_mcp/categories/components/builders/process_flow_builder.py:418`; `src/boomi_mcp/categories/components/builders/process_flow_builder.py:3119`.)
+   - Remove `_NoExceptionBindingV1` from valid compiler inputs/lowering. Harden `_pre_exception` against forged or unknown sources rather than mapping them to a supported binding. (`src/boomi_mcp/compiler/process_ir/contracts.py:1275`; `src/boomi_mcp/compiler/process_ir/lowering.py:1186`; `src/boomi_mcp/compiler/process_ir/emitter_registry.py:704`.)
+   - Make `render_exception_parameters` reject unsupported kinds instead of returning empty XML or falling through to caught-error rendering. Both adapters use this renderer. (`src/boomi_mcp/categories/components/builders/process_emitters/rendering.py:847`.)
+
+   No golden is retired for `none`; none currently exercises it. To restore static-message support later, capture `cap184-exception-none-empty-parameters`: independent empty-block XML, accepted create/readback, triggered execution yielding ERROR with the exact static message, witnesses and hashes. Meanwhile the compiler refuses the value. (`agents/reports/2026-09-13-issue-184-evidence-e1.md:184`.)
+
+10. **Served contract, diagnostics, revisions and ledger.**
+
+   **`authoring/process_ir_projection.py`:** generate cache input/output and ordering facts from the emission authority. Replace optional-input cache-read claims, cache-remove passthrough text, mandatory write/read adjacency, and the trailing-cache prose generator. Publish form-aware child grouping, wait, inheritance, standalone fallback and OPEN bounds. (`src/boomi_mcp/authoring/process_ir_projection.py:510`; `src/boomi_mcp/authoring/process_ir_projection.py:531`; `src/boomi_mcp/authoring/process_ir_projection.py:564`; `src/boomi_mcp/authoring/process_ir_projection.py:607`; `src/boomi_mcp/authoring/process_ir_projection.py:1210`.)
+
+   Exact cache summary:
+
+   > “Cache reads require an arriving document, including the scheduled Start’s empty document. Add to Cache and all-document Remove from Cache emit zero documents and end their document path. Place later work in another ordered Branch leg. A triggered retrieve supplies cached payloads; an empty cache supplies no successor documents.”
+
+   Exact DDP-bound-path remediation:
+
+   > “Establish a validated writer on every possible document origin reaching this call. After cache retrieval, use proved cached writer provenance or a supported current-document overlay; otherwise write the property after the read. Defaults and bare established-at-entry declarations do not provide writer proof.”
+
+   Replace the current assertion that retrieval loses properties and that inherited entry writers cannot be checked. (`src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py:139`.)
+
+   **`errors.py`, model diagnostic machinery, compiler diagnostic specifications and finding forwarding:** register `PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED`; use the existing placement, cardinality, schema and emitter codes as specified above. Add emission witnesses and exact code/path/phase parity tests. Preserve #178 reparsing and diagnostic provenance. (`src/boomi_mcp/models/process_ir.py:4324`; `src/boomi_mcp/models/process_ir.py:4456`; `.codex/plans/issue-184.md:261`.)
+
+   **`authoring/contract.py`:** include emission descriptors, overlay policy and child-contract behavior in revision material. Perturbation witnesses must show behavior changes move revisions; changing only explanatory text is insufficient. Existing revision material already projects body placement, state visibility and diagnostics. (`src/boomi_mcp/authoring/contract.py:1126`; `src/boomi_mcp/authoring/contract.py:1215`.)
+
+   **`docs/architecture/PROCESS_IR_V1.md`, schemas, contract snapshots and inventory:** rebaseline through the existing producers after final semantics. Update recipe metadata/digests affected by the legacy-route correction; do not broaden the recipe source digest into an indiscriminate compiler source hash. (`src/boomi_mcp/recipes/registry.py:174`; `.codex/plans/issue-184.claude.md:206`.)
+
+   **`docs/architecture/ISSUE_184_AUDIT_LEDGER.md`:** append amendment-3 corrections to C7’s trigger terminology, A5 invalidation, trailing-cache rules, child evidence status and survivor inventory. Preserve historical C1–C10 and raw finding rows. Resolve E0-184-01/03 and E1-184-01 together only after structural validation; resolve E0-184-02 and E1-184-02 against their distinct fixes. Record the complete sibling sweep, non-vacuity witnesses and vocabulary-derived coverage claim. No finding is marked fixed by this planning turn. (`docs/architecture/ISSUE_184_AUDIT_LEDGER.md:158`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:163`; `docs/architecture/ISSUE_184_AUDIT_LEDGER.md:171`.)
+
+11. **Issue #184 description — exact replacement text.**
+
+   Replace the following criteria in full. A8 remains unchanged, including its public-route and live-composite obligations; registering golden-000081 alone does not discharge it. These edits replace the contradicted plan matrix, A4 producer derivation, A5 loss assertion and amendment-1 child-form acceptance extensions. (`.codex/plans/issue-184.md:79`; `.codex/plans/issue-184.md:97`; `.codex/plans/issue-184.claude.md:240`; `.codex/plans/issue-184-amendment-1.md:225`.)
+
+   **A1 — Explicit contract.**
+
+   > A reviewed placement matrix identifies every new legal form and its negative neighbour. Cache load and all-document remove have no authored successor; linear put→read, remove→read, put→Exception and equivalent continuations are refused. Terminal cache_put remains available in Branch and catch bodies; terminal cache_remove is added only to Branch legs. Canonical cache-origin maps and Decision-interposed hand-offs are validated or refused. The genuine legacy dialect retains its named unchecked-map exemption. Implementation and served contract agree; listener and error grammars receive these correctness restrictions without unrelated expansion.
+
+   **A2 — Real public route.**
+
+   > Complete typed fixtures pass public plan → compile → materialize dry-run for consecutive maps in a Branch leg, a checked map suffix ending in terminal cache_put, ordinary root suffixes, a call-free cache-read root triggered by scheduled Start, correctly profiled cache-origin maps, terminal Branch cache removal, and an attested passthrough prefix in both Branch-leg and Decision-TRUE-arm slots. Exercise the corrected ordered staging example and a No Data shared-cache child invoked through an existing empty-prefix slot. Record baseline refusals or unchecked behavior beside each fixture. Scoped public-boundary live QA executes each newly admitted form and verifies requests, payloads and invocation records; COMPLETE alone is insufficient. Unmeasured prefix/form combinations remain refused.
+
+   **A3 — Profile and child-input proof.**
+
+   > Preserve the per-path map, cache-write and profile-source checks, resolved-identity alias handling and named legacy exemption. Cache declarations validate reaching writes but never replace content provenance; disagreeing or unknown content cannot satisfy a typed consumer. Derive inspectable child requirements without requiring effect declarations, validate children conditionally, and discharge every invocation independently. Passthrough callers supply the required arriving profile and server-derived DDP writer facts; No Data callers cannot satisfy child payload requirements with parent documents. Shared-cache requirements are checked separately. Unknown child contracts refuse new prefix admission; incompatible profiles and missing writer provenance retain their specified authored pointers. An interposed Decision or facts from another parent cannot erase these obligations.
+
+   **A4 — Document triggers and cardinality.**
+
+   > One document-emission authority separates execution triggers, output behavior and graph continuation, and is consumed by grammar, connector validation, lineage, emission, legacy validation and the served contract. Its complete kind/alias coverage and measured cache rows are pinned bidirectionally. A scheduled Start supplies one empty trigger document; a cache read needs an arriving document and cannot restart an exhausted stream. Cache load and all-document remove emit zero documents and have zero outgoing edges. A declared non-producing call cannot feed a cache read; cap184-send-then-read remains OPEN and fails closed. Preserve tested map/cache-put refusal on absent or unproved usable payload, with empty entry distinguished from zero runtime documents. Message and data_process gain no from-zero producer admission. Zero/one/many fixtures assert actual payloads and outcomes; empty-cache behavior remains explicit stopprocess, with no synthetic success document.
+
+   **A5 — Ordered staging and document-property transfer.**
+
+   > Earlier-leg terminal staging and separately triggered later-leg retrieval obey the execution-scoped cache contract; reversed order and missing writers retain their lineage diagnostics. A triggered retrieve restores cached payloads and cached DDPs. For the attested one-current/one-cached overlay, cached names override current names and current-only names survive. Track guarantees and every possible writer across all reaching cache writes; ordinary reads require establishment, while bound paths additionally require valid writer provenance, composition, profile pairing and freshness. Current-only overlay outside a compiler-proved supported bound remains OPEN and fails closed. Preserve sibling document-copy isolation, ordinary defaults, form-aware child transfer and post-read rebinding. The former linear put→read probe is refused for its dead successor, not for DDP loss; a legal staged equivalent proves the positive read. Split, combine, mixed operations and generic scripting retain conservative unmeasured-property handling.
+
+   **A6 — Terminal and invocation integrity.**
+
+   > Every newly admitted Process Call prefix ends with a call having no outgoing edge or returnpath. Admission uses the complete context, direct-predecessor, child-entry-form and wait evidence key and a discharged child contract. Current prefix rows admit passthrough with wait=true only. Unsupported context/form/predecessor or unknown child contract uses PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED at /…/terminal; passthrough wait=false uses PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED at /…/wait. Root singleton, connector-mixing precedence and notify-only recovery restrictions remain. Parsed JSON and directly compiled exported or mutated models agree. Residual placement remediation does not route to returning-call support; #176 retains the transfer note.
+
+   **A7 — Connector, effect and emitted-graph integrity.**
+
+   > Dynamic-path, profile, connector-capability, side-effect, retry and replay checks remain load-bearing, including the existing connector-mixing precedence. Cache removal participates in execution-state invalidation and mutation/replay analysis. New sequence admission does not authorize retries. Both authoring routes reject dead cache continuations and Exception parameter_source="none" before emission; forged emitter inputs cannot bypass the checks. No new connector action is required.
+
+   **A9 — Reachability and regressions.**
+
+   > Public and direct compiler checks agree, and native examples require no legacy adapter. Existing valid survivors remain byte-identical under the named legacy-dialect exemption. Runtime-unsafe or structurally invalid cache-successor goldens 000005, 000012, 000018, 000019, 000059, 000060 and 000066 are retired through active-to-tombstone transitions and replaced by independently sourced safe fixtures with explicit behavior/provenance mappings. Preserve immutable manifest fields and retirement-test nodes; derive floor arithmetic. Intentional refusal is not missing canonical coverage. Expected behavior and XML bytes must not be derived solely from the implementation under test.
+
+   **A10 — Discoverability and final-tree validation.**
+
+   > Served schemas, capabilities, diagnostics and examples describe trigger-dependent cache reads, terminal cache consumption, bounded retrieve-property overlay, conservative unmeasured operations, form-aware child contracts, prefix evidence keys, passthrough wait refusal and Exception-none refusal. Record capability_revision and compiler_revision before and after; rebaseline every bound artifact through its owning producer on the final tree. Publish the sibling sweep, bidirectional authority coverage and non-vacuity witnesses. Applicable #152 and completion-workflow gates must cover the final tree; Critical findings are fixed and validated or escalated with the issue open.
+
+   Replace the contradicted A1 matrix rows with these exact rows:
+
+   | Form | Replacement planned result |
+   |---|---|
+   | Root `[call,cache_put,cache_get,stop]` | Refuse `PROCESS_IR_SCHEMA_INVALID_CARDINALITY` at `/body/steps/1/cache_ref`: Add to Cache emits zero documents. Use terminal staging and a separately triggered later Branch leg. |
+   | Root `[cache_get,map,stop]` | Admit structurally through the scheduled Start’s empty trigger; map admission still requires proved reaching cache contents and profile. |
+   | Cache load/remove followed by any authored successor | Refuse at the consuming cache node’s `/cache_ref`, including Stop, Exception, retrieve and Process Call successors. |
+   | Terminal Branch `cache_put` | Admit with usable-payload and cache-profile proof; emit zero outgoing edges. |
+   | Terminal Branch `cache_remove` | Admit all-document removal; invalidate cache facts and emit zero outgoing edges. |
+   | Cache-origin DDP read | Admit only the establishment/provenance required by the supported cache transfer; retrieval is not unconditional DDP loss. |
+   | Branch/TRUE-arm prefixed Process Call | Admit only a complete attested passthrough/wait=true row with discharged child requirements; No Data and unknown-form prefixes remain refused. |
+
+   Replace the affected **Admission and exclusion boundaries** rows with:
+
+   | Context | Required target and boundary |
+   |---|---|
+   | Scheduled/native root | Existing control roots and checked native suffixes; read-led call-free roots use the scheduled empty trigger and preserve zero connector entry roles when no root call exists. No exhausted-stream restart. |
+   | Branch / supported Decision arm | Ordered independent document copies and existing control boundaries; terminal cache_put in existing slots and terminal cache_remove only in Branch legs. No authored continuation after either cache sink. |
+   | Cache consumer | Triggered all-document retrieval, explicit empty behavior, ordered writer/content proof, checked typed consumers and bounded DDP overlay. Cache profile declarations and external-writer assertions do not create content or writer provenance. |
+   | Process Call | Terminal call; full form/context/predecessor/wait evidence key; per-invocation child proof; current new-prefix admission is passthrough with wait=true. Existing root, mixing and recovery restrictions remain. |
+   | Listener / existing TryCatch | Preserve supported structures while removing dead cache continuations and invalid Exception-none emission. Cache staging may terminate its existing catch slot; stage-then-throw is refused. Local error-scope expansion remains with #185. |
+
+   Apply these exact associated clause replacements throughout the description:
+
+   - **Document-existence authority paragraph:** use A4’s complete replacement text.
+   - **Native suffixes/staging continuation clause:** “Cache writes and all-document removes terminate their document path. Later work requires a separately triggered ordered Branch leg; a directly connected read is not recovery.”
+   - **Prefix vocabulary sentence:** “The attested direct predecessors are map_ref, set_ddp, set_dpp, cache_get/document_cache_retrieve, flow_control, message and data_process, in the recorded passthrough/wait=true contexts. Cache_put and cache_remove cannot precede the call.”
+   - **Order-and-lineage DDP-loss paragraph:** use A5’s complete replacement text.
+   - **No Data example:** remove the `set_dpp` prefix before its call; use an empty-prefix terminal call unless `cap184-prefix-predecessors-nodata` supplies the missing admission.
+   - **Out-of-scope legacy clause:** “New legacy adapters, general flow_sequence expansion, caller migration and deletion remain out of scope. Correcting the served legacy cache-emission and Exception-binding defects is in scope for #184.”
+   - **Implementation-slice phrase “DDP invalidation derived from PROPERTY_SURVIVAL_V1”:** replace with “evidence-backed property-transfer policy, including bounded cache overlay and conservative handling of unmeasured operations.”
+
+   Replace the complete **Definition of done** paragraph with:
+
+   > Authors compose the declared native sequences through the canonical public path with a per-path stream/profile proof, execution-scoped cache-content and property provenance, one measured document-emission authority, and form-aware terminal child contracts. Cache reads require arriving documents; cache load/remove paths terminate; retrieve DDP behavior follows the attested overlay bounds. Each admitted form has reproducible evidence, both compiler entry points agree, and unsafe legacy/canonical cache continuations and Exception-none emission are refused or safely normalized as specified. No temporary adapter or deferred grammar change is required for the amended acceptance examples. Critical findings are fixed and validated or the issue remains open. The EVAL-155-02/02a expressibility half retains its frozen-oracle and live-composite requirements and its #159/#160 handoff. Returning calls, connector/process-call mixing and recipe migration are not added by this slice.
+
+12. **Tests, implementation order and completion obligations.**
+
+   Implement in this order:
+
+   1. Record amendment-3 ledger corrections, complete the sibling inventory, and freeze independent replacement-oracle sources/transforms.
+   2. Land the shared emission authority and its grammar, connector, lineage, lowering, emitter, graph-verifier and legacy consumers as one structural correction.
+   3. Land retrieve-overlay snapshots/provenance and replace the A5 tests.
+   4. Integrate selected public profile facts; complete child derivation, per-call discharge and wait refusal.
+   5. Apply the Exception-none refusal across both authoring routes and rendering.
+   6. Complete served text, diagnostics, issue-description edits, provenance, manifest transitions and final-tree rebaselines.
+   7. Run affected public-boundary QA and the required completion gates in an execution-capable session.
+
+   **Test obligations by file/group:**
+
+   - **New `tests/test_issue_184_document_emission.py`:** complete kind/alias/emitter coverage; bidirectional capture binding and hashes; every body context × cache action × position × successor category; successful terminal put/remove; read requiring a trigger. Mutants invert consumption, omit an alias, restore a read-after-sink exception, or permit an outgoing cache edge.
+   - **`tests/test_issue_184_absent_stream.py`, `tests/test_connector_call_resolution.py`:** distinguish empty trigger from exhausted stream; Send→read refusal; listener, caught and passthrough entries; preserve A4 consumer pointers and Send precedence.
+   - **`tests/test_issue_184_ddp_invalidation.py`:** retain the file but replace its premise and illegal factories. Test both cache spellings against R1–R4 transfer states, legal staged cached-DDP positives, multiple cached cohorts, unknown writers, removal, defaults, `current` append, singleton/unknown bounds and sibling isolation. The literal old probe now asserts cache-continuation refusal. Replace the blanket-loss mutant with cached-precedence, writer-meet and unknown-multiplicity mutants. (`tests/test_issue_184_ddp_invalidation.py:1`; `tests/test_issue_184_ddp_invalidation.py:89`; `tests/test_issue_184_ddp_invalidation.py:136`; `tests/test_issue_184_ddp_invalidation.py:200`.)
+   - **`tests/test_process_ir_semantic_lineage.py`:** replace #155’s blanket cache invalidation and `"lost"` pins with supported overlay/provenance cases; retain conservative unmeasured-operation negatives. (`tests/test_process_ir_semantic_lineage.py:1058`; `tests/test_process_ir_semantic_lineage.py:1528`; `tests/test_process_ir_semantic_lineage.py:1596`.)
+   - **New `tests/test_issue_184_child_entries.py`, existing caller-entry/effect tests:** declaration-free multi-root planning, independent parents, aliases, grandchildren, opaque children, called versus standalone validity, inherited writer proof, waited effects and repeated No Data cache mutations. Replace the existing passthrough put→read fixture with terminal staging plus a separately triggered read. (`tests/test_issue_184_caller_entry_stream.py:109`; `tests/test_process_ir_effect_declarations.py:2491`.)
+   - **`tests/test_issue_184_native_sequences.py`:** bind complete evidence keys, including form and wait; test No Data/opaque negatives and Decision interposition without erasing ancestor obligations. (`tests/test_issue_184_native_sequences.py:74`.)
+   - **Model/body, CFG, emitter and graph-verifier tests:** both compiler entrypoints; forged cache exits, remove in forbidden slots, missing terminal role, outgoing cache edges and Exception-none bypass.
+   - **Legacy builder/adapter/primitive tests:** all cache aliases, implicit target continuation, authored Exception refusal, synthetic-Stop normalization and supported Exception-binding parity. Replace tests that currently expect no parameter block. (`tests/test_process_flow_builder.py:2190`; `tests/test_process_flow_builder.py:2288`.)
+   - **Golden and served-contract tests:** scan every active XML golden for zero cache-sink outbound edges; verify all seven replacement provenance records; pin exact served text, diagnostic witnesses and revision perturbations.
+
+   The sibling sweep covers all model contexts, both read aliases, all-document removal, connector output classifications, lineage/property summaries, child/effect/replay paths, legacy transform and sequence routes, reliability/archetype paths, cache primitive metadata, raw graph verification, active goldens and served inventory. Coverage is claimed over the discovered finite compiler vocabulary and indexed evidence cases—not every possible platform operation.
+
+   Future scoped QA must verify terminal staging/removal, independently triggered reads, corrected catch throwing behavior, cached DDP/body correlation, passthrough inherited paths, No Data absence/grouping, shared cache/DPP behavior and the A8 composite. Preserve the distinction between pre-implementation platform evidence and validation of the changed public compiler.
+
+   Rebaseline schema, authoring-contract and inventory artifacts through their existing producers; append test manifests from actual collection. Retain baseline `73b9d3d…`, current-tree revision records, the full non-KB Python 3.11 requirement, QA-validated commit review, architect-review cap and final composite wave gate. A structural correction still owes affected QA and delta review, and Critical residue cannot be deferred. (`docs/architecture/ISSUE_184_AUDIT_LEDGER.md:27`; `.codex/plans/issue-184.claude.md:206`; `docs/architecture/COMPLETION_WORKFLOW_RULES.md:38`.)

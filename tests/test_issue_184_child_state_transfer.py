@@ -901,6 +901,109 @@ def test_the_cache_a_binding_rides_on_is_load_bearing(monkeypatch):
         roots, "PARENT", "CACHE_CHILD").cache_property_requirements
 
 
+#: The same re-cache child with a Message between the retrieve and the binding. A Message
+#: hands on exactly the documents it received, so the binding still rides on the documents
+#: the child retrieved from the second cache — and every verdict below is the one the shape
+#: without it already earns.
+_RECACHES_THEN_BINDS_PAST_A_MESSAGE = _legs(
+    {"steps": [_READ, _READS_X], "terminal": _PUT2},
+    {"steps": [_READ2, _MSG, _BOUND_GET], "terminal": _STOP})
+
+
+@pytest.mark.parametrize("caller", sorted(_RECACHE_CALLERS))
+def test_a_bound_use_past_a_recache_rides_on_that_cache_past_a_message_too(caller):
+    """Amendment 3 §7: "A bound path must pass for every possible selected writer. Never
+    discard an inconvenient writer alternative."
+
+    A step that hands on exactly the documents it received cannot change WHICH cache those
+    documents were retrieved from, so it cannot change which caller writes reach the binding
+    riding on them. The stream-replacement branch rebuilt the stream as opaque and dropped
+    `retrieved_from` with it, so the ride-on attribution — and only the attribution, never
+    the seeded cohort's clearing of the binding — was lost one Message wide: the caller's
+    LITERAL X in the cache the binding rides on escaped validation and both roots compiled,
+    while the flattened twin of the same legs was refused NO_DYNAMIC_SEGMENT (ARCH-184-r2-01,
+    the limit recorded at SELF-184-42 whose stated blocker — a marker that survives a stream
+    replacement — round r19's count-preserving carrier removed)."""
+    into_cache, into_cache2, expected = _RECACHE_CALLERS[caller]
+    parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    roots = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)]
+    assert _errors(roots, "PARENT") == list(expected)
+    assert _compile_errors(roots, "PARENT") == list(expected)
+    assert set(_row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements) == {
+        ("$ref:CACHE", "X", None, False),
+        ("$ref:CACHE", "X", None, True),
+        ("$ref:CACHE2", "X", None, True),
+    }
+    # The Message moves nothing: the same legs without it earn the same verdict, which is
+    # the whole claim — including for the caller that composes X dynamically into both
+    # caches, which stays ADMITTED either way rather than being refused by a fix that
+    # over-corrects.
+    without = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS)]
+    assert _errors(without, "PARENT") == list(expected)
+    assert _compile_errors(without, "PARENT") == list(expected)
+    # The model's own flattening of the same legs agrees, as it does without the Message.
+    flat = list(parent["body"]["steps"][0]["legs"])[:-1] + list(
+        _RECACHES_THEN_BINDS_PAST_A_MESSAGE["body"]["steps"][0]["legs"])
+    twin = _errors([("PARENT", _legs(*flat))], "PARENT")
+    assert bool(twin) == bool(expected), (twin, expected)
+    # The refusal belongs to the CALL, not to the child: the child alone is still clean.
+    assert _errors(roots, "CACHE_CHILD") == []
+
+
+def test_the_ride_on_cache_surviving_a_stream_replacement_is_load_bearing(monkeypatch):
+    """Non-vacuity: with the carry neutralised — an opaque stream rebuilt WITHOUT the cache
+    its documents were retrieved from, exactly what the branch returned before this
+    correction — the caller that stored a literal path segment in the cache the binding
+    rides on is admitted again and the row it was refused for disappears.
+
+    The mutant reaches only the stream a replacement rebuilds, so the same shape without the
+    Message keeps its refusal: what it neutralises is the carry, not the ride-on channel."""
+    into_cache, into_cache2, expected = _RECACHE_CALLERS[
+        "a_literal_in_the_cache_the_binding_rides_on"]
+    parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    roots = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)]
+    assert _errors(roots, "PARENT") == list(expected)
+
+    real_stream = lineage._Stream
+
+    def without_the_ride_on_marker(*args, **kwargs):
+        if kwargs.get("origin") == "opaque":
+            kwargs.pop("retrieved_from", None)
+        return real_stream(*args, **kwargs)
+
+    monkeypatch.setattr(lineage, "_Stream", without_the_ride_on_marker)
+    assert _errors(roots, "PARENT") == []
+    assert _compile_errors(roots, "PARENT") == []
+    assert ("$ref:CACHE2", "X", None, True) not in _row(
+        roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+    assert _errors([("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS)],
+                   "PARENT") == list(expected)
+
+
+def test_a_per_document_caller_of_the_recache_child_answers_the_same_past_a_message():
+    """The restored attribution's OTHER consequence, pinned where it is newly reachable.
+
+    A Data Passthrough caller hands the call a group of a size no child can know, so this No
+    Data child runs once per document — and it both requires CACHE2 and appends to it, which
+    amendment 1 rule 8 (`_repetition_unstable_caches`) refuses at the call. That verdict is
+    not new: the Message-free twin has earned it since correction batch 18, because the
+    ride-on row is what makes the child require the cache it also writes. What IS new is that
+    the shape WITH the Message now answers the same instead of compiling clean, which is the
+    claim itself — a step that hands on exactly the documents it received moves nothing.
+
+    Pinned on the caller that composes X dynamically into both caches, the cell that moved:
+    it is refused here for the repetition, not for its writers, so a later change that made
+    this admit again while the twin stayed refused would be the same hole reopened."""
+    call_leg = {"steps": [], "terminal": _call("CACHE_CHILD")}
+    parent = _passthrough_root(_STAGES_X, _DYNAMIC_INTO_CACHE2, call_leg)
+    past_a_message = _errors(
+        [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)], "PARENT")
+    assert [code for code, _pointer in past_a_message] == [
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED]
+    assert past_a_message == _errors(
+        [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS)], "PARENT")
+
+
 #: A child that binds a request path past EACH of two caches: two cached-property rows of
 #: ONE property name, both reported at the caller's single call pointer.
 _BINDS_PAST_EACH_CACHE = _legs({"steps": [_READ, _BOUND_GET], "terminal": _STOP},

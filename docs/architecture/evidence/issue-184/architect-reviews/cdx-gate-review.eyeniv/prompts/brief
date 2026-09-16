@@ -1,0 +1,85 @@
+# Architect implementation review, evaluation 2 — issue #184 (M12.24: ProcessIR native document-sequence composition and non-returning staged workflows, bridge A)
+
+You are the architect who wrote the plans of record inlined below: the base design plan, then amendments 1, 2 and 3. Amendment 3 governs wherever they differ. Review the IMPLEMENTATION on branch `codex/issue-184` at HEAD against those plans. This is a read-only review; you may not edit anything.
+
+## Scope
+
+- Your evaluation 1 ran over `80bdd30` and returned ISSUES FOUND with nine findings. Its review is archived at `docs/architecture/evidence/issue-184/architect-reviews/cdx-gate-review.j1rWJg/review.md`. The ledger records each finding as a row `ARCH-184-r1-01` … `ARCH-184-r1-09` in `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`, section "Finding rows", with its reconciliation, disposition and witnessing tests.
+- This evaluation judges the CORRECTION DELTA, `git diff 80bdd30bfead2f0534937295d7fe32e489b7cf86..HEAD`: correction batch 18 and its validation archives. Its changed files are listed at the end of this brief, excluding the archived evidence under `docs/architecture/evidence/issue-184/`. Do not re-review the whole implementation. `git diff 73b9d3ddc8e547eba09b857275050fb336c06b59..HEAD` is the whole implementation, if a claim needs context.
+- The repository's own gates already ran on this delta:
+  - the full non-KB suite passes: `13226 passed, 19 skipped` at `6ac8031e783b2a68a545368db5085a649b118175`;
+  - the repository's own gates ran on this delta and their findings are dispositioned in the ledger: Codex commit review round r18 over `61ec8e1..6ac8031` (three P2 findings, all corrected in batch 19), live QA round r19 at `6ac8031` (broad, one Medium, refuted by measurement), Codex commit review round r19 over `6ac8031..4c67685` (one P2, refuted as stated with the residual limit recorded), and live QA round r20 at `4c67685` (affected, one Medium). Each round is archived under `docs/architecture/evidence/issue-184/`, and each finding carries exactly one disposition with its evidence.
+
+## What to judge
+
+1. **Each evaluation-1 finding.** For `ARCH-184-r1-01` … `-09`, decide whether the correction realizes the plan requirement you named, with tests that witness it. Also decide whether its fix, or the invariant that replaced a hand list, reaches every sibling the plans require.
+2. **`ARCH-184-r1-01` was reconciled as PARTLY valid. Judge that scoped refutation explicitly.** Its confirmed half is corrected: a profile-valued source is now refused where its only profile claim is cache content that is not one proved identity. Its two literal forms stay admitted by design:
+   - (a) A profile-valued source after a Message. This is C7, kept, with its scope stated in the new row C7a. A Message may author a document of that profile. Amendment 2 §4 limits the entry refusal to the empty entry. Amendment 3 kept the completed proof. The set_ddp and set_dpp pages now serve such a source as not verified (the implementation plan's D2 disclosure).
+   - (b) An undeclared GET written into a cache that declares a profile. Base §4 designs this as an admitted event that makes the content UNKNOWN ("make differing/unknown writes UNKNOWN"; "present `None` means UNKNOWN"). The downstream typed consumer is refused.
+
+   If you still hold that the plans require refusing either literal form, quote the sentence that requires it. Otherwise accept the scoping.
+3. **The revised plan-correction rows.** `C5a`, `C7a`, `C13a`, `C14a`, `C20a` and `C21a` are appended after C25; the originals are retained unchanged. Accept or reject each.
+4. **Scope deliberately kept fail-closed.** Judge whether each item narrows a plan requirement:
+   - current-only N × M carry of cached document properties stays OPEN, and the caller's cached cohort never becomes a current-document overlay;
+   - rule 8 still refuses a per-document No Data child that requires a cache it may write, because the state lattice cannot express a possible removal. A child's per-document rewrite of a process property is admitted, because establishment only grows. The served text says establishment is checked, not the value one run reads from the previous one;
+   - a scheduled parent keeps rule 4's legacy empty-prefix placement after an interposed control (the #141 capture);
+   - undeclared-input calls and direct call-to-call stay unchecked (D2, D4);
+   - a guarantee from a called child needs `wait` and `abort_on_error`, and a path that provably runs the call.
+5. **Regressions against what evaluation 1 accepted.** Name anything in the correction delta that breaks a plan correction you accepted (C1–C4, C6, C8–C12, C15–C19, C22–C25) or either owner decision recorded in the ledger.
+
+## Constraints
+
+- Do NOT call Boomi MCP tools, GitHub tools or any network tool. A headless turn parks on an elicitation it cannot answer. Ground every claim in the source, tests, ledger and plans in this checkout.
+- You may run targeted tests to check a claim:
+  `PYTHONPATH=src BOOMI_LOCAL=true BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider <node ids>`.
+  Do not run the full suite. A probe that builds a mocked client must stub `boomi_mcp.categories.integration_builder.paginate_metadata`: the mocked pager otherwise never ends.
+- Report only concrete, verifiable findings. For each finding give:
+  - a priority label from `[P0]` (breaks the plan's core contract) to `[P3]` (minor);
+  - the file and line;
+  - the plan section it concerns (quote the requirement);
+  - the concrete input and the wrong behaviour or missing realization.
+
+  A correction you accept needs no finding. Do not report prose, comment or historical-count nits.
+
+## Output
+
+1. Start with one line `Reviewed files:` naming the files you actually read.
+2. List the findings, most severe first, or state that there are none.
+3. For each evaluation-1 finding `ARCH-184-r1-01` … `-09`, one short line: fixed, or not fixed with the finding it maps to. For ARCH-184-r1-01, also state whether you accept the scoped refutation.
+4. For each revised correction row `C5a`, `C7a`, `C13a`, `C14a`, `C20a` and `C21a`, one short line: accepted, or rejected with the finding it maps to.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
+
+## Changed files in the correction delta (excluding `docs/architecture/evidence/issue-184/`)
+
+- `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`
+- `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+- `src/boomi_mcp/authoring/contract.py`
+- `src/boomi_mcp/authoring/process_ir_effects.py`
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+- `src/boomi_mcp/authoring/workflow.py`
+- `src/boomi_mcp/categories/components/builders/process_emitters/rendering.py`
+- `src/boomi_mcp/categories/deployment/orchestration.py`
+- `src/boomi_mcp/categories/integration_builder.py`
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/context.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+- `src/boomi_mcp/errors.py`
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+- `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+- `tests/fixtures/process_ir/semantic_report_linear_flow.json`
+- `tests/fixtures/wave_gate/test_nodes.jsonl`
+- `tests/test_issue_180_compile_entry_context.py`
+- `tests/test_issue_184_child_entries.py`
+- `tests/test_issue_184_child_state_transfer.py`
+- `tests/test_issue_184_component_identity.py`
+- `tests/test_issue_184_document_emission.py`
+- `tests/test_issue_184_native_sequences.py`
+- `tests/test_issue_184_raw_route_context.py`
+- `tests/test_issue_184_revision_coverage.py`
+- `tests/test_issue_184_stream_profiles.py`
+- `tests/test_process_ir_effect_declarations.py`
+- `tests/test_process_ir_semantic_lineage.py`
+- `tests/test_wave_gate.py`

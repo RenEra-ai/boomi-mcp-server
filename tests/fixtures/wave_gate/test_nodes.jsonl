@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13275, "minimum_collected": 13275, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 13280, "minimum_collected": 13280, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -13373,3 +13373,8 @@
 {"kind": "test", "id": "pytest-013372", "node_id": "tests/test_issue_184_revision_coverage.py::test_each_call_state_rule_moves_the_revision_through_its_own_row[an_unproved_removal_seals_all_the_same]", "state": "active"}
 {"kind": "test", "id": "pytest-013373", "node_id": "tests/test_issue_184_revision_coverage.py::test_every_child_any_call_state_section_measures_is_a_graph_that_can_ship", "state": "active"}
 {"kind": "test", "id": "pytest-013374", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_admits_a_retrieve_of_a_cache_this_path_proved_it_filled", "state": "active"}
+{"kind": "test", "id": "pytest-013375", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_past_a_recache_rides_on_that_cache_past_a_message_too[a_literal_in_the_cache_the_binding_rides_on]", "state": "active"}
+{"kind": "test", "id": "pytest-013376", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_past_a_recache_rides_on_that_cache_past_a_message_too[a_literal_in_the_cache_the_property_came_from]", "state": "active"}
+{"kind": "test", "id": "pytest-013377", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_past_a_recache_rides_on_that_cache_past_a_message_too[dynamic_in_both]", "state": "active"}
+{"kind": "test", "id": "pytest-013378", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_ride_on_cache_surviving_a_stream_replacement_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-013379", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_per_document_caller_of_the_recache_child_answers_the_same_past_a_message", "state": "active"}

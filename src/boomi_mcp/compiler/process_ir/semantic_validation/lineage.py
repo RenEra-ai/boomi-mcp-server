@@ -2247,7 +2247,29 @@ def _walk_lineage(
                 return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
             if stream.state == STREAM_ABSENT:
                 return state, stream, legacy
-            return state, _Stream(STREAM_UNKNOWN, origin="opaque"), legacy
+            # The documents' IDENTITY survives a step that hands on exactly the documents
+            # it received, so the cache they were RETRIEVED from survives with them.
+            # `_COUNT_PRESERVING_KINDS` is the authority on which kinds those are — the
+            # count carry and the non-emptiness carry below read the same set, so a kind
+            # added there is carried by all three at once, and this invents no second
+            # carrier. A binding behind a Message is still a bound use of that cache, and
+            # the caller that filled it is still one of the writers the path must pass
+            # for: amendment 3 §7 requires a bound path to pass for every possible
+            # selected writer and never to discard an inconvenient writer alternative.
+            # Dropping it admitted a caller whose LITERAL path segment reached the request
+            # path, while the flattened twin of the same legs was refused (ARCH-184-r2-01).
+            #
+            # Only the identity travels. `caller_cache` stays withheld: it says no write
+            # of this process reached the read, and past a step that rebuilds the stream
+            # the payload is no longer the caller's to state — the cohort seed already
+            # clears the binding through the ordinary read that recorded the row.
+            return state, _Stream(
+                STREAM_UNKNOWN,
+                origin="opaque",
+                retrieved_from=(
+                    stream.retrieved_from if kind in _COUNT_PRESERVING_KINDS else None
+                ),
+            ), legacy
 
         return state, stream, legacy
 
