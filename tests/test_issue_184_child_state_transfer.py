@@ -2756,3 +2756,117 @@ def test_the_retrieve_fill_proof_is_load_bearing(monkeypatch):
         assert ("dpp", "K") in _row(unfilled, "PARENT", "WRITER").guaranteed_state
     assert _errors(proved, "PARENT") == []
     assert _row(unfilled, "PARENT", "WRITER").guaranteed_state == ()
+
+
+def test_the_public_plan_admits_a_retrieve_of_a_cache_this_path_proved_it_filled(monkeypatch):
+    """QA round r20 reported that the carry's ADMISSION direction has no authorable
+    composition at the public tool boundary. It has one — the two rows above, carried out to
+    `build_integration(action="plan"|"compile")` unchanged — and the whole of the difference
+    is the Message in front of the Add to Cache: it makes the write consume the CHILD's own
+    documents, so the child records no entry requirement and demands no profile of its
+    caller. QA's own spelling writes the caller's ENTRY documents to the cache, which is what
+    made that call a PROFILE_MISMATCH and was read as a universal rule about profiled caches.
+
+    The cache here is genuinely profiled — a `$ref` to an in-spec profile.json, the only
+    spelling that sets `cache_profile_ref` — so the admission is measured against the same
+    profile fact QA's refusal rested on rather than around it. The refs are the module's own,
+    bound to declared components keyed exactly as `_symbols()` names them, so the fixtures
+    reach the public route as they are."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import (
+        _PROFILE,
+        _ApplyBoundary,
+        _cause_codes,
+        _request,
+        _unit,
+    )
+    from boomi_mcp.categories.integration_builder import build_integration_action
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    profile = {"key": "P2", "type": "profile.json", "name": "E184 P2", "action": "create",
+               "config": {"component_type": "profile.json", "profile_type": "json.generated",
+                          "component_name": "E184 P2", "root": {
+                              "name": "Root", "kind": "object", "children": [
+                                  {"name": "id", "kind": "simple", "data_type": "character"}]}}}
+    cache = {"key": "CACHE", "type": "documentcache", "name": "E184 CACHE", "action": "create",
+             "depends_on": ["P2"], "config": {
+                 "component_type": "documentcache", "component_name": "E184 CACHE",
+                 "profile_type": "profile.json", "profile_id": "$ref:P2",
+                 "indexes": [{"index_id": 1, "index_name": "by id", "keys": [
+                     {"id": 1, "element_key": "3", "name": "id (Root/id)"}]}]}}
+    components = [profile, cache, dict(APPLIABLE_CONN, key="RCONN"),
+                  dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                       config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN"))]
+    # The premise the row rests on, read off the DERIVED table rather than asserted of the
+    # literal above: this cache really does declare a profile, so an admission here is not
+    # an admission of an unprofiled cache.
+    table = build_symbol_table([IntegrationComponentSpec(**spec) for spec in components])
+    assert [symbol.cache_profile_ref for symbol in table.symbols
+            if symbol.ref == "$ref:CACHE"] == ["$ref:P2"]
+
+    def verdicts(child):
+        """The caller and one child through the public dispatcher, on both read actions."""
+        raw = _request(
+            [_unit(_call_then_read(**_WAITS_AND_ABORTS), ("WRITER",), key="root",
+                   name="E184 Root"),
+             _unit(child, tuple(spec["key"] for spec in components), key="WRITER",
+                   name="E184 Child")],
+            components,
+        ).model_dump(mode="json")
+        results = {}
+        for action in ("plan", "compile"):
+            with _ApplyBoundary().installed():
+                results[action] = build_integration_action(
+                    MagicMock(), _PROFILE, action, config={"authoring_request": raw})
+        return results
+
+    def blamed(result, code):
+        """Every pointer the route blames for ``code``, wherever the envelope carries it:
+        plan REPORTS it in the validation payload, compile REFUSES with diagnostics."""
+        reported = list((result.get("authoring_result") or {}).get("errors") or ())
+        reported += list(result.get("authoring_diagnostics") or ())
+        return sorted({item.get("path") or "" for item in reported
+                       if code in ({item.get("code")} | set(item.get("cause_codes") or ()))})
+
+    # the caller's first Branch leg, whose terminal is the call itself
+    at_the_call = "/body/steps/0/legs/0/terminal"
+
+    # ADMITTED on both actions, with neither lineage refusal anywhere in the envelope.
+    admitted = verdicts(_PROVED_FILL_THEN_RETRIEVE_THEN_WRITE)
+    assert admitted["plan"]["authoring_result"]["validation_report"]["is_valid"] is True, (
+        _cause_codes(admitted["plan"]))
+    assert admitted["compile"]["_success"] is True, _cause_codes(admitted["compile"])
+    for action, result in admitted.items():
+        for code in (_READ_BEFORE_WRITE, _CACHE_WRITER_MISSING):
+            assert blamed(result, code) == [], (action, code, _cause_codes(result))
+
+    # CONTROL, the fill unproved: behind a producer that may return no rows the cache may be
+    # empty at the retrieve, so K is not guaranteed and the caller's later read is refused.
+    unproved = verdicts(_UNPROVED_FILL_THEN_RETRIEVE_THEN_WRITE)
+    assert unproved["plan"]["authoring_result"]["validation_report"]["is_valid"] is False
+    assert unproved["compile"]["_success"] is False
+    for action, result in unproved.items():
+        assert blamed(result, _READ_BEFORE_WRITE) == [_LATER_READ], (action, _cause_codes(result))
+
+    # CONTROL, nothing fills it at all: the same refusal, plus the cache's own missing writer
+    # at the call that would have had to bring one.
+    unfilled = verdicts(_NO_FILL_THEN_RETRIEVE_THEN_WRITE)
+    assert unfilled["plan"]["authoring_result"]["validation_report"]["is_valid"] is False
+    assert unfilled["compile"]["_success"] is False
+    for action, result in unfilled.items():
+        assert blamed(result, _READ_BEFORE_WRITE) == [_LATER_READ], (action, _cause_codes(result))
+        assert blamed(result, _CACHE_WRITER_MISSING) == [at_the_call], (
+            action, _cause_codes(result))
+
+    # NON-VACUITY: with the carry neutralised the ADMITTED witness is refused exactly where
+    # its controls are, so this row measures the CARRY and not the composition.
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_retrieve_of_a_proved_cache", lambda semantic, state: False)
+        neutralised = verdicts(_PROVED_FILL_THEN_RETRIEVE_THEN_WRITE)
+    assert neutralised["plan"]["authoring_result"]["validation_report"]["is_valid"] is False
+    assert neutralised["compile"]["_success"] is False
+    for action, result in neutralised.items():
+        assert blamed(result, _READ_BEFORE_WRITE) == [_LATER_READ], (action, _cause_codes(result))
