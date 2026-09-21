@@ -1893,6 +1893,11 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # is exactly what happened when #171's arrived.
     "AUDIT_LEDGER_TEMPLATE",
     "ENDGAME_VERIFICATION_GATE",
+    # The served authoring-workflow contract document. #184's correction batch 21 made
+    # `compiler_revision` replay a packaged corpus, and §4 of this document is where the
+    # bound on what that revision covers is served, so the rows recording the change have
+    # to name the file they moved. A singular document, like the two above.
+    "AUTHORING_WORKFLOW_V1",
     # The tracked home for standing completion-workflow amendments. `CLAUDE.md` and
     # `AGENTS.md` are gitignored, so a rule meant to govern future slices lives here and
     # a ledger recording its adoption has to be able to name it.

@@ -316,12 +316,36 @@ def test_a_bound_path_must_be_sound_for_every_possible_cached_writer():
 
 
 def test_a_whole_cache_removal_clears_the_cached_properties():
+    """Amendment 3 §7: "Whole-cache removal clears these summaries" — for a removal that has run
+    whenever what reads the cache after it runs.
+
+    The first assertion is this test as it stood before correction batch 21a. The removal
+    stands behind the GET in front of the Branch, so the walk cannot prove it runs at all; but
+    that GET feeds EVERY leg, so the later leg that reads the cache runs only when the removal
+    leg did (`lineage._removal_runs_before_anything_after_it`), and the cohort it cleared is
+    gone for that read. Batch 21a first gated the clear on the whole-run proof alone and this
+    shape came back clean — an over-refusal of its own, reversed there.
+
+    A removal the later legs do NOT depend on keeps what the cache may hold: behind a GET of
+    its own leg it may be skipped while the reading leg still runs, so the cache after it is
+    the meet of "it ran" and "it was skipped" — §7 unions possible cohorts and says "Never
+    discard an inconvenient writer alternative". Measured before the correction: that
+    leg-local form was clean, while the same legs with no removal are refused."""
     steps = _staged(
         _leg([_WRITE_X], _PUT), _leg([], _REMOVE),
         _leg([_read("cache_get"), _read_x(), _PATCH], _STOP),
     )
     diagnostics = _diagnostics(steps)
     assert (PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE, "/body/steps/1/legs/2/steps/1") in diagnostics, diagnostics
+    reads = _leg([_read("cache_get"), _read_x(), _PATCH], _STOP)
+    refused = (PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE, "/body/steps/1/legs/3/steps/1")
+    # The shared trigger: X-less documents, the removal, an X refill, the read. The removal ran
+    # whenever the read runs, so only the refill reaches it.
+    assert _diagnostics(_staged(_leg([], _PUT), _leg([], _REMOVE), _leg([_WRITE_X], _PUT), reads)) == ()
+    # The removal behind its OWN leg's GET may be skipped while the read runs: refused ...
+    assert _diagnostics(_staged(_leg([], _PUT), _leg([_GET], _REMOVE), _leg([_WRITE_X], _PUT), reads)) == (refused,)
+    # ... exactly as the same legs with no removal at all.
+    assert refused[0] in _codes(_staged(_leg([], _PUT), _leg([_WRITE_X], _PUT), reads))
 
 
 def test_the_cohort_meet_is_load_bearing(monkeypatch):

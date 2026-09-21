@@ -370,14 +370,27 @@ OWES, never what the child establishes for it.
 | Child entry | What reaches it | What each call must supply |
 |---|---|---|
 | Data Passthrough (`passthrough` entry) | the documents reaching the call, as one group, in one execution | the profile each consumer of those documents requires (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the call's `/process_ref`); a validated writer for every bound request path that composes from them (the dynamic-path codes at `/process_ref`); `wait=true` (`PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED` at `/wait`) |
-| No Data (no explicit entry) | one empty document of its own per arriving document | nothing from the parent's documents; where several documents can reach the call, a child that may change state it reads first is refused |
-| either | the calling execution's process properties and caches | every state key the child reads before writing it, classified like any read at the call; and, for a cache the child reads before writing it, the one profile its consumers require of the caller's writes there (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at `/process_ref`) |
+| No Data (no explicit entry) | one empty document of its own per arriving document | nothing from the parent's documents; where several documents can reach the call, a child is refused (`PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE` at `/…/terminal`) when it requires something of a cache it may also add to or empty — it reads the cache before writing it, or it uses the profile or properties of what it retrieves while a run may end with what it stored still there (its last write is not followed by a whole-cache removal, or a call that may write that cache stands after the removal, or one it does not wait for may write it anywhere — its own call or one inside a process it calls, or the request declares an outside writer of that cache and a retrieve of it authors `external_writer`, since such a writer may refill it between runs — a declaration no retrieve names establishes nothing and withholds nothing) or the call does not both wait and abort on error — or when it reads state first while its own effects are unknown. Whether a call may write the cache is the derived contract's answer: a call whose ProcessIR the request carries may write it when that contract says so, a call the request cannot derive may write any cache the calling process can observe, and the first cause — reading the cache before writing it — has no removal that exempts it |
+| either | the calling execution's process properties and caches | every state key the child reads before writing it, classified like any read at the call; and, for a cache its callers' documents may share — whether or not the child also writes it — the one profile its consumers require and every document property it uses of the retrieved documents, checked against the caller's own writes there (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` and the lineage and dynamic-path codes at the call) |
 
 A step prefix needs a derived Data Passthrough contract and `wait=true`; a child whose entry cannot
-be derived (not in the request, a listener, a call cycle) and a No Data child refuse a prefix with
-`PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` at `/…/terminal`. An empty-prefix call
+be derived (not in the request, a listener) and a No Data child refuse a prefix with
+`PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` at `/…/terminal`. A member of a call
+cycle is not in that set: its entry form and its requirements are derived against the fail-closed
+seed every cycle member starts from, so a prefix into one is admitted only where those derived
+requirements are provable, and refused wherever what it consumes stays unknown. An empty-prefix call
 keeps its compatibility placement. Every call adds unknown content to the caches its child may
-write. A called child is validated under its callers' obligations, and a passthrough root that
+write.
+
+A document cache is shared with every caller and Add to Cache appends, so a child's own writes to a
+cache never take its callers' documents out of it: the cache obligations travel to each caller that
+stores documents there, and a caller that stores nothing satisfies them vacuously. They end at the first
+process on the call chain — the child, or a caller between it and the call — that the walk proves removed
+the whole cache before the use (or before its own call leading to it) and refilled it only from its own
+writes since, in every run that reaches the use — a removal on a path that provably carries documents, or one whose
+Branch leg hands on unchanged the documents that Branch received, since every later leg of that Branch
+runs only on those same documents. A removal behind a step of its own leg that may hand on no documents
+may be skipped while a later leg runs, so what was stored before it may still be read there. A called child is validated under its callers' obligations, and a passthrough root that
 needs a caller is refused a direct test run or schedule before deployment mutates anything, because
 run directly it starts as No Data (capture `cap184-passthrough-standalone`).
 

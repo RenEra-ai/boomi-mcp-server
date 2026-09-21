@@ -141,7 +141,10 @@ def test_the_revision_moves_on_class_semantics_and_not_on_an_account_record(monk
     from boomi_mcp.authoring import contract as contract_module
     from boomi_mcp.connector_replay.registry import load_registry as _real_registry
 
-    baseline = contract_module._compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = contract_module._compiler_revision_payload()
+    baseline = contract_module.sha256_fingerprint(baseline_payload)
 
     class _Semantics:
         def model_dump(self, mode="json"):
@@ -156,8 +159,8 @@ def test_the_revision_moves_on_class_semantics_and_not_on_an_account_record(monk
     monkeypatch.setattr(
         contract_module, "_replay_registry", lambda: _Registry(semantics=[_Semantics()])
     )
-    with_semantics = contract_module._compiler_revision()
-    assert with_semantics != baseline, "a class-level semantics change did not move it"
+    assert contract_module._compiler_revision_moved(baseline_payload)[0], (
+        "a class-level semantics change did not move it")
 
     # An account-scoped operation record does NOT.
     #
@@ -399,7 +402,10 @@ def test_changing_HOW_the_grammar_matches_moves_the_revision():
     from boomi_mcp.authoring import contract as contract_module
     from boomi_mcp.connector_replay import ids
 
-    baseline = contract_module._compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = contract_module._compiler_revision_payload()
+    baseline = contract_module.sha256_fingerprint(baseline_payload)
 
     class _ShimIds:
         AUTHORED_CONTRACT_REF_PROBES = ids.AUTHORED_CONTRACT_REF_PROBES
@@ -424,11 +430,11 @@ def test_changing_HOW_the_grammar_matches_moves_the_revision():
     original = contract_module._replay_ids
     contract_module._replay_ids = lambda: _ShimIds
     try:
-        moved = contract_module._compiler_revision()
+        moved = contract_module._compiler_revision_moved(baseline_payload)[0]
     finally:
         contract_module._replay_ids = original
 
-    assert moved != baseline, (
+    assert moved, (
         "a change to how the grammar matches left the revision unchanged; "
         "two deployments differing in what they ACCEPT would report no drift"
     )

@@ -53,6 +53,7 @@ from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
     PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
@@ -244,11 +245,29 @@ def test_a_grandchild_contract_reaches_its_parents_derivation():
 
 
 def test_a_call_cycle_has_no_derivable_contract():
+    """THE NAME IS THE CLAIM'S HISTORY, AND THE NODE ID THE WAVE GATE PINS: a cycle member's
+    contract is no longer empty, but this node stays under its original name because
+    `tests/fixtures/wave_gate/test_nodes.jsonl` requires it and that manifest is append-only
+    (B21A-R6-V6-03).
+
+    What holds now: a cycle member cannot be derived IN ORDER, so it is seeded with the
+    contract an underivable call gets and then derived against those seeds to a fixed point
+    (B21A-R5-CYC-01, correction batch 21a rounds 6 and 7). Its own entry form and obligations
+    are real — they come off its own CFG, and what one member owes reaches the member that
+    calls it — while everything the seeding hid stays unknown, so a supplied-but-cyclic
+    ProcessIR is never weaker evidence than an absent one."""
     roots = [("LOOP_A", _parent(_P2_PREFIX, _call("LOOP_B"))), ("LOOP_B", _parent(_P2_PREFIX, _call("LOOP_A")))]
     _irs, resolution = _resolve(roots)
-    assert resolution.capabilities_by_root["LOOP_A"].child_entry_contract("$ref:LOOP_B").entry_form == "unknown"
+    row = resolution.capabilities_by_root["LOOP_A"].child_entry_contract("$ref:LOOP_B")
+    assert row.entry_form == "passthrough"
+    assert (row.state_known, row.cache_writes_known) == (False, False)
+    assert row.unwaited_writes_of_an_unknown_cache is True
+    assert row.required_caches_retain_nothing_it_stored is False
+    # Each member is still refused at its own call — what the seed hides is the profile its
+    # callee consumes, so the caller cannot prove what it hands over (before round 6 the
+    # vacuous contract made the same call a placement refusal instead).
     for key in ("LOOP_A", "LOOP_B"):
-        assert (_PLACEMENT, _LEG) in _errors(roots, key)
+        assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _LEG + "/process_ref") in _errors(roots, key)
 
 
 # ---------------------------------------------------------------------------
@@ -404,18 +423,24 @@ def test_a_no_data_child_run_per_document_may_not_change_the_state_it_requires(m
     The passthrough parent's stream may carry several documents, so the No Data child may
     run several times. A process property is never un-established, so a child that reads
     K and rewrites it leaves K established for its next run. A cache it requires and may
-    write or remove is refused, because the lattice cannot express a possible removal."""
+    write or remove is refused, because the lattice cannot express a possible removal.
+
+    Refused under its own code since QA-184-s1-r21-01, which the placement code's step-prefix
+    text could not explain; the refusal, its pointer and both mutant answers are unchanged.
+    Where a verdict is meant to be clean the WHOLE verdict is asserted, so no other code at this
+    pointer — the placement code the step-prefix rule still raises included — can hide behind a
+    check for one code (TI-184-21a-03)."""
     def parent(child_key, first=None):
         return _doc(_ENTRY, {"kind": "branch", "legs": [
             first or {"steps": [_SET_K], "terminal": _STOP},
             {"steps": [], "terminal": _call(child_key)},
         ]})
 
-    placement = (_PLACEMENT, "/body/steps/1/legs/1/terminal")
+    placement = (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "/body/steps/1/legs/1/terminal")
     rewrites_k = [("PARENT", parent("MUTATES_K")), ("MUTATES_K", _MUTATES_K)]
-    assert placement not in _errors(rewrites_k, "PARENT")
+    assert _errors(rewrites_k, "PARENT") == []
     stable = [("PARENT", parent("NEEDS_K")), ("NEEDS_K", _NEEDS_K)]
-    assert placement not in _errors(stable, "PARENT")
+    assert _errors(stable, "PARENT") == []
 
     staged = {"steps": [_MAP], "terminal": _put("$ref:CACHE")}
     reads_then_removes = _legs(
@@ -434,9 +459,9 @@ def test_a_no_data_child_run_per_document_may_not_change_the_state_it_requires(m
     assert placement in _errors(typed, "PARENT")
     # Mutant: without the cache term only the unknown-state refusal is left, and both
     # children that may change the cache they read are admitted.
-    monkeypatch.setattr(lineage, "_repetition_unstable_caches", lambda contract, cache_refs: ())
-    assert placement not in _errors(removal, "PARENT")
-    assert placement not in _errors(typed, "PARENT")
+    monkeypatch.setattr(lineage, "_repetition_unstable_caches", lambda contract, cache_refs, semantic: ())
+    assert _errors(removal, "PARENT") == []
+    assert _errors(typed, "PARENT") == []
 
 
 def test_a_child_may_leave_unknown_content_in_a_shared_cache():
@@ -561,20 +586,21 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
     from boomi_mcp.authoring import contract as authoring_contract
     from boomi_mcp.models import process_ir_document_semantics as emission
 
-    baseline = authoring_contract._compiler_revision()
+    baseline_payload = authoring_contract._compiler_revision_payload()
+    baseline = authoring_contract.sha256_fingerprint(baseline_payload)
     with monkeypatch.context() as patched:
         patched.setattr(lineage, "process_call_prefix_admitted", lambda *args: True)
-        assert authoring_contract._compiler_revision() != baseline
+        assert authoring_contract._compiler_revision_moved(baseline_payload)[0]
     with monkeypatch.context() as patched:
         cells = dict(lineage.PROPERTY_SURVIVAL_V1)
         cells[("data_process", "split_documents")] = "survives"
         patched.setattr(lineage, "PROPERTY_SURVIVAL_V1", MappingProxyType(cells))
-        assert authoring_contract._compiler_revision() != baseline
+        assert authoring_contract._compiler_revision_moved(baseline_payload)[0]
     with monkeypatch.context() as patched:
         rows = dict(emission.DOCUMENT_EMISSION_V1)
         rows.pop("stop")
         patched.setattr(emission, "DOCUMENT_EMISSION_V1", MappingProxyType(rows))
-        assert authoring_contract._compiler_revision() != baseline
+        assert authoring_contract._compiler_revision_moved(baseline_payload)[0]
 
     real_overlay, real_freeze = lineage._overlay_cache_read, lineage._cohort_at_write
 
@@ -601,13 +627,13 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
     def freezing_no_writer(on_documents, writers, stream):
         return real_freeze(on_documents, writers, stream)._replace(alternatives=frozenset())
 
-    def overlay_graphs():
-        row = authoring_contract._compiler_revision_payload()["property_survival"]
+    def overlay_graphs(payload):
+        row = payload["property_survival"]
         assert row != "unavailable"
         return row["overlay_verdicts"]["graphs"]
 
     kinds = sorted(lineage.TRIGGERED_REPLACEMENT_SEMANTIC_KINDS)
-    unperturbed = overlay_graphs()
+    unperturbed = overlay_graphs(baseline_payload)
     # Non-vacuity: before anything is perturbed, the cached writer admits its bound path
     # and a current-only write proves nothing past the read.
     for kind in kinds:
@@ -621,10 +647,11 @@ def test_the_revision_moves_with_child_contract_emission_and_survival_behaviour(
     ):
         with monkeypatch.context() as patched:
             patched.setattr(lineage, name, replacement)
-            graphs = overlay_graphs()
+            moved, perturbed = authoring_contract._compiler_revision_moved(baseline_payload)
+            graphs = overlay_graphs(perturbed)
             assert all(graphs[kind + ":" + flipped] != unperturbed[kind + ":" + flipped] for kind in kinds), (
                 replacement.__name__, graphs)
-            assert authoring_contract._compiler_revision() != baseline, replacement.__name__
+            assert moved, replacement.__name__
     assert authoring_contract._compiler_revision() == baseline
 
 # ---------------------------------------------------------------------------
@@ -924,7 +951,7 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
     payload = authoring_contract._compiler_revision_payload()
     for row in ("component_identity", "child_forwarding"):
         assert payload[row] != "unavailable", row
-    baseline = authoring_contract._compiler_revision()
+    baseline = authoring_contract.sha256_fingerprint(payload)
     perturbations = (
         (integration_builder, "declared_bindings_for_components",
          lambda components, conflict_policy="reuse", existing_ids=None: {}),
@@ -961,9 +988,9 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
             patched.setattr(module, name, replacement)
             # Non-vacuity: a replacement the oracle cannot call would read "unavailable" and move
             # the revision without changing any verdict.
-            perturbed = authoring_contract._compiler_revision_payload()
+            moved, perturbed = authoring_contract._compiler_revision_moved(payload)
             assert all(perturbed[row] != "unavailable" for row in ("component_identity", "child_forwarding")), name
-            assert authoring_contract._compiler_revision() != baseline, name
+            assert moved, name
     assert authoring_contract._compiler_revision() == baseline
 
 
@@ -1142,6 +1169,15 @@ _CONTRACT_FIELDS_NOT_FORWARDED = {
     "removed_caches": (
         "effect side: which caches the child may empty, applied by each call's own rule for "
         "what a call un-establishes"),
+    "required_caches_retain_nothing_it_stored": (
+        "effect side: what no completion of the child leaves in the caches it requires, read "
+        "by the repetition check for a later run of that child, off its own walk"),
+    "unwaited_cache_writes": (
+        "effect side: the caches a completion of the child may STILL be writing, unioned into "
+        "the caller's own set at the call site whether or not the call is waited"),
+    "unwaited_writes_of_an_unknown_cache": (
+        "effect side: whether one of those pending writes is to a cache the child cannot name; "
+        "the call site then reads it against the CALLER's own observable caches"),
 }
 
 #: Per requirement field, one child whose own contract states a value other than the field's

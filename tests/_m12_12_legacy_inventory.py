@@ -2,9 +2,10 @@
 reachability inventory, allowlist baseline and served-surface retraction matrix.
 
 Not a ``test_*`` module, so pytest never collects it (this repo has no
-``pytest.ini``/``pyproject.toml``/``conftest.py``, so pytest's default
+``pytest.ini``/``pyproject.toml``, so pytest's default
 ``python_files = test_*.py *_test.py`` applies and a leading-underscore module is
-skipped). Precedent: ``tests/_m12_11_support.py``.
+skipped; ``tests/conftest.py`` exists but only registers the #184 behaviour-corpus
+guard and sets no collection option). Precedent: ``tests/_m12_11_support.py``.
 
 The module is BOTH the library the freeze test imports and the CLI that
 regenerates the committed baseline:

@@ -835,7 +835,10 @@ def test_the_oracle_covers_three_profiles_and_their_option_bytes():
 
 
 def test_the_revision_moves_with_passthrough_classification_or_bytes(monkeypatch):
-    baseline = authoring_contract._compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = authoring_contract._compiler_revision_payload()
+    baseline = authoring_contract.sha256_fingerprint(baseline_payload)
     original = ep.derive_process_execution_profile
 
     def _two_forms(cfg, symbols):
@@ -844,13 +847,13 @@ def test_the_revision_moves_with_passthrough_classification_or_bytes(monkeypatch
 
     with monkeypatch.context() as patched:
         patched.setattr(ep, "derive_process_execution_profile", _two_forms)
-        assert authoring_contract._compiler_revision() != baseline
+        assert authoring_contract._compiler_revision_moved(baseline_payload)[0]
     with monkeypatch.context() as patched:
         patched.setitem(
             pcm._PROFILE_OPTIONS, "passthrough",
             pcm.PASSTHROUGH_PROCESS_OPTIONS + ' stopProcessingIfZeroDocuments="true"',
         )
-        assert authoring_contract._compiler_revision() != baseline
+        assert authoring_contract._compiler_revision_moved(baseline_payload)[0]
     assert authoring_contract._compiler_revision() == baseline
 
 

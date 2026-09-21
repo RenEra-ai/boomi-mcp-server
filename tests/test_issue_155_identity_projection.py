@@ -3892,18 +3892,23 @@ def test_the_path_equivalence_moves_the_published_revision():
     # call's answer and the assertion below compares a value with itself. The
     # first version of this test did exactly that and reported the defect as
     # still present when it was fixed — the measurement was of the cache.
+    from boomi_mcp.authoring.contract import _compiler_revision_moved, _compiler_revision_payload
+
     reset_manifest_cache()
     before = get_authoring_revisions()["compiler_revision"]
+    # The served compiler revision's answer, from `_compiler_revision_moved`: the same answer
+    # as comparing the manifest's `compiler_revision`, replaying the behaviour corpus only
+    # when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
 
     def _folds_dot_segments(path):
         return digests._remove_dot_segments(digests._normalize_percent_encoding(path.strip()))
 
     with patch.object(digests, "comparable_path", _folds_dot_segments):
-        reset_manifest_cache()
-        after = get_authoring_revisions()["compiler_revision"]
+        moved = _compiler_revision_moved(baseline_payload)[0]
     reset_manifest_cache()
 
-    assert after != before, (
+    assert moved, (
         "the compiler revision stood still while the path equivalence changed, so "
         "a build validated under the old rule would report as current"
     )
@@ -3930,10 +3935,7 @@ def test_the_revision_oracle_covers_both_normalization_arms():
     from unittest.mock import patch
 
     import boomi_mcp.connector_replay.digests as digests
-    from boomi_mcp.authoring.contract import (
-        get_authoring_revisions,
-        reset_manifest_cache,
-    )
+    from boomi_mcp.authoring.contract import reset_manifest_cache
 
     # NON-VACUITY: the derived domain must actually contain both arms.
     outputs = dict(digests.path_equivalence_behaviour())
@@ -3941,19 +3943,22 @@ def test_the_revision_oracle_covers_both_normalization_arms():
     assert outputs["/%2F"] == "/%2F", "no probe exercises the escape-keeping arm"
     assert outputs["/%2f"] == "/%2F", "no probe exercises the hex-case arm"
 
-    reset_manifest_cache()
-    before = get_authoring_revisions()["compiler_revision"]
+    from boomi_mcp.authoring.contract import _compiler_revision_moved, _compiler_revision_payload
+
+    # The served compiler revision's answer, from `_compiler_revision_moved`: the same answer
+    # as comparing the manifest's `compiler_revision`, replaying the behaviour corpus only
+    # when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
 
     def _keeps_every_escape(match):
         # The mutant: upper-case the hex, never decode the unreserved byte.
         return "%" + match.group(1).upper()
 
     with patch.object(digests, "_UNRESERVED", frozenset()):
-        reset_manifest_cache()
-        after = get_authoring_revisions()["compiler_revision"]
+        moved = _compiler_revision_moved(baseline_payload)[0]
     reset_manifest_cache()
 
-    assert after != before, (
+    assert moved, (
         "dropping the unreserved decoding left the compiler revision unmoved, so "
         "a build validated under the old normalization reports as current"
     )
@@ -3976,10 +3981,7 @@ def test_the_revision_oracle_derives_its_casing_per_nibble():
     from unittest.mock import patch
 
     import boomi_mcp.connector_replay.digests as digests
-    from boomi_mcp.authoring.contract import (
-        get_authoring_revisions,
-        reset_manifest_cache,
-    )
+    from boomi_mcp.authoring.contract import reset_manifest_cache
 
     outputs = dict(digests.path_equivalence_behaviour())
     for spelling in ("/%AF", "/%Af", "/%aF", "/%af"):
@@ -3990,8 +3992,12 @@ def test_the_revision_oracle_derives_its_casing_per_nibble():
     for malformed in ("/%", "/%2", "/%ZZ", "/%2G"):
         assert malformed in outputs, malformed
 
-    reset_manifest_cache()
-    before = get_authoring_revisions()["compiler_revision"]
+    from boomi_mcp.authoring.contract import _compiler_revision_moved, _compiler_revision_payload
+
+    # The served compiler revision's answer, from `_compiler_revision_moved`: the same answer
+    # as comparing the manifest's `compiler_revision`, replaying the behaviour corpus only
+    # when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
 
     _real = digests._normalize_percent_encoding
 
@@ -4004,11 +4010,10 @@ def test_the_revision_oracle_derives_its_casing_per_nibble():
         return digests._PCT.sub(replace, path)
 
     with patch.object(digests, "_normalize_percent_encoding", _only_uniform_case):
-        reset_manifest_cache()
-        after = get_authoring_revisions()["compiler_revision"]
+        moved = _compiler_revision_moved(baseline_payload)[0]
     reset_manifest_cache()
 
-    assert after != before, (
+    assert moved, (
         "a normalization accepting only uniformly-cased escapes left the compiler "
         "revision unmoved, so mixed-case spellings could stop matching silently"
     )
@@ -4056,13 +4061,20 @@ def test_a_refusing_probe_does_not_blind_the_revision_oracle():
             raise ValueError("malformed percent escape")
         return _real(path).lower()
 
+    from boomi_mcp.authoring.contract import _compiler_revision_moved, _compiler_revision_payload
+
+    # The served compiler revision's answer, from `_compiler_revision_moved`: the same answer
+    # as comparing the manifest's `compiler_revision`, replaying the behaviour corpus only
+    # when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
     with patch.object(digests, "comparable_path", _hardened):
+        hardening_moved = _compiler_revision_moved(baseline_payload)[0]
         hardened = _revision()
     with patch.object(digests, "comparable_path", _hardened_and_lowered):
         hardened_and_changed = _revision()
     reset_manifest_cache()
 
-    assert hardened != baseline, "a hardening that refuses did not move the revision"
+    assert hardening_moved and hardened != baseline, "a hardening that refuses did not move the revision"
     assert hardened_and_changed != hardened, (
         "after a refusing probe the oracle stopped distinguishing, so a further "
         "acceptance change produced the same revision"
@@ -4349,11 +4361,19 @@ def test_the_route_decision_moves_the_published_revision():
         reset_manifest_cache,
     )
 
-    def _revision():
-        reset_manifest_cache()
-        return get_authoring_revisions()["compiler_revision"]
+    from boomi_mcp.authoring.contract import (
+        _compiler_revision_moved,
+        _compiler_revision_payload,
+        sha256_fingerprint,
+    )
 
-    before = _revision()
+    # The served compiler revision's answer, from `_compiler_revision_moved`: the same answer
+    # as comparing the manifest's `compiler_revision`, replaying the behaviour corpus only
+    # when no other row has already moved. The name says PUBLISHED, so the baseline is pinned
+    # to the manifest's own value once, here.
+    baseline_payload = _compiler_revision_payload()
+    reset_manifest_cache()
+    assert get_authoring_revisions()["compiler_revision"] == sha256_fingerprint(baseline_payload)
 
     def _rejects_equivalent_spellings(path_fields, *, modelled, resolved_enough):
         if modelled and resolved_enough and len(set(path_fields)) > 1:
@@ -4363,10 +4383,10 @@ def test_the_route_decision_moves_the_published_revision():
         ) if hasattr(crs.rest_route_decision, "__wrapped__") else ("static", False, None)
 
     with patch.object(crs, "rest_route_decision", _rejects_equivalent_spellings):
-        after = _revision()
+        moved = _compiler_revision_moved(baseline_payload)[0]
     reset_manifest_cache()
 
-    assert after != before, (
+    assert moved, (
         "the route reader's decision changed and the compiler revision did not"
     )
 

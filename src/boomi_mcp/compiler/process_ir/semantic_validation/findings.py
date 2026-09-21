@@ -27,6 +27,7 @@ from ....errors import (
     PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID,
     PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
     PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND,
     PROCESS_IR_REFERENCE_COMPONENT_TYPE_MISMATCH,
     PROCESS_IR_REFERENCE_CONNECTION_MISMATCH,
@@ -80,6 +81,28 @@ _MESSAGES: Dict[str, str] = {
     # #184 amendment 3 §8: raised by lineage when a call discharges its child's contract.
     PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED: (
         "a process is invoked in an entry context ProcessIR v1 does not admit"
+    ),
+    # #184 amendment 1 rule 8 (QA-184-s1-r21-01): raised by lineage at a call whose No Data
+    # child more than one document can reach. The evidence's `state_scope` names the scope
+    # of the state involved and does not identify which of the two causes applies.
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE: (
+        "the called No Data process runs once for each document reaching this call, and "
+        "each run may change state a later run requires: it requires something of a "
+        "document cache it may also add to or empty — it reads that cache before writing "
+        "it; or it consumes the profile or uses the properties of the documents it "
+        "retrieves from it, including documents it stored there itself, unless every run "
+        "ends with nothing it stored left in that cache — a whole-cache removal that runs "
+        "whenever its leg does follows its last write to it, no call it makes after that "
+        "removal may write that cache, no "
+        "call it makes without waiting may write that cache wherever that call stands, its "
+        "own or one inside a process it calls, and no outside writer is declared for that "
+        "cache on a retrieve of it that names one, since such a writer may refill it between "
+        "runs — and this call is authored wait=true and "
+        "abort_on_error=true — so a later run may find what an earlier run added or "
+        "emptied; or it reads state before writing it while its own state effects are "
+        "unknown. A call may write that cache when the contract derived from its ProcessIR "
+        "says it writes it, and a call this request cannot derive may write any cache the "
+        "calling process can observe"
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE: (
         "a property or cache key is read before any write establishes it"
@@ -156,6 +179,39 @@ _REMEDIATION: Dict[str, str] = {
         "run directly (a test run or a schedule) starts as No Data, with one empty "
         "document and nothing a caller supplies, so run it through its caller or "
         "remove what it requires of one."
+    ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE: (
+        "Make the called process run once for these documents. Either give it a Data "
+        "Passthrough entry, with a passthrough step first and this call authored "
+        "wait=true, so one call runs it once over the whole group; or call it from a "
+        "process with no explicit entry, as the terminal of a Branch leg that has no steps "
+        "of its own and no step in front of its Branch, which hands the call exactly one "
+        "document. Or answer the cause this call was refused for. A child that reads the "
+        "cache before writing it needs that cache established before its own write, and an "
+        "earlier run may have emptied it: no removal exempts that one — write the cache "
+        "before reading it, or give it a Data Passthrough entry and take what it needs from "
+        "the documents its callers hand over, which a No Data child never receives. "
+        "A "
+        "child that never reads the cache before writing it may instead remove the whole "
+        "cache after its last write to it, in a later leg of the same Branch that runs no "
+        "connector call, cache retrieve or data process before the removal, with this call "
+        "authored wait=true and abort_on_error=true, and with no call of its own able to "
+        "write that cache after the removal or while the run goes on: move a call that "
+        "stands after the removal to before it and wait for it, and wait for every call it "
+        "makes, including a call made by a process it calls. Supplying a called process's "
+        "ProcessIR helps only where the contract derived from it shows that process does "
+        "not write that cache — for a call nothing waits for, that is the only thing that "
+        "helps. A cache this request declares an outside writer for, where a retrieve of "
+        "that cache authors external_writer, takes no such "
+        "exemption at all, whatever the child's own calls do: the writer may refill it "
+        "between runs, so either the child stops requiring that cache of its callers or it "
+        "runs once for the whole group. A declaration no retrieve names establishes nothing "
+        "and withholds nothing. A child that reads state before writing it while its own state effects are "
+        "unknown is refused for that read whatever the caches do: make its effects "
+        "derivable, by supplying the ProcessIR of what it calls or replacing the step "
+        "nothing can inspect. "
+        "The rule is published at "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='process_call')."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE: (
         "Write the property or cache key on every path that reaches this read, "

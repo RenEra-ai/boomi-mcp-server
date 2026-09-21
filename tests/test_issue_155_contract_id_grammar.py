@@ -336,7 +336,9 @@ def test_the_revision_moves_when_an_action_identifier_is_remapped():
 
     from boomi_mcp.authoring import contract as contract_module
 
-    baseline = contract_module._compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = contract_module._compiler_revision_payload()
     registry = contract_module._replay_registry()
 
     class _Remapped:
@@ -354,8 +356,8 @@ def test_the_revision_moves_when_an_action_identifier_is_remapped():
         "the remap did not apply, so this proves nothing"
     )
     with patch.object(contract_module, "_replay_registry", lambda: _Remapped):
-        moved = contract_module._compiler_revision()
-    assert moved != baseline, (
+        moved = contract_module._compiler_revision_moved(baseline_payload)[0]
+    assert moved, (
         "remapping an action identifier changed every derived contract reference "
         "and the served revision did not move"
     )

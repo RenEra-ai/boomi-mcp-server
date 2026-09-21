@@ -1,10 +1,10 @@
 import pathlib
 """Shared fixtures for the #146 (M12.11) authoring-surface tests.
 
-Not a ``test_*`` module, so pytest does not collect it. There is no
-``conftest.py`` in this repo — every test file does its own ``sys.path`` insert —
-so this module does the same and is imported by the eight ``test_m12_11_*``
-files.
+Not a ``test_*`` module, so pytest does not collect it. The one ``conftest.py``
+in this repo (``tests/conftest.py``) registers the #184 behaviour-corpus guard and
+nothing else — every test file still does its own ``sys.path`` insert — so this
+module does the same and is imported by the eight ``test_m12_11_*`` files.
 
 Imports use the bare ``boomi_mcp.`` prefix, matching every other M12 test.
 """

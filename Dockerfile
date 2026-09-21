@@ -98,6 +98,13 @@ USER appuser
 RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/src python -c "import boomi_mcp.categories.components.analyze_component; import boomi_mcp.categories.components.trading_partners; import boomi_mcp.categories.components.connectors; import boomi_mcp.categories.integration_builder" \
  || (echo '[BUILD ERROR] Required tool module failed to import - likely dropped from the build context by a .gcloudignore/.gitignore upload exclusion. Verify src/boomi_mcp/** is present in the uploaded build context.' >&2; exit 1)
 
+# Same class, for a packaged DATA asset an import gate cannot see (#184 batch 21b): the
+# compiler-revision behaviour corpus. Losing it is silent at runtime — `compiler_revision`
+# keeps being served, but stops varying with any compiler behaviour — so it is checked here,
+# where a missing file can still fail a build.
+RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/src python -c "from boomi_mcp.authoring.revision_corpus import assert_packaged; print('behaviour corpus inputs:', assert_packaged())" \
+ || (echo '[BUILD ERROR] The compiler-revision behaviour corpus did not ship - src/boomi_mcp/authoring/revision_corpus_v1.json.gz is missing from the build context, and the served compiler_revision would no longer track compiler behaviour.' >&2; exit 1)
+
 # KB corpus + model cache: fetched only when a release tag is provided at build
 # time. With KB_RELEASE_TAG empty these are no-ops and the image is unchanged;
 # runtime must then keep BOOMI_DOCS_ENABLED=false or startup fails fast.

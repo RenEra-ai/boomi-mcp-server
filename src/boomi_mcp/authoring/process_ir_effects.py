@@ -965,14 +965,26 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     from ..compiler.process_ir.semantic_validation.context import (
         prepare_validation_context,
     )
+    from ..compiler.process_ir.semantic_validation.context import (
+        canonical_cache_capabilities,
+        canonical_cache_refs,
+    )
     from ..compiler.process_ir.semantic_validation.lineage import (
         _trusted_effects,
         proved_removals,
         walk_lineage,
     )
 
-    base = capabilities or DEFAULT_VALIDATION_CAPABILITIES
     prepared = prepare_validation_context(child_ir, symbols)
+    # The trusted context in the graph's canonical cache spelling, for the facts read off
+    # the CONTEXT rather than off the walk (`mutated_state`, `removed_caches`, and the
+    # `guaranteed_state` filter that reads `mutated_state`). The walk canonicalizes what it
+    # is handed; this derivation reads the same rows a second time, and reading them raw
+    # made one component under two references two caches HERE: a child's guarantee was
+    # filtered out by a `mutated_state` entry spelled the other way, so the process
+    # forwarding it stated no guarantee at all (measured, correction batch 21a round 5).
+    base = canonical_cache_capabilities(
+        capabilities or DEFAULT_VALIDATION_CAPABILITIES, canonical_cache_refs(symbols))
     form = classify_entry(prepared.cfg)
     if form == LISTENER:
         return {"entry_form": "unknown"}
@@ -1030,6 +1042,10 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         # process nothing derives, so a parent that filled that cache, called the child
         # and read the cache afterwards was admitted (correction batch 18).
         "removed_caches": tuple(sorted(removed)),
+        # Amendment 1 rule 7: what a completion of this process may still be writing, off the
+        # walk — its own unwaited calls, and what every child it calls says of itself.
+        "unwaited_cache_writes": tuple(walk.unwaited_cache_writes),
+        "unwaited_writes_of_an_unknown_cache": walk.unwaited_writes_of_an_unknown_cache,
     }
     # Amendment 1 rule 7: what every normal completion establishes, off the walk's meet
     # over normal exits. Execution-scoped keys the child itself writes: a document
@@ -1058,6 +1074,15 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
     facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
+    # Amendment 1 rule 8, "until stable": which of the caches those rows name a completion may
+    # leave holding something stored during the run, off the walk's own continuation. None of
+    # them, and a later run's uses retrieve only what the callers stored — the rows the call
+    # already proves, or nothing.
+    facts["required_caches_retain_nothing_it_stored"] = not (
+        ({row[0] for row in facts["cache_requirements"]}
+         | {row[0] for row in facts["cache_property_requirements"]})
+        & set(walk.may_hold_at_exit)
+    )
     if form != PASSTHROUGH:
         facts.update(
             entry_form="scheduled",
@@ -1157,6 +1182,16 @@ def _caller_cached_properties(
     still = {(row[0], row[1], row[2]) for row in after.unestablished_cached_keys}
     rows = {(cache, name, ref, bound) for pointer, cache, name, ref, bound in candidates
             if (pointer, cache, name) not in still}
+    # An ORDINARY read the seed clears is a use of the cache its documents ride on, exactly as
+    # a cleared binding is below — whichever seeded cache the property came from. Measured the
+    # same way, by the read's own pointer: a Message between the retrieve and the read keeps
+    # the documents, so it keeps the cache they ride on (correction batch 21a).
+    still_reads = {(pointer, name) for pointer, name, _cache in after.read_cache_origins}
+    rows |= {
+        (ridden, name, None, False)
+        for pointer, name, ridden in walk.read_cache_origins
+        if (pointer, name) not in still_reads
+    }
     cleared_bindings = set(walk.unestablished_bindings) - set(after.unestablished_bindings)
     if cleared_bindings:
         rides_on: Dict[str, Set[str]] = {}
@@ -1210,14 +1245,48 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     return tuple(seeds)
 
 
+#: What a process nothing could ORDER claims about itself: nothing it could be believed on
+#: (#184 amendment 1 rule 7, correction batch 21a round 6, B21A-R5-CYC-01). A call cycle makes
+#: a root underivable in order, and these four fields are the spelling the walk already gives
+#: an underivable CALL — so a supplied-but-cyclic ProcessIR is never weaker evidence than an
+#: absent one. Re-applied after such a root's own facts are derived, so a derivation run
+#: against seeded children cannot hand back a stronger claim than its seeds supported.
+_A_CYCLE_MEMBERS_CLAIMS: Dict[str, Any] = {
+    "state_known": False,
+    "cache_writes_known": False,
+    "unwaited_writes_of_an_unknown_cache": True,
+    "required_caches_retain_nothing_it_stored": False,
+}
+#: The seed a cycle member is SEEN as while the others are derived is these claims plus the
+#: entry form an absent ProcessIR would give — `unknown`, which every reader already treats as
+#: "ask nothing of this and assume everything". Built where it is used, so perturbing the one
+#: table above perturbs the seed too.
+
+#: What a cycle member OWES its callers, carried between the passes of the fixpoint below. The
+#: first four are sets of rows and only grow, which is what makes the iteration terminate; the
+#: last is a per-consumer sequence, taken from the latest derivation (correction batch 21a
+#: round 7, CYC6-01).
+_OBLIGATION_FIELDS: Tuple[str, ...] = (
+    "cache_requirements",
+    "cache_property_requirements",
+    "required_reads",
+    "required_writers",
+    "document_requirements",
+)
+
+
 def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None) -> Dict[str, tuple]:
     """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
-    child's own walk. The members of a call cycle have no derivable entry and are
-    ``unknown``. A call whose target is not a root of this request binds no row, so its
-    admission treats the child as unknown. Only a root another root CALLS is validated
-    under its callers' obligations; every call discharges them on its own.
+    child's own walk. The members of a call cycle cannot be put in that order: they are
+    SEEDED with the contract an underivable call gets and then derived against those seeds
+    to a fixed point, so each states its own entry form and its own obligations — including
+    what it owes on behalf of another member it calls — while everything the seeding hid
+    stays unknown (B21A-R5-CYC-01, CYC6-01). A call whose target is not a root of this
+    request binds no row, so its admission treats the child as unknown. Only a root another
+    root CALLS is validated under its callers' obligations; every call discharges them on
+    its own.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ChildEntryContractV1,
@@ -1263,8 +1332,75 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
             child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})
         )
         facts[key] = derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), own)
-    for key in roots:
-        facts.setdefault(key, {"entry_form": "unknown"})
+    # A root nothing could ORDER — a member of a call cycle, and any process that
+    # transitively calls one — cannot be derived in order: its facts would need its callee's,
+    # which need its. Stated as `entry_form="unknown"` alone, every other field of the row
+    # took its default, which made a supplied-but-cyclic ProcessIR WEAKER evidence than an
+    # absent one: the row said the child requires nothing, writes nothing it cannot list and
+    # has nothing in flight, and `_discharge_child_contract` skips an `unknown` entry
+    # altogether — so adding one decision-guarded leg calling a process that calls back
+    # admitted the very composition amendment 1 rule 7 refuses (B21A-R5-CYC-01, measured).
+    #
+    # So each unordered root is SEEDED with the fail-closed contract — the spelling the walk
+    # already gives an underivable call: its state is not known, its cache writes are not all
+    # listed, and what it may still be writing is a cache its caller must name for itself —
+    # and then derived against those seeds TO A FIXED POINT on what it OWES its callers.
+    #
+    # One pass was not enough, and the gap was a fail-open: each member saw every other as the
+    # `unknown` seed, `_discharge_child_contract` returns early on an unknown entry, so an
+    # obligation BETWEEN two members of one cycle was charged at the member and nowhere above
+    # it — the caller storing documents that break it was admitted while the flattened graph
+    # refused (CYC6-01, measured on three back-edge spellings). Each pass now reads the
+    # previous pass's rows, and the obligation fields carry forward as a UNION, so what one
+    # member learns to owe its callers is owed by the member that calls it as well.
+    #
+    # TERMINATION. The four set-valued obligation fields only ever grow, over a finite lattice
+    # (the caches, property names and profile refs this request names, times the bound flag),
+    # so each pass either adds a row somewhere or the loop stops; `document_requirements` is a
+    # per-consumer sequence rather than a set, so it is taken from the latest derivation and a
+    # change in it counts as progress like any other. The bound below is deliberately larger
+    # than the number of distinct growth steps the lattice allows, and exceeding it is an
+    # invariant violation this raises on rather than answering with a contract nothing
+    # validated.
+    unordered = [key for key in sorted(roots) if key not in facts]
+    for key in unordered:
+        facts[key] = dict(_A_CYCLE_MEMBERS_CLAIMS, entry_form="unknown")
+    passes = 0
+    bound = 3 + len(unordered) * (1 + len(_OBLIGATION_FIELDS))
+    while unordered:
+        passes += 1
+        if passes > bound:
+            raise RuntimeError(
+                "the entry-contract fixpoint over {0} unordered root(s) did not settle in {1} "
+                "passes; the obligation fields are supposed to grow monotonically".format(
+                    len(unordered), bound))
+        previous = dict(facts)
+        for key in unordered:
+            own = ProcessIRValidationCapabilitiesV1(
+                child_entry_contracts=tuple(
+                    ChildEntryContractV1(process_ref=ref, **previous[child])
+                    for ref, child in sorted(calls[key].items())
+                    if child in previous
+                ),
+                **(base_for(key) if base_for else {})
+            )
+            derived = dict(
+                derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), own),
+                # ... but never weaker than the seed: the derivation saw a fail-closed row for
+                # every child it could not order, so what it could not see stays unknown. Its
+                # own ENTRY FORM is not a seed claim — that is read off its own CFG and is the
+                # fact a caller needs to ask the repetition question at all.
+                **_A_CYCLE_MEMBERS_CLAIMS
+            )
+            for field in _OBLIGATION_FIELDS:
+                if field == "document_requirements":
+                    continue
+                grown = set(previous[key].get(field, ()) or ()) | set(derived.get(field, ()) or ())
+                derived[field] = tuple(sorted(
+                    grown, key=lambda row: tuple("" if part is None else str(part) for part in row)))
+            facts[key] = derived
+        if all(previous[key] == facts[key] for key in unordered):
+            break
     called = {child for targets in calls.values() for child in targets.values() if child is not None}
     bindings: Dict[str, tuple] = {}
     for key in roots:

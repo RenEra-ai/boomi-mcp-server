@@ -6219,6 +6219,14 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
     seen = []
     stack = []
 
+    # #184 CDX-184-r20-02: the process-cached manifest's FIRST build replays the compiler over
+    # the packaged behaviour corpus, whose tables name roots this request never authored.
+    # That is process start-up, not the evidenced route, so it happens before any consumer is
+    # watched; every compile the route itself makes is still observed below.
+    from boomi_mcp.authoring.contract import build_authoring_contract_manifest
+
+    build_authoring_contract_manifest()
+
     # THE SHARED SEAM, not a per-name patch. Both public compile entries call
     # `_compile_parsed_process_ir_v1`, so instrumenting it observes every
     # compile however it was reached — through a sibling entry, through the

@@ -4116,11 +4116,17 @@ def test_the_compiler_revision_covers_the_listener_inbound_contract():
     import src.boomi_mcp.compiler.process_ir.connector_resolution as cr_src
     from boomi_mcp.authoring.contract import (
         _compiler_revision,
+        _compiler_revision_moved,
+        _compiler_revision_payload,
         _listener_inbound_behaviour_oracle,
         _nested_literal_options,
+        sha256_fingerprint,
     )
 
-    baseline = _compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
+    baseline = sha256_fingerprint(baseline_payload)
     cases = _listener_inbound_behaviour_oracle()
     # The oracle is not vacuous: it reaches every verdict the rule can reach,
     # including the inbound refusal, and its case set follows the vocabularies.
@@ -4153,7 +4159,7 @@ def test_the_compiler_revision_covers_the_listener_inbound_contract():
         try:
             setattr(cr, name, value)
             setattr(cr_src, name, value)
-            assert _compiler_revision() != baseline, name
+            assert _compiler_revision_moved(baseline_payload)[0], name
         finally:
             setattr(cr, name, original[0])
             setattr(cr_src, name, original[1])
@@ -4198,7 +4204,13 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     )
     from boomi_mcp.compiler.process_ir.invariants import ENTRY_ROLE_RESTRICTIONS
 
-    baseline = _compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    from boomi_mcp.authoring.contract import _compiler_revision_moved, _compiler_revision_payload
+    from boomi_mcp.authoring.revisions import sha256_fingerprint
+
+    baseline_payload = _compiler_revision_payload()
+    baseline = sha256_fingerprint(baseline_payload)
     oracle = _execution_profile_behaviour_oracle()
 
     # NON-DEGENERACY, before any mutation: both answers occur, and the listener
@@ -4247,11 +4259,11 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
                         "connector-%s-unnormalized-%s" % (role, family)):
                 assert oracle["cases"][key] == "scheduled", key
 
-    def _revision_under(rule):
+    def _moved_under(rule):
         original = ep.derive_process_execution_profile
         try:
             ep.derive_process_execution_profile = rule
-            return _compiler_revision()
+            return _compiler_revision_moved(baseline_payload)[0]
         finally:
             ep.derive_process_execution_profile = original
 
@@ -4259,7 +4271,7 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
 
     # 1. A BEHAVIOUR mutant: a derivation that classifies every graph as scheduled
     #    — ignoring the listener entry entirely.
-    assert _revision_under(lambda cfg, symbols: ep.SCHEDULED) != baseline, (
+    assert _moved_under(lambda cfg, symbols: ep.SCHEDULED), (
         "replacing the derivation with an always-scheduled rule left the served "
         "compiler revision unchanged — the revision covers the vocabulary, not "
         "the behaviour"
@@ -4268,9 +4280,9 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
 
     # 2. An EQUIVALENCE wrapper — same classifications, different code. The
     #    revision must NOT move, or it hashes identity rather than behaviour.
-    assert _revision_under(
+    assert not _moved_under(
         lambda cfg, symbols: original_derive(cfg, symbols)
-    ) == baseline, "a behaviour-preserving wrapper moved the served revision"
+    ), "a behaviour-preserving wrapper moved the served revision"
 
     # 3. THE PRE-#158 RULE, re-introduced: a connector entry whose operation symbol
     #    names a listener family is classified a listener. The decoy rows are what
@@ -4298,16 +4310,16 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
 
         return _rule
 
-    assert _revision_under(_family_rule("connector", "source")) != baseline
-    assert _revision_under(_family_rule("connector", "target")) != baseline
+    assert _moved_under(_family_rule("connector", "source"))
+    assert _moved_under(_family_rule("connector", "target"))
     entry_legal = set(ENTRY_ROLE_RESTRICTIONS["connector_call"])
     connector_call_member = next(
         m for m in _cfg_semantic_members()
         if m.model_fields["semantic_kind"].default == "connector_call"
     )
     for role in _literal_options(connector_call_member, "role"):
-        probed = _revision_under(_family_rule("connector_call", role))
-        assert (probed != baseline) == (role in entry_legal), (role, entry_legal)
+        probed = _moved_under(_family_rule("connector_call", role))
+        assert probed == (role in entry_legal), (role, entry_legal)
     assert _compiler_revision() == baseline
 
     # 4. The decoy family table is still covered: widening the compiler's refusal
@@ -4315,10 +4327,10 @@ def test_the_compiler_revision_covers_the_execution_profile_derivation():
     original_families = C.LISTENER_CONNECTOR_TYPES
     try:
         C.LISTENER_CONNECTOR_TYPES = frozenset(set(original_families) | {"zzz-probe"})
-        widened = _compiler_revision()
+        widened = _compiler_revision_moved(baseline_payload)[0]
     finally:
         C.LISTENER_CONNECTOR_TYPES = original_families
-    assert widened != baseline
+    assert widened
     assert _compiler_revision() == baseline
 
 
@@ -5056,10 +5068,18 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
     """
     import boomi_mcp.compiler.process_ir.contracts as C
     import boomi_mcp.compiler.process_ir.execution_profile as ep
-    from boomi_mcp.authoring.contract import _compiler_revision
+    from boomi_mcp.authoring.contract import (
+        _compiler_revision,
+        _compiler_revision_moved,
+        _compiler_revision_payload,
+        sha256_fingerprint,
+    )
     from boomi_mcp.compiler.process_ir.entry_policy import classify_entry
 
-    baseline = _compiler_revision()
+    # `_compiler_revision_moved` answers exactly as comparing `_compiler_revision()` would,
+    # replaying the behaviour corpus only when no other row has already moved.
+    baseline_payload = _compiler_revision_payload()
+    baseline = sha256_fingerprint(baseline_payload)
     original = ep.derive_process_execution_profile
     mutants = _symbol_driven_mutants(ep, C)
     assert len(mutants) >= 6, sorted(mutants)
@@ -5068,7 +5088,7 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
     try:
         for name, mutant in mutants.items():
             ep.derive_process_execution_profile = mutant
-            if _compiler_revision() == baseline:
+            if not _compiler_revision_moved(baseline_payload)[0]:
                 survived.append(name)
     finally:
         ep.derive_process_execution_profile = original
@@ -5099,7 +5119,7 @@ def test_the_served_revision_binds_multi_symbol_family_lookup():
     for equivalent in (_via_policy, _via_entry_map, _index_built_and_ignored):
         try:
             ep.derive_process_execution_profile = equivalent
-            assert _compiler_revision() == baseline, (
+            assert not _compiler_revision_moved(baseline_payload)[0], (
                 "an equivalent rule moved the served revision: %s" % equivalent.__name__
             )
         finally:

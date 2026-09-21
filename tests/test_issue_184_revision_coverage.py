@@ -104,6 +104,7 @@ def _perturbations():
     """
     real_overlay = lineage._overlay_cache_read
     real_freeze = lineage._cohort_at_write
+    real_cohort = lineage._cohort
     real_state = lineage._State
     x = (lineage.DDP, "X")
 
@@ -143,6 +144,15 @@ def _perturbations():
         ("lineage", "_cohort_at_write"):
             lambda on_documents, writers, stream: real_freeze(on_documents, writers, stream)._replace(
                 alternatives=frozenset()),
+        # What a root nothing could order claims about itself: emptied, a cycle member's
+        # derived facts stand unqualified and a supplied-but-cyclic ProcessIR is weaker
+        # evidence than an absent one again (B21A-R5-CYC-01).
+        ("effects", "_A_CYCLE_MEMBERS_CLAIMS"): {},
+        # The one factory every cohort is built through: it is handed the origins, so dropping
+        # them there drops the caches a later retrieve of that cohort could name.
+        ("lineage", "_cohort"):
+            lambda guaranteed, possible, alternatives, count, origins=(): real_cohort(
+                guaranteed, possible, alternatives, count),
         ("lineage", "_overlay_cache_read"): without_cached_alternatives,
         ("lineage", "_writes_of"): lambda semantic: (),
         ("lineage", "_trusted_effects"): lambda semantic, capabilities: (),
@@ -170,11 +180,20 @@ def _perturbations():
             lambda state, cache_ref, external_writer: False,
         ("lineage", "_caller_owes_a_cached_property"):
             lambda cache_ref, name, capabilities, state: False,
+        # The one authority on whether a caller's documents may share a cache here
+        # (correction batch 21a). Answering yes everywhere forgets every proved removal and
+        # refill, so the removed-and-refilled chain charges its caller again.
+        ("lineage", "_caller_documents_may_reach"): lambda state, cache_ref: True,
+        # The proof a removal's MAY-set clear and seal rest on. Dropping its relative half — a
+        # removal on the documents a Branch hands its leg runs whenever a later leg runs —
+        # keeps a document written before a shared-trigger removal reaching a later leg again.
+        ("lineage", "_removal_runs_before_anything_after_it"):
+            lambda stream: lineage._path_provably_runs(stream),
         ("lineage", "_without_cache_establishment"): lambda state, cache_ref: state,
         ("lineage", "_after_a_whole_cache_removal"):
             lambda state, cache_ref, proved_to_run: state.without_content(cache_ref),
         ("lineage", "_seeds_an_unknown_cohort"): lambda cache_ref, cohort_names: True,
-        ("lineage", "_repetition_unstable_caches"): lambda contract, cache_refs: (),
+        ("lineage", "_repetition_unstable_caches"): lambda contract, cache_refs, semantic: (),
         ("lineage", "_leg_member_index"): lambda prepared: {},
         ("lineage", "_leg_write_index"): lambda prepared, capabilities=None: {},
         ("lineage", "_written_in_a_later_leg"): lambda leg_writes, leg, key: False,
@@ -294,11 +313,11 @@ def test_every_lineage_decision_moves_the_compiler_revision(monkeypatch):
     for key, replacement in sorted(perturbations.items()):
         with monkeypatch.context() as patched:
             _patch(patched, key, replacement)
-            perturbed = authoring_contract._compiler_revision_payload()
+            moved, perturbed = authoring_contract._compiler_revision_moved(payload)
         rows = sorted(row for row, value in perturbed.items() if value == "unavailable")
         if rows:
             unavailable[key] = rows
-        if authoring_contract.sha256_fingerprint(perturbed) == baseline:
+        if not moved:
             unmoved.append(key)
     assert authoring_contract._compiler_revision() == baseline
     assert {
@@ -397,12 +416,13 @@ def test_a_retrieve_that_drops_one_component_of_its_answer_moves_the_revision(co
     material. The finding's own mutation moved only the document keys; a retrieve that
     kept the documents and dropped the cached cohorts, or the execution state, changed
     public plan and compile verdicts with the served revision standing still."""
-    baseline = authoring_contract._compiler_revision()
+    baseline_payload = authoring_contract._compiler_revision_payload()
+    baseline = authoring_contract.sha256_fingerprint(baseline_payload)
     with monkeypatch.context() as patched:
         patched.setattr(lineage, "_overlay_cache_read", _dropping(component))
-        payload = authoring_contract._compiler_revision_payload()
+        moved, payload = authoring_contract._compiler_revision_moved(baseline_payload)
     assert sorted(row for row, value in payload.items() if value == "unavailable") == []
-    assert authoring_contract.sha256_fingerprint(payload) != baseline, component
+    assert moved, component
     assert authoring_contract._compiler_revision() == baseline
 
 
@@ -530,10 +550,10 @@ def test_each_call_state_rule_moves_the_revision_through_its_own_row(rule, monke
         # `_patch` rather than a bare setattr: a rule may live on a method of the lattice
         # (`_State.with_write`), which only the dotted form reaches.
         _patch(patched, ("lineage", target), replacement)
-        payload = authoring_contract._compiler_revision_payload()
+        moved, payload = authoring_contract._compiler_revision_moved(baseline_payload)
     assert sorted(row for row, value in payload.items() if value == "unavailable") == []
     assert payload[row_name] != baseline_payload[row_name], rule
-    assert authoring_contract.sha256_fingerprint(payload) != baseline, rule
+    assert moved, rule
     assert authoring_contract._compiler_revision() == baseline
 
 
@@ -610,18 +630,18 @@ def test_the_two_reference_cases_rest_on_the_cache_identity_canonicalization(mon
     recording two copies of one verdict."""
     from boomi_mcp.compiler.process_ir.semantic_validation import pipeline as validation_pipeline
 
-    baseline = authoring_contract._compiler_revision()
+    baseline_payload = authoring_contract._compiler_revision_payload()
     for module in (validation_pipeline, lineage):
         monkeypatch.setattr(module, "canonical_cache_capabilities",
                             lambda capabilities, canonical: capabilities)
-    payload = authoring_contract._compiler_revision_payload()
+    moved, payload = authoring_contract._compiler_revision_moved(baseline_payload)
     cases = payload["child_call_state"]["one_cache_two_refs"]
     assert any(
         halves["stated_by_a_caller"]["through_one_reference"]
         != halves["stated_by_a_caller"]["through_two_references"]
         for halves in cases.values()
     ), cases
-    assert authoring_contract.sha256_fingerprint(payload) != baseline
+    assert moved
 
 
 def _recorded_root_verdicts(row):

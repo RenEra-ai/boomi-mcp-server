@@ -28,6 +28,7 @@ issue exists to remove.
 
 from __future__ import annotations
 
+import threading
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, NamedTuple, Optional, Tuple
 
@@ -46,7 +47,12 @@ from ..models.authoring_workflow import (
     authoring_request_v1_json_schema,
     authoring_revision_binding_v1_json_schema,
 )
-from .revisions import capability_fingerprint, schema_fingerprint, sha256_fingerprint
+from .revisions import (
+    canonical_json_bytes,
+    capability_fingerprint,
+    schema_fingerprint,
+    sha256_fingerprint,
+)
 
 class AuthoringSchemaRegistration(NamedTuple):
     """One served selector: version, schema builder, provenance, query builder.
@@ -277,6 +283,9 @@ _REASON_CODES: Mapping[str, str] = MappingProxyType(
 )
 
 _MANIFEST_CACHE: Dict[str, Any] = {}
+#: Serializes the cache MISS, so one cold caller builds and the others wait for its result.
+#: Re-entrant, so a loader that reaches the manifest behaves exactly as it did unlocked.
+_MANIFEST_LOCK = threading.RLock()
 
 
 def _process_ir_schema() -> Dict[str, Any]:
@@ -813,11 +822,24 @@ def build_authoring_contract_manifest() -> Mapping[str, Any]:
     Computed once per process and returned immutable: it is derived from
     registries that do not change at runtime, and rebuilding it per request would
     make an expensive package scan part of every discovery call.
+
+    ONCE, not once per concurrent caller. The miss path is serialized and the cache
+    re-read under the lock: sync tools are dispatched on a worker thread pool, so two
+    requests arriving during a cold start both missed and both rebuilt — which since
+    #184 batch 21b replays the whole behaviour corpus, measured at 13.3 s for four
+    cold threads against 2.3 s for one (CDX-184-r5-STALE-03).
     """
     cached = _MANIFEST_CACHE.get("manifest")
     if cached is not None:
         return cached
+    with _MANIFEST_LOCK:
+        cached = _MANIFEST_CACHE.get("manifest")
+        return cached if cached is not None else _build_authoring_contract_manifest()
 
+
+def _build_authoring_contract_manifest() -> Mapping[str, Any]:
+    """The build itself. Callers use :func:`build_authoring_contract_manifest`, which holds
+    the lock and the cache; this runs exactly once per process."""
     schema_bundle = _schema_bundle()
     # #146 amendment: the VERSION participates, not only the body hash.
     #
@@ -1082,13 +1104,51 @@ def _listener_inbound_behaviour_oracle() -> Dict[str, Any]:
     return cases
 
 
-def _compiler_revision_payload() -> dict:
+def _behaviour_corpus_payload() -> Dict[str, Any]:
+    """The replayed verdicts of the packaged behaviour corpus (``revision_corpus``).
+
+    Inputs are packaged, verdicts never are: each is computed here, by the entry points
+    this server runs. A corpus that cannot be read raises, and the row reads
+    "unavailable" like any other — which the shipped-build guard in
+    `tests/test_issue_155_contract_id_grammar.py` refuses in the suite. An IMAGE has no
+    suite, so the build gate calls :func:`revision_corpus.assert_packaged` beside the
+    tool-import gate:
+    losing this asset leaves a revision that no longer varies with any compiler behaviour,
+    which is worth failing a build over rather than discovering from a digest that never
+    moves again (CDX-184-r5-DOC-21B-06).
+    """
+    from . import revision_corpus
+
+    return revision_corpus.corpus_verdict_row()
+
+
+def _compiler_revision_payload(*, _without_corpus_row: bool = False) -> dict:
     """Fingerprint of the compiler + validator + recipe capability contracts.
 
-    All three are already-published contracts, so this moves when BEHAVIOR moves.
-    Deliberately not a source hash or a git SHA: equivalent packaged code must
-    produce the same revision, or a rebuilt-but-identical deployment reports
-    drift against itself.
+    Every row is BEHAVIOUR, never source: the published contracts, the verdicts the
+    behaviour oracles' case sets receive, and — the ``behaviour_corpus`` row — the
+    verdicts the compiler's entry points give every input the covered tests exercise,
+    replayed from a packaged corpus of those inputs. So the revision moves when a
+    behaviour a covered test can observe moves, wherever in the compiler it was
+    changed. The bound, in two parts: behaviour no oracle case and no corpus input
+    exhibits, and a change the corpus's VERDICT PROJECTION does not carry. That
+    projection is `revision_corpus.project_outcome`: everything the entry point RETURNED,
+    read through the authority of each class it is made of — a model by its fields and
+    its computed fields, a named tuple by its fields, a slotted object by its slots, a
+    readable property the package declares, and a container item by item WITH its type —
+    so a report's `is_valid`, a resolution's every slot and its `ok`, and a compile
+    result's lowered CFG all ride, and nothing is enumerated per kind. An acceptance carries its canonical
+    emission plan's SHA-256 in its own slot. A raise that is not a compile refusal is
+    recorded by TYPE only, so its message moves nothing through this row. `AUTHORING_WORKFLOW_V1.md` §4 states the same bound
+    for callers, including which calls of a covered test are recorded.
+
+    Deliberately not a source hash or a git SHA: equivalent packaged code — the same
+    code and the same corpus — produces the same revision, or a rebuilt-but-identical
+    deployment reports drift against itself.
+
+    ``_without_corpus_row`` is for :func:`_compiler_revision_moved`, which adds the row back
+    itself whenever the answer depends on it (and for the deliberately broken twins of it the
+    revision-corpus witness must refuse).
     """
     payload: Dict[str, Any] = {}
     try:
@@ -1302,6 +1362,16 @@ def _compiler_revision_payload() -> dict:
             _child_forwarding_behaviour_oracle,
         ),
         (
+            # #184 correction batch 21b (CDX-184-r20-02). Every row above is a case set
+            # someone chose, and a carry inside the lineage walk changed what the server
+            # accepts with all of them standing still. This row is the verdicts the
+            # compiler's entry points give every input the covered tests hand them,
+            # replayed from the packaged corpus, so a change a covered test can observe
+            # moves the revision wherever in the compiler it was made.
+            "behaviour_corpus",
+            _behaviour_corpus_payload,
+        ),
+        (
             "compiler_diagnostic_specs",
             lambda: [
                 dict(spec)
@@ -1325,11 +1395,61 @@ def _compiler_revision_payload() -> dict:
         ("parse_diagnostic_specs", _parse_diagnostic_specs_payload),
         ("process_ir_authoring_contract", _authoring_projection_payload),
     ):
-        try:
-            payload[key] = loader()
-        except Exception:  # noqa: BLE001
-            payload[key] = "unavailable"
+        if _without_corpus_row and key == _CORPUS_ROW:
+            continue
+        payload[key] = _row_or_unavailable(loader)
     return payload
+
+
+_CORPUS_ROW = "behaviour_corpus"
+#: What a row reads when :func:`_compiler_revision_moved` did not need to compute it. Never
+#: "unavailable", which means a loader RAISED: a caller scanning the returned payload for
+#: degraded rows must be able to tell "this one failed" from "this one was not asked"
+#: (CDX-184-r5-DOC-21B-05).
+NOT_COMPARED = "not compared"
+
+
+def _row_or_unavailable(loader) -> Any:
+    try:
+        return loader()
+    except Exception:  # noqa: BLE001
+        return "unavailable"
+
+
+def _compiler_revision_moved(baseline_payload: Mapping[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """``(moved, payload)``: whether the served compiler revision now differs from the one
+    ``baseline_payload`` fingerprints — the SAME answer as
+    ``_compiler_revision() != sha256_fingerprint(baseline_payload)``, reached by replaying the
+    behaviour corpus only when that answer depends on it.
+
+    Why it is the same answer. The fingerprint is SHA-256 over the canonical JSON of the
+    payload, whose keys are sorted, so the bytes are the rows' own canonical bytes under a
+    fixed key order. If the key set differs, or any row other than the corpus row serializes
+    differently, the bytes differ and so does the digest: the revision moved, and no replay
+    can change that. Only when every other row serializes identically does the answer rest on
+    the corpus row, and then the row is computed — through the same memoized loader the
+    served revision uses — and compared. Every row is serialized before any is compared, so
+    a row JSON cannot represent raises here exactly as it raises in the full fingerprint.
+
+    ``payload`` carries every row of the full payload, and the corpus row reads
+    :data:`NOT_COMPARED` when the answer did not need it — so a caller scanning the rows
+    for a degraded "unavailable" can see which row this comparison never asked for, instead
+    of reading a short payload as a complete one. A caller asserting that the revision did
+    NOT move always gets the full comparison, because "not moved" is only ever reached
+    through the corpus row.
+    """
+    payload = _compiler_revision_payload(_without_corpus_row=True)
+    serialized = {key: canonical_json_bytes(value) for key, value in payload.items()}
+    if set(payload) | {_CORPUS_ROW} != set(baseline_payload) or any(
+        serialized[key] != canonical_json_bytes(baseline_payload[key]) for key in serialized
+    ):
+        payload[_CORPUS_ROW] = NOT_COMPARED
+        return True, payload
+    payload[_CORPUS_ROW] = _row_or_unavailable(_behaviour_corpus_payload)
+    return (
+        canonical_json_bytes(payload[_CORPUS_ROW]) != canonical_json_bytes(baseline_payload[_CORPUS_ROW]),
+        payload,
+    )
 
 
 def _compiler_revision() -> str:
@@ -1830,6 +1950,9 @@ def _child_forwarding_behaviour_oracle():
         sym("m12", "transform.map", input_profile_ref="$ref:p1", output_profile_ref="$ref:p2"),
         sym("m22", "transform.map", input_profile_ref="$ref:p2", output_profile_ref="$ref:p2"),
         sym("cache", "documentcache"),
+        # A second cache, so a chain that RE-CACHES what it retrieved is in the row: the
+        # obligation of a use off the second cache belongs to the first (correction batch 21a).
+        sym("cache2", "documentcache"),
     ) + tuple(
         sym(key, "process") for key in (
             "parent", "mid", "writer", "reader", "bound", "child", "enrich", "external", "opaque",
@@ -2002,6 +2125,39 @@ def _child_forwarding_behaviour_oracle():
                 {"steps": [], "terminal": call("reader_x")})),
             ("reader_x", doc(read_cache, {"kind": "set_dpp", "name": "Y", "source_values": [
                 {"value_type": "ddp", "property_name": "X"}]}, message, bound("X"), stop)),
+        ]),
+        # #184 amendment 3 §7-§8 (correction batch 21a): the caller-cache attribution travels
+        # with the DOCUMENTS. A child that retrieves the caller's cache and re-caches what it
+        # read owes the use off the second cache to the FIRST, where the caller's documents are
+        # — whether the property is used on the way (the ride-on credit) or not at all (the
+        # cohort's origin alternative) — and a child that fills the cache it reads still owes
+        # what it proved to the callers that share it.
+        "a_use_off_a_re_cache": (None, [
+            ("parent", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                            {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", legs(
+                {"steps": [read_cache], "terminal": {"kind": "cache_put", "cache_ref": "$ref:cache2"}},
+                {"steps": [{"kind": "cache_get", "cache_ref": "$ref:cache2"},
+                           {"kind": "set_dpp", "name": "Y", "source_values": [
+                               {"value_type": "ddp", "property_name": "X"}]}], "terminal": stop})),
+        ]),
+        "an_ordinary_read_past_a_re_cache_behind_a_message": (None, [
+            ("parent", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                            {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", legs(
+                {"steps": [read_cache, {"kind": "set_dpp", "name": "Y", "source_values": [
+                    {"value_type": "ddp", "property_name": "X"}]}],
+                 "terminal": {"kind": "cache_put", "cache_ref": "$ref:cache2"}},
+                {"steps": [{"kind": "cache_get", "cache_ref": "$ref:cache2"}, message,
+                           {"kind": "set_dpp", "name": "Z", "source_values": [
+                               {"value_type": "ddp", "property_name": "X"}]}], "terminal": stop})),
+        ]),
+        "a_child_that_fills_the_cache_it_reads": (None, [
+            ("parent", legs({"steps": [get_p1], "terminal": put()},
+                            {"steps": [], "terminal": call("reader_x")})),
+            ("reader_x", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                              {"steps": [read_cache, {"kind": "set_dpp", "name": "Y", "source_values": [
+                                  {"value_type": "ddp", "property_name": "X"}]}], "terminal": stop})),
         ]),
         # ARCH-184-r1-06: what a waited, abort-on-error call that provably runs its child
         # establishes for a later leg. A write on every normal completion (K), on one arm
@@ -2334,6 +2490,15 @@ def _retrieve_overlay_behaviour_oracle():
         "maybe_named": (frozenset(), frozenset({x}), frozenset({(x, "cached")})),
         "unknown_properties": (frozenset(), None, frozenset()),
         "absent": (frozenset(), frozenset(), frozenset()),
+        # Documents another cache handed these ones on: whatever property they carry may be
+        # a caller's, under the key no authored property can spell and the `caller-cache:`
+        # carrier the obligation travels on (amendment 3 §7). Without a shape like this the
+        # row recorded the origin column as a constant — the transfer DOES distinguish an
+        # origin, and nothing here varied one (B21A-R4-TI-04, measured).
+        "retrieved_from_a_caller_cache": (
+            frozenset(), None,
+            frozenset({(lineage.CACHE_TRANSFER_UNPROVED,
+                        lineage.CALLER_CACHE_WRITER + "$ref:CALLER_CACHE")})),
     }
     variants = sorted(
         (name + "@" + count, lineage._Cohort(*shape, count))
@@ -2386,7 +2551,13 @@ def _retrieve_overlay_behaviour_oracle():
                             [label for label, _cohort in cohort_set], carried, stream_count,
                             external, current,
                             after.establishes(x), sorted(writers.get(x) or ()), x in on_documents,
-                            x in invalidated, lineage.CACHE_TRANSFER_UNPROVED in invalidated, count,
+                            x in invalidated, lineage.CACHE_TRANSFER_UNPROVED in invalidated,
+                            # ... and which caches the documents this retrieve hands on may
+                            # have come from: the origin alternative is keyed on the key no
+                            # authored property can spell, so the two columns above — both
+                            # about X — cannot see it, and the row recorded the origin channel
+                            # as a constant (B21A-R4-TI-04, measured).
+                            sorted(writers.get(lineage.CACHE_TRANSFER_UNPROVED) or ()), count,
                             _overlay_state_projection(after),
                         ])
     return {"graphs": graphs, "transfer": transfer}
@@ -2573,6 +2744,16 @@ def _child_call_state_oracle():
             {"steps": [message], "terminal": stop}]}),
         "fills_then_empties_the_cache": legs({"steps": [get_p1], "terminal": put()},
                                              {"steps": [], "terminal": remove()}),
+        # A child nothing can ORDER, because it calls itself: no derivation can state its
+        # facts before its own, so its contract is the fail-closed one every member of a call
+        # cycle gets — its state is not known, its cache writes are not all listed, and a
+        # caller must treat its own caches as possibly still being written. What that is worth
+        # to a caller is exactly what this row records (B21A-R5-CYC-01, correction batch 21a
+        # round 6): before it, a cyclic ProcessIR was weaker evidence than an absent one.
+        "calls_itself_so_nothing_can_order_it": legs(
+            {"steps": [get_p1], "terminal": put()},
+            {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+            {"steps": [message], "terminal": stop}),
         # One key, written on BOTH a proved path and an unproved one. Every normal
         # completion establishes K — the first leg always runs — so the guarantee holds,
         # and a rule that subtracted a union over paths from the meet over exits withheld
@@ -2781,6 +2962,23 @@ def _child_call_state_oracle():
             ("child", legs({"steps": [get_p1], "terminal": put()},
                            {"steps": [], "terminal": remove(ref)})),
         ],
+        # Amendment 1 rule 7: the middle hands documents to a call it does not WAIT for, so
+        # that call's write is still in flight when the middle returns and its own emptying
+        # of the cache does not provably follow it. The pending write is stated through
+        # `ref` and the middle requires and empties the cache through its own spelling, so
+        # only the identity rule puts the two on one cache — and the caller above reads the
+        # answer as "a later run of this child is not stable".
+        "unwaited_cache_writes": lambda ref: [
+            ("parent", doc(entry, {"kind": "branch", "legs": [
+                {"steps": [], "terminal": call("mid", wait=True, abort_on_error=True)},
+                {"steps": [message], "terminal": stop}]})),
+            ("mid", legs({"steps": [get_p1, dynamic("X")], "terminal": put()},
+                         {"steps": [read_cache(), bound("X")], "terminal": stop},
+                         {"steps": [], "terminal": call("writer", wait=False, abort_on_error=False)},
+                         {"steps": [], "terminal": remove()})),
+            ("writer", legs({"steps": [get_p1], "terminal": put(ref)},
+                            {"steps": [message], "terminal": stop})),
+        ],
     }
     # The cohorts a caller stored land on the child of the cached-property chain, so that
     # chain answers for both facts; it is run once per fact so each has its own recorded
@@ -2818,6 +3016,19 @@ def _child_call_state_oracle():
             ), ChildEntryContractV1(
                 process_ref="$ref:child", entry_form="scheduled",
                 cache_property_requirements=(("$ref:" + ref, "X", None, True),))
+        if field == "unwaited_cache_writes":
+            # The caller fills the cache, binds on what it retrieves, calls the child and
+            # then empties the cache. The child states a write still in flight on ``ref``:
+            # only the identity rule lands it on the cache this caller requires, and the
+            # row below then says a later run of THIS process is not stable either.
+            return legs(
+                {"steps": [get_p1, dynamic("X")], "terminal": put()},
+                {"steps": [read_cache(), bound("X")], "terminal": stop},
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                {"steps": [], "terminal": remove()},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled", state_known=True,
+                cache_writes_known=True, unwaited_cache_writes=("$ref:" + ref,))
         # `caller_cache_cohorts` states what a caller stored to the child that reads it.
         return doc(read_cache(), bound("X"), stop), None
 
@@ -2837,8 +3048,18 @@ def _child_call_state_oracle():
                 child_entry_contracts=() if row is None else (row,),
                 caller_cache_cohorts=(("$ref:" + ref, "X"),) if row is None else (),
             )
-            aliased[field]["stated_by_a_caller"][spelling] = reported_by(
-                validate_process_ir(graph, symbols, capabilities=capabilities))
+            aliased[field]["stated_by_a_caller"][spelling] = dict(
+                reported_by(validate_process_ir(graph, symbols, capabilities=capabilities)),
+                # ... and what the caller's OWN contract carries away from the stated fact.
+                # A fact whose consequence is read one call further out — what a completion
+                # may STILL be writing — appears in no finding of the process that receives
+                # it, so recording the findings alone would record two empty answers and
+                # call them an agreement (round 5, `unwaited_cache_writes`).
+                row_of_the_caller=ChildEntryContractV1(
+                    process_ref="$ref:the_caller",
+                    **derive_child_entry_facts(graph, symbols, capabilities),
+                ).model_dump(mode="json"),
+            )
     return {"calls": calls, "forwarded_cached_properties": forwarded, "one_cache_two_refs": aliased,
             "a_removed_and_refilled_cache": removed_and_refilled}
 

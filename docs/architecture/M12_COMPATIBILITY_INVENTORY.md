@@ -2167,8 +2167,9 @@ rather than aspirational.
 | LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1127 | #160 | delete with the legacy renderer |
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 660 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 669 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-6993ec78 | unclassified_reference | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 2 | 105 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-88502416 | unclassified_reference | src/boomi_mcp/authoring/revision_corpus.py | <module> | 1 | 977 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 484 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5291 | #160 | delete the legacy semantic shell |
@@ -2427,7 +2428,7 @@ over the census, so a row cannot be silently orphaned when a file moves.
 | #160 | delete with the legacy renderer | 3 |
 | #160 | delete with the legacy semantic shell | 2 |
 | #160 | follow the callee's row; this is an edge, not a site | 66 |
-| #160 | residue: a watched name mentioned in a shape the census does not classify | 36 |
+| #160 | residue: a watched name mentioned in a shape the census does not classify | 37 |
 | #160 | retract the served legacy guidance / guard the raw route | 2 |
 
 Owner semantics: **#151** neutral extraction and `flow_sequence` parity/reachability; **#153**
@@ -3154,3 +3155,15 @@ proves this path removed the whole cache and refilled it. The census, the ledger
 move, and the §11 tables were re-spliced for moved `Baseline line` values. Revisions after batch 19:
 `capability_revision` `sha256:194aa6c8…` and `compiler_revision` `sha256:40def511…`;
 `schema_revision` stays `sha256:c9583e6b…`.
+
+**Architect-review correction batch 20 (ARCH-184-r2-01) and batch 21 (CDX-184-r20-01, CDX-184-r20-02,
+QA-184-s1-r21-01) re-ran it.** Batch 20 carried the cache a binding rides on across a step that hands on
+exactly the documents it received. Batch 21 replaced the channel-by-channel accounting with one authority
+on whether a caller's documents may still be in a cache, carried that attribution across a re-cache,
+stopped a child's own write and a call cycle from buying a weaker contract than an absent ProcessIR, gave
+the repeated-run refusal its own served code, and made `compiler_revision` replay a packaged corpus of the
+graphs the covered tests exercise, so a behaviour change a covered test can observe moves it. The census
+gained one row (`LG-88502416`, the unclassified `'create_component'` literal in the new
+`authoring/revision_corpus.py`) and the §11 tables were re-spliced for it and for moved `Baseline line`
+values. Revisions after batch 21: `capability_revision` `sha256:555f0eb1…` and `compiler_revision`
+`sha256:08213c91…`; `schema_revision` stays `sha256:c9583e6b…`.

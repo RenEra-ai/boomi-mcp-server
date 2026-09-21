@@ -201,13 +201,46 @@ Four related but **non-interchangeable** digests, all spelled `sha256:<64 lowerc
 | `semantic_hash` | one normalized, secret-free authoring intent |
 | `plan_hash` / `compile_hash` | that intent bound to its planning and compilation evidence |
 
-`compiler_revision` is exposed separately and identifies compiler + validator behavior.
+`compiler_revision` is exposed separately and identifies compiler + validator behavior. It is a
+digest of the published compiler contracts, of the verdicts a set of behaviour oracles' case sets
+receive, and — since #184 correction batch 21b — of the verdicts the compiler's entry points give
+every input the covered tests exercise, replayed at runtime from a corpus of those inputs packaged
+with the server (`src/boomi_mcp/authoring/revision_corpus_v1.json.gz`). The covered tests are the
+set `tests/_revision_corpus.py` decides and enforces: it refuses a covered test whose input the
+packaged corpus lacks, so that set is checkable rather than described. So a behaviour change that
+any covered test can observe through the verdict the corpus projects moves it, wherever in the
+compiler the change was made.
+
+**Bound, in four parts.** (1) A change no oracle case and no corpus input exhibits does not move
+it. (2) Only what an entry point RETURNS is folded in — behaviour a test reaches past the entry
+points (the emitter, the lowering, a prepared context built by hand) is outside it. (3) Only the
+OUTERMOST entry-point call of a covered test is recorded: a call nested inside another is a
+function of it, and a call made while the revision itself is being computed, or while the corpus
+replays, is revision material already and is excluded. (4) A verdict is EVERYTHING the entry
+point returned, digested: the returned object is read through the authority of each class it is
+made of — a model by its fields AND its computed fields, a named tuple by its fields, a slotted
+object by its slots, a readable `property` or `cached_property` the package itself declares, and a
+container item by item WITH its type (a list, a tuple, a set, a frozenset, a mapping and a
+read-only mapping are four different verdicts, not one) — so a validation report's `is_valid` and
+`version`, a resolution's every slot and its `ok`, a lineage walk's every field and a compile
+result's lowered CFG all ride, and a field added to any of them rides the day it exists. A
+declared name whose accessor RAISES degrades loudly, like any other value the projection cannot
+read; a declared name the object never assigned is a distinct, unforgeable marker. A compile acceptance additionally
+carries the SHA-256 of its canonical emission plan in its own slot, so an unreadable value
+elsewhere in what it returned degrades that slot alone (as `{"unencodable": …}`, which the suite
+refuses) rather than costing the plan its discrimination. A raise that is not a compile refusal is
+recorded by its TYPE, so its message — which can carry an address — moves nothing here. Which
+entry kinds the packaged corpus actually holds is itself derived (`validate_lowered` has no
+covered caller today, so nothing behind it is replayed). The corpus holds inputs only — every
+verdict is computed by the running code — and it changes, rotating the revision, when the covered
+tests' inputs change.
 
 Revisions are **derived, never declared** — computed from the live archetype registry, the live
 recipe registry snapshot, and the runtime models' own JSON Schemas. A hand-maintained version string
 would drift from behavior exactly the way the four-vs-six catalog did. They are deliberately *not*
 source hashes or git SHAs: equivalent packaged code must produce the same revision, or a
-rebuilt-but-identical deployment would report drift against itself.
+rebuilt-but-identical deployment would report drift against itself. The behaviour corpus is part of
+the package, so identical packages replay identical corpora into identical revisions.
 
 `account_scope_hash` is a one-way hash whose scope is the **account**, not the profile name. A
 profile is an alias: two profiles can address one account, and one profile can be repointed at
@@ -428,8 +461,10 @@ not what a caller *sends*.
   capability revision but not the compiler revision.~~ **The compiler-revision half is CLOSED by the
   #146 amendment**: `compiler_revision` now covers the body-placement rows, the connector capability
   rows, the replay-safety rules, the state-visibility model, the process-property scope, all three
-  diagnostic spec tables and the served authoring projection — so a behaviour change moves it. The
-  XML-versus-edges limit stands.
+  diagnostic spec tables and the served authoring projection. Those are chosen case sets, and a
+  change outside every case left the revision standing still (CDX-184-r20-02); #184 correction
+  batch 21b adds the replayed verdicts of the covered tests' own inputs, with the bound §4 states.
+  The XML-versus-edges limit stands.
 - ~~**`schema_revision` covers selector-to-body hashes, not selector+version pairs.**~~ **CLOSED by
   the #146 amendment.** Owned selector versions now participate in `schema_revision` directly, so a
   version bump moves it even when the body is byte-identical. Separately,

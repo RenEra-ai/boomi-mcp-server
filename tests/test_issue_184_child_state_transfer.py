@@ -43,6 +43,7 @@ from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (  # noqa
 )
 from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_DDP_NOT_ESTABLISHED,
     PROCESS_IR_SEMANTIC_DYNAMIC_PATH_NO_DYNAMIC_SEGMENT,
     PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID,
@@ -50,6 +51,7 @@ from boomi_mcp.errors import (  # noqa: E402
     PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID,
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED,
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE,
 )
 from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
@@ -242,12 +244,13 @@ def test_a_forwarder_inherits_its_childs_cached_property_requirement():
 def test_a_no_data_child_run_per_document_may_not_append_to_the_cache_it_needs_properties_of():
     """Amendment 1 rule 8: under a passthrough parent the child may run once per arriving
     document, and a later run's retrieve may find what an earlier run appended. Under a
-    scheduled parent it runs once, and the same child is admitted."""
+    scheduled parent it runs once, and the same child is admitted. Refused under its own code
+    since QA-184-s1-r21-01; the verdict and the pointer are unchanged."""
     appends = _legs({"steps": [_READ, _BOUND_GET], "terminal": _STOP},
                     {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT})
     per_document = _doc(_ENTRY, {"kind": "branch", "legs": [
         {"steps": [_DYNAMIC_X], "terminal": _PUT}, {"steps": [], "terminal": _call("CACHE_CHILD")}]})
-    placement = (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, "/body/steps/1/legs/1/terminal")
+    placement = (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "/body/steps/1/legs/1/terminal")
     assert placement in _errors([("PARENT", per_document), ("CACHE_CHILD", appends)], "PARENT")
     assert _errors([("PARENT", _stage_and_call(_STAGES_X)), ("CACHE_CHILD", appends)], "PARENT") == []
 
@@ -305,9 +308,18 @@ _BOUNDARY = {
     ("execution", "possible_effect"): ("mutated_state", "removed_caches", "state_known"),
     ("execution", "guaranteed_effect"): ("guaranteed_state",),
     ("content", "requirement"): ("cache_requirements",),
-    ("content", "possible_effect"): ("cache_writes_known",),
-    ("content", "guaranteed_effect"):
-        "withheld: what a child stores stays an unknown possibility at every later read",
+    # What a completion of the child may write, and — because a write it did not wait for is
+    # still in flight when it returns — which of those writes its caller must go on treating
+    # as possible after the call, whether or not the caller waits (amendment 1 rule 7). The
+    # second of the two says the child cannot NAME them, so the caller reads it against its
+    # own observable caches; deciding this per process made the identical composition depend
+    # on how deeply it was nested (B21A-R4-SOUND-01).
+    ("content", "possible_effect"): (
+        "cache_writes_known", "unwaited_cache_writes", "unwaited_writes_of_an_unknown_cache"),
+    # What no completion leaves in the caches the child requires of its callers — read only by
+    # the repetition check for a LATER RUN of the same child (amendment 1 rule 8). A caller's
+    # own later reads still meet what a child may store as an unknown possibility.
+    ("content", "guaranteed_effect"): ("required_caches_retain_nothing_it_stored",),
     ("cohorts", "requirement"): ("cache_property_requirements",),
     ("cohorts", "possible_effect"):
         "carried by the content cells: every cache a child may write gets an unknown cohort",
@@ -350,6 +362,30 @@ _REMOVES_THE_CACHE = [
 #: One derivation per contract field that makes it differ from its default.
 _NON_DEFAULT = {
     "removed_caches": (_REMOVES_THE_CACHE, "WRITER"),
+    # Fills CACHE2, binds on what it retrieves, and empties CACHE2 on a later leg the walk proves.
+    "required_caches_retain_nothing_it_stored": ([
+        ("PARENT", _legs({"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)},
+                         {"steps": [_MSG], "terminal": _STOP})),
+        ("CACHE_CHILD", _legs(
+            {"steps": [_GET, _DYNAMIC_X], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE2"}},
+            {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE2"}, _BOUND_GET], "terminal": _STOP},
+            {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:CACHE2"}}))], "CACHE_CHILD"),
+    # Hands its documents to a call it does not WAIT for: that call's write into CACHE2 is
+    # still in flight when this child returns, so its callers carry it too.
+    "unwaited_cache_writes": ([
+        ("PARENT", _legs({"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)},
+                         {"steps": [_MSG], "terminal": _STOP})),
+        ("CACHE_CHILD", _legs({"steps": [], "terminal": _call("WRITER2", wait=False, abort_on_error=False)},
+                              {"steps": [_MSG], "terminal": _STOP})),
+        ("WRITER2", _legs({"steps": [_GET], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE2"}},
+                          {"steps": [_MSG], "terminal": _STOP}))], "CACHE_CHILD"),
+    # ... and the same call to a process nothing derives: this child cannot name what that
+    # call may still be writing, so it says so and its callers use their own vocabulary.
+    "unwaited_writes_of_an_unknown_cache": ([
+        ("PARENT", _legs({"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)},
+                         {"steps": [_MSG], "terminal": _STOP})),
+        ("CACHE_CHILD", _legs({"steps": [], "terminal": _call("EXTERNAL", wait=False, abort_on_error=False)},
+                              {"steps": [_MSG], "terminal": _STOP}))], "CACHE_CHILD"),
     "document_requirements": ([("PARENT", _parent(_P2_PREFIX, _call("CHILD"))), ("CHILD", _CHILD)], "CHILD"),
     "required_writers": ([("PARENT", _parent([_DYNAMIC_X], _call("BOUND"))), ("BOUND", _BOUND)], "BOUND"),
     "required_reads": ([("PARENT", _legs({"steps": [_SET_K], "terminal": _STOP},
@@ -695,16 +731,31 @@ def test_an_outer_callers_x_less_documents_in_the_same_cache_are_refused_at_the_
                       {"steps": [_READ, _BOUND_GET], "terminal": _STOP})
     assert (_NOT_ESTABLISHED, "/body/steps/0/legs/2/steps/1/path_binding") in _errors(
         [("PARENT", flattened)], "PARENT")
-    # THE CONTENT CHANNEL beside it still answers the other way at the same shape, and the
-    # difference is measured here rather than assumed away: `cache_requirements` inherits
-    # only what this process's own writes do not prove, so MID's staging ends that
-    # obligation and PARENT's profile-less documents in the same cache are not checked.
-    # Fail-open, unchanged from 80bdd30, and out of scope for this correction.
+    # THE CONTENT CHANNEL beside it now answers the same way at the same shape. Until
+    # correction batch 21a `cache_requirements` inherited only what this process's own writes
+    # did not reach, so MID's staging ended the obligation and PARENT's profile-less documents
+    # in the same cache were never checked (the limit SELF-184-43 recorded), while the
+    # flattened graph refused the map. Amendment 3 §7: "Append possible cohorts; do not treat
+    # the last cache write as replacing earlier contents" — MID's P2 documents sit BESIDE
+    # PARENT's, so the row travels up and PARENT is refused at its call, as its twin is.
+    # Measured before the correction: row `()`, PARENT clean on validate and compile.
     typed = [("PARENT", _legs({"steps": [_GET], "terminal": _PUT},
                               {"steps": [], "terminal": _call("MID")})),
              ("MID", _stage_and_call(_STAGES_P2)), ("CACHE_CHILD", _TYPED_CACHE_CHILD)]
-    assert _row(typed, "PARENT", "MID").cache_requirements == ()
-    assert _errors(typed, "PARENT") == []
+    assert _row(typed, "PARENT", "MID").cache_requirements == (("$ref:CACHE", "$ref:P2"),)
+    content_refusal = (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")
+    assert _errors(typed, "PARENT") == [content_refusal]
+    assert _compile_errors(typed, "PARENT") == [content_refusal]
+    typed_twin = _legs({"steps": [_GET], "terminal": _PUT}, _STAGES_P2,
+                       {"steps": [_READ, {"kind": "map_ref", "map_ref": "$ref:M22"}], "terminal": _STOP})
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref") in _errors(
+        [("PARENT", typed_twin)], "PARENT")
+    # CONTROL, over-correction: a caller that stores NOTHING in that cache is still admitted —
+    # nothing it stored is of the wrong profile — and so is its twin.
+    stores_nothing = [("PARENT", _legs({"steps": [_MSG], "terminal": _STOP},
+                                       {"steps": [], "terminal": _call("MID")}))] + typed[1:]
+    assert _errors(stores_nothing, "PARENT") == []
+    assert _compile_errors(stores_nothing, "PARENT") == []
 
 
 def test_the_vacuous_cache_rule_is_load_bearing(monkeypatch):
@@ -868,7 +919,16 @@ def test_a_bound_use_past_a_recache_is_owed_to_the_cache_it_rides_on_too(caller)
 def test_the_cache_a_binding_rides_on_is_load_bearing(monkeypatch):
     """Non-vacuity: with the pre-correction attribution — a cleared binding credited to the
     seeded cache alone — the row loses its second cache and the caller that stored a literal
-    segment in the cache the binding rides on is admitted again."""
+    segment in the cache the binding rides on is admitted again.
+
+    Measured where the ride-on credit is the ONLY carrier (correction batch 21a). With the
+    binding right behind the retrieve, the retrieve's own marker now names the second cache
+    too — a caller's documents may share it beside the child's re-cached ones (amendment 3
+    §7: "Append possible cohorts; do not treat the last cache write as replacing earlier
+    contents") — so that refusal records the second cache's row directly and the mutant
+    leaves it refused; that second carrier is asserted below rather than assumed. Behind a
+    Message the marker is withheld, as it always was, and the credit alone carries the row:
+    there the mutant re-admits the literal caller, which is the claim."""
     from boomi_mcp.authoring import process_ir_effects
 
     def the_seeded_cache_only(prepared, capabilities, walk):
@@ -891,14 +951,21 @@ def test_the_cache_a_binding_rides_on_is_load_bearing(monkeypatch):
                      if cleared_name == name}
         return tuple(sorted(rows, key=lambda row: (row[0], row[1], row[2] or "", row[3])))
 
-    roots = [("PARENT", _legs(_STAGES_X, _LITERAL_INTO_CACHE2,
-                              {"steps": [], "terminal": _call("CACHE_CHILD")})),
-             ("CACHE_CHILD", _RECACHES_THEN_BINDS)]
+    parent = _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    roots = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)]
+    beside = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS)]
     assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(roots, "PARENT")
+    assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(beside, "PARENT")
     monkeypatch.setattr(process_ir_effects, "_caller_cached_properties", the_seeded_cache_only)
     assert _errors(roots, "PARENT") == []
+    assert _compile_errors(roots, "PARENT") == []
     assert ("$ref:CACHE2", "X", None, True) not in _row(
         roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+    # The second carrier, with no Message: the binding's own refusal names the second cache,
+    # so the row survives the mutant and the literal caller stays refused.
+    assert ("$ref:CACHE2", "X", None, True) in _row(
+        beside, "PARENT", "CACHE_CHILD").cache_property_requirements
+    assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(beside, "PARENT")
 
 
 #: The same re-cache child with a Message between the retrieve and the binding. A Message
@@ -993,13 +1060,14 @@ def test_a_per_document_caller_of_the_recache_child_answers_the_same_past_a_mess
 
     Pinned on the caller that composes X dynamically into both caches, the cell that moved:
     it is refused here for the repetition, not for its writers, so a later change that made
-    this admit again while the twin stayed refused would be the same hole reopened."""
+    this admit again while the twin stayed refused would be the same hole reopened. Refused
+    under its own code since QA-184-s1-r21-01; the verdict is unchanged."""
     call_leg = {"steps": [], "terminal": _call("CACHE_CHILD")}
     parent = _passthrough_root(_STAGES_X, _DYNAMIC_INTO_CACHE2, call_leg)
     past_a_message = _errors(
         [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)], "PARENT")
     assert [code for code, _pointer in past_a_message] == [
-        PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED]
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE]
     assert past_a_message == _errors(
         [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS)], "PARENT")
 
@@ -1831,31 +1899,63 @@ def test_a_declared_external_writer_is_refused_before_the_seal_is_consulted(monk
     makes `_call_stores_nothing_in` false, so the call takes the retrieve overlay, which
     seeds an unknown cohort; the meet there is empty, nothing at that call is proved, and the
     gate is never consulted at all. The middle process is refused at its own forward instead,
-    so nothing ships. The clause is gone and this is what replaces the claim."""
+    so nothing ships. The clause is gone and this is what replaces the claim.
+
+    Measured AT THE CALL, which is the site the claim is about. Since correction batch 21a a
+    retrieve asks the same gate too, per property it hands on, whether a caller of the
+    retrieving process is one more writer alternative (amendment 3 §7: "possible presence
+    retains both alternatives, including unknown provenance"); those asks are recorded
+    separately, and none of them pairs a sealed cache with a declared external writer
+    either."""
+    import sys as _sys
+
     flagged = {"steps": [dict(_READ, external_writer=True), _READS_X], "terminal": _STOP}
     roots = _outer_caller_of(
         _legs(flagged, _EMPTIES_IT, _STAGES_X, _FORWARDS_TO_THE_CACHE_CHILD))
     asked = []
     real = lineage._caller_owes_a_cached_property
 
+    def _asking_site():
+        """The function that asked, not the comprehension it asked from.
+
+        One of the gate's call sites sits inside a set comprehension, which is its own
+        frame before 3.12 and is inlined from 3.12 on (PEP 709), so the raw caller name is
+        `<setcomp>` on 3.11 and the enclosing function on 3.12. Walking out of the
+        synthetic `<...>` frames records the same site on both interpreters; reading frame 1
+        directly failed only under the 3.11 CI gate.
+        """
+        frame = _sys._getframe(2)
+        while frame is not None and frame.f_code.co_name.startswith("<"):
+            frame = frame.f_back
+        return frame.f_code.co_name if frame is not None else "<unknown>"
+
     def recording(cache_ref, name, capabilities, state):
-        asked.append((cache_ref in state.sealed,
+        asked.append((_asking_site(), cache_ref in state.sealed,
                       bool(capabilities.writes_cache_externally(cache_ref))))
         return real(cache_ref, name, capabilities, state)
+
+    def at_the_call():
+        return [(sealed, external) for site, sealed, external in asked
+                if site == "_discharge_child_contract"]
 
     monkeypatch.setattr(lineage, "_caller_owes_a_cached_property", recording)
     declared = _cell(roots, _external_writer_declaration(), key="MID")
     at_the_forward = "/body/steps/0/legs/3/terminal/process_ref"
     assert (_NOT_ESTABLISHED, at_the_forward) in declared["errors"]
     assert (_NOT_ESTABLISHED, at_the_forward) in declared["compile_errors"]
-    assert asked == [], asked
+    assert at_the_call() == [], asked
+    assert {site for site, _sealed, _external in asked} <= {"_discharge_child_contract", "_transfer"}, asked
+    assert not any(sealed and external for _site, sealed, external in asked), asked
     # With no external writer declared the gate IS consulted — and only ever about a cache
     # no external writer touches, which is exactly why the removed clause could not fire.
     asked.clear()
     for key in ("PARENT", "MID"):
         _cell(roots, None, key=key)
-    assert asked, "the gate was never consulted, so the control proves nothing"
-    assert all(external is False for _sealed, external in asked), asked
+    assert at_the_call(), "the gate was never consulted, so the control proves nothing"
+    assert all(external is False for _sealed, external in at_the_call()), asked
+    # ... and at every site that asks, the retrieve's per-property ask included: no ask anywhere
+    # is about a cache a declared external writer touches (the pre-21a strength, TI-184-21a-02).
+    assert all(external is False for _site, _sealed, external in asked), asked
 
 
 # ---------------------------------------------------------------------------
@@ -2660,10 +2760,37 @@ def test_a_declared_read_of_retrieved_documents_is_owed_to_the_cache_that_filled
 
 
 def test_a_middles_own_write_to_the_cache_leaves_a_declared_read_nothing_to_inherit():
-    """The control the channel rests on: when this process's own write reached the cache,
-    the documents are its own, so the declared read inherits nothing."""
+    """REVISED in correction batch 21a; the name is the retired claim, kept because the node
+    id is pinned by the wave gate's frozen node list.
+
+    The retired claim: "when this process's own write reached the cache, the documents are
+    its own, so the declared read inherits nothing". A document cache is shared with every
+    caller and Add to Cache APPENDS, so the middle's own write puts its documents BESIDE any
+    its caller stored there; the retrieve hands on both, and the declared read needs X on
+    every one. Amendment 3 §7: "Append possible cohorts; do not treat the last cache write as
+    replacing earlier contents." The row therefore travels up exactly as it does for a middle
+    that wrote nothing, and each caller proves it against what IT stored.
+
+    Measured before the correction: row `()`, so a caller that stored X-less documents in the
+    same cache was admitted while the same legs in one process are refused
+    `…PROPERTY_READ_BEFORE_WRITE`. The controls keep the callers the row must not refuse."""
     facts = _derived_facts(_FILLS_IT_THEN_CALLS, _summarised(_SCHEDULED_READS_X))
-    assert facts["cache_property_requirements"] == ()
+    assert facts["cache_property_requirements"] == (("$ref:CACHE", "X", None, False),)
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    held = ProcessIRValidationCapabilitiesV1(child_entry_contracts=(
+        ChildEntryContractV1(process_ref="$ref:MID", **facts),))
+    assert _READ_BEFORE_WRITE in {
+        code for code, _path in _errors_against(_STORES_NO_X_THEN_CALLS_MID, held)}
+    twin = _legs({"steps": [_GET], "terminal": _PUT}, _STAGES_X,
+                 {"steps": [_READ, _READS_X], "terminal": _STOP})
+    assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/2/steps/1") in _errors([("PARENT", twin)], "PARENT")
+    # CONTROLS: a caller whose documents carry X, and one that stores nothing, are admitted.
+    assert _errors_against(_STORES_X_THEN_CALLS_MID, held) == []
+    stores_nothing = _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [], "terminal": _call("MID")})
+    assert _errors_against(stores_nothing, held) == []
 
 
 def test_what_a_declared_reads_cache_row_is_worth_at_the_caller():
@@ -2685,11 +2812,17 @@ def test_what_a_declared_reads_cache_row_is_worth_at_the_caller():
 
 def test_the_declared_read_channel_is_load_bearing(monkeypatch):
     """Non-vacuity, and the measurement that fixes WHICH failure the rule prevents: with the
-    cached-origin rule neutralised the obligation does not simply move. For a scheduled
-    middle it disappears — its contract drops document-property reads, so nothing is owed to
-    anybody — and for a passthrough middle it becomes a demand that the caller establish the
-    property as its own state, which no caller of a cache-filling chain can satisfy."""
+    cached-origin rule neutralised the obligation does not move anywhere — it disappears, for
+    both entry forms. A scheduled middle's contract drops document-property reads; a passthrough
+    middle's read is of documents it RETRIEVED, which the documents its caller hands it never
+    reach, so it is no entry requirement either (correction batch 21a round 2 — it used to
+    become a demand that the caller establish the property on its own documents, which no
+    caller of a cache-filling chain can satisfy and which let none of them through). So the
+    cached-origin row is the only thing that charges any caller for it."""
     capabilities = _summarised(_SCHEDULED_READS_X)
+    real = (_derived_facts(_CALLS_A_SUMMARISED_CHILD, capabilities),
+            _derived_facts(_SUMMARISED_CALLERS["a_passthrough_middle"], capabilities))
+    assert all(("$ref:CACHE", "X", None, False) in facts["cache_property_requirements"] for facts in real)
     monkeypatch.setattr(lineage, "_caller_cached_origin",
                         lambda key, stream, invalidated: None)
     scheduled = _derived_facts(_CALLS_A_SUMMARISED_CHILD, capabilities)
@@ -2697,7 +2830,7 @@ def test_the_declared_read_channel_is_load_bearing(monkeypatch):
     assert scheduled["cache_property_requirements"] == ()
     assert ("ddp", "X") not in scheduled.get("required_reads", ())
     assert passthrough["cache_property_requirements"] == ()
-    assert ("ddp", "X") in passthrough["required_reads"]
+    assert ("ddp", "X") not in passthrough["required_reads"]
 
 
 def test_a_catch_carried_stream_never_reaches_a_call_that_consults_its_marker():
@@ -2973,3 +3106,3247 @@ def test_the_public_plan_admits_a_retrieve_of_a_cache_this_path_proved_it_filled
     assert neutralised["compile"]["_success"] is False
     for action, result in neutralised.items():
         assert blamed(result, _READ_BEFORE_WRITE) == [_LATER_READ], (action, _cause_codes(result))
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a: ONE authority on whether a caller's documents may share a cache
+# ---------------------------------------------------------------------------
+#
+# `lineage._caller_documents_may_reach` answers one question — may documents this process did
+# not write still be in that cache here? — and every site that turns a cache attribution into
+# an obligation of the process's callers asks it (CDX-184-r20-01, the second instance of
+# `obligation-ignores-what-the-walk-proves-about-the-cache`). Expected verdicts come from
+# amendment 3 §7's cache sentences and the runtime they describe, never from this
+# implementation's output: a document cache is shared with every caller and Add to Cache
+# APPENDS ("Append possible cohorts; do not treat the last cache write as replacing earlier
+# contents"); a whole-cache removal that runs empties it ("Whole-cache removal clears these
+# summaries"); a removal that may be skipped leaves what it may have left ("Never discard an
+# inconvenient writer alternative"). Each composition is compared with the flattened graph of
+# the same legs, which after this correction agrees in every cell measured here.
+
+_REMOVE2 = {"kind": "cache_remove", "cache_ref": "$ref:CACHE2"}
+#: A whole-cache removal of CACHE2 the walk proves runs, and one behind a producer that may
+#: return no rows, so the walk proves nothing about it.
+_EMPTIES2 = {"steps": [], "terminal": _REMOVE2}
+_EMPTIES2_BEHIND_A_GET = {"steps": [_GET], "terminal": _REMOVE2}
+_REMOVALS_OF_CACHE2 = {"proved": [_EMPTIES2], "unproved": [_EMPTIES2_BEHIND_A_GET], "none": []}
+#: Reads the caller's CACHE, uses X on those documents, and re-caches them into CACHE2.
+_RECACHE_LEG = {"steps": [_READ, _READS_X], "terminal": _PUT2}
+_BINDS2 = {"steps": [_READ2, _BOUND_GET], "terminal": _STOP}
+_READS2 = {"steps": [_READ2, _READS_X], "terminal": _STOP}
+_AT_THE_SECOND_LEGS_CALL = "/body/steps/0/legs/1/terminal"
+_AT_THE_THIRD_LEGS_TERMINAL = "/body/steps/0/legs/2/terminal"
+
+
+def _branch_legs(document):
+    """The legs of the first Branch a root authors, whichever entry form the root has."""
+    return list(next(step for step in document["body"]["steps"] if step.get("kind") == "branch")["legs"])
+
+
+def _flattened(caller, *callees):
+    """The same work in ONE process: the caller's legs before its call, each middle's legs
+    before ITS call, then the last callee's legs. Every call is its root's last leg."""
+    legs = _branch_legs(caller)[:-1]
+    for position, callee in enumerate(callees):
+        own = _branch_legs(callee)
+        legs += own if position == len(callees) - 1 else own[:-1]
+    return _legs(*legs)
+
+
+def _both_routes(roots, key, declared_external_writers=()):
+    """The same verdict on the validate and the compile entry point, returned once.
+
+    ``declared_external_writers`` names the caches the REQUEST declares an outside writer
+    for. Such a declaration is a fact only the caller can state, so it travels the public
+    effect-declaration path — the same one `resolve_process_ir_effect_declarations` serves —
+    rather than a hand-built capability, and a root whose own retrieve does not author the
+    `external_writer` flag receives nothing from it (`process_ir_effects` §external writers).
+    """
+    if not declared_external_writers:
+        validated = _errors(roots, key)
+        assert sorted(_compile_errors(roots, key)) == sorted(validated), (key, validated)
+        return validated
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.models.authoring_workflow import (
+        ProcessIREffectDeclarationsV1,
+        ProcessIRExternalWriterDeclarationV1,
+    )
+
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = resolve_process_ir_effect_declarations(
+        parsed,
+        ProcessIREffectDeclarationsV1(external_writers=tuple(
+            ProcessIRExternalWriterDeclarationV1(cache_ref=ref)
+            for ref in declared_external_writers)),
+        _symbols(), [], child_roots={"$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok, resolution.findings
+    irs = dict(parsed)
+    capabilities = resolution.capabilities_by_root[key] or DEFAULT_VALIDATION_CAPABILITIES
+    validated = [(item.code, item.path) for item in
+                 validate_process_ir(irs[key], _symbols(), capabilities=capabilities).errors]
+    try:
+        compile_process_ir_v1(irs[key], _symbols(), capabilities=capabilities)
+        compiled = []
+    except ProcessIRCompileError as exc:
+        compiled = [(item.code, item.path) for item in exc.diagnostics]
+    assert sorted(compiled) == sorted(validated), (key, validated, compiled)
+    return validated
+
+
+def _root(form, *legs):
+    return _passthrough_root(*legs) if form == "passthrough" else _legs(*legs)
+
+
+@pytest.mark.parametrize("past_a_message", (False, True), ids=("no_step", "message"))
+@pytest.mark.parametrize("form", ("scheduled", "passthrough"))
+@pytest.mark.parametrize("removal", sorted(_REMOVALS_OF_CACHE2))
+@pytest.mark.parametrize("caller", sorted(_RECACHE_CALLERS))
+def test_the_ride_on_obligation_ends_exactly_where_the_removal_is_proved(caller, removal, form, past_a_message):
+    """CDX-184-r20-01. The child empties CACHE2, re-caches what it read from CACHE into it, and
+    binds a request path on the documents it retrieves from CACHE2. Where the walk PROVES the
+    removal ran, whatever the caller stored in CACHE2 is gone before the re-cache, so the
+    caller's literal segment there cannot reach the binding: it is admitted, as the flattened
+    graph of the same legs is. The ride-on credit charged it anyway, on both forms, with and
+    without a Message — the charge was written without asking whether a caller's document can
+    still be in that cache.
+
+    Where the removal may be skipped, or there is none, the literal still reaches the binding
+    and stays refused at the call, exactly as before; a literal in the cache the property came
+    FROM is refused whatever happens to CACHE2."""
+    into_cache, into_cache2, refused_without_removal = _RECACHE_CALLERS[caller]
+    child = _root(form, *(_REMOVALS_OF_CACHE2[removal] + [
+        _RECACHE_LEG,
+        {"steps": [_READ2] + ([_MSG] if past_a_message else []) + [_BOUND_GET], "terminal": _STOP}]))
+    parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    roots = [("PARENT", parent), ("CACHE_CHILD", child)]
+    literal_in_cache2 = caller == "a_literal_in_the_cache_the_binding_rides_on"
+    expected = [] if (removal == "proved" and literal_in_cache2) else list(refused_without_removal)
+    assert _both_routes(roots, "PARENT") == expected
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    rows = set(_row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements)
+    assert (("$ref:CACHE2", "X", None, True) in rows) == (removal != "proved"), rows
+    twin = _errors([("PARENT", _flattened(parent, child))], "PARENT")
+    assert bool(twin) == bool(expected), (twin, expected)
+
+
+@pytest.mark.parametrize("past_a_message", (False, True), ids=("no_step", "message"))
+@pytest.mark.parametrize("mid_form", ("scheduled", "passthrough"))
+@pytest.mark.parametrize("removal", sorted(_REMOVALS_OF_CACHE2))
+def test_a_passthrough_call_discharges_the_ride_on_obligation_through_the_same_authority(
+        removal, mid_form, past_a_message):
+    """The same function serves a call discharging a passthrough child's bound path: MID
+    retrieves the re-cached documents and hands them to BOUND, whose binding its caller's
+    writers compose. The verdict follows the removal's proof exactly as the child's own binding
+    does above."""
+    mid = _root(mid_form, *(_REMOVALS_OF_CACHE2[removal] + [
+        _RECACHE_LEG,
+        {"steps": [_READ2] + ([_MSG] if past_a_message else []), "terminal": _call("BOUND")}]))
+    expected = [] if removal == "proved" else [(_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL)]
+    literal = _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("MID")})
+    roots = [("PARENT", literal), ("MID", mid), ("BOUND", _BOUND)]
+    assert _both_routes(roots, "PARENT") == expected
+    assert _both_routes(roots, "MID") == []
+    inline = _legs(*(_REMOVALS_OF_CACHE2[removal] + [
+        _RECACHE_LEG,
+        {"steps": [_READ2] + ([_MSG] if past_a_message else []) + [_BOUND_GET], "terminal": _STOP}]))
+    twin = _errors([("PARENT", _flattened(literal, inline))], "PARENT")
+    assert bool(twin) == bool(expected), (twin, expected)
+    # CONTROL: the caller that composes X dynamically into both caches is admitted either way.
+    dynamic = [("PARENT", _legs(_STAGES_X, _DYNAMIC_INTO_CACHE2, {"steps": [], "terminal": _call("MID")})),
+               ("MID", mid), ("BOUND", _BOUND)]
+    assert _both_routes(dynamic, "PARENT") == []
+
+
+@pytest.mark.parametrize("use", ("bound", "ordinary"))
+@pytest.mark.parametrize("removal", sorted(_REMOVALS_OF_CACHE2))
+def test_a_middle_that_provably_emptied_the_cache_charges_its_caller_nothing_for_it(use, removal):
+    """The inherited-row site. MID empties CACHE2, re-caches its caller's CACHE into it and
+    calls a grandchild that uses X on what it retrieves from CACHE2. MID's own walk cannot
+    prove that use (only a seeded caller cohort for CACHE can), so its refusal recorded a row
+    for CACHE2 — and that refusal attributed the row without asking the question the proved
+    channel beside it already asked, charging the caller for a cache the walk proved it had
+    emptied. Measured before the correction: the literal (bound) and X-less (ordinary) caller
+    refused at its call although the flattened graph of the same legs is clean."""
+    grandchild = _legs(_BINDS2 if use == "bound" else _READS2, {"steps": [_MSG], "terminal": _STOP})
+    mid = _legs(*(_REMOVALS_OF_CACHE2[removal] + [
+        _RECACHE_LEG, {"steps": [], "terminal": _call("CACHE_CHILD")}]))
+    bad = _LITERAL_INTO_CACHE2 if use == "bound" else _X_LESS_INTO_CACHE2
+    refusal = ((_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) if use == "bound"
+               else (_READ_BEFORE_WRITE, _AT_THE_THIRD_LEGS_TERMINAL))
+    parent = _legs(_STAGES_X, bad, {"steps": [], "terminal": _call("MID")})
+    roots = [("PARENT", parent), ("MID", mid), ("CACHE_CHILD", grandchild)]
+    expected = [] if removal == "proved" else [refusal]
+    assert _both_routes(roots, "PARENT") == expected
+    for key in ("MID", "CACHE_CHILD"):
+        assert _both_routes(roots, key) == [], key
+    rows = set(_row(roots, "PARENT", "MID").cache_property_requirements)
+    assert any(row[0] == "$ref:CACHE2" for row in rows) == (removal != "proved"), rows
+    twin = _errors([("PARENT", _flattened(parent, mid, grandchild))], "PARENT")
+    assert bool(twin) == bool(expected), (twin, expected)
+
+
+def test_the_one_authority_is_load_bearing_for_every_ride_on_site(monkeypatch):
+    """Non-vacuity for CDX-184-r20-01: with `_caller_documents_may_reach` answering yes
+    everywhere — no proved removal ends anything — the caller whose literal segment the proved
+    removal discarded is refused again at each of the three sites, and CACHE2's row returns."""
+    literal_parent = _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    sites = {
+        "own binding": [("PARENT", literal_parent), ("CACHE_CHILD", _legs(
+            _EMPTIES2, _RECACHE_LEG, _BINDS2))],
+        "own binding past a Message": [("PARENT", literal_parent), ("CACHE_CHILD", _legs(
+            _EMPTIES2, _RECACHE_LEG, {"steps": [_READ2, _MSG, _BOUND_GET], "terminal": _STOP}))],
+        "passthrough call discharge": [
+            ("PARENT", _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("MID")})),
+            ("MID", _legs(_EMPTIES2, _RECACHE_LEG, {"steps": [_READ2], "terminal": _call("BOUND")})),
+            ("BOUND", _BOUND)],
+        "inherited row": [
+            ("PARENT", _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("MID")})),
+            ("MID", _legs(_EMPTIES2, _RECACHE_LEG, {"steps": [], "terminal": _call("CACHE_CHILD")})),
+            ("CACHE_CHILD", _legs(_BINDS2, {"steps": [_MSG], "terminal": _STOP}))],
+    }
+    for site, roots in sites.items():
+        assert _errors(roots, "PARENT") == [], site
+    monkeypatch.setattr(lineage, "_caller_documents_may_reach", lambda state, cache_ref: True)
+    for site, roots in sites.items():
+        assert _errors(roots, "PARENT") == [(_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL)], site
+        callee = roots[1][0]
+        assert any(row[0] == "$ref:CACHE2" for row in _row(
+            roots, "PARENT", callee).cache_property_requirements), site
+
+
+#: A child that FILLS the cache itself, then retrieves it and uses X: ``(its fill, the steps
+#: after the retrieve, what a caller stores that breaks the use, what satisfies it, the
+#: refusal at the caller's call)``.
+_OWN_FILL_USES = {
+    "bound": (_DYNAMIC_INTO_CACHE2, [_BOUND_GET], _LITERAL_INTO_CACHE2, _DYNAMIC_INTO_CACHE2,
+              (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+    "bound_past_a_message": (_DYNAMIC_INTO_CACHE2, [_MSG, _BOUND_GET], _LITERAL_INTO_CACHE2,
+                             _DYNAMIC_INTO_CACHE2, (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+    "bound_past_a_connector_call": (_DYNAMIC_INTO_CACHE2, [_GET, _BOUND_GET], _LITERAL_INTO_CACHE2,
+                                    _DYNAMIC_INTO_CACHE2, (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+    "bound_past_a_map": ({"steps": [_GETP1, _TO_P2, _DYNAMIC_X], "terminal": _PUT2},
+                         [_CONSUMES_P2, _MSG, _BOUND_GET],
+                         {"steps": [_GETP1, _TO_P2, _STATIC_X], "terminal": _PUT2},
+                         {"steps": [_GETP1, _TO_P2, _DYNAMIC_X], "terminal": _PUT2},
+                         (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+    "ordinary": (_DYNAMIC_INTO_CACHE2, [_READS_X], _X_LESS_INTO_CACHE2, _DYNAMIC_INTO_CACHE2,
+                 (_READ_BEFORE_WRITE, _AT_THE_SECOND_LEGS_CALL)),
+    "ordinary_past_a_message": (_DYNAMIC_INTO_CACHE2, [_MSG, _READS_X], _X_LESS_INTO_CACHE2,
+                                _DYNAMIC_INTO_CACHE2, (_READ_BEFORE_WRITE, _AT_THE_SECOND_LEGS_CALL)),
+}
+
+
+@pytest.mark.parametrize("form", ("scheduled", "passthrough"))
+@pytest.mark.parametrize("use", sorted(_OWN_FILL_USES))
+def test_a_child_that_fills_the_cache_itself_still_owes_the_callers_that_share_it(use, form):
+    """Finding O of correction batch 21a. The child stores documents carrying a dynamic X in
+    CACHE2 and uses X on what it retrieves from CACHE2. At runtime the cache is shared and
+    appends, so the retrieve hands on the child's documents AND whatever its caller stored
+    there before the call: a caller's literal X reaches the bound path, and a caller's X-less
+    documents reach the read. Amendment 3 §7: "Append possible cohorts; do not treat the last
+    cache write as replacing earlier contents."
+
+    Every row was empty, because the retrieve's caller marker was keyed on "no write of this
+    process reached the cache": the child's own write was read as replacing its caller's
+    documents. Measured before the correction: every breaking caller below admitted on validate
+    and compile, for both child forms, while the flattened graph refused it. CONTROLS, against
+    over-correction: a caller that stores satisfying documents, and one that stores nothing in
+    the cache, are admitted, as their twins are."""
+    fill, after_the_retrieve, breaks, satisfies, refusal = _OWN_FILL_USES[use]
+    child = _root(form, fill, {"steps": [_READ2] + after_the_retrieve, "terminal": _STOP})
+    for caller_leg, expected in ((breaks, [refusal]), (satisfies, []), (_STORES_NOTHING, [])):
+        parent = _legs(caller_leg, {"steps": [], "terminal": _call("CACHE_CHILD")})
+        roots = [("PARENT", parent), ("CACHE_CHILD", child)]
+        assert _both_routes(roots, "PARENT") == expected, caller_leg
+        assert _both_routes(roots, "CACHE_CHILD") == [], caller_leg
+        twin = _errors([("PARENT", _flattened(parent, child))], "PARENT")
+        assert bool(twin) == bool(expected), (caller_leg, twin)
+    bound = use.startswith("bound")
+    assert ("$ref:CACHE2", "X", None, bound) in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+
+
+def test_a_forwarder_hands_its_caller_the_obligation_of_a_child_that_fills_the_cache_itself():
+    """Finding O through a middle that stores nothing: the row travels up and the caller that
+    stored a literal X in the shared cache is refused at ITS call, as the flattened graph is."""
+    child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)
+    mid = _legs(_STORES_NOTHING, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    for caller_leg, expected in ((_LITERAL_INTO_CACHE2, [(_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)]),
+                                 (_DYNAMIC_INTO_CACHE2, [])):
+        parent = _legs(caller_leg, {"steps": [], "terminal": _call("MID")})
+        roots = [("PARENT", parent), ("MID", mid), ("CACHE_CHILD", child)]
+        assert _both_routes(roots, "PARENT") == expected
+        assert _both_routes(roots, "MID") == []
+        assert _row(roots, "PARENT", "MID").cache_property_requirements == (("$ref:CACHE2", "X", None, True),)
+        twin = _errors([("PARENT", _flattened(parent, mid, child))], "PARENT")
+        assert bool(twin) == bool(expected), twin
+
+
+def test_the_retired_own_write_proxy_is_load_bearing(monkeypatch):
+    """Non-vacuity for finding O: with the one authority answering the retired proxy — "a
+    caller's documents may be there only when no write of this process reached the cache" —
+    the caller whose literal X shares the cache the child filled is admitted again, on the
+    bound and the ordinary channel, and the row is gone."""
+    cells = {
+        "bound": ([("PARENT", _legs(_LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                   ("CACHE_CHILD", _legs(_DYNAMIC_INTO_CACHE2, _BINDS2))],
+                  (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+        "ordinary": ([("PARENT", _legs(_X_LESS_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                      ("CACHE_CHILD", _legs(_DYNAMIC_INTO_CACHE2, _READS2))],
+                     (_READ_BEFORE_WRITE, _AT_THE_SECOND_LEGS_CALL)),
+    }
+    for use, (roots, refusal) in cells.items():
+        assert _errors(roots, "PARENT") == [refusal], use
+    monkeypatch.setattr(lineage, "_caller_documents_may_reach",
+                        lambda state, cache_ref: not state.content_of(cache_ref))
+    for use, (roots, _refusal) in cells.items():
+        assert _errors(roots, "PARENT") == [], use
+        assert _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements == (), use
+
+
+#: A child that stages P2 documents carrying X in CACHE itself and maps what it retrieves, so
+#: its contract owes a CONTENT row for CACHE, then uses X in a way no cached-property refusal
+#: ever recorded: a Decision that tracks X, and a writer that re-composes X from its `current`
+#: value for a bound path.
+_STAGES_P2_WITH_X = {"steps": [_GETP1, _TO_P2, _DYNAMIC_X], "terminal": _PUT}
+_DECIDES_ON_X = {"kind": "decision", "comparison": "equals",
+                 "left": {"value_type": "track", "property_id": "dynamicdocument.X"},
+                 "right": {"value_type": "static", "static_value": "a"},
+                 "true_arm": {"steps": [_MSG], "terminal": _STOP}, "false_arm": {"steps": [], "terminal": _STOP}}
+_RECOMPOSES_X = {"kind": "set_ddp", "name": "X", "source_values": [
+    {"value_type": "current"}, {"value_type": "static", "value": "/tail"}]}
+_CONTENT_AND_AN_UNRECORDED_USE = {
+    "a_decision_tracking_x": _legs(
+        _STAGES_P2_WITH_X, {"steps": [_READ, _CONSUMES_P2], "terminal": _DECIDES_ON_X}),
+    "a_current_recomposition_bound": _legs(_STAGES_P2_WITH_X, {
+        "steps": [_READ, _CONSUMES_P2, _MSG, _RECOMPOSES_X, _BOUND_GET], "terminal": _STOP}),
+}
+
+
+@pytest.mark.parametrize("use", sorted(_CONTENT_AND_AN_UNRECORDED_USE))
+def test_a_use_that_owes_nothing_by_a_refusal_still_names_the_cache_it_owes(use):
+    """Over-correction guard, found by this correction's own verification. The content row makes
+    every caller seed CACHE's content for the child, and a cache seeded for content that no
+    cached-property row names enters with an UNKNOWN cohort. A use of X no refusal ever recorded
+    a row for — a non-strict Decision operand of a property the child writes, and a writer that
+    re-uses X's `current` value for a bound path — then met the child's own cohort with the
+    unknown one, and the called child was refused under every caller, including one that stores
+    nothing, while it is clean on its own and so is every flattened twin but the breaking one.
+
+    Each such use is refused unestablished, so each owes its callers exactly what a refusal would
+    have recorded: the row names CACHE, the seed carries X, and the child is admitted under its
+    callers again. The `current` recomposition was also a fail-open of finding O's kind before
+    the correction: a caller whose documents in CACHE lack X was admitted while its twin is
+    refused. It is now refused at its call (as an establishment row: the recomposing writer's own
+    non-static source composes the segment, so a caller's literal X is admitted, as its twin is)."""
+    child = _CONTENT_AND_AN_UNRECORDED_USE[use]
+    call_leg = {"steps": [], "terminal": _call("CACHE_CHILD")}
+    assert _both_routes([("CACHE_CHILD", child)], "CACHE_CHILD") == []
+    x_less = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
+    literal = {"steps": [_GETP1, _TO_P2, _STATIC_X], "terminal": _PUT}
+    for caller_leg, refused in ((_STORES_NOTHING, False), (_STAGES_P2_WITH_X, False), (literal, False),
+                                (x_less, True)):
+        parent = _legs(caller_leg, call_leg)
+        roots = [("PARENT", parent), ("CACHE_CHILD", child)]
+        assert _both_routes(roots, "CACHE_CHILD") == [], caller_leg
+        expected = [(_READ_BEFORE_WRITE, _AT_THE_SECOND_LEGS_CALL)] if refused else []
+        assert _both_routes(roots, "PARENT") == expected, caller_leg
+        twin = _errors([("PARENT", _flattened(parent, child))], "PARENT")
+        assert bool(twin) == refused, (caller_leg, twin)
+    row = _row(roots, "PARENT", "CACHE_CHILD")
+    assert ("$ref:CACHE", "X", None, False) in row.cache_property_requirements, row
+    assert ("$ref:CACHE", "$ref:P2") in row.cache_requirements, row
+
+
+#: ``(what the caller or the first leg stores, the use leg, the refusal code, the use's
+#: sub-pointer)`` for the unproved-removal shapes.
+_UNPROVED_REMOVAL_USES = {
+    "bound": (_LITERAL_INTO_CACHE2, _BINDS2, _NO_DYNAMIC_SEGMENT, "/steps/1/path_binding"),
+    "ordinary": (_X_LESS_INTO_CACHE2, _READS2, _READ_BEFORE_WRITE, "/steps/1"),
+}
+
+
+@pytest.mark.parametrize("use", sorted(_UNPROVED_REMOVAL_USES))
+def test_a_removal_the_walk_does_not_prove_keeps_what_the_cache_may_hold(use):
+    """Finding S7 of correction batch 21a, in one process and across a call.
+
+    A whole-cache removal behind a producer that may return no rows may never run while the
+    process still completes normally, and the producer in front of a later leg's write is
+    independent of it. After it the cache is the meet of "it ran" and "it was skipped": its
+    guarantees clear, and what it may hold survives — amendment 3 §7 unions possible cohorts at
+    convergence and says "Never discard an inconvenient writer alternative". The removal
+    cleared the cohorts unconditionally, so a literal (bound) or X-less (ordinary) document
+    stored before it reached the use unrefused, while the same legs with no removal are refused.
+    Measured before the correction: the unproved cells below clean on validate and compile, in
+    process and at the caller's call. The proved removal still clears them.
+
+    Across a call the shape is also finding O's — the child fills the cache itself after the
+    removal — so there the removal's proof decides through the seal: an unproved removal grants
+    none, and the child still owes the callers whose documents may have survived it."""
+    before, use_leg, code, sub_path = _UNPROVED_REMOVAL_USES[use]
+    unproved = _legs(before, _EMPTIES2_BEHIND_A_GET, _DYNAMIC_INTO_CACHE2, use_leg)
+    assert _both_routes([("PARENT", unproved)], "PARENT") == [(code, "/body/steps/0/legs/3" + sub_path)]
+    no_removal = _legs(before, _DYNAMIC_INTO_CACHE2, use_leg)
+    assert _both_routes([("PARENT", no_removal)], "PARENT") == [(code, "/body/steps/0/legs/2" + sub_path)]
+    proved = _legs(before, _EMPTIES2, _DYNAMIC_INTO_CACHE2, use_leg)
+    assert _both_routes([("PARENT", proved)], "PARENT") == []
+    # Across a call: the removal and the refill are the child's, the breaking document is its caller's.
+    at_the_call = _AT_THE_CALL if use == "bound" else _AT_THE_SECOND_LEGS_CALL
+    for removal, expected in (("unproved", [(code, at_the_call)]), ("proved", [])):
+        child = _legs(*(_REMOVALS_OF_CACHE2[removal] + [_DYNAMIC_INTO_CACHE2, use_leg]))
+        parent = _legs(before, {"steps": [], "terminal": _call("CACHE_CHILD")})
+        roots = [("PARENT", parent), ("CACHE_CHILD", child)]
+        assert _both_routes(roots, "PARENT") == expected, removal
+        assert _both_routes(roots, "CACHE_CHILD") == [], removal
+        twin = _errors([("PARENT", _flattened(parent, child))], "PARENT")
+        assert bool(twin) == bool(expected), (removal, twin)
+
+
+def test_the_proof_gate_on_the_cohort_clear_is_load_bearing(monkeypatch):
+    """Non-vacuity for S7: with the pre-correction removal — content and cohorts cleared
+    whatever the proof, only the seal gated — the literal (bound) and the X-less document
+    (ordinary) stored before an unproved removal are admitted again in one process.
+
+    Measured, and stated so the witness is not over-read: the same shape ACROSS a call stays
+    refused under this mutant, because there it is also finding O's shape and the unproved
+    removal grants no seal — so that cell is O's to witness (above), not this one's."""
+    cells = {
+        "bound": ([("PARENT", _legs(_LITERAL_INTO_CACHE2, _EMPTIES2_BEHIND_A_GET, _DYNAMIC_INTO_CACHE2, _BINDS2))],
+                  [(_NO_DYNAMIC_SEGMENT, "/body/steps/0/legs/3/steps/1/path_binding")]),
+        "ordinary": ([("PARENT", _legs(_X_LESS_INTO_CACHE2, _EMPTIES2_BEHIND_A_GET, _DYNAMIC_INTO_CACHE2, _READS2))],
+                     [(_READ_BEFORE_WRITE, "/body/steps/0/legs/3/steps/1")]),
+    }
+    called = [("PARENT", _legs(_LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD")})),
+              ("CACHE_CHILD", _legs(_EMPTIES2_BEHIND_A_GET, _DYNAMIC_INTO_CACHE2, _BINDS2))]
+    for use, (roots, refusal) in cells.items():
+        assert _errors(roots, "PARENT") == refusal, use
+
+    def clears_whatever_the_proof(state, cache_ref, proved_to_run):
+        after = lineage._without_cache_establishment(state.without_content(cache_ref), cache_ref)
+        return after.with_sealed_cache(cache_ref) if proved_to_run else after
+
+    monkeypatch.setattr(lineage, "_after_a_whole_cache_removal", clears_whatever_the_proof)
+    for use, (roots, _refusal) in cells.items():
+        assert _errors(roots, "PARENT") == [], use
+    assert _errors(called, "PARENT") == [(_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)]
+
+
+#: A process that STAGES P2 documents in CACHE itself, behind each kind of removal.
+_STAGES_P2_BEHIND = {
+    "proved": [_EMPTIES_IT],
+    "unproved": [{"steps": [_GET], "terminal": _REMOVE}],
+    "none": [],
+}
+
+
+@pytest.mark.parametrize("removal", sorted(_STAGES_P2_BEHIND))
+@pytest.mark.parametrize("site", ("inherited", "own"))
+def test_a_process_that_stages_the_profile_itself_still_owes_the_content_its_callers_share(site, removal):
+    """The content channel, the limit SELF-184-43 recorded. A process that staged P2 in the
+    cache itself inherited nothing (at a call) and recorded nothing (at its own map), because
+    both were keyed on "no write of this process reaches the cache". The cache appends, so a
+    caller that stored P1 documents there before the call has them retrieved beside the
+    process's P2 ones and mapped as P2 (amendment 3 §7). Measured before the correction: the P1
+    caller admitted at every removal while the flattened graph refused the map, except at the
+    proved removal, whose flattened graph is clean too.
+
+    CONTROLS, against over-correction: a caller that stores nothing in the cache stores nothing
+    of the wrong profile and is admitted — the vacuous rule the cached-property rows already
+    apply, now applied to the content rows the same way — and so is a P2 caller."""
+    process_legs = _STAGES_P2_BEHIND[removal] + [_STAGES_P2]
+    if site == "inherited":
+        callee = [("MID", _legs(*(process_legs + [{"steps": [], "terminal": _call("CACHE_CHILD")}]))),
+                  ("CACHE_CHILD", _TYPED_CACHE_CHILD)]
+    else:
+        callee = [("CACHE_CHILD", _legs(*(process_legs + [
+            {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP}])))]
+    called = callee[0][0]
+    p1 = {"steps": [_GETP1], "terminal": _PUT}
+    for caller_leg, expected in (
+        (p1, [] if removal == "proved" else [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _AT_THE_CALL)]),
+        (_STAGES_P2, []),
+        (_STORES_NOTHING, []),
+    ):
+        parent = _legs(caller_leg, {"steps": [], "terminal": _call(called)})
+        roots = [("PARENT", parent)] + callee
+        assert _both_routes(roots, "PARENT") == expected, caller_leg
+        for key, _document in callee:
+            assert _both_routes(roots, key) == [], (caller_leg, key)
+        twin = _errors([("PARENT", _flattened(parent, *[document for _key, document in callee]))], "PARENT")
+        assert bool(twin) == bool(expected), (caller_leg, twin)
+    rows = _row(roots, "PARENT", called).cache_requirements
+    assert (("$ref:CACHE", "$ref:P2") in rows) == (removal != "proved"), rows
+
+
+def test_the_content_channel_asks_the_one_authority_and_the_vacuous_rule(monkeypatch):
+    """Non-vacuity for the content channel, one witness per half. With the retired proxy in the
+    authority's place the P1 caller of the self-staging middle is admitted again; with the
+    vacuous rule gone the caller that stores nothing in the cache is refused for it."""
+    mid = _legs(_STAGES_P2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+
+    def chain(caller_leg):
+        return [("PARENT", _legs(caller_leg, {"steps": [], "terminal": _call("MID")})),
+                ("MID", mid), ("CACHE_CHILD", _TYPED_CACHE_CHILD)]
+
+    p1, nothing = chain({"steps": [_GETP1], "terminal": _PUT}), chain(_STORES_NOTHING)
+    refusal = (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _AT_THE_CALL)
+    assert _errors(p1, "PARENT") == [refusal]
+    assert _errors(nothing, "PARENT") == []
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_caller_documents_may_reach",
+                        lambda state, cache_ref: not state.content_of(cache_ref))
+        assert _errors(p1, "PARENT") == []
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_call_stores_nothing_in", lambda state, cache_ref, external_writer: False)
+        assert _errors(nothing, "PARENT") == [refusal]
+
+
+_RECACHES_THEN_READS = _legs(_RECACHE_LEG, _READS2)
+_RECACHES_THEN_READS_PAST_A_MESSAGE = _legs(
+    _RECACHE_LEG, {"steps": [_READ2, _MSG, _READS_X], "terminal": _STOP})
+#: What the caller stores in each cache, and the verdict the read past the re-cache earns.
+_RECACHE_READ_CALLERS = {
+    "dynamic_in_both": (_STAGES_X, _DYNAMIC_INTO_CACHE2, ()),
+    "x_less_in_the_cache_the_read_rides_on": (
+        _STAGES_X, _X_LESS_INTO_CACHE2, ((_READ_BEFORE_WRITE, _AT_THE_THIRD_LEGS_TERMINAL),)),
+    "x_less_in_the_cache_the_property_came_from": (
+        {"steps": [_GET], "terminal": _PUT}, _DYNAMIC_INTO_CACHE2,
+        ((_READ_BEFORE_WRITE, _AT_THE_THIRD_LEGS_TERMINAL),)),
+    "nothing_in_the_cache_the_read_rides_on": (_STAGES_X, _STORES_NOTHING, ()),
+}
+
+
+@pytest.mark.parametrize("child", ("no_step", "message"))
+@pytest.mark.parametrize("caller", sorted(_RECACHE_READ_CALLERS))
+def test_an_ordinary_read_past_a_recache_rides_on_that_cache_past_a_message_too(caller, child):
+    """The ordinary-read twin of ARCH-184-r2-01, reached by this correction's coverage matrix.
+    A read of X on documents retrieved from the re-cache is a use of that cache's documents, and
+    a Message between the retrieve and the read hands on exactly the documents it received, so
+    it changes nothing about which caller documents reach the read. The binding already carried
+    the cache it rides on past a Message; the read did not. Once the retrieve's own marker
+    charged the second cache (a caller's documents may share it beside the re-cached ones), the
+    same read one Message later still charged nothing, and a caller's X-less documents in that
+    cache escaped it. Measured before the correction: both child spellings admitted the X-less
+    caller of the second cache while the flattened graph refused it."""
+    into_cache, into_cache2, expected = _RECACHE_READ_CALLERS[caller]
+    document = _RECACHES_THEN_READS_PAST_A_MESSAGE if child == "message" else _RECACHES_THEN_READS
+    parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    roots = [("PARENT", parent), ("CACHE_CHILD", document)]
+    assert _both_routes(roots, "PARENT") == list(expected)
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    assert ("$ref:CACHE2", "X", None, False) in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+    twin = _errors([("PARENT", _flattened(parent, document))], "PARENT")
+    assert bool(twin) == bool(expected), (twin, expected)
+
+
+def test_the_ride_on_credit_for_an_ordinary_read_is_load_bearing(monkeypatch):
+    """Non-vacuity: with the walk's ordinary-read ride-on record dropped, the X-less caller of
+    the second cache is admitted again behind the Message, while the read with no step keeps its
+    refusal through the retrieve's own marker."""
+    into_cache, into_cache2, expected = _RECACHE_READ_CALLERS["x_less_in_the_cache_the_read_rides_on"]
+    parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    past = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_READS_PAST_A_MESSAGE)]
+    beside = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_READS)]
+    assert _errors(past, "PARENT") == list(expected)
+    real = lineage.walk_lineage
+
+    def without_the_read_ride_on(prepared, capabilities=DEFAULT_VALIDATION_CAPABILITIES):
+        return real(prepared, capabilities)._replace(read_cache_origins=())
+
+    monkeypatch.setattr(lineage, "walk_lineage", without_the_read_ride_on)
+    assert _errors(past, "PARENT") == []
+    assert _errors(beside, "PARENT") == list(expected)
+
+
+@pytest.mark.parametrize("use", ("bound", "ordinary", "content"))
+def test_a_per_document_caller_of_a_child_that_fills_and_reads_its_own_shared_cache_is_refused(use):
+    """Amendment 1 rule 8, newly reachable. A No Data child a Data Passthrough caller runs once
+    per document appends to the cache on every run, so each later run's retrieve also hands on
+    what the earlier runs stored: "A later invocation whose required cache may have been removed
+    or changed is refused as a verified composition." The child now requires something of that
+    cache's documents — its callers' documents are owed (finding O) — so rule 8 sees the change.
+    A scheduled caller runs it once and is admitted, and so is a per-document caller of the same
+    child behind a proved removal, which empties the cache on every run before refilling it."""
+    fills = {"bound": (_DYNAMIC_INTO_CACHE2, [_BOUND_GET]),
+             "ordinary": (_DYNAMIC_INTO_CACHE2, [_READS_X]),
+             "content": ({"steps": [_GETP1, _TO_P2], "terminal": _PUT2}, [_CONSUMES_P2])}
+    fill, after_the_retrieve = fills[use]
+    use_leg = {"steps": [_READ2] + after_the_retrieve, "terminal": _STOP}
+    call_leg = {"steps": [], "terminal": _call("CACHE_CHILD")}
+    per_document = _passthrough_root(_STORES_NOTHING, call_leg)
+    scheduled = _legs(_STORES_NOTHING, call_leg)
+    child = _legs(fill, use_leg)
+    placement = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "/body/steps/1/legs/1/terminal")]
+    assert _both_routes([("PARENT", per_document), ("CACHE_CHILD", child)], "PARENT") == placement
+    assert _both_routes([("PARENT", scheduled), ("CACHE_CHILD", child)], "PARENT") == []
+    emptied_each_run = _legs(_EMPTIES2, fill, use_leg)
+    assert _both_routes([("PARENT", per_document), ("CACHE_CHILD", emptied_each_run)], "PARENT") == []
+
+
+def _cache_mutation_kinds():
+    """Every authored node kind that changes a document cache, read off the model: a kind that
+    names a cache and is not a retrieve (`TRIGGERED_REPLACEMENT_KINDS`)."""
+    import typing
+
+    from pydantic import BaseModel
+
+    from boomi_mcp.models import process_ir as model
+
+    named = {
+        typing.get_args(member.model_fields["kind"].annotation)[0]
+        for member in vars(model).values()
+        if isinstance(member, type) and issubclass(member, BaseModel)
+        and "cache_ref" in member.model_fields and "kind" in member.model_fields
+    }
+    return named - set(model.TRIGGERED_REPLACEMENT_KINDS)
+
+
+#: QA-184-s1-r21-01 and B21A-TXT-01. The children a per-document caller is refused for under
+#: amendment 1 rule 8, per KIND of change a child may make to the cache it requires: each
+#: `(child, what its caller stores first)`. An Add to Cache: the re-cache child, the same with a
+#: Message before its binding, and a child that fills CACHE2 and reads it back. A Remove from
+#: Cache: a child that binds on what its caller stored in CACHE2 and then empties CACHE2, adding
+#: nothing — so the cause may not claim that a later run reads what an earlier one added.
+_REPEATED_RUN_CHILDREN = {
+    "cache_put": {
+        "recache": (_RECACHES_THEN_BINDS, [_STAGES_X, _DYNAMIC_INTO_CACHE2]),
+        "recache_past_a_message": (_RECACHES_THEN_BINDS_PAST_A_MESSAGE, [_STAGES_X, _DYNAMIC_INTO_CACHE2]),
+        "fills_and_reads_its_own_cache": (_legs(_DYNAMIC_INTO_CACHE2, _BINDS2), [_STORES_NOTHING]),
+    },
+    "cache_remove": {
+        "reads_its_callers_cache_then_empties_it": (_legs(_BINDS2, _EMPTIES2), [_DYNAMIC_INTO_CACHE2]),
+    },
+}
+_REPEATED_RUN_CASES = sorted((kind, name) for kind, children in _REPEATED_RUN_CHILDREN.items() for name in children)
+
+
+def test_the_repeated_run_witnesses_cover_every_kind_of_cache_change():
+    """The enumeration is derived, not hand-picked: one entry per node kind that can change a
+    cache, each child's own contract says it may change the cache it requires, and the child
+    changes that cache with that kind and no other."""
+    assert set(_REPEATED_RUN_CHILDREN) == _cache_mutation_kinds() == {"cache_put", "cache_remove"}
+    for kind, children in _REPEATED_RUN_CHILDREN.items():
+        for name, (document, caller_prefix) in children.items():
+            roots = [("PARENT", _passthrough_root(*(caller_prefix + [{"steps": [], "terminal": _call("CACHE_CHILD")}]))),
+                     ("CACHE_CHILD", document)]
+            row = _row(roots, "PARENT", "CACHE_CHILD")
+            assert ("cache", "$ref:CACHE2") in row.mutated_state, (kind, name, row)
+            changes = {leg["terminal"]["kind"] for leg in _branch_legs(document)
+                       if leg["terminal"].get("cache_ref") == "$ref:CACHE2"} & _cache_mutation_kinds()
+            assert changes == {kind}, (kind, name, changes)
+
+
+@pytest.mark.parametrize("kind, child", _REPEATED_RUN_CASES, ids=["-".join(case) for case in _REPEATED_RUN_CASES])
+def test_the_repeated_run_refusal_states_its_cause_and_its_way_out(kind, child):
+    """QA-184-s1-r21-01, measured live at 5b5038c: this refusal served the placement code, whose
+    message ("a process call is placed after a composition ProcessIR v1 does not admit") names
+    no cause and whose remediation describes a step prefix the call does not have. It now has
+    its own code: the message says the child runs once for each document and requires a cache it
+    may also add to OR EMPTY, so a later run may find what an earlier run added or emptied
+    (B21A-TXT-01: the refusal fires for a child that only removes the cache too, and "reads what
+    an earlier run added" was false for it); the evidence names the state scope, `cache`; and
+    the remediation names the alternatives measured admitted — a Data Passthrough entry called
+    wait=true, a path handing the child exactly one document, and, for a child that never reads
+    the cache before writing it, a removal after its last write with the call waiting and
+    aborting on error. The finding names no cache reference: served findings carry no authored
+    text.
+
+    Both general alternatives are measured here too, on the same child, for each kind of cache
+    change: rewritten with a passthrough step first and called wait=true, and called from a
+    process with no explicit entry, each is admitted."""
+    from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    document, caller_prefix = _REPEATED_RUN_CHILDREN[kind][child]
+    call_leg = {"steps": [], "terminal": _call("CACHE_CHILD")}
+    roots = [("PARENT", _passthrough_root(*(caller_prefix + [call_leg]))), ("CACHE_CHILD", document)]
+    pointer = "/body/steps/1/legs/{0}/terminal".format(len(caller_prefix))
+    irs, resolution = _resolve(roots)
+    capabilities = resolution.capabilities_by_root["PARENT"]
+    validated = [item for item in validate_process_ir(irs["PARENT"], _symbols(), capabilities=capabilities).errors]
+    assert [(item.code, item.path) for item in validated] == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, pointer)]
+    with pytest.raises(ProcessIRCompileError) as caught:
+        compile_process_ir_v1(irs["PARENT"], _symbols(), capabilities=capabilities)
+    compiled = list(caught.value.diagnostics)
+    assert [(item.code, item.path) for item in compiled] == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, pointer)]
+    for served in (validated[0], compiled[0]):
+        message, remediation = served.message, served.remediation
+        for cause in ("runs once for each document", "document cache", "add to or empty",
+                      "a later run may find what an earlier run added or emptied"):
+            assert cause in message, (cause, message)
+        assert "a later run reads what an earlier run added" not in message
+        for way_out in ("Data Passthrough entry", "wait=true", "exactly one document",
+                        "abort_on_error=true", "node_kind='process_call'"):
+            assert way_out in remediation, (way_out, remediation)
+        # NON-VACUITY: the generic placement text no longer serves for this cause.
+        placement = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
+        assert message != compiler_diagnostics._MESSAGES[placement]
+        assert remediation != compiler_diagnostics._REMEDIATION[placement]
+        assert "direct predecessor" not in remediation
+    assert [(evidence.key, evidence.value) for evidence in validated[0].evidence] == [("state_scope", "cache")]
+    # The two ways out, measured on the same child.
+    as_passthrough = _passthrough_root(*_branch_legs(document))
+    waited = [("PARENT", _passthrough_root(*(caller_prefix + [
+        {"steps": [], "terminal": _call("CACHE_CHILD", wait=True)}]))), ("CACHE_CHILD", as_passthrough)]
+    assert _both_routes(waited, "PARENT") == []
+    one_document = [("PARENT", _legs(*(caller_prefix + [call_leg]))), ("CACHE_CHILD", document)]
+    assert _both_routes(one_document, "PARENT") == []
+
+
+def test_the_repeated_run_text_is_what_each_table_serves_for_the_code(monkeypatch):
+    """Non-vacuity of the table entry: with this code's text removed from the validator's
+    tables the finding falls back to the generic text, which states no cause and names neither
+    way out — so the witness above measures the served entry, not a string the finding
+    builds."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    code = PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE
+    served = findings.finding(code, "error", "capability", "/body")
+    assert "runs once for each document" in served.message
+    assert "Data Passthrough entry" in served.remediation
+    assert {row["code"]: row for row in findings.finding_specs()}[code]["message"] == served.message
+    monkeypatch.setattr(findings, "_MESSAGES", {k: v for k, v in findings._MESSAGES.items() if k != code})
+    monkeypatch.setattr(findings, "_REMEDIATION", {k: v for k, v in findings._REMEDIATION.items() if k != code})
+    fallback = findings.finding(code, "error", "capability", "/body")
+    assert "runs once for each document" not in fallback.message
+    assert "Data Passthrough entry" not in fallback.remediation
+
+
+#: The middle process for the declared-read channel: ``form -> (its legs before the retrieve,
+#: the retrieve, the removal legs by kind, what a caller stores that breaks the read, the
+#: caller's other legs)``.
+_DECLARED_READ_MIDDLES = {
+    "own_fill": ([_STAGES_X], _READ,
+                 {"proved": [_EMPTIES_IT], "unproved": [{"steps": [_GET], "terminal": _REMOVE}], "none": []},
+                 {"steps": [_GET], "terminal": _PUT}, []),
+    "recache": ([_RECACHE_LEG], _READ2, _REMOVALS_OF_CACHE2, _X_LESS_INTO_CACHE2, [_STAGES_X]),
+}
+
+
+@pytest.mark.parametrize("past_a_message", (False, True), ids=("no_step", "message"))
+@pytest.mark.parametrize("removal", ("proved", "unproved", "none"))
+@pytest.mark.parametrize("form", sorted(_DECLARED_READ_MIDDLES))
+def test_a_declared_read_owes_the_callers_that_share_its_cache_unless_the_removal_is_proved(
+        form, removal, past_a_message):
+    """The declared-read channel over the same case set: a verified subprocess summary's read
+    of X at a call, on documents the middle retrieved from a cache it filled or re-cached into.
+    The row is owed exactly while a caller's documents may be in that cache, and a caller whose
+    documents there lack X is refused at its call — on validate and compile — exactly then; a
+    caller that stores nothing there is admitted throughout."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    before, retrieve, removals, breaks, caller_prefix = _DECLARED_READ_MIDDLES[form]
+    call = _call("CHILD", **_WAITS_AND_ABORTS)
+    middle = _legs(*(removals[removal] + before + [
+        {"steps": [retrieve] + ([_MSG] if past_a_message else []), "terminal": call}]))
+    facts = _derived_facts(middle, _summarised(_SCHEDULED_READS_X))
+    owed = removal != "proved"
+    assert ((retrieve["cache_ref"], "X", None, False) in facts["cache_property_requirements"]) == owed, facts
+    held = ProcessIRValidationCapabilitiesV1(child_entry_contracts=(
+        ChildEntryContractV1(process_ref="$ref:MID", **facts),))
+
+    def codes(caller_legs):
+        document = parse_process_ir_v1(_legs(*(caller_legs + [{"steps": [], "terminal": _call("MID")}])))
+        validated = [(item.code, item.path) for item in
+                     validate_process_ir(document, _symbols(), capabilities=held).errors]
+        try:
+            compile_process_ir_v1(document, _symbols(), capabilities=held)
+            compiled = []
+        except ProcessIRCompileError as exc:
+            compiled = [(item.code, item.path) for item in exc.diagnostics]
+        assert sorted(compiled) == sorted(validated), (validated, compiled)
+        return {code for code, _path in validated}
+
+    assert (_READ_BEFORE_WRITE in codes(caller_prefix + [breaks])) == owed
+    assert codes(caller_prefix + [_STORES_NOTHING]) == set()
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a follow-up: a removal proved relative to what can observe it
+# ---------------------------------------------------------------------------
+
+from test_issue_184_child_entries import _SPLIT as _SPLITS_THE_DOCUMENTS  # noqa: E402
+
+
+def _decision_whose_true_arm_is(terminal):
+    return {"kind": "decision", "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "a"},
+            "true_arm": {"steps": [], "terminal": terminal},
+            "false_arm": {"steps": [], "terminal": _STOP}}
+
+
+#: Roots whose Branch is fed by ONE producer in front of it, so every leg receives that
+#: producer's documents: ``form -> (build the root from the legs, the Branch's own pointer)``.
+_SHARED_TRIGGER_ROOTS = {
+    "a_get_before_the_branch": (
+        lambda legs: _doc(_GET, {"kind": "branch", "legs": legs}), "/body/steps/1"),
+    "a_get_and_a_message_before_the_branch": (
+        lambda legs: _doc(_GET, _MSG, {"kind": "branch", "legs": legs}), "/body/steps/2"),
+    "a_passthrough_entry_and_a_get_before_the_branch": (
+        lambda legs: _doc(_ENTRY, _GET, {"kind": "branch", "legs": legs}), "/body/steps/2"),
+    "a_decision_arm_branch_behind_a_get": (
+        lambda legs: _doc(_GET, _decision_whose_true_arm_is({"kind": "branch", "legs": legs})),
+        "/body/steps/1/true_arm/terminal"),
+}
+#: The removal leg's steps: ones that hand on exactly the documents the leg received, and ones
+#: that may not.
+_LEG_INPUT_KEPT = {"no_steps": [], "a_message": [_MSG], "a_process_property": [_SET_K]}
+_LEG_INPUT_REDUCED = {"its_own_get": [_GET], "a_split": [_SPLITS_THE_DOCUMENTS]}
+#: ``use -> (what an earlier leg stores that breaks it, the use leg, the refusal code, sub-pointer)``
+_SHARED_TRIGGER_USES = {
+    "bound": ([_STATIC_X], {"steps": [_READ2, _BOUND_GET], "terminal": _STOP}, _NO_DYNAMIC_SEGMENT,
+              "/legs/3/steps/1/path_binding"),
+    "ordinary": ([], {"steps": [_READ2, _READS_X], "terminal": _STOP}, _READ_BEFORE_WRITE, "/legs/3/steps/1"),
+}
+
+
+@pytest.mark.parametrize("use", sorted(_SHARED_TRIGGER_USES))
+@pytest.mark.parametrize("kept", sorted(_LEG_INPUT_KEPT))
+@pytest.mark.parametrize("root", sorted(_SHARED_TRIGGER_ROOTS))
+def test_a_removal_on_the_documents_its_branch_hands_every_leg_has_run_for_every_later_leg(root, kept, use):
+    """The over-refusal correction batch 21a introduced, and its bound.
+
+    A producer in front of a Branch feeds every leg the same documents, and a leg that receives
+    none runs nothing. A removal whose leg does nothing to those documents but hand them on
+    therefore runs whenever a later leg runs at all — so for that later leg the cache WAS
+    emptied, and a document an earlier leg stored cannot reach it. Gating the removal's
+    MAY-set clear on the whole-run proof alone refused these on validate and compile, although
+    every one was admitted before the batch and the runtime cannot reach the breaking document.
+
+    CONTROLS, and they are the bound: a removal leg with a producer of its own (finding S7's
+    shape) or a step that may reduce the documents stays refused, because the removal may be
+    skipped while the later legs run; and the same legs with no removal are refused."""
+    build, branch_pointer = _SHARED_TRIGGER_ROOTS[root]
+    breaks, use_leg, code, sub_path = _SHARED_TRIGGER_USES[use]
+
+    def legs(removal_steps):
+        return [{"steps": list(breaks), "terminal": _PUT2},
+                {"steps": list(removal_steps), "terminal": _REMOVE2},
+                {"steps": [_DYNAMIC_X], "terminal": _PUT2},
+                use_leg]
+
+    refused = [(code, branch_pointer + sub_path)]
+    assert _both_routes([("PARENT", build(legs(_LEG_INPUT_KEPT[kept])))], "PARENT") == []
+    for reduced, steps in sorted(_LEG_INPUT_REDUCED.items()):
+        assert _both_routes([("PARENT", build(legs(steps)))], "PARENT") == refused, reduced
+    no_removal = [legs([])[0], legs([])[2], dict(use_leg)]
+    no_removal_pointer = branch_pointer + sub_path.replace("/legs/3/", "/legs/2/")
+    assert _both_routes([("PARENT", build(no_removal))], "PARENT") == [(code, no_removal_pointer)]
+
+
+@pytest.mark.parametrize("use", sorted(_SHARED_TRIGGER_USES))
+def test_a_called_child_whose_removal_shares_its_branchs_trigger_owes_nothing_for_the_emptied_cache(use):
+    """The same bound across a call. The child's GET feeds its whole Branch; the removal leg
+    hands those documents on untouched, so whenever the child's later legs run the caller's
+    documents in CACHE2 are gone, and the caller whose breaking document sits there is admitted,
+    with no row for CACHE2 — as the flattened graph is. With the removal behind a GET of its own
+    leg the caller is refused at its call, exactly as before."""
+    breaks, use_leg, code, _sub_path = _SHARED_TRIGGER_USES[use]
+    parent = _legs({"steps": [_GET] + list(breaks), "terminal": _PUT2}, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    at_the_call = _AT_THE_CALL if use == "bound" else _AT_THE_SECOND_LEGS_CALL
+    for removal_steps, expected in (([], []), ([_GET], [(code, at_the_call)])):
+        child_legs = [{"steps": list(removal_steps), "terminal": _REMOVE2},
+                      {"steps": [_DYNAMIC_X], "terminal": _PUT2}, use_leg]
+        child = _doc(_GET, {"kind": "branch", "legs": child_legs})
+        roots = [("PARENT", parent), ("CACHE_CHILD", child)]
+        assert _both_routes(roots, "PARENT") == expected, removal_steps
+        assert _both_routes(roots, "CACHE_CHILD") == [], removal_steps
+        rows = _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+        assert any(row[0] == "$ref:CACHE2" for row in rows) == bool(expected), rows
+        twin = _doc(_GET, {"kind": "branch", "legs": _branch_legs(parent)[:-1] + child_legs})
+        assert bool(_errors([("PARENT", twin)], "PARENT")) == bool(expected), removal_steps
+
+
+def test_the_relative_removal_proof_is_load_bearing(monkeypatch):
+    """Non-vacuity, one witness per half. With the removal's proof reduced to the whole-run
+    proof, the shared-trigger removal is read as possibly skipped again and both the in-process
+    and the called shape are refused. With the Message no longer counted as handing on the
+    documents it received, only the removal leg that carries one is refused again: the leg
+    input is carried by that authority and nothing else."""
+    in_process = [("PARENT", _doc(_GET, {"kind": "branch", "legs": [
+        {"steps": [_STATIC_X], "terminal": _PUT2}, {"steps": [], "terminal": _REMOVE2},
+        {"steps": [_DYNAMIC_X], "terminal": _PUT2}, _BINDS2]}))]
+    past_a_message = [("PARENT", _doc(_GET, {"kind": "branch", "legs": [
+        {"steps": [_STATIC_X], "terminal": _PUT2}, {"steps": [_MSG], "terminal": _REMOVE2},
+        {"steps": [_DYNAMIC_X], "terminal": _PUT2}, _BINDS2]}))]
+    called = [("PARENT", _legs({"steps": [_GET, _STATIC_X], "terminal": _PUT2},
+                               {"steps": [], "terminal": _call("CACHE_CHILD")})),
+              ("CACHE_CHILD", _doc(_GET, {"kind": "branch", "legs": [
+                  {"steps": [], "terminal": _REMOVE2}, {"steps": [_DYNAMIC_X], "terminal": _PUT2}, _BINDS2]}))]
+    for roots in (in_process, past_a_message, called):
+        assert _errors(roots, "PARENT") == []
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_removal_runs_before_anything_after_it",
+                        lambda stream: lineage._path_provably_runs(stream))
+        assert _errors(in_process, "PARENT") == [(_NO_DYNAMIC_SEGMENT, "/body/steps/1/legs/3/steps/1/path_binding")]
+        assert _errors(called, "PARENT") == [(_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)]
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_COUNT_PRESERVING_KINDS", lineage._COUNT_PRESERVING_KINDS - {"message"})
+        assert _errors(in_process, "PARENT") == []
+        assert _errors(past_a_message, "PARENT") == [
+            (_NO_DYNAMIC_SEGMENT, "/body/steps/1/legs/3/steps/1/path_binding")]
+
+
+def test_what_can_observe_a_removal_is_only_the_later_legs_of_its_own_branch():
+    """The premise `_removal_runs_before_anything_after_it` rests on, pinned where the model
+    decides it rather than assumed: a whole-cache removal is only ever a Branch-leg terminal;
+    nothing follows a Branch; and no Branch sits below another at any depth. So the effect of a
+    removal proved relative to its Branch can reach the later legs of that Branch and nothing
+    else — a document a removal left behind can never meet a step outside it."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    inner = {"kind": "branch", "legs": [{"steps": [], "terminal": _REMOVE2}, _STORES_NOTHING]}
+    refused = {
+        "PROCESS_IR_SEMANTIC_CONTROL_CONTINUATION_UNSUPPORTED": _doc(
+            _GET, {"kind": "branch", "legs": [{"steps": [], "terminal": _PUT2}, _STORES_NOTHING]}, _MSG, _STOP),
+        "PROCESS_IR_SEMANTIC_NESTING_LIMIT": _doc(
+            _GET, {"kind": "branch", "legs": [{"steps": [], "terminal": _decision_whose_true_arm_is(inner)},
+                                              _STORES_NOTHING]}),
+        "PROCESS_IR_SCHEMA_INVALID_CARDINALITY": _doc(
+            _GET, {"kind": "branch", "legs": [{"steps": [_REMOVE2], "terminal": _STOP}, _STORES_NOTHING]}),
+    }
+    for code, document in refused.items():
+        with pytest.raises(ProcessIRValidationError) as caught:
+            parse_process_ir_v1(document)
+        assert code in str(caught.value), (code, str(caught.value))
+    # CONTROL: the same removal as the terminal of a leg parses.
+    parse_process_ir_v1(_doc(_GET, {"kind": "branch", "legs": [
+        {"steps": [], "terminal": _REMOVE2}, _STORES_NOTHING]}))
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a: the coverage claim over the authority's case set
+# ---------------------------------------------------------------------------
+#
+# {removal: proved, unproved, a shared trigger, none} x {ride-on cache: the seeded cache, a
+# re-cache into a second cache that USES the property first, a re-cache that does not} x
+# {between the retrieve and the use: nothing, a Message} x {site: the retrieving
+# process's own use, a passthrough call's discharge, a grandchild's row a middle inherits} x
+# {the retrieving process fills the ride-on cache itself: yes, no} x {use: a bound path, an
+# ordinary read, a profile consumer, a bound path whose writer composes from a DEFAULTED ddp
+# source}; the declared read is measured above over the removal and step axes. Each cell has three callers: one that stores a breaking document in the ride-on
+# cache beside satisfying ones, one that stores only satisfying documents, and one that stores
+# nothing there.
+#
+# A PROVED removal runs on every run (its leg is fed by the scheduled start); an UNPROVED one
+# stands behind a GET of its own leg, which may return no rows while the later legs run; a
+# SHARED-TRIGGER one stands on the documents a step in front of the whole Branch hands every leg,
+# so it has run whenever a later leg runs at all. That step is a GET where the process retrieves
+# for its own use, and a Split behind a passthrough entry at the two call sites: a process call
+# is not an admitted leg terminal of a Branch a connector call feeds, while one a Split feeds
+# parses (measured by `test_the_shared_trigger_spellings_are_what_each_site_can_author`).
+#
+# The verdict is DERIVED from the runtime the plan describes, not read off this implementation:
+# the breaking caller is refused exactly when its document can reach the use — an unproved
+# removal or none — and the other two are admitted, each on both entry points and in agreement with
+# the flattened graph. A cell is DETERMINED when the processes the caller calls are themselves
+# admitted; the undetermined families are those processes' OWN refusals, named by
+# `_matrix_undetermined` with the limit each rests on, and for them the claim is that nothing
+# ships.
+
+#: A bound path composed from X with a default, which does NOT discharge a read that becomes a
+#: request path (`DdpPropertySourceV1`): the X-less document a caller stored reaches the path.
+_Y_FROM_DEFAULTED_X = {"kind": "set_ddp", "name": "Y", "source_values": [
+    {"value_type": "static", "value": "/clients/"},
+    {"value_type": "ddp", "property_name": "X", "default_value": "0"}]}
+_BOUND_Y_GET = {"kind": "connector_call", "operation_ref": "$ref:GET", "path_binding": {"property_name": "Y"}}
+
+_MATRIX_USES = {
+    # (the use, what satisfies it, what breaks it, the passthrough child that uses it, refusal
+    #  code, what the retrieving process does before a passthrough call, the pointer suffix)
+    "bound": ([_BOUND_GET], [_GET, _DYNAMIC_X], [_GET, _STATIC_X], _doc(_ENTRY, _BOUND_GET, _STOP),
+              _NO_DYNAMIC_SEGMENT, [], "/process_ref"),
+    "ordinary": ([_READS_X], [_GET, _DYNAMIC_X], [_GET], _doc(_ENTRY, _READS_X, _STOP), _READ_BEFORE_WRITE,
+                 [], ""),
+    "content": ([_CONSUMES_P2], [_GETP1, _TO_P2], [_GETP1], _doc(_ENTRY, _CONSUMES_P2, _STOP),
+                PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, [], "/process_ref"),
+    # SOUND-21a-01: what the callers owe is the SOURCE property, an establishment row, so it is
+    # refused as an unmet read at the call.
+    "defaulted_writer": ([_Y_FROM_DEFAULTED_X, _BOUND_Y_GET], [_GET, _DYNAMIC_X], [_GET],
+                         _doc(_ENTRY, _BOUND_Y_GET, _STOP), _READ_BEFORE_WRITE, [_Y_FROM_DEFAULTED_X], ""),
+}
+_MATRIX_CELLS = [
+    (removal, form, step, site, fills, use)
+    for removal in ("proved", "unproved", "shared_trigger", "none")
+    for form in ("same", "recache", "recache_no_use")
+    for step in ("none", "message")
+    for site in ("own", "passthrough", "inherited")
+    for fills in (True, False)
+    for use in sorted(_MATRIX_USES)
+]
+
+
+#: How each use is refused INSIDE the process that makes it, which is what an undetermined
+#: family measures. The call-side code in `_MATRIX_USES` is what a CALLER is refused with, and
+#: for a path writer composing from a defaulted source the two differ.
+_IN_CHILD_REFUSAL = {
+    "bound": _NOT_ESTABLISHED,
+    "ordinary": _READ_BEFORE_WRITE,
+    "content": PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+    "defaulted_writer": _NOT_ESTABLISHED,
+}
+
+
+def _matrix_undetermined(removal, form, step, site, fills, use):
+    """Why the processes the caller calls refuse the SATISFYING caller too, with the codes
+    that refusal carries — or None where the cell is determined.
+
+    The codes are part of the record (TI2-184-21a-02): a family that starts refusing for a
+    different reason is a limit that moved, and the cell must say so rather than stay green
+    because SOMETHING refused.
+
+    - A profile consumer reached only by re-cached or Message-rebuilt documents: a cache write
+      is not a consumer, so the source cache owes no content row and the re-cache proves no
+      profile; a Message rebuilds the payload the map would consume.
+    - A retrieve of the seeded cache after a removal nothing refilled: a read of a cache that may
+      be empty (amendment 3 §8, `CACHE_WRITER_MISSING`).
+    - A property used only behind a Message, with no use on the retrieve's own stream and no fill
+      of the process's own to prove it: the fail-closed limit
+      `test_a_bound_use_no_cohort_clears_keeps_the_childs_own_refusal` records. At the inherited
+      site the grandchild never fills, so every Message cell there is in it.
+
+    - A grandchild a middle calls behind a Split: the Split is native work in front of the call,
+      and no attested hand-off admits it into a No Data child (the placement refusal). That is
+      the inherited site's only shared-trigger spelling that parses, so it ships nothing; the
+      passthrough site's call follows a retrieve and IS measured.
+    """
+    in_the_child = _IN_CHILD_REFUSAL[use]
+    families = []
+    if removal == "shared_trigger" and site == "inherited":
+        # The Split is native work in front of the call (the placement refusal) AND it leaves
+        # the count unknown, so a No Data grandchild requiring anything of a shared cache is
+        # refused under amendment 1 rule 8 at the same pointer.
+        families.append(("a call whose Branch a Split feeds, into a No Data child",
+                         frozenset({PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+                                    PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE})))
+    if use == "content" and (form.startswith("recache") or step == "message"):
+        families.append(("a profile consumer of re-cached or rebuilt documents",
+                         frozenset({PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})))
+    if form == "same" and not fills and removal != "none":
+        # The retrieve finds a cache nothing filled, and what it hands on establishes the use
+        # no better — so the family carries the empty-cache refusal and the use's own.
+        families.append(("a read of a cache the removal may have emptied",
+                         frozenset({_CACHE_WRITER_MISSING, in_the_child})))
+    if step == "message" and (site == "inherited" or (form == "same" and not fills)):
+        families.append(("a use behind a Message that no cohort seed clears", frozenset({in_the_child})))
+    if not families:
+        return None
+    # A cell can sit in more than one recorded limit, and then it carries all of them: the
+    # codes it may raise are their union, and dropping the ones it does not name first would
+    # make the check depend on the order they are listed in.
+    return (tuple(reason for reason, _codes in families),
+            frozenset().union(*(codes for _reason, codes in families)))
+
+
+def _matrix_roots(removal, form, step, site, fills, use):
+    """``(callers, callees, the use leg, the callee legs before it, the refusal code)``."""
+    uses, satisfies, breaks, passthrough_user, code, before_the_call, _suffix = _MATRIX_USES[use]
+    ride_put, ride_read, ride_remove = (_PUT, _READ, _REMOVE) if form == "same" else (_PUT2, _READ2, _REMOVE2)
+    before = {"proved": [{"steps": [], "terminal": ride_remove}],
+              "unproved": [{"steps": [_GET], "terminal": ride_remove}],
+              "shared_trigger": [{"steps": [], "terminal": ride_remove}],
+              "none": []}[removal]
+    if form == "recache":
+        before = before + [{"steps": [_READ] + ([] if use == "content" else [_READS_X]), "terminal": _PUT2}]
+    if form == "recache_no_use":
+        # The same re-cache with NOTHING reading the property on the way: what the documents
+        # carry is unproved, so the cache they came OUT of is the only thing that can carry the
+        # obligation (`_cohort_at_write`'s origin alternative, correction batch 21a round 3).
+        before = before + [{"steps": [_READ], "terminal": _PUT2}]
+    if fills:
+        before = before + [{"steps": list(satisfies), "terminal": ride_put}]
+    message = [_MSG] if step == "message" else []
+    use_leg = {"steps": [ride_read] + message + list(uses), "terminal": _STOP}
+
+    def branch(*legs, calls=False):
+        # A Branch needs two legs; a lone leg gets a Message leg beside it, which stores nothing.
+        # A shared trigger is a step in front of the whole Branch: a GET where the process uses
+        # the documents itself, a Split behind a passthrough entry where a leg ends in a call.
+        legs = legs if len(legs) > 1 else legs + (_STORES_NOTHING,)
+        body = {"kind": "branch", "legs": list(legs)}
+        if removal != "shared_trigger":
+            return _doc(body)
+        return _doc(_ENTRY, _SPLITS_THE_DOCUMENTS, body) if calls else _doc(_GET, body)
+
+    if site == "own":
+        callees = [("CACHE_CHILD", branch(*(before + [use_leg])))]
+    elif site == "passthrough":
+        callees = [("CACHE_CHILD", branch(*(before + [
+            {"steps": [ride_read] + message + list(before_the_call), "terminal": _call("BOUND")}]), calls=True)),
+                   ("BOUND", passthrough_user)]
+    else:
+        callees = [("CACHE_CHILD", branch(*(before + [{"steps": [], "terminal": _call("CACHE_CHILD_P1")}]),
+                                          calls=True)),
+                   ("CACHE_CHILD_P1", _legs(use_leg, _STORES_NOTHING))]
+    into_the_seeded_cache = {"steps": list(satisfies), "terminal": _PUT}
+    callers = {
+        "breaking": [into_the_seeded_cache, {"steps": list(breaks), "terminal": ride_put}],
+        "satisfying": [into_the_seeded_cache] + (
+            [{"steps": list(satisfies), "terminal": _PUT2}] if form == "recache" else []),
+        "storing_nothing_there": [_STORES_NOTHING] if form == "same" else [into_the_seeded_cache],
+    }
+    return callers, callees, use_leg, before, code, branch
+
+
+def _matrix_id(cell):
+    removal, form, step, site, fills, use = cell
+    return "-".join((removal, form, "msg" if step == "message" else "nostep", site,
+                     "fills" if fills else "nofill", use))
+
+
+@pytest.mark.parametrize("cell", _MATRIX_CELLS, ids=[_matrix_id(cell) for cell in _MATRIX_CELLS])
+def test_every_cell_of_the_cache_obligation_case_set_answers_as_the_runtime_does(cell):
+    """The coverage claim (see the section comment above): every cell, every caller, on the
+    validate and the compile entry point, against the flattened graph of the same legs."""
+    removal, form, _step, site, fills, use = cell
+    callers, callees, use_leg, before, code, branch = _matrix_roots(*cell)
+    suffix = _MATRIX_USES[use][6]
+    undetermined = _matrix_undetermined(*cell)
+    for caller, caller_legs in callers.items():
+        parent = _legs(*(caller_legs + [{"steps": [], "terminal": _call("CACHE_CHILD")}]))
+        roots = [("PARENT", parent)] + callees
+        callee_verdicts = {key: _errors(roots, key) for key, _document in callees}
+        if undetermined is not None:
+            reasons, expected_codes = undetermined
+            raised = {found for verdict in callee_verdicts.values() for found, _path in verdict}
+            assert raised and raised <= expected_codes, (reasons, caller, callee_verdicts)
+            continue
+        assert callee_verdicts == {key: [] for key, _document in callees}, (caller, callee_verdicts)
+        call = "/body/steps/0/legs/{0}/terminal".format(len(caller_legs))
+        if caller == "breaking" and removal in ("unproved", "none"):
+            refused = True
+            expected = [(code, call + suffix)]
+        elif caller == "storing_nothing_there" and form == "same" and not fills:
+            # The callee reads the cache before anything of its own fills it, so a caller that
+            # stores nothing there leaves it empty: a read before any write, at the call.
+            refused = True
+            expected = [(_CACHE_WRITER_MISSING, call)]
+        else:
+            refused = False
+            expected = []
+        assert _both_routes(roots, "PARENT") == expected, caller
+        # The flattened graph: a shared trigger is the GET spelling there, which parses in a process
+        # that uses the documents itself.
+        twin = _errors([("PARENT", branch(*(caller_legs + before + [use_leg])))], "PARENT")
+        assert bool(twin) == refused, (caller, twin)
+
+
+def test_the_case_set_is_the_whole_product_and_every_axis_value_is_determined_somewhere():
+    """Non-vacuity of the claim itself: the parametrized set is the full product of its axes,
+    every undetermined family is inhabited, and what they leave still spans every value of every
+    axis — so no axis value is covered only by the "nothing ships" half."""
+    axes = (("proved", "unproved", "shared_trigger", "none"), ("same", "recache", "recache_no_use"),
+            ("none", "message"),
+            ("own", "passthrough", "inherited"), (True, False), tuple(sorted(_MATRIX_USES)))
+    product = 1
+    for values in axes:
+        product *= len(values)
+    assert len(_MATRIX_CELLS) == product == len(set(_MATRIX_CELLS))
+    recorded = [_matrix_undetermined(*cell) for cell in _MATRIX_CELLS]
+    families = {reason for entry in recorded if entry is not None for reason in entry[0]}
+    assert len(families) == 4, families
+    # Every recorded limit names the codes it is a limit OF (TI2-184-21a-02), and every one of
+    # the four is inhabited on its own, not only in combination with another.
+    assert all(entry[1] for entry in recorded if entry is not None)
+    assert {entry[0][0] for entry in recorded if entry is not None and len(entry[0]) == 1} == families
+    determined = [cell for cell in _MATRIX_CELLS if _matrix_undetermined(*cell) is None]
+    # The shared trigger is measured at a CALL site, not only in the process that uses the
+    # documents: the passthrough discharge's cells are determined.
+    assert any(cell[0] == "shared_trigger" and cell[3] == "passthrough" for cell in determined)
+    for axis, values in enumerate(axes):
+        assert {cell[axis] for cell in determined} == set(values), axis
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a round 2: the verification's findings, each with its witness
+# ---------------------------------------------------------------------------
+
+_WAITS_AND_ABORTS_ON_ERROR = {"wait": True, "abort_on_error": True}
+
+
+def _waited(key, **extra):
+    return {"steps": [], "terminal": _call(key, **dict(_WAITS_AND_ABORTS_ON_ERROR, **extra))}
+
+
+def _lineage_with_source(monkeypatch, old, new, occurrences=1):
+    """Run every walk through `lineage.py` with ONE source edit, and nothing else changed.
+
+    A source mutant, for a rule that lives inside the walk's own closures and so has no
+    module-level name to replace: the module's source is executed afresh with ``old`` replaced by
+    ``new``, and only `_walk_lineage` — which `walk_lineage` and `collect_lineage_findings` both
+    call through the module — is rebound to the mutant's."""
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == occurrences, (old, source.count(old))
+    namespace = {"__name__": lineage.__name__, "__package__": lineage.__package__, "__file__": lineage.__file__}
+    exec(compile(source.replace(old, new), lineage.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(lineage, "_walk_lineage", namespace["_walk_lineage"])
+
+
+def _source_mutants():
+    """Every source mutant this module applies, read off its own call sites.
+
+    Machine-readable because the call sites are: `_lineage_with_source(monkeypatch, old, new)`
+    takes the two source strings as literals, so the pairs can be collected without a second
+    list anyone has to keep in step. A call site whose strings are not literals fails the test
+    below rather than being skipped — a mutant this sweep cannot see is a mutant nothing
+    checks (B21A-R4-REV-01).
+    """
+    import ast
+
+    found = []
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_lineage_with_source"):
+            continue
+        occurrences = next(
+            (keyword.value.value for keyword in node.keywords
+             if keyword.arg == "occurrences" and isinstance(keyword.value, ast.Constant)), 1)
+        pair = tuple(argument.value if isinstance(argument, ast.Constant) else None
+                     for argument in node.args[1:3])
+        found.append((node.lineno, pair, occurrences))
+    return sorted(found)
+
+
+@pytest.mark.parametrize("mutant", _source_mutants(), ids=lambda mutant: "line%d" % mutant[0])
+def test_every_source_mutant_this_module_applies_moves_the_served_revision(mutant, monkeypatch):
+    """B21A-R4-REV-01. Each of these mutants is a claim that some rule inside the walk's
+    closures is load-bearing. A mutant that changed nothing the served compiler revision
+    records would be a claim the revision cannot keep: the rule could then be reverted with
+    the served payload standing still, which is the property `test_issue_184_revision_coverage`
+    exists to give for module-level decisions and this test gives for the closures.
+
+    The pairs are read off this module's own call sites, so a mutant added later is measured
+    the moment it is written.
+
+    WHAT CARRIES THE CLAIM, measured rather than assumed. The revision's hand-built oracles
+    reach six of these twelve mutants; the other six change no verdict any of them records,
+    because the rules they perturb only speak on graphs no oracle builds. Batch 21b's
+    behaviour corpus DOES record those graphs — it harvests the compiler's real inputs from
+    this very suite — and with it in the payload all twelve move (measured on a merged copy of
+    both batches with the corpus regenerated: 12 of 12, against 6 of 12 on this batch's tree
+    alone; the counts are kept in `b21a/round6/{m21a_r6,mmerged_r6}.json`). So the strict claim
+    is asserted wherever the corpus row is in the payload, which is
+    where it is true; without it the mutant is still applied and the payload still has to
+    build, and the six are covered by the witness tests they sit in."""
+    from boomi_mcp.authoring import contract as authoring_contract
+
+    line, (old, new), occurrences = mutant
+    assert old is not None and new is not None, ("not a literal pair", line)
+    baseline = authoring_contract._compiler_revision()
+    assert authoring_contract.sha256_fingerprint(
+        authoring_contract._compiler_revision_payload()) == baseline
+    # Applied through a REFERENCE, not a call of the name: the sweep above matches calls, and
+    # this one is the driver rather than a mutant claim of its own.
+    apply_the_mutant = _lineage_with_source
+    with monkeypatch.context() as patched:
+        apply_the_mutant(patched, old, new, occurrences=occurrences)
+        payload = authoring_contract._compiler_revision_payload()
+    assert sorted(row for row, value in payload.items() if value == "unavailable") == [], line
+    # BOOTSTRAP SEAM, and only over this one branch. The corpus that makes the strict claim
+    # true is produced by a harvest pass that RUNS this test, and the producer refuses to
+    # write unless the covered tests are clean — so against a stale corpus the claim and its
+    # own evidence deadlock, and nobody following the documented command can regenerate it
+    # (V5-05, measured on a merged copy). The harvest pass sets `REVISION_CORPUS_BOOTSTRAP`;
+    # everything else here — the mutant applying, the payload building, no row going
+    # unavailable, the served revision standing still — is asserted in that pass too.
+    import os
+
+    bootstrapping = bool(os.environ.get("REVISION_CORPUS_BOOTSTRAP"))
+    if "behaviour_corpus" in payload and not bootstrapping:
+        assert authoring_contract.sha256_fingerprint(payload) != baseline, (line, old)
+    assert authoring_contract._compiler_revision() == baseline
+
+
+# --- SOUND-21a-01: a path writer's defaulted DDP source ------------------------------------
+
+#: What each child does with the documents it retrieves, and the cache they come from:
+#: ``(the child's legs, the cache the caller's documents share)``. Every use composes a bound
+#: request path from X with a default, which does NOT discharge a read that becomes a request
+#: path (`DdpPropertySourceV1`).
+_DEFAULTED_SOURCE_CHILDREN = {
+    "composes_y_from_x": ([_DYNAMIC_INTO_CACHE2, {"steps": [_READ2, _Y_FROM_DEFAULTED_X, _BOUND_Y_GET],
+                                                  "terminal": _STOP}], "CACHE2"),
+    "past_a_message": ([_DYNAMIC_INTO_CACHE2, {"steps": [_READ2, _MSG, _Y_FROM_DEFAULTED_X, _BOUND_Y_GET],
+                                               "terminal": _STOP}], "CACHE2"),
+    "recomposes_x_from_x": ([_DYNAMIC_INTO_CACHE2, {"steps": [_READ2, {
+        "kind": "set_ddp", "name": "X", "source_values": [
+            {"value_type": "static", "value": "/clients/"},
+            {"value_type": "ddp", "property_name": "X", "default_value": "0"}]}, _BOUND_GET],
+        "terminal": _STOP}], "CACHE2"),
+    # The passthrough call-discharge site: the binding lives in the passthrough child.
+    "a_passthrough_child_binds": ([_DYNAMIC_INTO_CACHE2, {"steps": [_READ2, _Y_FROM_DEFAULTED_X],
+                                                          "terminal": _call("BOUND_XY")}], "CACHE2"),
+    "the_same_cache": ([_STAGES_X, {"steps": [_READ, _Y_FROM_DEFAULTED_X, _BOUND_Y_GET], "terminal": _STOP}],
+                       "CACHE"),
+    # No fill of its own: the over-refusal the same missing row caused (p4 cell d8).
+    "no_fill_of_its_own": ([{"steps": [_READ, _Y_FROM_DEFAULTED_X, _BOUND_Y_GET], "terminal": _STOP},
+                            _STORES_NOTHING], "CACHE"),
+}
+_DEFAULTED_SOURCE_CALLERS = ("x_less", "dynamic_x", "stores_nothing")
+
+
+def _defaulted_source_roots(child, caller):
+    legs, shared = _DEFAULTED_SOURCE_CHILDREN[child]
+    put = _PUT if shared == "CACHE" else _PUT2
+    other = _DYNAMIC_INTO_CACHE2 if shared == "CACHE" else _STAGES_X
+    caller_legs = {
+        "x_less": [other, {"steps": [_GET], "terminal": put}],
+        "dynamic_x": [other, {"steps": [_GET, _DYNAMIC_X], "terminal": put}],
+        "stores_nothing": [other, _STORES_NOTHING],
+    }[caller]
+    roots = [("PARENT", _legs(*(caller_legs + [_waited("CACHE_CHILD")]))), ("CACHE_CHILD", _legs(*legs)),
+             ("BOUND_XY", _doc(_ENTRY, _BOUND_Y_GET, _STOP))]
+    flat = [({"steps": leg["steps"] + [_BOUND_Y_GET], "terminal": _STOP}
+             if leg["terminal"].get("kind") == "process_call" else leg) for leg in legs]
+    return roots, _legs(*(caller_legs + flat))
+
+
+@pytest.mark.parametrize("caller", _DEFAULTED_SOURCE_CALLERS)
+@pytest.mark.parametrize("child", sorted(_DEFAULTED_SOURCE_CHILDREN))
+def test_a_path_writer_owes_the_callers_that_share_its_cache_the_source_it_composes_from(child, caller):
+    """SOUND-21a-01, a sibling of finding O the batch's sweep missed. A child that fills CACHE2
+    itself, retrieves it and composes a bound request path from X WITH A DEFAULT admitted a
+    caller whose X-less documents shared CACHE2: the default composed the path from "0", and the
+    GET went to another resource, while the flattened graph was refused. The published
+    `DdpPropertySourceV1` says a default does NOT discharge a read that becomes a request path,
+    and amendment 3 §7: "A bound path must pass for every possible selected writer."
+
+    The obligation is recorded where the in-process refusal lives — at the writer, per SOURCE
+    property, default or not — so the child's contract owes each caller X on what it stored in
+    the shared cache: an X-less caller is refused at its call, one storing X or storing nothing
+    there is admitted, and the flattened graph agrees in every cell. The same recording clears
+    the mirrored over-refusal (p4 cell d8): a child with no fill of its own was refused for every
+    caller, because its contract named nothing a caller could satisfy."""
+    roots, flat = _defaulted_source_roots(child, caller)
+    call = "/body/steps/0/legs/2/terminal"
+    if caller == "x_less":
+        expected = [(_READ_BEFORE_WRITE, call)]
+    elif caller == "stores_nothing" and child == "no_fill_of_its_own":
+        expected = [(_CACHE_WRITER_MISSING, call)]
+    else:
+        expected = []
+    assert _both_routes(roots, "PARENT") == expected
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    shared = _DEFAULTED_SOURCE_CHILDREN[child][1]
+    assert ("$ref:" + shared, "X", None, False) in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements
+    assert bool(_errors([("PARENT", flat)], "PARENT")) == bool(expected)
+
+
+def test_the_per_source_writer_capture_is_load_bearing(monkeypatch):
+    """Non-vacuity, one mutant per half, each a source edit of the writer capture.
+
+    - The capture restored to the `current` recomposition only: the X-less caller of the child
+      that composes Y from a defaulted X is admitted again, while the flattened graph is refused.
+    - A writer's unmet source recorded nowhere: the child with no fill of its own is refused for
+      the caller storing X again (the over-refusal)."""
+    x_less, x_less_flat = _defaulted_source_roots("composes_y_from_x", "x_less")
+    dynamic, _flat = _defaulted_source_roots("no_fill_of_its_own", "dynamic_x")
+    assert _errors(x_less, "PARENT") == [(_READ_BEFORE_WRITE, "/body/steps/0/legs/2/terminal")]
+    assert _errors(dynamic, "PARENT") == [] and _errors(dynamic, "CACHE_CHILD") == []
+    with monkeypatch.context() as patched:
+        _lineage_with_source(
+            patched,
+            "                sources = {read_key for read_key, _has_default, _strict in _reads_of(semantic)\n"
+            "                           if read_key[0] == DDP}\n"
+            "                if recomposes:\n"
+            "                    sources.add(key)\n",
+            "                sources = {key} if recomposes and key in on_documents else set()\n")
+        assert _errors(x_less, "PARENT") == []
+        assert _errors([("PARENT", x_less_flat)], "PARENT") != []
+    with monkeypatch.context() as patched:
+        _lineage_with_source(
+            patched,
+            "            for source_name, cache_ref, ridden, origins in unmet_origins:\n",
+            "            for source_name, cache_ref, ridden, origins in ():\n")
+        assert _errors(dynamic, "CACHE_CHILD") == [
+            (_NOT_ESTABLISHED, "/body/steps/0/legs/0/steps/2/path_binding")]
+
+
+# --- B21A-OVR-02: a run that leaves nothing it stored is repetition-stable -----------------
+
+#: Children a No Data caller's per-document call runs once per document, each filling CACHE2,
+#: using what it retrieves and emptying CACHE2 again on a leg the walk proves runs.
+_CLEANS_UP_EVERY_RUN = {
+    "bound": _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2),
+    "ordinary": _legs(_DYNAMIC_INTO_CACHE2, _READS2, _EMPTIES2),
+    "content": _legs({"steps": [_GETP1, _TO_P2], "terminal": _PUT2},
+                     {"steps": [_READ2, _CONSUMES_P2], "terminal": _STOP}, _EMPTIES2),
+    "a_message_before_the_removal": _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, {"steps": [_MSG], "terminal": _REMOVE2}),
+    "a_shared_trigger": _doc(_GET, {"kind": "branch", "legs": [
+        {"steps": [_DYNAMIC_X], "terminal": _PUT2}, _BINDS2, _EMPTIES2]}),
+    "two_cycles": _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2, _DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2),
+}
+_PER_DOCUMENT_CALL = "/body/steps/1/legs/1/terminal"
+
+
+def _per_document(child, **extra):
+    return [("PARENT", _passthrough_root(_STORES_NOTHING, {"steps": [], "terminal": _call("CACHE_CHILD", **extra)})),
+            ("CACHE_CHILD", child)]
+
+
+@pytest.mark.parametrize("child", sorted(_CLEANS_UP_EVERY_RUN))
+def test_a_run_that_leaves_nothing_it_stored_in_the_cache_is_stable_under_repetition(child):
+    """B21A-OVR-02. Amendment 1 rule 8 says to "analyze possible subsequent invocations using the
+    same finite state/profile lattice until stable", and amendment 3 repeats it ("Repeated No Data
+    invocation checks use the same finite lattice until stable"). A child that fills CACHE2, uses
+    what it retrieves and then empties CACHE2 on a leg the walk proves runs leaves nothing it
+    stored at the end of any run, so every later run's uses retrieve only what the callers stored
+    — which the call proves — or nothing: stable after one step. 5b5038c admitted it; the first
+    handback refused it, because the child's own fill no longer ended its callers' obligation.
+
+    Admitted for a call that waits and aborts on error, on both entry points; the contract says
+    why (`required_caches_retain_nothing_it_stored`, read off the walk's exit)."""
+    roots = _per_document(_CLEANS_UP_EVERY_RUN[child], **_WAITS_AND_ABORTS_ON_ERROR)
+    assert _both_routes(roots, "PARENT") == []
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    row = _row(roots, "PARENT", "CACHE_CHILD")
+    assert row.required_caches_retain_nothing_it_stored is True
+    assert any(requirement[0] == "$ref:CACHE2" for requirement in
+               row.cache_property_requirements + row.cache_requirements), row
+    # A scheduled caller is the NEGATIVE control, and it is one for the exemption too: its bare
+    # Branch leg carries the proved singleton, so rule 8 is not entered at all there and the same
+    # cell is clean for a child the exemption does NOT cover (R8-TI-01 — asserted here as the
+    # gate it is, rather than as an exemption witness it cannot be).
+    for scheduled_child in (_CLEANS_UP_EVERY_RUN[child], _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)):
+        scheduled = [("PARENT", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))),
+                     ("CACHE_CHILD", scheduled_child)]
+        assert _both_routes(scheduled, "PARENT") == []
+
+
+def test_a_per_document_run_that_may_leave_what_it_stored_stays_refused():
+    """The controls, each the reason a later run may find what an earlier run added or emptied.
+
+    - Nothing removes CACHE2, or a removal the walk does not prove runs (behind its own GET), or a
+      refill after the removal: a run may end with what it stored still there.
+    - The cleanup child called without abort_on_error: amendment 1 rule 7, "An asynchronous call
+      or a call allowed to continue after child failure must not establish normal-exit
+      guarantees" — a run that fails between its fill and its removal leaves the fill behind, and
+      the next run starts from it.
+    - A child that READS CACHE2 before writing it and then empties it: the next run finds the
+      cache the first emptied, so the establishment the call proved is gone.
+    - A forwarder between the per-document caller and the cleanup child: the forwarder's own run
+      meets its child's possible writes as unknown possibilities (amendment 3 §7, "Possible
+      opaque/external/child writes introduce unknown possibilities"), so its exit may hold them.
+    And the admitted control: a child that empties CACHE2 first owes its callers nothing there."""
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    fill_use = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)
+    for child in (fill_use,
+                  _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2_BEHIND_A_GET),
+                  _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2, _DYNAMIC_INTO_CACHE2)):
+        roots = _per_document(child, **_WAITS_AND_ABORTS_ON_ERROR)
+        assert _both_routes(roots, "PARENT") == refused, child
+        assert _row(roots, "PARENT", "CACHE_CHILD").required_caches_retain_nothing_it_stored is False
+    assert _both_routes(_per_document(_CLEANS_UP_EVERY_RUN["bound"], wait=True), "PARENT") == refused
+    reads_then_empties = [
+        ("PARENT", _passthrough_root(_DYNAMIC_INTO_CACHE2, {"steps": [], "terminal": _call(
+            "CACHE_CHILD", **_WAITS_AND_ABORTS_ON_ERROR)})), ("CACHE_CHILD", _legs(_BINDS2, _EMPTIES2))]
+    assert _both_routes(reads_then_empties, "PARENT") == refused
+    via_a_forwarder = [
+        ("PARENT", _passthrough_root(_STORES_NOTHING, {"steps": [], "terminal": _call(
+            "MID", **_WAITS_AND_ABORTS_ON_ERROR)})),
+        ("MID", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))), ("CACHE_CHILD", _CLEANS_UP_EVERY_RUN["bound"])]
+    assert _both_routes(via_a_forwarder, "PARENT") == refused
+    assert _both_routes(_per_document(_legs(_EMPTIES2, _DYNAMIC_INTO_CACHE2, _BINDS2)), "PARENT") == []
+
+
+def test_the_exit_state_and_the_abort_gate_decide_the_repeated_run_exemption(monkeypatch):
+    """Non-vacuity in both directions, and of the gate. The walk's exit MAY set decides: forced to
+    name CACHE2, the cleanup child is refused again; forced empty, the child whose removal the walk
+    does not prove is admitted. And the abort gate decides: with every call treated as waiting and
+    aborting on error, the cleanup child called without abort_on_error is admitted."""
+    import types
+
+    cleans_up = _per_document(_CLEANS_UP_EVERY_RUN["bound"], **_WAITS_AND_ABORTS_ON_ERROR)
+    unproved = _per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2_BEHIND_A_GET), **_WAITS_AND_ABORTS_ON_ERROR)
+    no_abort = _per_document(_CLEANS_UP_EVERY_RUN["bound"], wait=True)
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    assert (_errors(cleans_up, "PARENT"), _errors(unproved, "PARENT"), _errors(no_abort, "PARENT")) == ([], refused, refused)
+    real_walk = lineage.walk_lineage
+    for forced, roots, expected in ((("$ref:CACHE2",), cleans_up, refused), ((), unproved, [])):
+        with monkeypatch.context() as patched:
+            patched.setattr(lineage, "walk_lineage", lambda prepared, capabilities=DEFAULT_VALIDATION_CAPABILITIES,
+                            forced=forced: real_walk(prepared, capabilities)._replace(may_hold_at_exit=forced))
+            assert _errors(roots, "PARENT") == expected, forced
+    real_rule = lineage._repetition_unstable_caches
+    with monkeypatch.context() as patched:
+        patched.setattr(lineage, "_repetition_unstable_caches", lambda contract, cache_refs, semantic: real_rule(
+            contract, cache_refs, types.SimpleNamespace(wait=True, abort_on_error=True)))
+        assert _errors(no_abort, "PARENT") == []
+
+
+# --- B21A-OVR-01 and SOUND-21a-02: a child's possible writes are unknown possibilities -------
+
+_SELF_FILLING_USES = {
+    # (the fill, the use after the retrieve, the refusal at the second call)
+    "bound": (_DYNAMIC_INTO_CACHE2, [_BOUND_GET], _NOT_ESTABLISHED, "/process_ref"),
+    "ordinary": (_DYNAMIC_INTO_CACHE2, [_READS_X], _READ_BEFORE_WRITE, ""),
+    "content": ({"steps": [_GETP1, _TO_P2], "terminal": _PUT2}, [_CONSUMES_P2], PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                "/process_ref"),
+}
+
+
+@pytest.mark.parametrize("use", sorted(_SELF_FILLING_USES))
+def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_unknown_possibility(use):
+    """B21A-OVR-01, a DELIBERATE refusal: an admission of 5b5038c (masked there by finding O) that
+    this batch turns into a refusal, listed and pinned here so the verdict is a decision.
+
+    Two waited calls into a child that fills CACHE2 and uses what it retrieves; the same with a
+    WRITER child that fills CACHE2 first; and the same with the parent filling CACHE2 between the
+    two calls. The second call is refused, while the flattened graph of the same legs is admitted:
+    at runtime the second run retrieves the first run's documents, and they carry what the child's
+    own writer composed. The reason is the plan's, not the runtime's: amendment 3 §7, "Whole-cache
+    removal clears these summaries. Possible opaque/external/child writes introduce unknown
+    possibilities" (ledger C20: every call adds unknown content and an unknown property cohort to
+    the caches its child may write). A call does not carry what its child stored into the caller's
+    cache state, and this batch does not build that transfer. Since finding O the child owes its
+    callers what they stored in CACHE2, and the first call's unknown possibility is such a
+    document, so the second call cannot prove the row.
+
+    The admitted way out: the child empties CACHE2 first, on a leg the walk proves runs, so no
+    earlier call's document reaches its use."""
+    fill, after, code, suffix = _SELF_FILLING_USES[use]
+    use_leg = {"steps": [_READ2] + after, "terminal": _STOP}
+    child = _legs(fill, use_leg)
+    twice = [("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
+    assert _both_routes(twice, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    assert _both_routes(twice, "CACHE_CHILD") == []
+    assert _errors([("PARENT", _legs(fill, use_leg, fill, use_leg))], "PARENT") == []
+    writer_first = [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
+                    ("WRITER", _legs(fill, _STORES_NOTHING)), ("CACHE_CHILD", child)]
+    assert _both_routes(writer_first, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    parent_fills_between = [("PARENT", _legs(_waited("CACHE_CHILD"), fill, _waited("CACHE_CHILD"))),
+                            ("CACHE_CHILD", child)]
+    assert _both_routes(parent_fills_between, "PARENT") == [(code, "/body/steps/0/legs/2/terminal" + suffix)]
+    empties_first = _legs(_EMPTIES2, fill, use_leg)
+    for roots in ([("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", empties_first)],
+                  [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
+                   ("WRITER", _legs(fill, _STORES_NOTHING)), ("CACHE_CHILD", empties_first)]):
+        assert _both_routes(roots, "PARENT") == []
+
+
+@pytest.mark.parametrize("caller", ("stores_the_profile", "stores_nothing"))
+def test_a_middle_that_calls_a_cache_writer_before_a_self_filling_consumer_meets_an_unknown_possibility(caller):
+    """SOUND-21a-02, a DELIBERATE refusal, listed and pinned like the one above. A middle calls a
+    WRITER child that stores P2 in CACHE, then a child that stores P2 in CACHE itself and consumes
+    what it retrieves. The middle is refused PROFILE_MISMATCH at its second call while the
+    flattened graph is admitted: the writer's content crosses the call as unknown (amendment 3
+    §7, "Possible opaque/external/child writes introduce unknown possibilities"), and unknown
+    content cannot satisfy a typed consumer (amendment 3, A3). The consumer's own fill no longer
+    ends the requirement, so the middle's check meets that unknown content.
+
+    The admitted ways out: the middle without the writer call, and a consumer that empties CACHE
+    first on a leg the walk proves runs."""
+    stores_p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
+    consumes = {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP}
+    caller_leg = stores_p2 if caller == "stores_the_profile" else _STORES_NOTHING
+    roots = [("PARENT", _legs(caller_leg, _waited("MID"))),
+             ("MID", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
+             ("WRITER", _legs(stores_p2, _STORES_NOTHING)), ("CACHE_CHILD", _legs(stores_p2, consumes))]
+    assert _both_routes(roots, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    assert _errors([("PARENT", _legs(caller_leg, stores_p2, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == []
+    without_the_writer = [("PARENT", _legs(caller_leg, _waited("MID"))),
+                          ("MID", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))),
+                          ("CACHE_CHILD", _legs(stores_p2, consumes))]
+    empties_first = roots[:3] + [("CACHE_CHILD", _legs(_EMPTIES_IT, stores_p2, consumes))]
+    for admitted in (without_the_writer, empties_first):
+        assert _both_routes(admitted, "PARENT") == []
+        assert _both_routes(admitted, "MID") == []
+
+
+# --- TI-184-21a-01: the shared trigger at the call sites ---------------------------------------
+
+def test_the_shared_trigger_spellings_are_what_each_site_can_author():
+    """What the coverage matrix's shared-trigger cells rest on, measured. A connector call in front
+    of a Branch whose leg ends in a process call does not parse
+    (`PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`); a Split behind a passthrough entry does.
+    At the passthrough call-discharge site that spelling is admitted, so its cells are measured.
+    At the inherited site the middle's call has only the Split in front of it, and the Split is a
+    native step prefix no attested hand-off admits into the No Data grandchild, so the middle is
+    refused under the placement code: that site's shared-trigger cells ship nothing."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    def removal_then(call_leg):
+        return {"kind": "branch", "legs": [_EMPTIES2, _RECACHE_LEG, call_leg]}
+
+    with pytest.raises(ProcessIRValidationError) as caught:
+        parse_process_ir_v1(_doc(_GET, removal_then({"steps": [_READ2], "terminal": _call("BOUND")})))
+    assert "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY" in str(caught.value)
+    caller = _legs(_STAGES_X, _LITERAL_INTO_CACHE2, {"steps": [], "terminal": _call("MID")})
+    discharge = [("PARENT", caller),
+                 ("MID", _doc(_ENTRY, _SPLITS_THE_DOCUMENTS, removal_then({"steps": [_READ2], "terminal": _call("BOUND")}))),
+                 ("BOUND", _BOUND)]
+    assert _both_routes(discharge, "MID") == []
+    assert _both_routes(discharge, "PARENT") == []
+    inherited = [("PARENT", caller),
+                 ("MID", _doc(_ENTRY, _SPLITS_THE_DOCUMENTS, removal_then({"steps": [], "terminal": _call("CACHE_CHILD")}))),
+                 ("CACHE_CHILD", _legs(_BINDS2, _STORES_NOTHING))]
+    assert _both_routes(inherited, "MID") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, "/body/steps/2/legs/2/terminal")]
+
+
+def test_the_relative_removal_proof_decides_the_passthrough_call_site_too(monkeypatch):
+    """Non-vacuity of the matrix's shared-trigger cells at the passthrough call-discharge site:
+    with the removal's proof reduced to the whole-run proof, the literal segment the caller stored
+    in CACHE2 is read as possibly surviving the Split-fed removal, and the caller is refused at its
+    call — the cell's own verdict, flipped."""
+    cell = ("shared_trigger", "recache", "none", "passthrough", True, "bound")
+    callers, callees, _use_leg, _before, code, _branch = _matrix_roots(*cell)
+    roots = [("PARENT", _legs(*(callers["breaking"] + [{"steps": [], "terminal": _call("CACHE_CHILD")}])))] + callees
+    assert _both_routes(roots, "PARENT") == []
+    monkeypatch.setattr(lineage, "_removal_runs_before_anything_after_it",
+                        lambda stream: lineage._path_provably_runs(stream))
+    assert _both_routes(roots, "PARENT") == [(code, "/body/steps/0/legs/2/terminal/process_ref")]
+
+
+# --- the entry requirement of a passthrough process that reads what it retrieved --------------
+
+_READS_WHAT_IT_RETRIEVED = {
+    "its_own_read": {"steps": [_READ2, _READS_X], "terminal": _STOP},
+    "a_passthrough_child_reads": {"steps": [_READ2], "terminal": _call("READS_X")},
+}
+
+
+@pytest.mark.parametrize("trigger", ("a_passthrough_entry", "a_split"))
+@pytest.mark.parametrize("use", sorted(_READS_WHAT_IT_RETRIEVED))
+def test_a_passthrough_process_asks_its_callers_nothing_of_their_documents_for_what_it_retrieved(use, trigger):
+    """Found by building the matrix's call-site shared-trigger cells from the Split spelling
+    (TI-184-21a-01), and a sibling of the batch's own authority sweep: every channel that turns a
+    read into an obligation of the callers must ask whether a caller's document can reach it.
+
+    A Data Passthrough process empties CACHE2 on a leg the walk proves runs, re-caches what its
+    caller stored in CACHE (reading X there) into CACHE2, and reads X on what it retrieves from
+    CACHE2. The walk records that read unestablished until a caller cohort is seeded, and it used
+    to record it as an ENTRY requirement too: every caller was asked to establish X on the
+    documents it hands over — documents the retrieve replaced, which never reach the read — and
+    was refused (`PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID`) while the flattened graph ran.
+    Measured at 5b5038c too. Past a retrieve on its path a document property read is a read of the
+    retrieved documents; the cached-property row is what charges a caller, and it still does."""
+    entry = [_ENTRY, _SPLITS_THE_DOCUMENTS] if trigger == "a_split" else [_ENTRY]
+    mid = _doc(*(entry + [{"kind": "branch", "legs": [_EMPTIES2, _RECACHE_LEG, _READS_WHAT_IT_RETRIEVED[use]]}]))
+    callers = {
+        "stores_x": [_STAGES_X],
+        "stores_x_less_documents_in_the_emptied_cache": [_STAGES_X, _X_LESS_INTO_CACHE2],
+        "stores_x_less_documents_in_the_cache_it_re_caches": [{"steps": [_GET], "terminal": _PUT}],
+    }
+    for caller, caller_legs in callers.items():
+        roots = [("PARENT", _legs(*(caller_legs + [{"steps": [], "terminal": _call("MID")}]))), ("MID", mid),
+                 ("READS_X", _doc(_ENTRY, _READS_X, _STOP))]
+        breaks = caller.endswith("the_cache_it_re_caches")
+        expected = [(_READ_BEFORE_WRITE, "/body/steps/0/legs/{0}/terminal".format(len(caller_legs)))] if breaks else []
+        assert _both_routes(roots, "PARENT") == expected, caller
+        assert _both_routes(roots, "MID") == []
+        assert ("ddp", "X") not in _row(roots, "PARENT", "MID").required_reads
+
+
+def test_a_read_of_retrieved_documents_is_no_entry_requirement_by_that_rule_alone(monkeypatch):
+    """Non-vacuity: with the rule removed from `_classify_unmet_read`, the caller storing X is
+    asked for X on its own documents again and refused."""
+    mid = _doc(_ENTRY, {"kind": "branch", "legs": [_EMPTIES2, _RECACHE_LEG, _READS_WHAT_IT_RETRIEVED["its_own_read"]]})
+    roots = [("PARENT", _legs(_STAGES_X, {"steps": [], "terminal": _call("MID")})), ("MID", mid)]
+    assert _errors(roots, "PARENT") == []
+    _lineage_with_source(monkeypatch, "        elif not externally_satisfied and upward and not of_retrieved_documents:\n",
+                         "        elif not externally_satisfied and upward:\n")
+    assert ("ddp", "X") in _row(roots, "PARENT", "MID").required_reads
+    assert _errors(roots, "PARENT") != []
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a round 3: verification round 2's findings
+# ---------------------------------------------------------------------------
+
+# --- R8-SOUND-01: rule 8 asks the child's own vocabulary ----------------------------------
+
+def test_rule_eight_asks_the_childs_own_vocabulary_when_its_cache_writes_are_unknown(monkeypatch):
+    """R8-SOUND-01. `_caches_a_call_may_write` answers a child whose cache writes are unknown
+    with the CALLER's observable caches, which is the right answer for what a call leaves behind
+    for the caller's own later steps and the wrong one for amendment 1 rule 8: what a later run
+    of the CHILD may find is a fact about the child. Intersecting with the caller's vocabulary
+    made the same child admitted under a caller that names no cache and refused under one that
+    does — and appending a call nothing can derive to an otherwise refused child turned the
+    refusal into an admission, because the child's own `mutated_state` goes empty with it.
+
+    The child here fills CACHE2, binds on what it retrieves, empties CACHE2 on a proved leg and
+    then calls a process nothing in the request derives. Nothing states that process does not
+    add to CACHE2, so run 2's retrieve may hand on its documents."""
+    child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2, _waited("EXTERNAL"))
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    names_no_cache = _per_document(child, **_WAITS_AND_ABORTS_ON_ERROR)
+    names_the_cache = [("PARENT", _passthrough_root(
+        _DYNAMIC_INTO_CACHE2, {"steps": [], "terminal": _call("CACHE_CHILD", **_WAITS_AND_ABORTS_ON_ERROR)})),
+        ("CACHE_CHILD", child)]
+    assert _both_routes(names_no_cache, "PARENT") == refused
+    assert _both_routes(names_the_cache, "PARENT") == refused
+    assert _row(names_no_cache, "PARENT", "CACHE_CHILD").mutated_state == ()
+    # THE INVERSION: appending the underivable call to a refused child leaves it refused.
+    fill_use = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)
+    assert _both_routes(_per_document(fill_use, **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == refused
+    assert _both_routes(_per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("EXTERNAL")),
+                                      **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == refused
+    # CONTROL: the same cleanup child without the underivable call keeps its exemption.
+    assert _both_routes(_per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2),
+                                      **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == []
+    # NON-VACUITY: with the caller's vocabulary back in the unknown-writes branch, the child is
+    # admitted under the caller that names no cache and refused under the one that does.
+    _lineage_with_source(
+        monkeypatch,
+        "        return tuple(sorted(required))\n",
+        "        return tuple(sorted(required & set(_caches_a_call_may_write(cache_refs, contract))))\n")
+    assert _errors(names_no_cache, "PARENT") == []
+    assert _errors(names_the_cache, "PARENT") == refused
+
+
+# --- B21A-R2-FO-01 and W21A-01: what a re-cache carries -----------------------------------
+
+#: A use of a property of documents that came out of one cache and were stored in another, by
+#: kind: ``(the steps after the retrieve, the pointer suffix of the call-side refusal, the code)``.
+_USES_OFF_A_RE_CACHE = {
+    "ordinary": ([_READS_X], "", _READ_BEFORE_WRITE),
+    "bound": ([_BOUND_GET], "/process_ref", _NOT_ESTABLISHED),
+    "defaulted_writer": ([_Y_FROM_DEFAULTED_X, _BOUND_Y_GET], "", _READ_BEFORE_WRITE),
+}
+#: The re-cache itself: it reads the caller's CACHE and stores what it read into CACHE2,
+#: with NOTHING reading the property on the way — so nothing in the child names it.
+_RE_CACHES_WITHOUT_A_USE = {"steps": [_READ], "terminal": _PUT2}
+
+
+@pytest.mark.parametrize("through_a_middle", (False, True), ids=("direct", "through_a_middle"))
+@pytest.mark.parametrize("emptied_first", (False, True), ids=("no_removal", "emptied_first"))
+@pytest.mark.parametrize("use", sorted(_USES_OFF_A_RE_CACHE))
+def test_a_use_off_a_re_cache_owes_the_cache_the_documents_came_from(use, emptied_first, through_a_middle):
+    """W21A-01 and B21A-R2-FO-01, one mechanism with two faces, both measured at 5b5038c.
+
+    A child retrieves its caller's CACHE, stores what it retrieved into CACHE2 without reading
+    the property on the way, and then uses that property on what it retrieves from CACHE2.
+
+    - Without the removal the child was refused for EVERY caller and its contract named nothing
+      a caller could satisfy, while the flattened graph of the same legs ran for a caller that
+      stores the property (the over-refusal).
+    - With CACHE2 emptied first on a proved leg the call was ADMITTED for a caller whose
+      documents in CACHE lack the property, while the flattened twin was refused: those
+      documents are exactly what the re-cache stores and the use reads (the fail-open).
+
+    Both are the same gap: the documents changed caches, and the caller-cache attribution did
+    not travel with them. It travels now on the carrier every other caller-cache obligation
+    uses — the `CALLER_CACHE_WRITER` alternative, under the key no authored property can spell —
+    so the use records its row against the cache the documents came OUT of. The child is its own
+    process again, the caller that stores the property is admitted, and the one that does not is
+    refused at its call, on both entry points and in agreement with the flattened graph."""
+    steps, suffix, code = _USES_OFF_A_RE_CACHE[use]
+    removal = [_EMPTIES2] if emptied_first else []
+    child_legs = removal + [_RE_CACHES_WITHOUT_A_USE, {"steps": [_READ2] + steps, "terminal": _STOP}]
+    callers = {"stores_the_property": _STAGES_X, "stores_documents_without_it": {"steps": [_GET], "terminal": _PUT}}
+    for caller, caller_leg in callers.items():
+        if through_a_middle:
+            roots = [("PARENT", _legs(caller_leg, _waited("MID"))),
+                     ("MID", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))),
+                     ("CACHE_CHILD", _legs(*child_legs))]
+            call = "/body/steps/0/legs/1/terminal"
+        else:
+            roots = [("PARENT", _legs(caller_leg, _waited("CACHE_CHILD"))), ("CACHE_CHILD", _legs(*child_legs))]
+            call = "/body/steps/0/legs/1/terminal"
+        breaks = caller == "stores_documents_without_it"
+        assert _both_routes(roots, "CACHE_CHILD") == [], (caller, use)
+        assert _both_routes(roots, "PARENT") == ([(code, call + suffix)] if breaks else []), (caller, use)
+        assert ("$ref:CACHE", "X") in {
+            (row[0], row[1]) for row in _row(roots, "PARENT", roots[1][0]).cache_property_requirements}
+        twin = _errors([("PARENT", _legs(*([caller_leg] + child_legs)))], "PARENT")
+        assert bool(twin) == breaks, (caller, use, twin)
+
+
+#: Every site in the server that builds a `_Cohort` — what a cache write leaves behind — and
+#: what each says about where those documents came from. The sibling sweep for
+#: `attribution-lost-where-documents-change-hands`, whose first instance was a bound use past a
+#: Message (ARCH-184-r2-01) and whose second is a use off a re-cache (W21A-01, B21A-R2-FO-01).
+_COHORT_BUILDERS = {
+    ("compiler/process_ir/semantic_validation/lineage.py", "_cohort"): (
+        "THE factory every builder below goes through: it takes the origins explicitly and is "
+        "the one place they become the alternative a later retrieve reads back, so a builder "
+        "that carries none says so by passing none (B21A-R4-TI-03)"),
+    # The two namedtuple copies in the tree, named so the sweep that now matches `_replace`
+    # and `_make` stays closed: neither is a cohort, and a cohort copied in either function
+    # would be a key of its own.
+    ("compiler/process_ir/semantic_validation/lineage.py", "_transfer via stream._replace"): (
+        "not a cohort: the per-path `_Stream` after a step, whose markers the cohort factory "
+        "is handed as `origins` where the write happens"),
+    ("compiler/process_ir/semantic_validation/lineage.py", "_edge_stream via stream._replace"): (
+        "not a cohort: the same `_Stream`, weakened across an edge the walk cannot count"),
+    ("compiler/process_ir/semantic_validation/lineage.py", "_cohort_at_write"): (
+        "the executing Add to Cache: it carries every cache these documents came out of, the "
+        "retrieve that handed them on and the ones that retrieve inherited"),
+    ("compiler/process_ir/semantic_validation/lineage.py", "UNKNOWN_COHORT"): (
+        "a write nothing here can inspect (a child, a contract, an outside writer): it claims "
+        "no origin, and no use can be proved against it at all"),
+    ("compiler/process_ir/semantic_validation/lineage.py", "_caller_cohort"): (
+        "the caller's own documents, seeded per cache from the contract: the cache IS the row's "
+        "key, so there is nothing further back to name"),
+    ("authoring/contract.py", "_retrieve_overlay_behaviour_oracle"): (
+        "not a write: hand-built inputs to `_overlay_cache_read` for the served revision's "
+        "retrieve-overlay row (B21A-R3-TI-01). One of them now CARRIES an origin, because the "
+        "row does distinguish one — the earlier justification asserted it did not, and the "
+        "measurement said otherwise (B21A-R4-TI-04). What is true, and measured by "
+        "`test_the_served_overlay_row_distinguishes_a_cohort_that_carries_an_origin`, is that "
+        "`_overlay_cache_read`'s answer about a property key does not depend on the origin: the "
+        "origin travels at the retrieve site, into `_Stream.retrieved_origins`"),
+}
+
+
+def _cohort_builders_in(source_root):
+    """Every construction of a `_Cohort` under ``source_root``, as ``(file, owner)``.
+
+    WHAT IS MATCHED, exactly — the claim is this list, not "every spelling" (V5-04 measured
+    five that passed the round-5 version):
+
+    * `_Cohort(...)` and `_cohort(...)`, plain or attribute-qualified (`lineage._Cohort(...)`),
+      the factory being the one place a WRITE builds one;
+    * `<anything>._replace(...)` and `<anything>._make(...)`, keyed by what they copy;
+    * a call through a name bound to either in the SAME file, resolved transitively, and the
+      same through `functools.partial` over either;
+    * a call to a class declared in that file whose bases name either;
+    * `getattr(<anything>, "_Cohort"|"_cohort")(...)` and `tuple.__new__(_Cohort, ...)`.
+
+    STILL OPEN, named rather than implied: an alias bound in ANOTHER file and imported under
+    a new name, a constructor kept in a container (`builders["cohort"](...)`), and anything
+    reached only at runtime (`globals()[...]`). The sweep reads one file at a time.
+    """
+    import ast
+
+    built = set()
+
+    def owner_of(node, owner, relative):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+        if isinstance(node, ast.Assign) and owner is None:
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            return names[0] if names else owner
+        return owner if owner is not None else relative
+
+    def spelled(node):
+        """The dotted name this call is spelled with, for a key that names the copy too."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return spelled(node.value) + "." + node.attr
+        return "<expression>"
+
+    def constructors_in(tree):
+        """The names that BUILD a cohort in this file: the two real ones, every alias of
+        them (including through `functools.partial`), and every class declared over one."""
+        known = {"_Cohort", "_cohort"}
+        growing = True
+        while growing:
+            growing = False
+            for node in ast.walk(tree):
+                found = set()
+                if isinstance(node, ast.Assign):
+                    value = node.value
+                    if isinstance(value, ast.Call) and spelled(value.func).endswith("partial"):
+                        value = value.args[0] if value.args else None
+                    if value is not None and isinstance(value, (ast.Name, ast.Attribute)):
+                        spelling = spelled(value)
+                        if spelling in known or spelling.split(".")[-1] in known:
+                            found = {target.id for target in node.targets
+                                     if isinstance(target, ast.Name)}
+                if isinstance(node, ast.ClassDef) and any(
+                        spelled(base).split(".")[-1] in known for base in node.bases):
+                    found = {node.name}
+                if found - known:
+                    known |= found
+                    growing = True
+        return known
+
+    def builds_a_cohort(node, known):
+        """Every spelling that can produce a cohort, not just the constructor's name.
+
+        The compiler builds them through ONE checked factory that takes the origins
+        explicitly (`_cohort`), so the sweep looks for that; the NamedTuple itself is still
+        matched, qualified or not, for the served revision's hand-built inputs; and
+        `_replace`/`_make` are matched WHEREVER they appear, because a cohort spelled either
+        way carries whatever the copy carried and a sweep blind to them would have let a
+        builder drop the origins with nothing failing (B21A-R4-TI-03). Round 6 added the
+        indirections V5-04 measured: an alias, a `partial`, a subclass, a `getattr` and
+        `tuple.__new__`. A copy is keyed by what it copies as well as by its owner, so a
+        cohort copied inside a function that already copies something else still needs its
+        own justification.
+        """
+        if not isinstance(node, ast.Call):
+            return None
+        func = node.func
+        spelling = spelled(func)
+        if spelling in known or spelling.split(".")[-1] in known:
+            return ""
+        if isinstance(func, ast.Attribute) and func.attr in ("_replace", "_make"):
+            return " via " + spelled(func)
+        # `tuple.__new__(_Cohort, ...)` and `type(...)(...)`: the cohort is an ARGUMENT.
+        if any(isinstance(argument, (ast.Name, ast.Attribute))
+               and spelled(argument).split(".")[-1] in known for argument in node.args):
+            return " via " + spelling
+        # `getattr(x, "_Cohort")(...)`: the constructor is named by a constant.
+        if (isinstance(func, ast.Call) and spelled(func.func) == "getattr"
+                and any(isinstance(argument, ast.Constant) and argument.value in known
+                        for argument in func.args)):
+            return " via getattr"
+        if (spelling == "getattr"
+                and any(isinstance(argument, ast.Constant) and argument.value in known
+                        for argument in node.args)):
+            return " via getattr"
+        return None
+
+    def walk(node, owner, relative, known):
+        for child in ast.iter_child_nodes(node):
+            how = builds_a_cohort(child, known)
+            if how is not None:
+                built.add((relative, (owner if owner is not None else relative) + how))
+            walk(child, owner_of(child, owner, relative), relative, known)
+
+    for path in sorted(Path(source_root).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        walk(tree, None, str(path.relative_to(source_root)), constructors_in(tree))
+    return built
+
+
+def _obligation_sites_in(source, recorded):
+    """Every place one of ``recorded`` could be added to in ``source``, as ``(owner, list)``.
+
+    WHAT IS MATCHED, exactly — the claim is this list and not "any spelling", which is what
+    round 5's wording said while four spellings were checked (V5-03, measured):
+
+    * `x += [row]`, and the same through a name bound to `x`;
+    * ANY method call on the list — `append`, `extend`, `insert`, `__iadd__`, whatever comes
+      next — including through an attribute-qualified owner (`self.rows.append`);
+    * an assignment into the list, `x[...] = ...`, which is how a slice insert is written;
+    * the list handed to a call that is not a builtin, by position or by keyword, since the
+      callee may record into it;
+    * the list's bound method handed to anything at all (`map(x.append, rows)`), a builtin
+      included;
+    * each of the above through a LOCAL ALIAS of the list, resolved transitively.
+
+    STILL OPEN, named rather than implied: a recorded list stored in a container or an
+    attribute (`box["rows"] = x`) and reached from somewhere else entirely; a list reached
+    through `globals()`; and a mutation made in another module against a list passed there —
+    the last is bounded by the sweep's own scope, which is this one module's source.
+    """
+    import ast
+    import builtins
+
+    tree = ast.parse(source)
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    found = set()
+
+    def owner_of(node):
+        while node is not None:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return node.name
+            node = parents.get(node)
+        return None
+
+    # Local aliases: `_a = read_cache_origins` makes `_a` the same list. Resolved to a fixed
+    # point, so an alias of an alias is one too.
+    aliases = {}
+    growing = True
+    while growing:
+        growing = False
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+                continue
+            target, value = node.targets[0].id, node.value.id
+            named = value if value in recorded else aliases.get(value)
+            if named is not None and aliases.get(target) != named:
+                aliases[target] = named
+                growing = True
+
+    def names(node):
+        """The recorded list this expression stands for, directly or through an alias."""
+        if isinstance(node, ast.Attribute) and node.attr in recorded:
+            return node.attr
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        if not isinstance(node, ast.Name):
+            return None
+        return node.id if node.id in recorded else aliases.get(node.id)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AugAssign):
+            name = names(node.target)
+            if name is not None:
+                found.add((owner_of(node), name))
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript):
+                    name = names(target.value)
+                    if name is not None:
+                        found.add((owner_of(node), name))
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Attribute):
+            name = names(node.func.value)
+            if name is not None:
+                found.add((owner_of(node), name))
+        handed = list(node.args) + [keyword.value for keyword in node.keywords]
+        builtin = isinstance(node.func, ast.Name) and hasattr(builtins, node.func.id)
+        for argument in handed:
+            name = names(argument)
+            if name is None:
+                continue
+            if isinstance(argument, ast.Attribute) or not builtin:
+                found.add((owner_of(node), name))
+    return found
+
+
+def test_the_two_derived_sweeps_fail_closed(tmp_path, monkeypatch):
+    """Non-vacuity of the two guards this round rebuilt (B21A-R4-TI-02, B21A-R4-TI-03).
+
+    The cohort sweep is measured on a file written for it, with a cohort built in every
+    spelling this guard claims — the constructor plain and qualified, the factory, the two
+    NamedTuple copies, and the five indirections round 6 added after they were measured
+    passing: an alias, an alias of the factory, a `functools.partial`, a subclass, a `getattr`
+    and `tuple.__new__` (V5-04). The obligation sweep is measured on mutated copies of the
+    derivation's own source, one per way it could quietly measure nothing: a requirement field
+    nobody assigns, one whose expression reaches no walk field, a call that IS handed the walk
+    and cannot be followed by name, the same call spelled through an attribute, a builtin that
+    reads an attribute for you, and a second assignment to the same requirement key (V5-02).
+    Two controls keep it honest: a call the walk is not handed, and a plain builtin over the
+    walk, neither of which may raise."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    spellings = tmp_path / "spellings"
+    spellings.mkdir()
+    (spellings / "builders.py").write_text(
+        "import functools\n"
+        "_C = _Cohort\n"
+        "_c2 = _cohort\n"
+        "_P = functools.partial(_Cohort)\n"
+        "class Sub(_Cohort):\n    pass\n"
+        "def a():\n    return _Cohort(1, 2, 3, 4)\n"
+        "def b():\n    return lineage._Cohort(1, 2, 3, 4)\n"
+        "def c():\n    return _cohort(1, 2, 3, 4, origins=())\n"
+        "def d(x):\n    return x._replace(alternatives=frozenset())\n"
+        "def e(rows):\n    return _Cohort._make(rows)\n"
+        "def f():\n    return _C(1, 2, 3, 4)\n"
+        "def g():\n    return _c2(1, 2, 3, 4)\n"
+        "def h():\n    return _P(1, 2, 3, 4)\n"
+        "def i():\n    return Sub(1, 2, 3, 4)\n"
+        "def j(m):\n    return getattr(m, '_Cohort')(1, 2, 3, 4)\n"
+        "def k():\n    return tuple.__new__(_Cohort, (1, 2, 3, 4))\n"
+        "def nothing():\n    return _Stream('known')\n",
+        encoding="utf-8")
+    assert sorted(owner for _file, owner in _cohort_builders_in(spellings)) == [
+        "_P via functools.partial", "a", "b", "c", "d via x._replace", "e via _Cohort._make",
+        "f", "g", "h", "i", "j via getattr", "k via tuple.__new__"]
+
+    source = Path(process_ir_effects.__file__).read_text(encoding="utf-8")
+    assigns = '    facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)'
+    assert source.count(assigns) == 1
+    mutants = {
+        "unassigned": "    pass",
+        "reaches_no_walk_field": '    facts["cache_property_requirements"] = ()',
+        "an_unfollowable_call_handed_the_walk": assigns + " + elsewhere_helper(walk)",
+        "a_qualified_call_handed_the_walk": assigns + " + _t.dumps(walk)",
+        "a_builtin_that_reads_an_attribute": assigns + ' + tuple(getattr(walk, "may_hold_at_exit"))',
+        "a_second_assignment_to_the_same_key": (
+            assigns + '\n    facts["cache_property_requirements"] = elsewhere_helper(walk)'),
+    }
+    silent = {
+        "a_call_the_walk_is_not_handed": assigns + " + _t.dumps(prepared)",
+        "a_plain_builtin_over_the_walk": assigns + " + tuple(walk.may_hold_at_exit)",
+    }
+    for label, replacement in sorted(silent.items()):
+        quiet = tmp_path / (label + ".py")
+        quiet.write_text(source.replace(assigns, replacement, 1), encoding="utf-8")
+        with monkeypatch.context() as patched:
+            patched.setattr(process_ir_effects, "__file__", str(quiet))
+            assert _requirement_walk_fields(), label
+    assert _requirement_walk_fields(), "the sweep must find something before it is mutated"
+    for label, replacement in sorted(mutants.items()):
+        mutated = tmp_path / (label + ".py")
+        mutated.write_text(source.replace(assigns, replacement, 1), encoding="utf-8")
+        with monkeypatch.context() as patched:
+            patched.setattr(process_ir_effects, "__file__", str(mutated))
+            with pytest.raises(AssertionError):
+                _requirement_walk_fields()
+
+
+def test_every_cohort_a_write_stores_says_where_its_documents_came_from():
+    """The sibling sweep, derived: a cohort is the only thing a later retrieve hands on, so every
+    construction of one either carries the caches its documents came out of or states why it
+    cannot. A fourth builder fails here until it does one or the other."""
+    import ast
+
+    built = _cohort_builders_in(_ROOT / "src" / "boomi_mcp")
+    assert built == set(_COHORT_BUILDERS), {
+        "unjustified": sorted(built - set(_COHORT_BUILDERS)),
+        "justified_but_absent": sorted(set(_COHORT_BUILDERS) - built),
+    }
+    # ... and the one that carries origins really does, measured rather than read: a cohort
+    # written from retrieved documents names that cache; one written from the entry names none.
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import (
+        CACHE_TRANSFER_UNPROVED,
+        CALLER_CACHE_WRITER,
+        _cohort_at_write,
+        _Stream,
+    )
+
+    retrieved = _cohort_at_write(frozenset(), {}, _Stream("unknown", retrieved_from="$ref:CACHE"))
+    assert (CACHE_TRANSFER_UNPROVED, CALLER_CACHE_WRITER + "$ref:CACHE") in retrieved.alternatives
+    from_the_entry = _cohort_at_write(frozenset(), {}, _Stream("empty_entry"))
+    assert not [token for key, token in from_the_entry.alternatives if key == CACHE_TRANSFER_UNPROVED]
+    # ... and the factory is where the origins become that alternative, so a builder that
+    # passes none carries none however it spells the rest.
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import _cohort
+
+    assert _cohort(frozenset(), None, frozenset(), "one").alternatives == frozenset()
+    assert _cohort(frozenset(), None, frozenset(), "one", origins=("$ref:CACHE",)).alternatives == \
+        frozenset({(CACHE_TRANSFER_UNPROVED, CALLER_CACHE_WRITER + "$ref:CACHE")})
+
+
+#: The served overlay row's columns, in the order `_retrieve_overlay_behaviour_oracle` records
+#: them. Read from the oracle's own source so a column inserted later moves this table too.
+_OVERLAY_ROW_COLUMNS = (
+    "cohorts", "carried", "stream_count", "external", "current", "establishes_x", "writers_of_x",
+    "x_on_documents", "x_invalidated", "origin_invalidated", "writers_of_the_origin",
+    "count_out", "state",
+)
+
+
+def test_the_served_overlay_row_distinguishes_a_cohort_that_carries_an_origin():
+    """B21A-R4-TI-04. The `_COHORT_BUILDERS` justification for the served revision's overlay
+    oracle used to ASSERT that the row never reads an origin. Measured, that was wrong twice
+    over: the row records the state it hands on, which holds the cohorts, so an origin-bearing
+    cohort does move it — and the `shapes` table carried none, so the origin columns were
+    constants and the claim could not have been measured either way.
+
+    Both halves are measured here, against the two shapes that differ ONLY in the origin. The
+    row distinguishes them; `_overlay_cache_read`'s answer about a property key does not, which
+    is the accurate version of the old claim — the origin is carried at the retrieve site, into
+    `_Stream.retrieved_origins` (pinned above and by the re-cache witnesses), not by the
+    overlay's per-key answer."""
+    from boomi_mcp.authoring import contract as authoring_contract
+
+    rows = authoring_contract._retrieve_overlay_behaviour_oracle()["transfer"]
+    assert {len(row) for row in rows} == {len(_OVERLAY_ROW_COLUMNS)}, sorted({len(row) for row in rows})
+    column = {name: index for index, name in enumerate(_OVERLAY_ROW_COLUMNS)}
+    by_case = {(tuple(row[column["cohorts"]]), row[column["carried"]], row[column["stream_count"]],
+                row[column["external"]], row[column["current"]]): row for row in rows}
+    with_an_origin = [case for case in by_case if case[0] == ("retrieved_from_a_caller_cache@one",)]
+    assert with_an_origin, sorted({label for case in by_case for label in case[0]})
+    moved, same_answer = 0, 0
+    for case in with_an_origin:
+        twin = ((("unknown_properties@one",),) + case[1:])
+        origin_row, plain_row = by_case[case], by_case[twin]
+        assert origin_row != plain_row, case
+        moved += 1
+        for name in ("establishes_x", "writers_of_x", "x_on_documents", "x_invalidated",
+                     "origin_invalidated", "writers_of_the_origin", "count_out"):
+            assert origin_row[column[name]] == plain_row[column[name]], (case, name)
+        same_answer += 1
+        assert origin_row[column["state"]] != plain_row[column["state"]], case
+    assert moved == same_answer == 16, moved
+
+
+def test_the_re_cache_attribution_is_load_bearing(monkeypatch):
+    """Non-vacuity, one mutant per face, each a source edit of the one carrier.
+
+    - The cohort stores no origin: the child that re-caches without a use is refused for every
+      caller again, with a contract naming nothing (the over-refusal returns).
+    - The retrieve does not read the origins back: the caller whose documents lack the property
+      is admitted again while the flattened twin refuses it (the fail-open returns)."""
+    child = _legs(_RE_CACHES_WITHOUT_A_USE, {"steps": [_READ2, _BOUND_GET], "terminal": _STOP})
+    emptied = _legs(_EMPTIES2, _RE_CACHES_WITHOUT_A_USE, {"steps": [_READ2, _BOUND_GET], "terminal": _STOP})
+    satisfying = [("PARENT", _legs(_STAGES_X, _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
+    breaking = [("PARENT", _legs({"steps": [_GET], "terminal": _PUT}, _waited("CACHE_CHILD"))),
+                ("CACHE_CHILD", emptied)]
+    assert _errors(satisfying, "CACHE_CHILD") == [] and _errors(satisfying, "PARENT") == []
+    assert _errors(breaking, "PARENT") == [(_NOT_ESTABLISHED, "/body/steps/0/legs/1/terminal/process_ref")]
+    twin = [("PARENT", _legs({"steps": [_GET], "terminal": _PUT}, _EMPTIES2, _RE_CACHES_WITHOUT_A_USE,
+                             {"steps": [_READ2, _BOUND_GET], "terminal": _STOP}))]
+    assert _errors(twin, "PARENT") != []
+    with monkeypatch.context() as patched:
+        # The write stores no origin at all.
+        _lineage_with_source(
+            patched,
+            "            ({stream.retrieved_from} - {None}) | set(stream.retrieved_origins)\n",
+            "            ()\n")
+        assert _errors(satisfying, "CACHE_CHILD") != []
+        assert _errors(breaking, "PARENT") == []
+        assert _errors(twin, "PARENT") != []
+    with monkeypatch.context() as patched:
+        # The write stores them and the retrieve does not read them back.
+        _lineage_with_source(patched, "retrieved_origins=inherited", "retrieved_origins=()", occurrences=2)
+        assert _errors(satisfying, "CACHE_CHILD") != []
+        assert _errors(breaking, "PARENT") == []
+
+
+#: Every site in the server that records a row a CALLER must discharge, and what makes each one
+#: ask the one authority (`_caller_documents_may_reach`) before it does, or why the authority
+#: does not apply to it. Keyed on the function that records, in the style of `_REMOVAL_READERS`.
+#: The hand sweep missed a channel in each of the two earlier rounds (TI2-184-21a-01) and the
+#: hand-chosen LIST SET missed the content and entry channels in the third (B21A-R3-TI-01), so
+#: both the set of lists and the set of sites are now derived from source.
+_OBLIGATION_SITES = {
+    ("_report", "findings"): (
+        "the walk's own findings, which are a requirement channel because "
+        "`_caller_composed_paths` re-walks the child with `caller_supplied_writers` seeded and "
+        "reads which DYNAMIC_PATH_DDP_NOT_ESTABLISHED refusals CLEAR: a refusal that a caller's "
+        "writer removes IS the `required_writers` row. One place by construction — every "
+        "finding the walk reports goes through `_report` — and the fail-closed sweep is what "
+        "surfaced this channel (B21A-R4-TI-02); measured by the passthrough `required_writers` "
+        "forwarding case and by the bound cells of the matrix"),
+    ("_check_bound_key", "unestablished_bindings"): (
+        "a bound path this process cannot compose: the row is about the CALLER'S OWN DOCUMENTS, "
+        "not about a cache, so the cache authority does not apply — `_caller_composed_paths` "
+        "measures it by seeding `caller_supplied_writers`; measured by the passthrough "
+        "`required_writers` forwarding case and the bound cells of the matrix"),
+    ("_classify_unmet_read", "unmet"): (
+        "what the caller must ESTABLISH (`required_reads`): the authority is asked in the "
+        "negative — a document property read past a retrieve is never an entry requirement "
+        "(`of_retrieved_documents`) — and a cache read is establishment, not attribution; "
+        "measured by `test_a_passthrough_process_asks_its_callers_nothing_of_their_documents_"
+        "for_what_it_retrieved` and by the matrix's storing-nothing caller"),
+    ("_requires", "cache_requirement_refs"): (
+        "the content row a consumer of retrieved documents records: the cache is "
+        "`_Stream.caller_cache`, which IS the retrieve's own `_caller_documents_may_reach` "
+        "answer; measured by the matrix's content use at the own site"),
+    ("_requires", "entry_requirement_refs"): (
+        "what a passthrough child requires of the documents its caller hands over: the entry "
+        "group, not a cache, so the authority does not apply; measured by the "
+        "`document_requirements` forwarding case"),
+    ("_discharge_child_contract", "cache_requirement_refs"): (
+        "the content row a call inherits from its child, recorded under a direct "
+        "`_caller_documents_may_reach(state, cache_ref)`; measured by the matrix's content use "
+        "at the inherited site and by "
+        "`test_a_process_that_stages_the_profile_itself_still_owes_the_content_its_callers_share`"),
+    ("_classify_unmet_read", "read_cache_origins"): (
+        "the ride-on credit for an unmet ordinary read: the caches come from `_Stream`'s "
+        "`retrieved_from` and `retrieved_origins`, both set at a retrieve that asked the "
+        "authority; measured by the matrix's ordinary and defaulted_writer uses at the own site"),
+    ("_classify_unmet_read", "unestablished_cached_keys"): (
+        "the cached row for an unmet read: `cached_from` is `_caller_cached_origin`, which reads "
+        "the stream's `caller_cache` — the authority's own answer at the retrieve — and the "
+        "origin rows come from `retrieved_origins`; measured by the matrix's own and inherited "
+        "sites and by the re-cache witnesses"),
+    ("_check_bound_key", "binding_cache_origins"): (
+        "the same credit for a bound path, off the same two stream markers; measured by the "
+        "matrix's bound use at every site"),
+    ("_check_bound_key", "unestablished_cached_keys"): (
+        "the cached row a refused binding records, and the rows a PROVED binding owes through "
+        "its writer's captured `CALLER_CACHE_WRITER` alternatives, which exist only where "
+        "`_caller_owes_a_cached_property` said yes at the retrieve"),
+    ("owe_the_retrieve_on_failure", "unestablished_cached_keys"): (
+        "THE row of a binding whose check failed on documents a call retrieved for its child: "
+        "one rule inside `_check_bound_key`, fed by the three call sites, and the cache is the "
+        "site's own `cached_from` — `_caller_documents_may_reach` asked where that retrieve "
+        "happens (B21A-R4-FO-01); measured by "
+        "`test_a_failed_binding_on_documents_a_call_retrieved_travels_to_the_caller_that_"
+        "stored_them` — the three-level graph, with "
+        "`test_the_inherited_rows_obligation_on_a_failed_writer_is_load_bearing` neutralising "
+        "this rule and nothing else (the two-level test passes with it reverted, V5-01) — and "
+        "by the matrix's bound and defaulted_writer uses at the inherited site"),
+    ("_check_one_writer", "read_cache_origins"): (
+        "a path writer's unmet DDP source, credited to the caches its documents came out of, off "
+        "the same markers captured with the writer; measured by the defaulted_writer use"),
+    ("_check_one_writer", "unestablished_cached_keys"): (
+        "the same source's cached and origin rows; measured by the defaulted_writer use and by "
+        "`test_a_path_writer_owes_the_callers_that_share_its_cache_the_source_it_composes_from`"),
+    ("_owe_the_caches_behind", "unestablished_cached_keys"): (
+        "what a PROVED use owes: one row per `CALLER_CACHE_WRITER` alternative, and the retrieve "
+        "adds that alternative only where `_caller_owes_a_cached_property` — the authority plus "
+        "the seeded-pair bookkeeping — said yes"),
+    ("_discharge_child_contract", "unestablished_cached_keys"): (
+        "the row a call inherits from its child, recorded only when `_caller_owes_a_cached_"
+        "property` says this process's callers may share the cache; measured by the matrix's "
+        "inherited site"),
+}
+
+
+def _requirement_walk_fields():
+    """The walk fields the child-contract derivation turns into a REQUIREMENT field.
+
+    Derived twice over, so neither half is a hand list: the requirement fields come from the
+    lattice table above (`_BOUNDARY`, requirement side), and which walk field feeds each comes
+    from `derive_child_entry_facts`'s own source — the expression assigned to that fact, with
+    local names resolved and the module-level helpers it calls followed.
+
+    FAIL-CLOSED, every way it could quietly measure nothing (B21A-R4-TI-02, widened in round 6
+    by V5-02): a requirement field the derivation never assigns, a field whose expression
+    reaches no walk attribute at all, and any call handed the walk that this sweep cannot
+    follow. EVERY assignment to a requirement key is swept, not the first one found: the
+    derivation assigns some of them once per entry form, and a second assignment on one path
+    would otherwise decide the runtime value while this sweep read another expression.
+
+    The resolution rule is closed and derived rather than listed. A call is followable when its
+    func is a NAME defined in this module (followed into), or the walk's own constructor (its
+    result IS the walk, so attributes off it count like `walk.<field>`), or a builtin that
+    cannot read an attribute for you. `getattr`, `vars` and `map` are builtins that CAN, so
+    they count as unfollowable the moment the walk reaches them. Every other spelling — an
+    attribute-qualified helper from another module, a call through a subscript, a lambda's
+    result — is unfollowable too, with one hand-modelled exception, `facts.update(...)`, whose
+    keywords this sweep reads directly. A call the walk is NOT handed cannot read a walk field
+    whatever it does, which is what makes `prepare_validation_context(child_ir, symbols)` and
+    the canonicalization of the trusted context safe to pass over without naming them.
+
+    STILL OPEN, named rather than implied: the walk could be stashed in a container or an
+    attribute first (`box["w"] = walk`) and read back out of it later; this sweep follows names
+    and calls, not containers.
+    """
+    import ast
+    import builtins
+
+    from boomi_mcp.authoring import process_ir_effects
+    from boomi_mcp.compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    #: The one call whose RESULT is a walk. Named from the runtime object, so renaming it in
+    #: the derivation's import list makes this sweep fail rather than silently miss a channel.
+    walking = walk_lineage.__name__
+    wanted = {field for (_component, side), cell in _BOUNDARY.items()
+              if side == "requirement" and isinstance(cell, tuple) for field in cell}
+    tree = ast.parse(Path(process_ir_effects.__file__).read_text(encoding="utf-8"))
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    derive = functions["derive_child_entry_facts"]
+    #: name/key -> every expression assigned to it, in source order. A list, not a first
+    #: writer: two assignments to one requirement key mean the sweep would read an
+    #: expression the runtime value does not come from (V5-02).
+    assigned: "dict" = {}
+
+    def record(key, value):
+        assigned.setdefault(key, []).append(value)
+
+    for node in ast.walk(derive):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    record(target.id, node.value)
+                if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant):
+                    record(target.slice.value, node.value)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update":
+            for keyword in node.keywords:
+                record(keyword.arg, keyword.value)
+    unfollowed = set()
+    #: Builtins that read an attribute or apply a callable for you, so a walk handed to one
+    #: goes somewhere this sweep cannot see. Everything else in `builtins` is inert here.
+    opaque_builtins = {"getattr", "vars", "map", "filter", "eval", "exec", "next", "iter"}
+
+    def is_a_walk(node):
+        """Whether this expression IS the walk: the name it is bound to, or a fresh one."""
+        if isinstance(node, ast.Name):
+            return node.id in ("walk", "after")
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == walking)
+
+    def is_handed_the_walk(call):
+        """Whether the walk reaches this call — the only way it could read a walk field."""
+        return any(is_a_walk(inner)
+                   for argument in list(call.args) + [keyword.value for keyword in call.keywords]
+                   for inner in ast.walk(argument))
+
+    def spelling(func):
+        """How a call is written, for naming what could not be followed."""
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return spelling(func.value) + "." + func.attr
+        return type(func).__name__
+
+    def collect(node, seen):
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Attribute) and is_a_walk(child.value):
+                found.add(child.attr)
+            if isinstance(child, ast.Name) and child.id in assigned and child.id not in seen:
+                for value in assigned[child.id]:
+                    found |= collect(value, seen | {child.id})
+            if not isinstance(child, ast.Call):
+                continue
+            func = child.func
+            if isinstance(func, ast.Name) and func.id in functions:
+                if func.id not in seen:
+                    found |= collect(functions[func.id], seen | {func.id})
+                continue
+            if not is_handed_the_walk(child):
+                # Whatever it is, it cannot read a field of a walk it was never handed.
+                continue
+            if isinstance(func, ast.Name) and func.id == walking:
+                continue
+            if (isinstance(func, ast.Name) and hasattr(builtins, func.id)
+                    and func.id not in opaque_builtins):
+                continue
+            if isinstance(func, ast.Attribute) and spelling(func) == "facts.update":
+                # Hand-modelled above: its keywords are read as assignments.
+                continue
+            unfollowed.add(spelling(func))
+        return found
+
+    fields = set()
+    for field in sorted(wanted):
+        assert field in assigned, (
+            "the derivation assigns no %s, so this sweep would measure nothing for it" % field)
+        # EVERY assignment to the key, not the first: the derivation assigns some of them
+        # once per entry form, and a second assignment on one path would otherwise decide
+        # the runtime value while the sweep read another expression (V5-02).
+        reached = set()
+        for value in assigned[field]:
+            reached |= collect(value, {field})
+        assert reached, ("%s reaches no walk field" % field, sorted(fields))
+        fields |= reached
+    assert not unfollowed, sorted(unfollowed)
+    return fields
+
+
+def test_every_caller_obligation_is_recorded_through_the_one_authority():
+    """The derived sweep for the batch's structural fix, in the style of
+    `test_every_proved_removal_is_read_through_one_rule` and for the same reason: an enumeration
+    of sites, each free to decide for itself, is what the fix replaced, and a hand-written
+    coverage claim missed a channel in each round — the writer's defaulted source
+    (SOUND-21a-01), the entry-requirement channel (round 2), and the content channel, which the
+    guard's own hand-chosen list set hid (B21A-R3-TI-01).
+
+    Both halves are derived now. The LISTS come from the lattice table's requirement cells
+    through `derive_child_entry_facts`'s own source; the SITES are every mutation of those
+    lists in the spellings `_obligation_sites_in` enumerates — a method call on the list, an
+    augmented assignment, an assignment into it, the list or its bound method handed to a
+    call, each of those through a local alias — with what that sweep does NOT see named in
+    its own docstring rather than implied here (V5-03)."""
+    import ast
+
+    lineage_source = Path(lineage.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(lineage_source)
+    construction = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name) and node.func.id == "LineageWalkV1")
+    declared = {node.target.id for node in ast.walk(tree)
+                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and isinstance(node.value, (ast.List, ast.Set))}
+    requirement_fields = _requirement_walk_fields()
+    recorded = {name
+                for keyword in construction.keywords if keyword.arg in requirement_fields
+                for name in {inner.id for inner in ast.walk(keyword.value) if isinstance(inner, ast.Name)}
+                if name in declared}
+    # The derivation must reach the three channels the batch works through, the content channel
+    # the guard used to miss, and the entry one — otherwise the guard would be measuring less
+    # than it says while still passing.
+    assert {"unestablished_cached_keys", "read_cache_origins", "binding_cache_origins",
+            "cache_requirement_refs", "entry_requirement_refs", "unmet"} <= recorded, sorted(recorded)
+    found = _obligation_sites_in(lineage_source, recorded)
+    assert found == set(_OBLIGATION_SITES), {
+        "unjustified": sorted(found - set(_OBLIGATION_SITES)),
+        "justified_but_absent": sorted(set(_OBLIGATION_SITES) - found),
+    }
+    # The lists are the walk's own locals, so a row recorded anywhere else reaches no contract.
+    assert recorded <= set(lineage.LineageWalkV1._fields) | {"unmet"}, sorted(recorded)
+
+
+# --- R8-TXT-01 and B21A-R2-TXT-01/-02: what the three surfaces say ------------------------
+
+def test_the_repeated_run_exemption_is_scoped_to_the_cause_it_belongs_to():
+    """R8-TXT-01. The exemption — every run ends with nothing it stored left in the cache, and
+    the call waits and aborts on error — applies to the cause that USES what it retrieves, never
+    to a child that reads the cache before writing it: for that one the establishment the call
+    proved is gone whatever the child does afterwards. Measured on the child the two readings
+    disagree about: it reads CACHE2 before writing it, its contract's
+    `required_caches_retain_nothing_it_stored` is True and the call waits and aborts, and it is
+    refused. The served sentence must therefore attach the exemption to the second cause only,
+    which is where the other two surfaces already put it."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    reads_then_empties = [
+        ("PARENT", _passthrough_root(_DYNAMIC_INTO_CACHE2, {"steps": [], "terminal": _call(
+            "CACHE_CHILD", **_WAITS_AND_ABORTS_ON_ERROR)})),
+        ("CACHE_CHILD", _legs(_BINDS2, _EMPTIES2))]
+    assert _both_routes(reads_then_empties, "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    row = _row(reads_then_empties, "PARENT", "CACHE_CHILD")
+    assert row.required_caches_retain_nothing_it_stored is True
+    assert ("cache", "$ref:CACHE2") in row.required_reads
+    message = findings.finding(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body").message
+    first, second = message.index("it reads that cache before writing it"), message.index("; or it consumes")
+    exemption = message.index("unless every run ends with nothing it stored left in that cache")
+    assert first < second < exemption, message
+
+
+#: B21A-R2-TXT-01: what the remediation's second way out describes, and the near misses. The
+#: caller is a No Data root whose Branch leg ends in the call; the child is the refused shape.
+_WAY_TWO_LEG_PREFIXES = {
+    "no steps of its own": ([], True),
+    "a message": ([_MSG], False),
+    "a map": ([_TO_P2], False),
+    "a process property write": ([_SET_K], False),
+    "flow control": ([{"kind": "flow_control", "for_each_count": 1}], False),
+}
+_WAY_TWO_ROOT_PREFIXES = {
+    "a message": [_MSG],
+    "a process property write": [_SET_K],
+    "flow control": [{"kind": "flow_control", "for_each_count": 1}],
+    "a map": [_TO_P2],
+    "a cache retrieve": [_READ],
+    "a data process": [_SPLITS_THE_DOCUMENTS],
+    "a connector call": [_GET],
+    "a message and a connector call": [_MSG, _GET],
+}
+
+
+def test_the_second_way_out_of_the_repeated_run_refusal_is_a_recipe():
+    """B21A-R2-TXT-01. Ways 1 and 3 are sufficient recipes — author this, and the call is
+    admitted — and way 2 was not: "a path that runs no connector call, cache retrieve or data
+    process before the call" describes a Message, a map, a property write and flow control
+    before the call, and each of those is refused under the placement code, which the same
+    served catalog's `node.process_call` entry states. It now names what it means, the empty leg
+    with nothing in front of its Branch, and this measures every near miss: exactly the shape
+    the sentence describes is admitted."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    remediation = findings.finding(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body").remediation
+    assert "as the terminal of a Branch leg that has no steps of its own and no step in front " \
+           "of its Branch" in remediation
+    child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)
+    for label, (prefix, admitted) in _WAY_TWO_LEG_PREFIXES.items():
+        roots = [("PARENT", _legs(_STORES_NOTHING, {"steps": list(prefix), "terminal": _call("CACHE_CHILD")})),
+                 ("CACHE_CHILD", child)]
+        verdict = _both_routes(roots, "PARENT")
+        if admitted:
+            assert verdict == [], label
+        else:
+            # The placement refusal, beside whatever else the prefix itself is refused for (a
+            # map of documents the leg does not carry is its own cardinality defect).
+            assert (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
+                    "/body/steps/0/legs/1/terminal") in verdict, (label, verdict)
+    for label, prefix in _WAY_TWO_ROOT_PREFIXES.items():
+        document = _doc(*(list(prefix) + [{"kind": "branch", "legs": [
+            _STORES_NOTHING, {"steps": [], "terminal": _call("CACHE_CHILD")}]}]))
+        try:
+            parsed = [("PARENT", document), ("CACHE_CHILD", child)]
+            assert _both_routes(parsed, "PARENT") != [], label
+        except ProcessIRValidationError as refused:
+            assert "PROCESS_IR" in str(refused), label
+
+
+def test_every_served_surface_that_states_rule_eight_states_its_gate():
+    """B21A-R2-TXT-02. Four surfaces state amendment 1 rule 8 — the finding's message, the
+    authoring entry, the architecture doc's §3e row and the error taxonomy's summary — and the
+    call's wait/abort gate decides a measured verdict, so a summary that leaves it out describes
+    a refusal no listed cause explains."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    summary = ERROR_TAXONOMY[PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE].summary
+    message = findings.finding(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body").message
+    from boomi_mcp.authoring.process_ir_projection import process_ir_authoring_revision_payload
+
+    from test_issue_184_child_entries import _entry_by_id
+
+    entry = _entry_by_id(process_ir_authoring_revision_payload(), "node.process_call")
+    doc_text = (_ROOT / "docs" / "architecture" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
+    assert "wait=true and abort_on_error=true" in message
+    assert "wait=true and abort_on_error=true" in " ".join(entry["ordering_facts"])
+    assert "wait and abort on error" in doc_text
+    # The rule is a CONJUNCTION — nothing retained AND the call waits and aborts — and a summary
+    # that keeps one conjunct exempts shapes the server refuses (B21A-R3-TXT-01). Measured on
+    # the three cells that tell the conjuncts apart, rather than on a substring.
+    assert "unless every run ends with nothing it stored there" in summary, summary
+    assert "the call both waits and aborts on error" in summary, summary
+    # ... and "nothing it stored there" is itself a conjunction, whose other conjuncts the
+    # summary omitted while A10's shape — a declared outside writer on a flagged retrieve —
+    # is refused (B21A-R6-V6-02, the third instance on this surface).
+    for clause in ("no call it makes may write that cache after its removal or without being "
+                   "waited for",
+                   "no outside writer is declared for that cache on a retrieve that names one"):
+        assert clause in summary, summary
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    cleanup = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2)
+    no_removal = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2)
+    cells = {
+        # retains what it stored, and the call waits and aborts: the first conjunct is false.
+        "retains_what_it_stored": (no_removal, _WAITS_AND_ABORTS_ON_ERROR, refused),
+        # retains nothing, but the call does not abort on error: the second conjunct is false.
+        "the_call_does_not_abort": (cleanup, {"wait": True}, refused),
+        # both conjuncts hold: admitted.
+        "both_hold": (cleanup, _WAITS_AND_ABORTS_ON_ERROR, []),
+    }
+    for label, (child, flags, expected) in cells.items():
+        roots = _per_document(child, **flags)
+        assert _both_routes(roots, "PARENT") == expected, label
+        retained = _row(roots, "PARENT", "CACHE_CHILD").required_caches_retain_nothing_it_stored
+        assert retained is (label != "retains_what_it_stored"), label
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 21a round 4: verification round 3's findings
+# ---------------------------------------------------------------------------
+
+# --- B21A-R3-FO-01: a failed WRITER is a failed BINDING ------------------------------------
+
+#: The child of the fail-open: it re-caches its caller's CACHE into CACHE2 after composing Y
+#: from a DEFAULTED X, then binds a request path to Y on what it retrieves from CACHE2.
+_COMPOSES_Y_THEN_RE_CACHES = {"steps": [_READ, _Y_FROM_DEFAULTED_X], "terminal": _PUT2}
+#: The same writer with no unmet source: its value comes from a process property the execution
+#: supplies. This one was charged before, and is the non-vacuity pair for the fix.
+_COMPOSES_Y_FROM_A_PROCESS_PROPERTY = {"kind": "set_ddp", "name": "Y", "source_values": [
+    {"value_type": "static", "value": "/clients/"},
+    {"value_type": "dpp", "property_name": "key", "default_value": ""}]}
+
+
+@pytest.mark.parametrize("writer", ("an_unmet_source", "a_process_property"))
+def test_a_binding_whose_writer_fails_owes_the_cache_it_retrieves_from(writer):
+    """B21A-R3-FO-01, a fail-open round 3's carrier exposed: at 5b5038c this child was refused on
+    its own walk (the W21A-01 over-refusal), and making it admissible turned a masked gap into a
+    live one.
+
+    The binding's establishment test PASSES — the child's own writer guarantees Y on what it
+    re-caches — and the composition then fails inside `_check_one_writer` because the writer's
+    own source is unmet. That failure recorded only the SOURCE property's caches, so the cache
+    the BINDING retrieves from was never charged and a caller that stored documents there
+    without Y was admitted while the flattened graph refused it. A composition failure is a
+    failure of the binding, so it now records what an establishment failure records.
+
+    The control keeps the pair honest: with a writer that has no unmet source the same row was
+    already published, so the fix adds the missing half rather than the whole rule."""
+    steps = _COMPOSES_Y_THEN_RE_CACHES if writer == "an_unmet_source" else {
+        "steps": [_READ, _COMPOSES_Y_FROM_A_PROCESS_PROPERTY], "terminal": _PUT2}
+    child_legs = [steps, {"steps": [_READ2, _BOUND_Y_GET], "terminal": _STOP}]
+    bare_documents = {"steps": [_GET], "terminal": _PUT2}
+    caller_legs = [_STAGES_X, bare_documents]
+    roots = [("PARENT", _legs(*(caller_legs + [_waited("CACHE_CHILD")]))),
+             ("CACHE_CHILD", _legs(*child_legs))]
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    assert _both_routes(roots, "PARENT") == [(_NOT_ESTABLISHED, "/body/steps/0/legs/2/terminal/process_ref")]
+    rows = {(row[0], row[1], row[3]) for row in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements}
+    assert ("$ref:CACHE2", "Y", True) in rows, rows
+    if writer == "an_unmet_source":
+        # ... beside the SOURCE row the round-1 fix publishes, which names the other cache.
+        assert ("$ref:CACHE", "X", False) in rows, rows
+    # The flattened graph of the same legs refuses the same caller.
+    assert _errors([("PARENT", _legs(*(caller_legs + child_legs)))], "PARENT") != []
+    # CONTROL: a caller that stores nothing in the cache the binding retrieves from is admitted.
+    admitted = [("PARENT", _legs(_STAGES_X, _STORES_NOTHING, _waited("CACHE_CHILD"))),
+                ("CACHE_CHILD", _legs(*child_legs))]
+    assert _both_routes(admitted, "PARENT") == []
+
+
+def test_the_bindings_own_obligation_on_a_failed_writer_is_load_bearing(monkeypatch):
+    """Non-vacuity: with the binding's own rows dropped from the writer-failure path, the
+    bare-documents caller is admitted again while the flattened twin still refuses it."""
+    child = _legs(_COMPOSES_Y_THEN_RE_CACHES, {"steps": [_READ2, _BOUND_Y_GET], "terminal": _STOP})
+    caller_legs = [_STAGES_X, {"steps": [_GET], "terminal": _PUT2}]
+    roots = [("PARENT", _legs(*(caller_legs + [_waited("CACHE_CHILD")]))), ("CACHE_CHILD", child)]
+    assert _errors(roots, "PARENT") != []
+    # The mutant: a failed binding owes nothing, which is what it did before the fix.
+    _lineage_with_source(
+        monkeypatch,
+        "                _owe_the_caches_behind(\n"
+        "                    node.source_path + sub_path, key, binding.request_profile_ref, True, writers)\n"
+        "                owe_the_retrieve_on_failure()\n"
+        "                return False\n",
+        "                return False\n")
+    assert _errors(roots, "PARENT") == []
+    assert _errors([("PARENT", _legs(*(caller_legs + _branch_legs(child))))], "PARENT") != []
+
+
+# --- B21A-R4-FO-01: the same failure ONE CALL FURTHER OUT ----------------------------------
+
+#: The three-level shape round 5's rule exists for. The grandparent stages X into CACHE and
+#: BARE documents into CACHE2; the middle retrieves CACHE, composes Y from a defaulted X and
+#: re-caches into CACHE2; the child retrieves CACHE2 and binds a request path to Y. The
+#: middle's writer fails inside `_check_one_writer`, so the row the child charged the middle
+#: has to travel one further call — to the grandparent that stored the Y-less documents.
+_THREE_LEVEL_RE_CACHE = (
+    [_STAGES_X, {"steps": [_GET], "terminal": _PUT2}],                      # the grandparent's
+    [{"steps": [_READ, _Y_FROM_DEFAULTED_X], "terminal": _PUT2}],           # the middle's
+    [{"steps": [_READ2, _BOUND_Y_GET], "terminal": _STOP}, _STORES_NOTHING],  # the child's
+)
+
+
+def _three_level_roots():
+    caller, middle, child = _THREE_LEVEL_RE_CACHE
+    return [("PARENT", _legs(*(list(caller) + [_waited("MID")]))),
+            ("MID", _legs(*(list(middle) + [_waited("CACHE_CHILD")]))),
+            ("CACHE_CHILD", _legs(*child))]
+
+
+def test_a_failed_binding_on_documents_a_call_retrieved_travels_to_the_caller_that_stored_them():
+    """B21A-R4-FO-01, the shape the rule is FOR, at the depth it is for.
+
+    Round 4 fixed a failed writer's obligation at the in-process binding site; the identical
+    failure at the CALL-DISCHARGE site — the row a call inherits from its child, on documents
+    the call itself retrieved — was still dropped, so the middle was served clean and its
+    caller was never charged while the flattened graph of the same legs refused. The middle's
+    own walk is clean here (its writer's refusal is its caller's to discharge), which is what
+    makes the grandparent's verdict the only place the defect is visible.
+
+    The two-level twin above passes with the rule reverted — it is the control, not the
+    witness (V5-01). This graph is the witness: the pointer, the row and the flattened twin."""
+    roots = _three_level_roots()
+    assert _both_routes(roots, "MID") == []
+    assert _both_routes(roots, "CACHE_CHILD") == []
+    assert _both_routes(roots, "PARENT") == [
+        (_NOT_ESTABLISHED, "/body/steps/0/legs/2/terminal/process_ref")]
+    # THE row: the middle charges its own callers the bound property, on the cache it
+    # retrieved the documents from.
+    assert ("$ref:CACHE2", "Y", None, True) in _row(roots, "PARENT", "MID").cache_property_requirements
+    # ... and the child's own row, one level in, is what the middle inherited it from.
+    assert ("$ref:CACHE2", "Y", None, True) in _row(roots, "MID", "CACHE_CHILD").cache_property_requirements
+    caller, middle, child = _THREE_LEVEL_RE_CACHE
+    flattened = _legs(*(list(caller) + list(middle) + list(child)))
+    assert _errors([("PARENT", flattened)], "PARENT") != []
+    # CONTROL: the same three processes, with the grandparent storing nothing in CACHE2.
+    admitted = [("PARENT", _legs(_STAGES_X, _STORES_NOTHING, _waited("MID")))] + roots[1:]
+    assert _both_routes(admitted, "PARENT") == []
+
+
+def test_the_inherited_rows_obligation_on_a_failed_writer_is_load_bearing(monkeypatch):
+    """Non-vacuity of round 5's rule ALONE: with only
+    `if owes_the_retrieve_on_failure and cached_from is not None:` neutralised — round 4's
+    `_owe_the_caches_behind` call left intact — the grandparent above is served clean, the row
+    disappears from the middle's contract, and the flattened twin still refuses. 2149 tests
+    stayed green under exactly this mutant before this test existed (V5-01)."""
+    roots = _three_level_roots()
+    caller, middle, child = _THREE_LEVEL_RE_CACHE
+    flattened = _legs(*(list(caller) + list(middle) + list(child)))
+    assert _errors(roots, "PARENT") != []
+    _lineage_with_source(
+        monkeypatch,
+        "            if owes_the_retrieve_on_failure and cached_from is not None:",
+        "            if False:")
+    assert _errors(roots, "PARENT") == []
+    assert ("$ref:CACHE2", "Y", None, True) not in _row(
+        roots, "PARENT", "MID").cache_property_requirements
+    assert _errors([("PARENT", flattened)], "PARENT") != []
+
+
+# --- B21A-R3-SOUND-01: an unwaited call is not ordered before the removal -------------------
+
+@pytest.mark.parametrize("call_flags, admitted", (
+    ({"wait": True, "abort_on_error": True}, True),
+    ({"wait": True}, True),
+    ({"wait": False}, False),
+), ids=("waited_and_aborting", "waited_without_abort", "not_waited"))
+def test_the_repeat_exemption_asks_whether_the_childs_own_calls_are_waited_for(call_flags, admitted):
+    """B21A-R3-SOUND-01. The exemption is a normal-exit guarantee about a cache, and amendment 1
+    rule 7 withholds those across an asynchronous call: a child that is not waited for may still
+    be running when this process finishes, so a whole-cache removal authored after it does not
+    provably follow its writes, and the next run may find them.
+
+    `abort_on_error` is deliberately NOT part of this: a child this process continues past has
+    still finished before the next leg runs, so the removal still follows it. The pair measured
+    here is the one the finding asked for — the waited twin stays admitted, the asynchronous one
+    is refused — plus that third spelling, which distinguishes the two questions."""
+    child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2,
+                  {"steps": [], "terminal": _call("EXTERNAL", **call_flags)}, _EMPTIES2)
+    roots = _per_document(child, **_WAITS_AND_ABORTS_ON_ERROR)
+    expected = [] if admitted else [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    assert _both_routes(roots, "PARENT") == expected
+    assert _row(roots, "PARENT", "CACHE_CHILD").required_caches_retain_nothing_it_stored is admitted
+
+
+# --- B21A-R4-SOUND-01: the same composition, however deeply the async call is nested --------
+
+#: A process whose one leg calls ``key``, with the flags given. The middle of the chains below.
+def _a_middle_that_calls(key, **flags):
+    return _legs({"steps": [], "terminal": _call(key, **flags)}, {"steps": [_MSG], "terminal": _STOP})
+
+
+#: Writes CACHE2 on the documents it is handed. The call nobody waits for, in every depth.
+_WRITES_CACHE2 = _legs({"steps": [_GET], "terminal": _PUT2}, {"steps": [_MSG], "terminal": _STOP})
+_ASYNC = {"wait": False, "abort_on_error": False}
+
+#: One asynchronous write into CACHE2, at four depths below the child that empties CACHE2 —
+#: and the synchronous twin of the nested one, which nothing leaves in flight.
+_ASYNC_DEPTHS = {
+    "flat": ([("WRITER2", _WRITES_CACHE2)], {"steps": [], "terminal": _call("WRITER2", **_ASYNC)}),
+    "nested": ([("MID", _a_middle_that_calls("WRITER2", **_ASYNC)), ("WRITER2", _WRITES_CACHE2)],
+               _waited("MID")),
+    "three_deep": ([("MID", _a_middle_that_calls("MIDP", **_WAITS_AND_ABORTS_ON_ERROR)),
+                    ("MIDP", _a_middle_that_calls("WRITER2", **_ASYNC)),
+                    ("WRITER2", _WRITES_CACHE2)], _waited("MID")),
+    # The middle cannot NAME what it may still be writing — nothing derives EXTERNAL — and it
+    # names no cache of its own either, so only the "an unknown cache" bit crosses and the
+    # child reads it against its own vocabulary.
+    "an_underivable_call": ([("MID", _a_middle_that_calls("EXTERNAL", **_ASYNC))], _waited("MID")),
+}
+
+
+@pytest.mark.parametrize("depth", sorted(_ASYNC_DEPTHS))
+def test_an_asynchronous_write_is_carried_across_the_calls_that_hid_it(depth):
+    """B21A-R4-SOUND-01. Round 4 decided this per process: the child's OWN unwaited call kept
+    the cache in `may_hold_at_exit`, but the identical call one process deeper was invisible to
+    it, so the same composition was refused flat and admitted nested — the depth of the nesting,
+    not the behaviour, decided it.
+
+    The fact now crosses the boundary: `ChildEntryContractV1.unwaited_cache_writes` states what
+    a completion of a child may still be writing (its own unwaited calls, unioned with the same
+    field of every child IT calls), and a caller unions it at the call site whether or not it
+    waits — waiting for a process whose own write is in flight orders nothing. A child that
+    cannot name those caches says so instead (`unwaited_writes_of_an_unknown_cache`), and its
+    caller then takes its own observable caches, exactly as an underivable call is treated.
+
+    Every depth is refused, like the flat spelling; the synchronous control below is admitted."""
+    extra, call_leg = _ASYNC_DEPTHS[depth]
+    child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, call_leg, _EMPTIES2)
+    roots = _per_document(child, **_WAITS_AND_ABORTS_ON_ERROR) + extra
+    assert _both_routes(roots, "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    assert _row(roots, "PARENT", "CACHE_CHILD").required_caches_retain_nothing_it_stored is False
+
+
+def test_a_nested_call_that_is_waited_for_leaves_nothing_in_flight():
+    """The control the refusals above are measured against: the same three processes, with the
+    middle WAITING for the writer. Nothing is in flight when the middle returns, the child's
+    removal provably follows the write, and the composition stays admitted — so the carry is
+    about the asynchrony and not about the nesting."""
+    roots = _per_document(
+        _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2), **_WAITS_AND_ABORTS_ON_ERROR
+    ) + [("MID", _a_middle_that_calls("WRITER2", **_WAITS_AND_ABORTS_ON_ERROR)),
+         ("WRITER2", _WRITES_CACHE2)]
+    assert _both_routes(roots, "PARENT") == []
+    assert _row(roots, "PARENT", "CACHE_CHILD").required_caches_retain_nothing_it_stored is True
+    assert _row(roots, "CACHE_CHILD", "MID").unwaited_cache_writes == ()
+
+
+def test_the_carry_across_the_boundary_is_what_refuses_the_nested_spelling(monkeypatch):
+    """Non-vacuity, both halves: with the union of the CHILD's own pending writes dropped, the
+    nested spelling is admitted again while the flat one still refuses — the exact disagreement
+    the finding measured — and with the unknown-cache bit dropped, the underivable middle is."""
+    nested = _per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2),
+                           **_WAITS_AND_ABORTS_ON_ERROR) + _ASYNC_DEPTHS["nested"][0]
+    flat = _per_document(
+        _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _ASYNC_DEPTHS["flat"][1], _EMPTIES2),
+        **_WAITS_AND_ABORTS_ON_ERROR) + _ASYNC_DEPTHS["flat"][0]
+    underivable = _per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2),
+                                **_WAITS_AND_ABORTS_ON_ERROR) + _ASYNC_DEPTHS["an_underivable_call"][0]
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    with monkeypatch.context() as patch:
+        _lineage_with_source(patch, "                unwaited_cache_writes.update(called.unwaited_cache_writes)",
+                             "                pass")
+        assert _errors(nested, "PARENT") == []
+        assert _errors(flat, "PARENT") == refused
+    with monkeypatch.context() as patch:
+        _lineage_with_source(patch, "                    unwaited_cache_writes.update(cache_refs)",
+                             "                    pass")
+        assert _errors(underivable, "PARENT") == []
+        assert _errors(flat, "PARENT") == refused
+    assert _errors(nested, "PARENT") == refused
+    assert _errors(underivable, "PARENT") == refused
+
+
+# --- B21A-R5-CYC-01: a call cycle is not a way out of the rule ------------------------------
+
+#: The cycle: a middle whose guarded second leg calls a process that calls the middle back.
+#: Nothing can ORDER either of them, so neither could be derived before round 6.
+def _a_cycle_through(key, back_to):
+    return ([(key, _legs({"steps": [], "terminal": _call("WRITER2", **_ASYNC)},
+                         {"steps": [], "terminal": _call("LOOP_B", **_WAITS_AND_ABORTS_ON_ERROR)},
+                         {"steps": [_MSG], "terminal": _STOP})),
+             ("LOOP_B", _legs({"steps": [], "terminal": _call(back_to, **_WAITS_AND_ABORTS_ON_ERROR)},
+                              {"steps": [_MSG], "terminal": _STOP})),
+             ("WRITER2", _WRITES_CACHE2)])
+
+
+#: The decisive triple, plus the control: the SAME child (the published cleanup recipe) calling
+#: the SAME middle, with the cycle present, absent, and replaced by an extra leg that closes no
+#: cycle. Only the cycle differs.
+_CYCLE_CELLS = {
+    "no_cycle": [("MID", _a_middle_that_calls("WRITER2", **_ASYNC)), ("WRITER2", _WRITES_CACHE2)],
+    "a_cycle_below_the_middle": _a_cycle_through("MID", "MID"),
+    "an_extra_leg_that_closes_no_cycle": [
+        ("MID", _legs({"steps": [], "terminal": _call("WRITER2", **_ASYNC)},
+                      {"steps": [], "terminal": _call("LOOP_B", **_WAITS_AND_ABORTS_ON_ERROR)},
+                      {"steps": [_MSG], "terminal": _STOP})),
+        ("LOOP_B", _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [_MSG], "terminal": _STOP})),
+        ("WRITER2", _WRITES_CACHE2)],
+}
+
+
+@pytest.mark.parametrize("cell", sorted(_CYCLE_CELLS))
+def test_a_call_cycle_below_a_child_does_not_buy_it_the_repeat_exemption(cell):
+    """B21A-R5-CYC-01. A root nothing can order — a cycle member, or anything that
+    transitively calls one — derived no facts at all, so its contract said it requires
+    nothing, writes nothing it cannot list and leaves nothing in flight. That is WEAKER than
+    the row an absent ProcessIR gets, and adding one decision-guarded leg calling a process
+    that calls back therefore admitted the composition amendment 1 rule 7 refuses.
+
+    Such a root is now seeded with the contract an underivable call gets and derived once
+    against those seeds, so its own obligations and entry form are real while everything the
+    seeding hid stays unknown. All three cells are refused; the extra leg that closes no cycle
+    shows the cycle is the only difference, and the control below keeps an ordinary chain
+    untouched."""
+    roots = _per_document(
+        _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2), **_WAITS_AND_ABORTS_ON_ERROR
+    ) + _CYCLE_CELLS[cell]
+    assert _both_routes(roots, "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+
+
+def test_a_cycle_member_still_states_what_it_requires_of_its_callers():
+    """The other half of the same rule, pre-existing and closed with it (§7): a child that
+    retrieves a cache only its caller fills and binds a request path on what it retrieves owes
+    that caller the property — and a call cycle underneath it used to erase the row. The
+    caller that stores a document without the property is refused again, and the caller that
+    stores it stays admitted, so the seeding restored the obligation rather than refusing
+    everything."""
+    child = _legs({"steps": [_READ2, _BOUND_GET], "terminal": _STOP},
+                  {"steps": [], "terminal": _call("LOOP_B", **_WAITS_AND_ABORTS_ON_ERROR)})
+    cycle = [("CACHE_CHILD", child),
+             ("LOOP_B", _legs({"steps": [], "terminal": _call("CACHE_CHILD", **_WAITS_AND_ABORTS_ON_ERROR)},
+                              {"steps": [_MSG], "terminal": _STOP}))]
+    bare = {"steps": [_GET], "terminal": _PUT2}
+    stores_x = {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT2}
+    refused = [("PARENT", _legs(bare, _waited("CACHE_CHILD")))] + cycle
+    admitted = [("PARENT", _legs(stores_x, _waited("CACHE_CHILD")))] + cycle
+    assert _errors(refused, "PARENT") == [(_NOT_ESTABLISHED, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _errors(admitted, "PARENT") == []
+
+
+def test_the_cycle_seed_is_what_refuses_it(monkeypatch):
+    """Non-vacuity of the seed's four CLAIMS, measured on a cycle where nothing else refuses:
+    every call waits and aborts, no process writes a cache asynchronously, and the members
+    require nothing of their callers, so the only reason the caller cannot take the repeat
+    exemption is that a cycle member's state and cache writes are not known. Emptying the
+    claims admits it again; the acyclic twin, which is refused for the asynchronous write, is
+    unaffected."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    all_waited = [("MID", _a_middle_that_calls("LOOP_B", **_WAITS_AND_ABORTS_ON_ERROR)),
+                  ("LOOP_B", _a_middle_that_calls("MID", **_WAITS_AND_ABORTS_ON_ERROR))]
+    cyclic = _per_document(
+        _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2), **_WAITS_AND_ABORTS_ON_ERROR
+    ) + all_waited
+    acyclic = _per_document(
+        _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _waited("MID"), _EMPTIES2), **_WAITS_AND_ABORTS_ON_ERROR
+    ) + _CYCLE_CELLS["no_cycle"]
+    assert _errors(cyclic, "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    monkeypatch.setattr(process_ir_effects, "_A_CYCLE_MEMBERS_CLAIMS", {})
+    assert _errors(cyclic, "PARENT") == []
+    assert _errors(acyclic, "PARENT") != []
+
+
+def _effects_with_source(monkeypatch, old, new, occurrences=1):
+    """Resolve every graph through `process_ir_effects` with ONE source edit and nothing else.
+
+    The twin of `_lineage_with_source` for the derivation module: its source is executed
+    afresh with ``old`` replaced by ``new``, and the resolver every helper here calls is
+    rebound to the mutant's, so a rule that lives inside `_entry_contract_bindings` — which
+    has no module-level name of its own — can be reverted and measured.
+    """
+    from boomi_mcp.authoring import process_ir_effects
+
+    import test_issue_184_child_entries as entries
+
+    source = Path(process_ir_effects.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == occurrences, (old, source.count(old))
+    namespace = {"__name__": process_ir_effects.__name__, "__package__": process_ir_effects.__package__,
+                 "__file__": process_ir_effects.__file__}
+    exec(compile(source.replace(old, new), process_ir_effects.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(
+        entries, "resolve_process_ir_effect_declarations",
+        namespace["resolve_process_ir_effect_declarations"])
+
+
+#: The CYC6-01 graph, as the verifier spelled it: the grandparent stores X-LESS documents in
+#: CACHE2 and calls LOOP_A; LOOP_A fills CACHE2 with X-carrying documents and calls LOOP_B;
+#: LOOP_B retrieves CACHE2, binds a request path on X, and calls LOOP_A back. The obligation
+#: is between two members of ONE cycle, so it is only charged if a member's derived row
+#: reaches the member that calls it.
+def _an_obligation_inside_a_cycle(back_edge):
+    loop_b_legs = [{"steps": [_READ2, _BOUND_GET], "terminal": _STOP}, _STORES_NOTHING]
+    if back_edge:
+        loop_b_legs.append(_waited("LOOP_A"))
+    return [("PARENT", _passthrough_root({"steps": [_GET], "terminal": _PUT2},
+                                         {"steps": [], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR)})),
+            ("LOOP_A", _legs(_DYNAMIC_INTO_CACHE2, _waited("LOOP_B"), _STORES_NOTHING)),
+            ("LOOP_B", _legs(*loop_b_legs))]
+
+
+def test_an_obligation_between_two_members_of_one_cycle_reaches_the_caller():
+    """CYC6-01. Round 6 derived each unordered root ONCE against a frozen seed map, so two
+    members of one cycle saw each other as the `unknown` seed and `_discharge_child_contract`
+    returned early: LOOP_A inherited none of LOOP_B's requirement, the row PARENT was handed
+    was empty, and the whole request — which 5b5038c refused and whose flattened twin is
+    refused — validated and compiled clean.
+
+    The unordered set is now derived to a FIXED POINT: each pass reads the previous pass's
+    rows, and what a member owes its callers only grows. The cyclic graph is now refused
+    exactly where its acyclic twin is, with the row travelling."""
+    cyclic, acyclic = _an_obligation_inside_a_cycle(True), _an_obligation_inside_a_cycle(False)
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "/body/steps/1/legs/1/terminal"),
+               (_NOT_ESTABLISHED, "/body/steps/1/legs/1/terminal/process_ref")]
+    for roots in (cyclic, acyclic):
+        assert sorted(_both_routes(roots, "PARENT")) == sorted(refused)
+        assert ("$ref:CACHE2", "X", None, True) in _row(roots, "PARENT", "LOOP_A").cache_property_requirements
+        assert _both_routes(roots, "LOOP_A") == [] and _both_routes(roots, "LOOP_B") == []
+    # CONTROL: a grandparent that stores the property is admitted, so the fixpoint charges the
+    # obligation rather than refusing every caller of a cycle.
+    satisfying = [("PARENT", _passthrough_root(
+        {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT2},
+        {"steps": [], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR)}))] + cyclic[1:]
+    assert _NOT_ESTABLISHED not in {code for code, _path in _both_routes(satisfying, "PARENT")}
+
+
+def test_the_fixpoint_is_what_carries_the_obligation_out_of_the_cycle(monkeypatch):
+    """Non-vacuity of the fixpoint itself: stop after the first pass — exactly what round 6
+    did — and the cyclic graph is admitted again while its acyclic twin stays refused."""
+    cyclic, acyclic = _an_obligation_inside_a_cycle(True), _an_obligation_inside_a_cycle(False)
+    assert _errors(cyclic, "PARENT") != []
+    _effects_with_source(
+        monkeypatch,
+        "        if all(previous[key] == facts[key] for key in unordered):\n            break\n",
+        "        break\n")
+    assert _errors(cyclic, "PARENT") == []
+    assert _errors(acyclic, "PARENT") != []
+
+
+# --- B21A-R3-TXT-01: what the published recipe leaves out -----------------------------------
+
+def test_the_published_cleanup_recipe_is_what_the_server_admits():
+    """B21A-R3-TXT-01. The third way out promises "every run then ends with nothing it stored
+    left there", and the shape that follows it verbatim is refused when it ALSO calls a process
+    the request carries no ProcessIR for after the removal: such a call may add to the cache
+    after it. The refusal is right and the text was not, so both now name the condition, and
+    both ways out of it are measured here — supply the called process's ProcessIR, or call it
+    before the removal and wait for it."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    fill, use, removal = _DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2
+    recipe = _legs(fill, use, removal)
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    assert _both_routes(_per_document(recipe, **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == []
+    after = _legs(fill, use, removal, _waited("EXTERNAL"))
+    assert _both_routes(_per_document(after, **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == refused
+    before = _legs(fill, use, _waited("EXTERNAL"), removal)
+    assert _both_routes(_per_document(before, **_WAITS_AND_ABORTS_ON_ERROR), "PARENT") == []
+    derivable = [("PARENT", _per_document(after, **_WAITS_AND_ABORTS_ON_ERROR)[0][1]),
+                 ("CACHE_CHILD", _legs(fill, use, removal, _waited("MID"))),
+                 ("MID", _legs(_STORES_NOTHING, {"steps": [_MSG], "terminal": _STOP}))]
+    assert _both_routes(derivable, "PARENT") == []
+    served = findings.finding(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body")
+    for clause in ("no call it makes after that removal may write that cache",
+                   "no call it makes without waiting may write that cache",
+                   # The two round-6 corrections: the removal's own proof qualifier
+                   # (B21A-R5-TXT-02) and the declared outside writer (B21A-R5-TXT-01).
+                   "a whole-cache removal that runs whenever its leg does",
+                   "no outside writer is declared for that cache"):
+        assert clause in served.message, served.message
+    for clause in ("move a call that stands after the removal to before it and wait for it",
+                   "shows that process does not write that cache",
+                   "takes no such exemption at all",
+                   # B21A-R5-TXT-03: the way out names the entry change it needs, because a
+                   # No Data child never receives its caller's documents.
+                   "give it a Data Passthrough entry and take what it needs from the documents"):
+        assert clause in served.remediation, served.remediation
+
+
+# --- B21A-R4-TXT-01: the recipe states the predicate, clause by clause ----------------------
+
+#: Writes the OTHER cache, so the contract derived from it names a cache the recipe is not
+#: about. Supplying such a process's ProcessIR is what "helps" means in the served text.
+_WRITES_THE_OTHER_CACHE = _legs({"steps": [_GET], "terminal": _PUT},
+                                {"steps": [_MSG], "terminal": _STOP})
+
+#: A retrieve of CACHE2 that AUTHORS the outside-writer flag, consumed by a Message. Only a
+#: root whose own retrieve authors it receives the declaration's contract, so this leg is what
+#: makes a declared writer of CACHE2 visible to the child at all.
+_READS_CACHE2_AS_AN_OUTSIDE_WRITERS = {
+    "steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE2", "external_writer": True}, _MSG],
+    "terminal": _STOP}
+
+#: Per clause of the served recipe, a request that satisfies it and one that breaks it, each
+#: varying only that clause. The child always fills CACHE2, binds on what it retrieves and —
+#: except in the first row — empties CACHE2 on a leg the walk proves runs.
+_RECIPE_CLAUSES = {
+    "a whole-cache removal follows its last write to it": (
+        ((_EMPTIES2,), ()), ((), ())),
+    "no call it makes after that removal may write that cache/a derivable writer": (
+        ((_waited("WRITER2"), _EMPTIES2), (("WRITER2", _WRITES_CACHE2),)),
+        ((_EMPTIES2, _waited("WRITER2")), (("WRITER2", _WRITES_CACHE2),))),
+    "no call it makes after that removal may write that cache/one nothing derives": (
+        ((_waited("EXTERNAL"), _EMPTIES2), ()),
+        ((_EMPTIES2, _waited("EXTERNAL")), ())),
+    # The ProcessIR is supplied in BOTH directions here: what decides the verdict is what the
+    # contract derived from it says the process writes, not that it was supplied.
+    "a call may write that cache when its contract says it writes it": (
+        ((_EMPTIES2, _waited("OTHER")), (("OTHER", _WRITES_THE_OTHER_CACHE),)),
+        ((_EMPTIES2, _waited("WRITER2")), (("WRITER2", _WRITES_CACHE2),))),
+    "no call it makes without waiting may write that cache/its own": (
+        (({"steps": [], "terminal": _call("OTHER", **_ASYNC)}, _EMPTIES2),
+         (("OTHER", _WRITES_THE_OTHER_CACHE),)),
+        (({"steps": [], "terminal": _call("WRITER2", **_ASYNC)}, _EMPTIES2),
+         (("WRITER2", _WRITES_CACHE2),))),
+    "no call it makes without waiting may write that cache/inside a process it calls": (
+        ((_waited("MID"), _EMPTIES2),
+         (("MID", _a_middle_that_calls("WRITER2", **_WAITS_AND_ABORTS_ON_ERROR)),
+          ("WRITER2", _WRITES_CACHE2))),
+        ((_waited("MID"), _EMPTIES2),
+         (("MID", _a_middle_that_calls("WRITER2", **_ASYNC)), ("WRITER2", _WRITES_CACHE2)))),
+    # The seventh condition, which no surface stated before round 6 (B21A-R5-TXT-01): a
+    # DECLARED outside writer of that cache may refill it between runs, so the exemption is
+    # withheld whatever the child's own calls do. Both sides author the same four legs — the
+    # third retrieves CACHE2 with `external_writer` — and differ only in whether the request
+    # declares the writer, which is what the walk reads.
+    "no outside writer is declared for that cache": (
+        ((_READS_CACHE2_AS_AN_OUTSIDE_WRITERS, _EMPTIES2), (), ()),
+        ((_READS_CACHE2_AS_AN_OUTSIDE_WRITERS, _EMPTIES2), (), ("$ref:CACHE2",))),
+    # ... and the half of that predicate the first row holds fixed: the DECLARATION is made in
+    # both directions here and only the retrieve's `external_writer` flag varies, because a
+    # declaration no retrieve names is recorded inert and establishes nothing
+    # (B21A-R6-V6-01, measured).
+    "no outside writer is declared for that cache/on a retrieve that names one": (
+        (({"steps": [_READ2, _MSG], "terminal": _STOP}, _EMPTIES2), (), ("$ref:CACHE2",)),
+        ((_READS_CACHE2_AS_AN_OUTSIDE_WRITERS, _EMPTIES2), (), ("$ref:CACHE2",))),
+}
+
+
+@pytest.mark.parametrize("clause", sorted(_RECIPE_CLAUSES))
+def test_every_clause_of_the_published_recipe_is_pinned_in_both_directions(clause):
+    """B21A-R4-TXT-01. The recipe used to name DERIVABILITY — "nothing this request cannot
+    derive may write that cache", "every process it calls ... must have its ProcessIR in this
+    request" — where the code asks whether the call MAY WRITE that cache. The two differ in
+    both directions, and each direction is a request an author would be told to build: a
+    derivable process whose contract says it writes the cache is refused although its ProcessIR
+    was supplied, and one whose contract names another cache is admitted although it is called
+    after the removal, or without waiting.
+
+    Second instance of "a hand-written served recipe versus the predicate the code evaluates"
+    (the first was B21A-R3-TXT-01), so the sentence is written from
+    `_repetition_unstable_caches` and `_caches_a_call_may_write` and every clause of it is
+    pinned here by a constructed request, admitted and refused."""
+    admitted_side, refused_side = _RECIPE_CLAUSES[clause]
+    # A side is `(the child's extra legs, the extra roots)`, and optionally the caches the
+    # REQUEST declares an outside writer for — the seventh clause's only dimension.
+    admitted_legs, admitted_roots = admitted_side[0], admitted_side[1]
+    refused_legs, refused_roots = refused_side[0], refused_side[1]
+    admitted_declared = admitted_side[2] if len(admitted_side) > 2 else ()
+    refused_declared = refused_side[2] if len(refused_side) > 2 else ()
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+    admitted_child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, *admitted_legs)
+    refused_child = _legs(_DYNAMIC_INTO_CACHE2, _BINDS2, *refused_legs)
+    assert _both_routes(
+        _per_document(admitted_child, **_WAITS_AND_ABORTS_ON_ERROR) + list(admitted_roots),
+        "PARENT", admitted_declared) == []
+    assert _both_routes(
+        _per_document(refused_child, **_WAITS_AND_ABORTS_ON_ERROR) + list(refused_roots),
+        "PARENT", refused_declared) == refused
+
+
+def test_the_three_surfaces_state_the_predicate_the_code_evaluates():
+    """B21A-R4-TXT-01, the other half: the served finding, the served `node.process_call`
+    paragraph and PROCESS_IR_V1.md §3e all say what the walk asks — whether a call MAY WRITE
+    that cache, answered by the contract derived from the called process — rather than whether
+    the request can derive it, and each gives the first cause its own way out."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    served = findings.finding(
+        PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body")
+    paragraphs = " ".join(_served("node.process_call")["ordering_facts"])
+    document = (_ROOT / "docs" / "architecture" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
+    for surface, text in (("finding", served.message + " " + served.remediation),
+                          ("node.process_call", paragraphs), ("PROCESS_IR_V1.md", document)):
+        assert "may write that cache" in text or "may write it" in text, surface
+        assert "cannot derive may write any cache" in text, surface
+        # The first cause gets its own way out on every surface, and it is not the removal.
+        assert "reads the cache before writing it" in text or \
+            "reads that cache before writing it" in text, surface
+    assert "no removal exempts that one" in served.remediation
+    assert "has no such way out" in paragraphs
+    assert "has no removal that exempts it" in document
+    # ... and the declared outside writer is stated wherever the exemption is (B21A-R5-TXT-01).
+    assert "no outside writer declared for that cache" in paragraphs
+    assert "declares an outside writer of that cache" in document
+
+
+# --- B21A-R3-OR-01: what the origin carry does NOT survive ---------------------------------
+
+@pytest.mark.parametrize("between", ("a_message", "a_connector_call", "a_map"),)
+def test_the_origin_of_a_re_cache_survives_only_a_step_that_hands_the_documents_on(between):
+    """B21A-R3-OR-01, recorded rather than changed. The cohort's origin travels with the
+    documents, and `_advance_stream` rebuilds the stream at a connector call and at a map before
+    the count-preserving carry is reached, so both drop it — `map` in particular is in
+    `_COUNT_PRESERVING_KINDS` and still loses it.
+
+    The direction is fail-closed and identical at 5b5038c: the child is refused on its own walk
+    with no row a caller could satisfy, while the flattened graph of the same legs runs for the
+    caller that stores the property. Moving the carry past a connector call is a behaviour
+    change — the documents there are the connector's output, not the caller's — so this pins
+    what the walk does today rather than asserting what it should do."""
+    step = {"a_message": _MSG, "a_connector_call": _GET, "a_map": _TO_P2}[between]
+    child = _legs({"steps": [_READ, step], "terminal": _PUT2},
+                  {"steps": [_READ2, _READS_X], "terminal": _STOP})
+    roots = [("PARENT", _legs(_STAGES_X, _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
+    rows = {(row[0], row[1]) for row in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements}
+    twin = _errors([("PARENT", _legs(_STAGES_X, *_branch_legs(child)))], "PARENT")
+    if between == "a_message":
+        assert _both_routes(roots, "CACHE_CHILD") == []
+        assert ("$ref:CACHE", "X") in rows and ("$ref:CACHE2", "X") in rows
+        assert _both_routes(roots, "PARENT") == [] and twin == []
+    else:
+        # The recorded limit: nothing carries the origin across a step that rebuilds the stream,
+        # so the child keeps its own refusal and names no cache to its callers. (A map of
+        # documents whose profile nothing proves is refused for that too, which is its own
+        # rule and not what this cell is about.)
+        assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/1/steps/1") in _both_routes(roots, "CACHE_CHILD")
+        assert rows == set()
+        # The flattened graph of the same legs reads the property fine: the disagreement is the
+        # recorded limit. (A map of documents whose profile nothing proves is refused for THAT
+        # in both graphs, which is its own rule and not what this cell is about.)
+        assert _READ_BEFORE_WRITE not in {code for code, _path in twin}, twin
+
+
+# --- B21A-R3-TI-01/-02: the guards, and the revision oracle --------------------------------
+
+def test_the_two_derived_guards_see_every_spelling(tmp_path):
+    """Non-vacuity for both sweeps, each against the spelling that used to escape it: a cohort
+    built through a module attribute, an obligation recorded with `+=`, and a content-channel
+    row appended by a site the table does not name."""
+    module = tmp_path / "mutant.py"
+    module.write_text("import lineage\n\n\ndef _fourth_builder():\n"
+                      "    return lineage._Cohort(frozenset(), None, frozenset(), 'unknown')\n",
+                      encoding="utf-8")
+    assert _cohort_builders_in(tmp_path) == {("mutant.py", "_fourth_builder")}
+    augmented = ("def _somewhere(node):\n"
+                 "    read_cache_origins += [(node.source_path, 'X', '$ref:CACHE')]\n")
+    assert _obligation_sites_in(augmented, {"read_cache_origins"}) == {("_somewhere", "read_cache_origins")}
+    extended = ("def _elsewhere(node):\n"
+                "    cache_requirement_refs.extend([('$ref:ESCAPED', None)])\n")
+    assert _obligation_sites_in(extended, {"cache_requirement_refs"}) == {
+        ("_elsewhere", "cache_requirement_refs")}
+    # ... and a spelling that is NOT a mutation of one of them stays invisible.
+    assert _obligation_sites_in("def _reader():\n    return read_cache_origins[0]\n",
+                                {"read_cache_origins"}) == set()
+
+
+def test_the_re_cache_carrier_moves_the_served_compiler_revision(monkeypatch):
+    """B21A-R3-TI-02. The revision oracle's `child_forwarding` row now carries the mechanism this
+    batch added, so an edit to the carrier cannot change what the server accepts while the served
+    revision stands still — the defect class `revision-oracle-omits-changed-behaviour` the
+    revision suite exists for. Measured with the two mutants the verifier used: neither moved the
+    revision before the row gained its cases."""
+    from boomi_mcp.authoring import contract as authoring_contract
+
+    baseline = authoring_contract._compiler_revision()
+    with monkeypatch.context() as patched:
+        _lineage_with_source(
+            patched,
+            "        for token in writers.get(key) or ():\n",
+            "        for token in ():\n")
+        assert authoring_contract._compiler_revision() != baseline
+    with monkeypatch.context() as patched:
+        _lineage_with_source(
+            patched,
+            "        for origin in (origins if scope == DDP else ()):\n",
+            "        for origin in ():\n")
+        assert authoring_contract._compiler_revision() != baseline
+    assert authoring_contract._compiler_revision() == baseline

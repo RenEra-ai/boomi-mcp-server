@@ -280,6 +280,14 @@ PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED = (
 PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED = (
     "PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED"
 )
+# #184 amendment 1 rule 8 (QA-184-s1-r21-01): a No Data child that more than one document
+# can reach runs once per document, and a later run may find state an earlier run changed —
+# it requires something of a document cache it may also add to or empty, or it reads state
+# first while its own state effects are unknown. Split from the placement code, whose one served
+# message and remediation describe a step prefix and could not state this cause.
+PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE = (
+    "PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE"
+)
 
 # State lineage: document-scoped (DDP) vs execution-scoped (DPP/cache).
 PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE = (
@@ -1610,6 +1618,24 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "A process is invoked in an entry context ProcessIR v1 does not admit: "
                 "a Data Passthrough child called with wait=false, or a passthrough "
                 "process run directly while it requires what only a caller supplies."
+            ),
+            owner="#184",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
+            category="process_ir",
+            retryable=False,
+            summary=(
+                "A No Data child that more than one document can reach runs once per "
+                "document, and a later run may find state an earlier run changed: it "
+                "requires something of a document cache it may also add to or empty, "
+                "reading the cache before writing it, or using what it retrieves from that "
+                "cache unless every run ends with nothing it stored there — no call it "
+                "makes may write that cache after its removal or without being waited for, "
+                "and no outside writer is declared for that cache on a retrieve that names "
+                "one — and the call "
+                "both waits and aborts on error, or it reads state first while its own "
+                "state effects are unknown."
             ),
             owner="#184",
         ),

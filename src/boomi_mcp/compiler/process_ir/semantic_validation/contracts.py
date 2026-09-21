@@ -429,14 +429,19 @@ class ChildEntryContractV1(_ValidationModel):
     - ``required_writers``: document properties a passthrough child's bound request
       path composes from the caller's documents, with the request profile ref the
       binding names. The caller's writer must pass the binding checks at the call.
-    - ``cache_requirements``: per consumer of documents the child reads from a cache
-      no write in the child reached, ``(cache ref, AUTHORED profile ref or None)``. A
-      caller's writes must have stored exactly that profile (amendment 1 rule 6).
+    - ``cache_requirements``: per consumer of documents the child retrieves from a cache
+      its callers' documents may share, ``(cache ref, AUTHORED profile ref or None)`` —
+      whether or not the child's own writes also reached that cache, because Add to Cache
+      appends. A caller's writes there must have stored exactly that profile (amendment 1
+      rule 6); a caller that stores nothing there satisfies it vacuously.
     - ``cache_property_requirements``: per document property the child uses on
       documents it retrieved from such a cache, ``(cache ref, property name, request
-      profile ref or None, bound)``. Every document a caller's writes stored there must
-      carry it (amendment 3 §7), and a bound request path additionally needs each of
-      their writers to pass the binding checks at the call.
+      profile ref or None, bound)``, including a use the child's own writes satisfy. Every
+      document a caller's writes stored there must carry it (amendment 3 §7), and a bound
+      request path additionally needs each of their writers to pass the binding checks at
+      the call.
+    - Neither lists a cache the child provably emptied and refilled only from its own
+      writes before the use: no caller's document can reach the use there.
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``guaranteed_state``: execution-scoped keys the child establishes on every normal
       completion, at a step its own documents provably reach — a subset of
@@ -457,6 +462,27 @@ class ChildEntryContractV1(_ValidationModel):
       call un-establishes each of these before applying what the child guarantees;
       unknowable cache writes are answered on the write side instead, as an unknown
       possibility that leaves the establishment alone.
+    - ``required_caches_retain_nothing_it_stored``: True when no completion of the child
+      leaves anything stored during its run in a cache ``cache_requirements`` or
+      ``cache_property_requirements`` names — nothing was stored there, or a whole-cache
+      removal the walk proves ran took it all away with nothing stored after. A later No
+      Data run then retrieves from those caches only what its callers stored, so a call
+      that waits and aborts on error runs it once per document without the cache changing
+      under the requirement (amendment 1 rule 8). False, the fail-closed value, by default.
+    - ``unwaited_cache_writes``: the document caches a completion of the child may STILL BE
+      WRITING — what it hands to a call it does not wait for, and what every child it calls says
+      the same of itself. A caller unions these into its own set whether or not it waits for the
+      child: waiting for a process whose own write is still in flight orders nothing, so a
+      whole-cache removal the caller makes afterwards does not provably follow it (amendment 1
+      rule 7). Empty for a child whose entry nothing derives: its own unwaited calls are
+      invisible to its callers.
+    - ``unwaited_writes_of_an_unknown_cache``: True when one of those pending writes may be
+      to a cache the child cannot name — it does not wait for a call whose own cache writes are
+      not all known, OR a call it DOES wait for says the same of itself. The flag is inherited
+      across the boundary exactly as ``unwaited_cache_writes`` is, so a child that waits for
+      every call it makes still carries it when one of those children does not (measured, round
+      6: B21A-R5-DOC-01). A caller then takes its OWN observable caches as possibly still being
+      written, the same answer `_caches_a_call_may_write` gives for an underivable call.
     - ``state_known``: False when some step's state effects are unknown; then
       ``mutated_state`` is incomplete and proves nothing about process properties.
     - ``cache_writes_known``: True when ``mutated_state`` lists every document cache the
@@ -476,6 +502,9 @@ class ChildEntryContractV1(_ValidationModel):
     mutated_state: Tuple[Tuple[str, str], ...] = ()
     guaranteed_state: Tuple[Tuple[str, str], ...] = ()
     removed_caches: Tuple[str, ...] = ()
+    required_caches_retain_nothing_it_stored: bool = False
+    unwaited_cache_writes: Tuple[str, ...] = ()
+    unwaited_writes_of_an_unknown_cache: bool = False
     state_known: bool = False
     cache_writes_known: bool = False
 
@@ -531,12 +560,12 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: though a writer composed each one, because every call proves that writer
     #: against the child's binding; a bare established key never does.
     caller_supplied_writers: Tuple[Tuple[str, str], ...] = ()
-    #: #184 amendment 1 rule 6: for a CALLED child, the profile each cache it reads
-    #: first holds, as ``(cache ref, profile ref)``. Seeded as that cache's content only
+    #: #184 amendment 1 rule 6: for a CALLED child, the profile each cache it requires of
+    #: its callers holds, as ``(cache ref, profile ref)``. Seeded as that cache's content only
     #: when every consumer names one profile; every call proves it against its writes.
     caller_cache_contents: Tuple[Tuple[str, str], ...] = ()
     #: #184 amendment 3 §7-§8: for a CALLED child, the document properties the documents
-    #: its callers stored in a cache it reads first carry, as ``(cache ref, property
+    #: its callers stored in a cache it requires of them carry, as ``(cache ref, property
     #: name)``. Seeded as one cohort per cache whose writer is the caller; every call
     #: proves it against each cohort its own writes left there.
     caller_cache_cohorts: Tuple[Tuple[str, str], ...] = ()

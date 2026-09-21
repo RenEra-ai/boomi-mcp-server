@@ -89,7 +89,12 @@ def test_compile_is_deterministic(spy):
 def test_the_canonical_compiler_is_actually_invoked(spy, monkeypatch):
     """Guard against a compile that fingerprints something it did not compile."""
     import boomi_mcp.compiler.process_ir.pipeline as pipeline
+    from boomi_mcp.authoring.contract import build_authoring_contract_manifest
 
+    # #184 CDX-184-r20-02: the process-cached manifest's FIRST build replays the compiler over
+    # the packaged behaviour corpus. That is process start-up, not this request, so it is
+    # built before the count opens; the count below is still every compile the request makes.
+    build_authoring_contract_manifest()
     seen = []
     # #178: count the PRIVATE CORE, not the public wrapper. `build_artifact_
     # descriptors` now reaches the compiler through `parse_and_compile_process_
