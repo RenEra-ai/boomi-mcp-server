@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import re
 from typing import (
-    Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple,
+    Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple, get_origin,
 )
 
 from ..errors import PROCESS_IR_CAPABILITY_EFFECT_CONTRACT_INVALID
@@ -1261,17 +1261,58 @@ _A_CYCLE_MEMBERS_CLAIMS: Dict[str, Any] = {
 #: entry form an absent ProcessIR would give — `unknown`, which every reader already treats as
 #: "ask nothing of this and assume everything". Built where it is used, so perturbing the one
 #: table above perturbs the seed too.
+#:
+#: The member's REAL entry form was measured as the seed and refused (correction batch 22c). It
+#: removes a recorded over-refusal — the first pass reads the `unknown` seed as an unknown
+#: consumption, the union carry keeps that `None`, and a caller's prefixed call is refused
+#: `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` where the acyclic twin is admitted
+#: (`test_the_unknown_seed_s_recorded_over_refusal`). But the unknown seed's first pass also
+#: states cache obligations a real-form seed never grounds, and on a fuzzed self-calling No Data
+#: member that re-reads the cache it stores in, that obligation is the only thing refusing the
+#: member's caller `PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE` — which the acyclic
+#: twin refuses too (`test_the_unknown_seed_is_what_refuses_a_caller_its_acyclic_twin_refuses`).
+#: The over-refusal is fail-closed; the admission would not be.
 
-#: What a cycle member OWES its callers, carried between the passes of the fixpoint below. The
-#: first four are sets of rows and only grow, which is what makes the iteration terminate; the
-#: last is a per-consumer sequence, taken from the latest derivation (correction batch 21a
-#: round 7, CYC6-01).
+#: What a cycle member OWES its callers, and what a completion of it may still be writing: the
+#: row fields where a LARGER value is FAIL-CLOSED for a caller — each entry is one more
+#: requirement the call must discharge, or one more cache a whole-cache removal after the call
+#: cannot be proved to follow. Carried between the passes of the fixpoint below as the UNION of
+#: every pass's derivation (correction batch 21a round 7, CYC6-01), so they only grow. All but
+#: one are sets of rows. `document_requirements` is positional — one entry per consumer of the
+#: caller's documents — and is carried as its DISTINCT entries in first-seen order, which grows
+#: the same way (CDX-184-r21-01). `unwaited_cache_writes` joined the carry in correction batch
+#: 22: its derivation was already a union of the callees' previous rows, so carrying it moves no
+#: row, and a carried field needs no monotonicity argument at all.
 _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "cache_requirements",
     "cache_property_requirements",
     "required_reads",
     "required_writers",
     "document_requirements",
+    "unwaited_cache_writes",
+)
+#: The row fields where a LARGER value is PERMISSIVE for a caller, so they are never carried as
+#: a union: inheriting a permissive fact from a partner whose own facts were derived against
+#: seeds could weaken a verdict rather than tighten it (correction batch 21, D5b). Each is taken
+#: from the latest derivation instead, and the fixpoint below ASSERTS it contains the previous
+#: pass's value.
+#:
+#: - `removed_caches`: a proved removal ENDS a caller's obligation on that cache (D5b, B1).
+#: - `guaranteed_state`: a guarantee satisfies a caller's later read.
+#: - `mutated_state`: read two ways. As the caches a call may touch (`cache_refs`), larger is
+#:   stricter; but it is also the ceiling on what may be GUARANTEED — the contract refuses a
+#:   guarantee outside it, and a caller's derivation keeps only the guarantees its own list
+#:   names — and there larger is looser. A field with any permissive reader is not carried.
+#:
+#: Every other tuple-valued field of the contract must be in `_OBLIGATION_FIELDS`, and every
+#: field that is not a tuple is a scalar the fixpoint asserts EQUAL from pass to pass: the entry
+#: form, read off the root's own CFG, and the four claims `_A_CYCLE_MEMBERS_CLAIMS` pins. The
+#: classification is checked against the contract model's own fields, so a field added there
+#: later is refused until it is classified here.
+_PERMISSIVE_FIELDS: Tuple[str, ...] = (
+    "removed_caches",
+    "guaranteed_state",
+    "mutated_state",
 )
 
 
@@ -1354,26 +1395,99 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
     # previous pass's rows, and the obligation fields carry forward as a UNION, so what one
     # member learns to owe its callers is owed by the member that calls it as well.
     #
-    # TERMINATION. The four set-valued obligation fields only ever grow, over a finite lattice
-    # (the caches, property names and profile refs this request names, times the bound flag),
-    # so each pass either adds a row somewhere or the loop stops; `document_requirements` is a
-    # per-consumer sequence rather than a set, so it is taken from the latest derivation and a
-    # change in it counts as progress like any other. The bound below is deliberately larger
-    # than the number of distinct growth steps the lattice allows, and exceeding it is an
-    # invariant violation this raises on rather than answering with a contract nothing
-    # validated.
+    # TERMINATION rests on monotone growth over a finite universe, never on a pass count. Every
+    # field of a row is in exactly one of three classes, read off the contract model itself (a
+    # tuple-valued field no class names, or two classes name, is refused before the first pass):
+    #
+    # - LARGER is fail-closed (`_OBLIGATION_FIELDS`): the union of every pass's derivation.
+    # - LARGER is permissive (`_PERMISSIVE_FIELDS`): the latest derivation — never a union, see
+    #   D5b — ASSERTED to contain the previous pass's value.
+    # - A scalar (the entry form and the seed's pinned claims): ASSERTED equal to the previous
+    #   pass's value.
+    #
+    # So from the second pass on, a row that changes has strictly GAINED an element in at least
+    # one tuple-valued field: nothing shrinks, nothing flips, and a value equal to the previous
+    # one as a set is equal as a value (asserted too, so a positional field cannot reorder or
+    # repeat forever). Every such field only holds entries built from what this request names —
+    # its caches, property names, profile refs and state keys, the bound flag and `None` — so
+    # the rows can gain an element only finitely often, and the loop stops at the first pass
+    # where every unordered root's row equals the previous pass's.
+    #
+    # HOW MANY passes that takes is a property of the request, not of its root count: a re-cache
+    # relay (retrieve cache C(i), store it in C(i-1)) moves an obligation ONE cache per pass, so
+    # the passes grow with the caches it names times the length of the ring the obligation
+    # travels. The fixed bound this replaced — 3 plus 6 per unordered root — was below that, and
+    # a parser-valid self-calling relay over nine caches raised where the loop, left to run,
+    # settled in ten passes and validated clean (correction batch 22, measured).
+    #
+    # `document_requirements` keeps its own finite representation: taken from the latest
+    # derivation, a recursive child's list grew by one entry per pass, because its walk appends
+    # its own consumer's requirement and then everything its self-call hands back
+    # (CDX-184-r21-01). What a caller OWES is not that count: each entry is a profile the
+    # documents it hands over must match, and a requirement already listed is discharged by the
+    # very same documents. The DISTINCT requirements in first-seen order — a subset of the
+    # profile refs this request names plus `None`, the unknown consumption — only grow.
+    #
+    # WHAT THE PERMISSIVE FIELDS' AND THE SCALARS' MONOTONICITY RESTS ON, stated because it is
+    # NOT a property of the derivation. A carried field is monotone by construction; the others
+    # are monotone only because of the pins. The raw derivation is not monotone in a callee's
+    # row: a waited call un-establishes every cache the callee's `removed_caches` names BEFORE
+    # it applies the callee's guarantee (lineage `_discharge_child_contract`, through
+    # `_caches_a_call_may_remove`), and a member's removals do grow — from the seed's () outward,
+    # one hop per pass around a ring — so a caller's raw guarantee of that cache is taken back
+    # on a later pass. `guaranteed_state` never shrinks for an unordered root only because every
+    # unordered root calls another unordered root — that is what keeps it unordered — whose row
+    # carries the pinned `state_known=False` and `cache_writes_known=False`: the caller's own
+    # `known` and `caches_known` go False with them, so its `mutated_state` is () on every pass,
+    # and with it the filter `guaranteed_state` is drawn through. The re-applied
+    # `required_caches_retain_nothing_it_stored=False` is load-bearing the same way: its raw
+    # derivation flips True to False between passes (measured 89,808 times over 20,000 fuzzed
+    # requests), and only the pin holds it still. A change that DERIVES any of the four claims
+    # for a cycle member therefore turns parser-valid requests into the RuntimeError below
+    # unless it first makes what that claim unblocks monotone —
+    # `test_the_pinned_claims_are_what_keep_a_cycle_members_guarantee_monotone` and
+    # `test_the_re_applied_pin_is_what_keeps_the_retention_claim_still` fail the moment a pin is
+    # relaxed (correction batch 22c, two verification lenses).
+    #
+    # A pass that breaks an assertion means a derivation rule stopped being monotone: a code
+    # defect, unreachable for any parser-valid request while the rules above hold. It raises,
+    # naming the root, the field and both values, and is never ANSWERED: the unknown seed is no
+    # answer (`_discharge_child_contract` returns early on an `unknown` entry and drops every
+    # obligation already derived, which is how the cycle member's fail-open arose), and neither
+    # are the last pass's rows (grown from the bottom, a partial result under-approximates what
+    # a caller owes). A `RuntimeError`, not the compiler's `PROCESS_IR_COMPILE_INTERNAL`: the
+    # typed plan and compile routes catch neither around this resolver, so the compiler's code
+    # would reach a caller no more typed than this does (measured, correction batch 22).
     unordered = [key for key in sorted(roots) if key not in facts]
     for key in unordered:
         facts[key] = dict(_A_CYCLE_MEMBERS_CLAIMS, entry_form="unknown")
+
+    def _not_monotone(detail):
+        return RuntimeError("the entry-contract fixpoint is not monotone: " + detail)
+
+    fields = {
+        name: field for name, field in ChildEntryContractV1.model_fields.items() if name != "process_ref"
+    }
+    tuple_fields = {name for name, field in fields.items() if get_origin(field.annotation) is tuple}
+    carried, permissive = set(_OBLIGATION_FIELDS), set(_PERMISSIVE_FIELDS)
+    if unordered and (carried & permissive or carried | permissive != tuple_fields):
+        raise _not_monotone("the contract fields {0!r} are not each classified exactly once".format(
+            sorted((tuple_fields ^ (carried | permissive)) | (carried & permissive))))
+
+    def _check_moved_monotonically(key, before, after, passes):
+        for name, field in sorted(fields.items()):
+            old, new = before.get(name, field.default), after.get(name, field.default)
+            if name in tuple_fields:
+                grew = set(old) <= set(new) and (set(old) != set(new) or tuple(old) == tuple(new))
+            else:
+                grew = old == new
+            if not grew:
+                raise _not_monotone("pass {0}, root {1!r}, field {2!r}: {3!r} -> {4!r}".format(
+                    passes, key, name, old, new))
+
     passes = 0
-    bound = 3 + len(unordered) * (1 + len(_OBLIGATION_FIELDS))
     while unordered:
         passes += 1
-        if passes > bound:
-            raise RuntimeError(
-                "the entry-contract fixpoint over {0} unordered root(s) did not settle in {1} "
-                "passes; the obligation fields are supposed to grow monotonically".format(
-                    len(unordered), bound))
         previous = dict(facts)
         for key in unordered:
             own = ProcessIRValidationCapabilitiesV1(
@@ -1394,10 +1508,33 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
             )
             for field in _OBLIGATION_FIELDS:
                 if field == "document_requirements":
+                    # Positional, so it cannot join the set-union below — and a recursive
+                    # child's list grows without bound unless the repeats are dropped. Each
+                    # entry is a profile the caller's documents must match; the same profile
+                    # twice is the same obligation, so first-seen order over the DISTINCT
+                    # entries is the finite representation (CDX-184-r21-01). `None` — a
+                    # consumption nothing states — is one such entry and is kept once, so the
+                    # fail-closed reading of an unknown consumer survives deduplication.
+                    seen, distinct = set(), []
+                    for entry in (tuple(previous[key].get(field, ()) or ())
+                                  + tuple(derived.get(field, ()) or ())):
+                        if entry in seen:
+                            continue
+                        seen.add(entry)
+                        distinct.append(entry)
+                    derived[field] = tuple(distinct)
                     continue
                 grown = set(previous[key].get(field, ()) or ()) | set(derived.get(field, ()) or ())
-                derived[field] = tuple(sorted(
-                    grown, key=lambda row: tuple("" if part is None else str(part) for part in row)))
+                # A row is a tuple, its `None` parts ordered first — or, for
+                # `unwaited_cache_writes`, a bare cache ref. `None` and `""` are two keys, never a
+                # tie: a tie would leave set iteration to order the tuple, and two passes holding
+                # the same rows could then differ as values.
+                derived[field] = tuple(sorted(grown, key=lambda row: (row,) if isinstance(row, str) else tuple(
+                    (part is not None, "" if part is None else str(part)) for part in row)))
+            if passes > 1:
+                # The first pass moves off the seed, whose entry form is the `unknown` an absent
+                # ProcessIR gives; from the second on, the row may only grow.
+                _check_moved_monotonically(key, previous[key], derived, passes)
             facts[key] = derived
         if all(previous[key] == facts[key] for key in unordered):
             break

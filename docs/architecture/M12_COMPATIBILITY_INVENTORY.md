@@ -3166,4 +3166,14 @@ graphs the covered tests exercise, so a behaviour change a covered test can obse
 gained one row (`LG-88502416`, the unclassified `'create_component'` literal in the new
 `authoring/revision_corpus.py`) and the §11 tables were re-spliced for it and for moved `Baseline line`
 values. Revisions after batch 21: `capability_revision` `sha256:555f0eb1…` and `compiler_revision`
-`sha256:08213c91…`; `schema_revision` stays `sha256:c9583e6b…`.
+`sha256:08213c91…`; `schema_revision` stays `sha256:c9583e6b…`. **Correction batch 22
+(CDX-184-r21-01)** made a recursive child contract settle instead of raising, by carrying a
+child's document requirements as distinct entries, and replaced the entry-contract fixpoint's
+fixed pass count — which a parser-valid re-cache relay over nine caches exceeded — with a
+per-pass check that every row only grows; the census and the §11 rows did not move beyond
+`Baseline line` values. Batch 22c changed no verdict: it named, in the fixpoint's comment and two
+witnesses, the pinned claims that growth check's monotonicity rests on, made the carry's sort key
+keep `None` and `""` apart, and measured — then refused — seeding a cycle member with its real
+entry form; its new witnesses added packaged corpus inputs, which is
+what moves the revision. Revisions after batch 22c: `capability_revision` `sha256:973f1985…` and
+`compiler_revision` `sha256:46792b20…`; `schema_revision` stays `sha256:c9583e6b…`.

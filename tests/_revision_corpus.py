@@ -631,7 +631,13 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - `session` is pyte
 def child_env(env=None):
     """The documented suite environment (``PYTHONPATH=src``, no plugin autoload, local and
     offline), plus this directory so ``-p _revision_corpus`` resolves to the same module a
-    ``pytest_plugins`` declaration registers. No harvest or coverage setting is inherited."""
+    ``pytest_plugins`` declaration registers. No harvest or coverage setting is inherited.
+
+    Uncoloured, whatever the caller's terminal asks for: the child's output is PARSED — its
+    ``FAILED`` lines, its summary — and a parent shell exporting ``FORCE_COLOR`` made every
+    child pytest wrap them in ANSI escapes, so the witnesses that read them read nothing and
+    failed while the runs themselves behaved (correction batch 22, measured). ``PY_COLORS=0``
+    takes precedence over ``FORCE_COLOR`` in pytest's own terminal writer."""
     child = dict(os.environ)
     child.pop(HARVEST_OUT_ENV, None)
     child.pop(EXTRA_COVERED_ENV, None)
@@ -644,15 +650,17 @@ def child_env(env=None):
         "BOOMI_LOCAL": "true",
         "BOOMI_DOCS_ENABLED": "false",
         "BOOMI_GOTCHAS_ENABLED": "false",
+        "PY_COLORS": "0",
     })
     child.update(env or {})
     return child
 
 
 def run_pytest(targets, *, python=None, env=None):
-    """pytest over ``targets`` in a fresh interpreter, with this plugin loaded by name."""
+    """pytest over ``targets`` in a fresh interpreter, with this plugin loaded by name, and its
+    output uncoloured (``--color=no``; see :func:`child_env`)."""
     argv = [python or sys.executable, "-m", "pytest", "-p", "_revision_corpus", "-p", "no:cacheprovider",
-            "-q", "--no-header", "-rfE", *targets]
+            "-q", "--no-header", "--color=no", "-rfE", *targets]
     return subprocess.run(argv, cwd=str(ROOT), env=child_env(env), capture_output=True, text=True)
 
 

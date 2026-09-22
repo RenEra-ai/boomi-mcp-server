@@ -65,7 +65,13 @@ jobs:
     # Rename only together with the ruleset's `context`.
     name: Python 3.11 non-KB
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # MEASURED budget, not a guess (#184, raised with the owner's approval): at the
+    # landing base `cbab28f` the pytest span was 38.3 min, 32.6 of them the #149
+    # legacy-reachability freeze module alone, so 60 left ~20 min of headroom. #184's
+    # tests outgrew it — its first preflight (run 35571464519) was cancelled at 60 min
+    # having finished 44% of the suite. The cap exists to kill a hung job, not to bound
+    # a healthy suite; 120 does the first while leaving room for the rest of M12.
+    timeout-minutes: 120
 
     env:
       PYTHONPATH: src

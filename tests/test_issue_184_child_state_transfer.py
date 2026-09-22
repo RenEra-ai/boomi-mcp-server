@@ -6350,3 +6350,503 @@ def test_the_re_cache_carrier_moves_the_served_compiler_revision(monkeypatch):
             "        for origin in ():\n")
         assert authoring_contract._compiler_revision() != baseline
     assert authoring_contract._compiler_revision() == baseline
+
+
+# --- CDX-184-r21-01: a recursive document requirement is finite -----------------------------
+
+#: A map that consumes the caller's documents: the passthrough child's own consumer, whose
+#: profile is what its callers must hand over.
+_CONSUMES_P2 = {"kind": "map_ref", "map_ref": "$ref:M22"}
+
+
+def _recursive_passthrough_child(consumer=_CONSUMES_P2):
+    """The reviewer's shape: a Data Passthrough child with one Branch leg that CONSUMES a
+    profile and another, Decision-guarded, that calls the child back."""
+    return _passthrough_root(
+        {"steps": [consumer], "terminal": _STOP},
+        {"steps": [], "terminal": _decision(_call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR))},
+        {"steps": [_MSG], "terminal": _STOP},
+    )
+
+
+def _recursive_roots(consumer=_CONSUMES_P2):
+    return [("PARENT", _parent([], _call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR))),
+            ("CHILD", _recursive_passthrough_child(consumer))]
+
+
+def test_a_recursive_document_requirement_settles_on_the_distinct_consumptions():
+    """CDX-184-r21-01. `document_requirements` is POSITIONAL — one entry per consumer of the
+    caller's documents — so it cannot join the set-union the other obligation fields carry, and
+    round 7 left it out of the carry entirely. For a child that calls ITSELF that never
+    settles: each pass appends the child's own consumer requirement and then everything the
+    self-call hands back, so the tuple grew by one entry per pass and the fixpoint's bound —
+    a backstop against a rule that does not converge — was reached on a request the parser
+    accepts. Resolution raised `RuntimeError` where 5b5038c returned an unknown contract.
+
+    The finite representation is the DISTINCT requirements in first-seen order: each entry is
+    a profile the caller's documents must match, so the same profile twice is the same
+    obligation. This asserts the SERVED OUTCOME — a contract with those entries, and the
+    verdicts every root receives — not merely the absence of a crash."""
+    roots = _recursive_roots()
+    row = _row(roots, "PARENT", "CHILD")
+    assert row.entry_form == "passthrough"
+    # P2, because the child's own leg consumes it; then `None`, the consumption the self-call
+    # states nothing about — kept once, so the fail-closed reading survives deduplication.
+    assert row.document_requirements == ("$ref:P2", None), row.document_requirements
+    assert _both_routes(roots, "PARENT") == []
+    assert _both_routes(roots, "CHILD") == []
+    # ... and the acyclic twin of the same child states the same single consumption.
+    acyclic = [("PARENT", _parent([], _call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR))),
+               ("CHILD", _passthrough_root({"steps": [_CONSUMES_P2], "terminal": _STOP},
+                                           {"steps": [_MSG], "terminal": _STOP}))]
+    assert _row(acyclic, "PARENT", "CHILD").document_requirements == ("$ref:P2",)
+    assert _both_routes(acyclic, "PARENT") == []
+
+
+@pytest.mark.parametrize("shape", ("a_self_call", "a_two_member_cycle", "an_unguarded_self_call"))
+def test_every_recursive_spelling_resolves_to_a_contract(shape):
+    """The siblings, each of which raised before: the back edge spelled as a Decision arm, as a
+    plain leg terminal, and through a partner. Every one resolves and every root is judged."""
+    if shape == "a_two_member_cycle":
+        roots = [("PARENT", _parent([], _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR))),
+                 ("LOOP_A", _passthrough_root(
+                     {"steps": [_CONSUMES_P2], "terminal": _STOP},
+                     {"steps": [], "terminal": _decision(_call("LOOP_B", **_WAITS_AND_ABORTS_ON_ERROR))},
+                     {"steps": [_MSG], "terminal": _STOP})),
+                 ("LOOP_B", _passthrough_root(
+                     {"steps": [_CONSUMES_P2], "terminal": _STOP},
+                     {"steps": [], "terminal": _decision(_call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR))},
+                     {"steps": [_MSG], "terminal": _STOP}))]
+        child = "LOOP_A"
+    elif shape == "an_unguarded_self_call":
+        roots = [("PARENT", _parent([], _call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR))),
+                 ("CHILD", _passthrough_root(
+                     {"steps": [_CONSUMES_P2], "terminal": _STOP},
+                     {"steps": [], "terminal": _call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR)},
+                     {"steps": [_MSG], "terminal": _STOP}))]
+        child = "CHILD"
+    else:
+        roots, child = _recursive_roots(), "CHILD"
+    assert _row(roots, "PARENT", child).document_requirements == ("$ref:P2", None)
+    for key, _document in roots:
+        assert _both_routes(roots, key) == [], key
+
+
+def test_the_finite_representation_is_what_makes_the_fixpoint_settle(monkeypatch):
+    """Non-vacuity: with `document_requirements` taken from the latest derivation instead of
+    carried as its distinct entries — round 7's state — the recursive child re-states its
+    requirement with one more repeat on every pass: the same entries as a set, a longer tuple.
+    That used to run into the fixpoint's pass count. Correction batch 22 removed the count, so
+    it is now refused the moment it happens, by the check that every pass only GROWS a row,
+    naming the field — never answered, and never looped on."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    roots = _recursive_roots()
+    assert _row(roots, "PARENT", "CHILD").document_requirements == ("$ref:P2", None)
+    monkeypatch.setattr(process_ir_effects, "_OBLIGATION_FIELDS", tuple(
+        field for field in process_ir_effects._OBLIGATION_FIELDS
+        if field != "document_requirements"))
+    monkeypatch.setattr(process_ir_effects, "_PERMISSIVE_FIELDS",
+                        process_ir_effects._PERMISSIVE_FIELDS + ("document_requirements",))
+    # A WATCHDOG, not a bound on the code under test: with no pass count left, a regression
+    # in the check this pins would loop forever, and a hung run is a poor way to fail. Forty
+    # derivations is far beyond the two passes the check needs to fire here.
+    real, derivations = process_ir_effects.derive_child_entry_facts, []
+
+    def watched(child_ir, symbols, capabilities=None):
+        derivations.append(child_ir)
+        assert len(derivations) < 40, "the fixpoint kept looping: the growth check did not fire"
+        return real(child_ir, symbols, capabilities)
+
+    monkeypatch.setattr(process_ir_effects, "derive_child_entry_facts", watched)
+    with pytest.raises(RuntimeError, match=r"not monotone: pass 2, root 'CHILD', field 'document_requirements'"):
+        _row(roots, "PARENT", "CHILD")
+
+
+# --- correction batch 22: the fixpoint ends on growth, never on a pass count ------------------
+
+def _relay_symbols():
+    """The module's symbols plus enough document caches for the longest relay below."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    return SymbolTableV1(symbols=tuple(_symbols().symbols) + tuple(
+        ComponentSymbolV1(ref="$ref:RC%d" % index, component_id="RC%d" % index, component_type="documentcache")
+        for index in range(21)))
+
+
+def _re_caches(indexes):
+    """One Branch leg per index: retrieve cache RC(i) and store what it holds in RC(i-1)."""
+    return [{"steps": [{"kind": "cache_get", "cache_ref": "$ref:RC%d" % index}],
+             "terminal": {"kind": "cache_put", "cache_ref": "$ref:RC%d" % (index - 1)}} for index in indexes]
+
+
+#: The use at the end of every relay: an ordinary read of X on documents retrieved from RC0.
+_READS_X_FROM_RC0 = {"steps": [{"kind": "cache_get", "cache_ref": "$ref:RC0"}, _READS_X], "terminal": _STOP}
+
+
+def _relay(shape, k):
+    """A re-cache relay over caches RC0..RC(k). Each re-cache leg turns an obligation its callee
+    states on RC(i-1) into one on RC(i), so the obligation travels ONE cache per pass of the
+    fixpoint — and once more around the ring for every member it has to cross."""
+    if shape == "a_guarded_passthrough_self_relay":  # the reviewer's spelling
+        return [("LOOP_A", _passthrough_root(
+            _READS_X_FROM_RC0, *_re_caches(range(1, k + 1)),
+            {"steps": [], "terminal": _decision(_call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR))}))]
+    if shape == "a_self_relay":
+        return [("LOOP_A", _legs(_READS_X_FROM_RC0, *_re_caches(range(1, k + 1)), _waited("LOOP_A")))]
+    if shape == "a_two_member_relay":  # LOOP_A re-caches the odd caches, LOOP_B the even ones
+        return [("LOOP_A", _legs(*_re_caches(range(1, k + 1, 2)), _waited("LOOP_B"))),
+                ("LOOP_B", _legs(_READS_X_FROM_RC0, *_re_caches(range(2, k + 1, 2)), _waited("LOOP_A")))]
+    assert shape == "a_three_member_ring"  # LOOP_A -> LOOP_B -> MID -> LOOP_A; only LOOP_A re-caches
+    return [("LOOP_A", _legs(_READS_X_FROM_RC0, *_re_caches(range(1, k + 1)), _waited("LOOP_B"))),
+            ("LOOP_B", _legs({"steps": [_MSG], "terminal": _STOP}, _waited("MID"))),
+            ("MID", _legs({"steps": [_MSG], "terminal": _STOP}, _waited("LOOP_A")))]
+
+
+#: ``shape -> (caches re-cached, passes the fixpoint takes, the root whose row for LOOP_A is read)``.
+#: The pass counts are the verifiers' measurement with ONLY the old bound lifted (correction batch
+#: 22 pre-commit verification, static lens E4/E5): 10, 22, 16 and 25, against old bounds of 9, 9,
+#: 15 and 21.
+_WITNESSED_RELAYS = {
+    "a_guarded_passthrough_self_relay": (8, 10, "LOOP_A"),
+    "a_self_relay": (20, 22, "LOOP_A"),
+    "a_two_member_relay": (13, 16, "LOOP_B"),
+    "a_three_member_ring": (7, 25, "MID"),
+}
+#: The longest relay of each shape the old pass counter still let settle.
+_THE_OLD_COUNTER_LAST_SETTLED = {
+    "a_guarded_passthrough_self_relay": 7, "a_self_relay": 7, "a_two_member_relay": 12, "a_three_member_ring": 5,
+}
+#: The counter this batch removed, put back into the working source: 3 plus 6 per unordered root.
+_THE_OLD_PASS_COUNTER = (
+    "    passes = 0\n    while unordered:\n        passes += 1\n",
+    "    passes = 0\n    while unordered:\n        passes += 1\n"
+    "        if passes > 3 + len(unordered) * 6:\n"
+    "            raise RuntimeError('did not settle')\n",
+)
+
+
+def _relay_verdicts(roots, declarations=None):
+    """``(resolution, {root: errors})`` under the relay symbols, every root validated AND compiled
+    under the context the resolver serves it — through whichever resolver `_effects_with_source`
+    has installed."""
+    import test_issue_184_child_entries as entries
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    symbols = _relay_symbols()
+    parsed = [(key, parse_process_ir_v1(document)) for key, document in roots]
+    resolution = entries.resolve_process_ir_effect_declarations(
+        parsed, declarations, symbols, [], child_roots={"$ref:" + key: ir for key, ir in parsed})
+    assert resolution.ok, resolution.findings
+    verdicts = {}
+    for key, ir in parsed:
+        capabilities = resolution.capabilities_by_root[key] or DEFAULT_VALIDATION_CAPABILITIES
+        validated = sorted((item.code, item.path)
+                           for item in validate_process_ir(ir, symbols, capabilities=capabilities).errors)
+        try:
+            compile_process_ir_v1(ir, symbols, capabilities=capabilities)
+            compiled = []
+        except ProcessIRCompileError as exc:
+            compiled = sorted((item.code, item.path) for item in exc.diagnostics)
+        assert compiled == validated, (key, validated, compiled)
+        verdicts[key] = validated
+    return resolution, verdicts
+
+
+def _counting_derivations(monkeypatch):
+    """How many times each process is derived — one per pass for a root nothing could order."""
+    from collections import Counter
+
+    from boomi_mcp.authoring import process_ir_effects
+
+    counts, real = Counter(), process_ir_effects.derive_child_entry_facts
+
+    def counting(child_ir, symbols, capabilities=None):
+        counts[id(child_ir)] += 1
+        return real(child_ir, symbols, capabilities)
+
+    monkeypatch.setattr(process_ir_effects, "derive_child_entry_facts", counting)
+    return counts
+
+
+@pytest.mark.parametrize("shape", sorted(_WITNESSED_RELAYS))
+def test_a_re_cache_relay_settles_however_many_caches_it_names(shape, monkeypatch):
+    """Correction batch 22. The fixpoint stopped at a fixed 3 + 6 passes per unordered root and
+    raised. A re-cache relay moves an obligation one cache per pass, so the passes it needs grow
+    with the CACHES a request names — times the ring it travels — not with its roots: each of
+    these parser-valid requests raised `RuntimeError` (so did `plan_authoring_request_v1`, on a
+    nine-cache self-relay and an eight-cache two-member relay), while the same loop left to run
+    settles and every root validates clean. Termination now rests on the rows only growing over
+    the finite set of entries the request can name.
+
+    Asserted: the SERVED outcome, on both resolver entry points — a derived contract (not the
+    unknown seed) stating one cached-property row per cache the relay names; every root
+    validated and compiled clean; and the pass count the verifiers measured with the bound
+    lifted, so the answer is the lifted-bound answer and not merely an absence of a crash."""
+    from boomi_mcp.models.authoring_workflow import ProcessIREffectDeclarationsV1
+
+    k, passes, caller = _WITNESSED_RELAYS[shape]
+    roots = _relay(shape, k)
+    derivations = _counting_derivations(monkeypatch)
+    resolution, verdicts = _relay_verdicts(roots)
+    assert max(derivations.values()) == passes, dict(derivations)
+    assert verdicts == {key: [] for key, _document in roots}
+    row = resolution.capabilities_by_root[caller].child_entry_contract("$ref:LOOP_A")
+    assert row.entry_form == ("passthrough" if "passthrough" in shape else "scheduled")
+    assert sorted(row.cache_property_requirements) == sorted(
+        ("$ref:RC%d" % index, "X", None, False) for index in range(k + 1))
+    declared, declared_verdicts = _relay_verdicts(roots, ProcessIREffectDeclarationsV1())
+    assert declared.capabilities_by_root == resolution.capabilities_by_root
+    assert declared_verdicts == verdicts
+
+
+@pytest.mark.parametrize("shape", sorted(_WITNESSED_RELAYS))
+def test_the_pass_counter_this_replaced_refused_every_witnessed_relay(shape, monkeypatch):
+    """Non-vacuity of the witness above: the old counter, put back into the working source,
+    refuses each relay — and still settles the longest one it used to, with the very answer the
+    working source gives, so the counter is the only thing that refused."""
+    k, _passes, _caller = _WITNESSED_RELAYS[shape]
+    shorter = _relay(shape, _THE_OLD_COUNTER_LAST_SETTLED[shape])
+    expected = _relay_verdicts(shorter)
+    _effects_with_source(monkeypatch, *_THE_OLD_PASS_COUNTER)
+    with pytest.raises(RuntimeError, match="did not settle"):
+        _relay_verdicts(_relay(shape, k))
+    settled = _relay_verdicts(shorter)
+    assert settled[1] == expected[1]
+    assert settled[0].capabilities_by_root == expected[0].capabilities_by_root
+
+
+def _a_self_calling_member():
+    return [("LOOP_A", _legs({"steps": [_MSG], "terminal": _STOP}, _waited("LOOP_A")))]
+
+
+#: A derivation made deliberately NON-MONOTONE in one field: what its first pass states, a later
+#: pass takes back. ``field -> (first pass's facts, every later pass's facts)``.
+_TAKEN_BACK = {
+    "removed_caches": ({"removed_caches": ("$ref:CACHE2",)}, {"removed_caches": ()}),
+    "guaranteed_state": ({"mutated_state": (("dpp", "K"),), "guaranteed_state": (("dpp", "K"),)},
+                         {"mutated_state": (("dpp", "K"),), "guaranteed_state": ()}),
+    "mutated_state": ({"mutated_state": (("dpp", "K"),)}, {"mutated_state": ()}),
+    "entry_form": ({"entry_form": "passthrough"}, {"entry_form": "scheduled"}),
+}
+
+
+@pytest.mark.parametrize("field", sorted(_TAKEN_BACK))
+def test_a_derivation_that_takes_a_fact_back_is_refused_naming_it(field, monkeypatch):
+    """The invariant the termination argument rests on, shown to be CHECKED rather than assumed:
+    a pass that shrinks a permissive field or changes a scalar is a derivation rule gone
+    non-monotone — a code defect no parser-valid request reaches — and the fixpoint raises on
+    the pass it happens, naming the root, the field and both values. It never answers with the
+    unknown seed (which `_discharge_child_contract` skips, dropping every derived obligation)
+    or with the last pass's rows (an under-approximation), and without the injected rule the
+    same request settles."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    roots = _a_self_calling_member()
+    assert _relay_verdicts(roots)[1] == {"LOOP_A": []}
+    first, later = _TAKEN_BACK[field]
+    real, passes = process_ir_effects.derive_child_entry_facts, []
+
+    def taking_back(child_ir, symbols, capabilities=None):
+        # Keyed on the INPUT, never on a call count, so the behaviour corpus's harvest — which
+        # replays the call under this very patch — sees the same rule: the first pass is the one
+        # that still sees the member it calls as the `unknown` seed.
+        called = capabilities.child_entry_contract("$ref:LOOP_A")
+        passes.append("first" if called.entry_form == "unknown" else "later")
+        return dict(real(child_ir, symbols, capabilities), **(first if passes[-1] == "first" else later))
+
+    monkeypatch.setattr(process_ir_effects, "derive_child_entry_facts", taking_back)
+    with pytest.raises(RuntimeError) as raised:
+        _relay_verdicts(roots)
+    assert str(raised.value) == "the entry-contract fixpoint is not monotone: pass 2, root 'LOOP_A', field {0!r}: " \
+        "{1!r} -> {2!r}".format(field, first[field], later[field])
+    assert passes[:2] == ["first", "later"]
+
+
+def test_every_contract_field_moves_by_exactly_one_rule():
+    """The classification the termination argument needs, pinned against the contract model
+    itself: every tuple-valued field is carried as a union (LARGER is fail-closed) or taken
+    latest and asserted to grow (LARGER is permissive), and every other field is a scalar the
+    seed pins or the entry form, asserted equal from pass to pass."""
+    from typing import get_origin
+
+    from boomi_mcp.authoring import process_ir_effects
+
+    fields = {name: field for name, field in ChildEntryContractV1.model_fields.items() if name != "process_ref"}
+    tuples = {name for name, field in fields.items() if get_origin(field.annotation) is tuple}
+    carried = set(process_ir_effects._OBLIGATION_FIELDS)
+    permissive = set(process_ir_effects._PERMISSIVE_FIELDS)
+    assert not carried & permissive
+    assert carried | permissive == tuples
+    assert permissive == {"removed_caches", "guaranteed_state", "mutated_state"}
+    assert set(fields) - tuples == {"entry_form"} | set(process_ir_effects._A_CYCLE_MEMBERS_CLAIMS)
+
+
+@pytest.mark.parametrize("mutant", ("a_field_left_unclassified", "a_field_classified_twice"))
+def test_a_classification_that_misses_a_field_is_refused_before_the_first_pass(mutant, monkeypatch):
+    """Non-vacuity of the classification check: a contract field no rule names — or two rules
+    name — is refused on the first cyclic request rather than moving by an accident of which
+    list forgot it."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    if mutant == "a_field_left_unclassified":
+        monkeypatch.setattr(process_ir_effects, "_PERMISSIVE_FIELDS", ("removed_caches", "guaranteed_state"))
+        named = "mutated_state"
+    else:
+        monkeypatch.setattr(process_ir_effects, "_PERMISSIVE_FIELDS",
+                            process_ir_effects._PERMISSIVE_FIELDS + ("unwaited_cache_writes",))
+        named = "unwaited_cache_writes"
+    with pytest.raises(RuntimeError, match=r"the contract fields \['{0}'\] are not each classified".format(named)):
+        _row(_recursive_roots(), "PARENT", "CHILD")
+
+
+# --- correction batch 22c: what the termination argument rests on ----------------------------
+
+_REMOVES_CACHE = {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:CACHE"}}
+_FILLS_CACHE_ON_A_PROVED_PATH = {"steps": [_MSG], "terminal": _PUT}
+
+#: Two rings in which a member FILLS a cache on a path its walk proves and then calls into a
+#: partner that REMOVES it — the removal arriving one hop per pass (the verification lenses'
+#: `ring2_fill_then_partner_removes` and `ring3_removal_arrives_late`; MID stands in for the third
+#: member). ``shape -> (roots, the pass on which the relaxed pin's guarantee is taken back)``.
+_A_PARTNER_REMOVES_WHAT_A_MEMBER_FILLED = {
+    "ring2_fill_then_partner_removes": ([
+        ("LOOP_A", _passthrough_root(_FILLS_CACHE_ON_A_PROVED_PATH, _waited("LOOP_B"))),
+        ("LOOP_B", _legs(_REMOVES_CACHE, _waited("LOOP_A")))], 2),
+    "ring3_removal_arrives_late": ([
+        ("LOOP_A", _passthrough_root(_FILLS_CACHE_ON_A_PROVED_PATH, _waited("LOOP_B"))),
+        ("LOOP_B", _legs({"steps": [_MSG], "terminal": _STOP}, _waited("MID"))),
+        ("MID", _legs(_REMOVES_CACHE, _waited("LOOP_A")))], 3),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_A_PARTNER_REMOVES_WHAT_A_MEMBER_FILLED))
+def test_the_pinned_claims_are_what_keep_a_cycle_members_guarantee_monotone(shape, monkeypatch):
+    """Correction batch 22c. The fixpoint's termination argument needs `guaranteed_state` to
+    only grow, and the raw derivation does NOT give that: a waited call un-establishes every
+    cache its callee's `removed_caches` names before applying the callee's guarantee, and a
+    member's removals grow from the seed's () outward — so a caller's guarantee of a cache it
+    filled is taken back on the pass its partner's removal arrives. It stays () for every cycle
+    member only because each one calls a member pinned `cache_writes_known=False`, which blanks
+    its `mutated_state` and with it the guarantee filter.
+
+    Both halves: on the real module each ring settles, every member guarantees and lists
+    nothing, and every root validates and compiles alike; with that ONE pin relaxed in memory,
+    the same request is refused by the growth check naming `guaranteed_state` on the pass the
+    removal arrives. A change that derives the claim for a cycle member fails here rather than
+    in production."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    roots, taken_back_on = _A_PARTNER_REMOVES_WHAT_A_MEMBER_FILLED[shape]
+    resolution, _verdicts = _relay_verdicts(roots)
+    members = [key for key, _document in roots]
+    for caller in members:
+        for row in resolution.capabilities_by_root[caller].child_entry_contracts:
+            assert (row.mutated_state, row.guaranteed_state) == ((), ()), (caller, row)
+    assert any(row.removed_caches for caller in members
+               for row in resolution.capabilities_by_root[caller].child_entry_contracts)
+    monkeypatch.setattr(process_ir_effects, "_A_CYCLE_MEMBERS_CLAIMS",
+                        dict(process_ir_effects._A_CYCLE_MEMBERS_CLAIMS, cache_writes_known=True))
+    with pytest.raises(RuntimeError) as raised:
+        _relay_verdicts(roots)
+    assert str(raised.value) == (
+        "the entry-contract fixpoint is not monotone: pass {0}, root 'LOOP_A', field 'guaranteed_state': "
+        "(('cache', '$ref:CACHE'),) -> ()".format(taken_back_on)), str(raised.value)
+
+
+def test_the_re_applied_pin_is_what_keeps_the_retention_claim_still(monkeypatch):
+    """The same dependency for a SCALAR. `required_caches_retain_nothing_it_stored` is asserted
+    equal from pass to pass, and its raw derivation is not constant: over a two-member re-cache
+    relay it flips from True to False between passes. Only the pin re-applied after every
+    derivation holds it still — drop that re-application and the growth check names the field."""
+    roots = _relay("a_two_member_relay", 13)
+    assert _relay_verdicts(roots)[1] == {"LOOP_A": [], "LOOP_B": []}
+    _effects_with_source(monkeypatch, "                **_A_CYCLE_MEMBERS_CLAIMS\n            )\n", "            )\n")
+    with pytest.raises(RuntimeError, match=r"not monotone: pass \d+, root '\w+', field "
+                                           r"'required_caches_retain_nothing_it_stored': True -> False"):
+        _relay_verdicts(roots)
+
+
+#: The source mutant the oracle measured and refused: seed a root the fixpoint cannot order with
+#: its REAL entry form — read off its own CFG through the derivation itself — instead of `unknown`.
+_A_REAL_FORM_SEED = (
+    '        facts[key] = dict(_A_CYCLE_MEMBERS_CLAIMS, entry_form="unknown")\n',
+    "        facts[key] = dict(_A_CYCLE_MEMBERS_CLAIMS, entry_form=derive_child_entry_facts(\n"
+    "            roots[key], symbols_for(key, roots[key]), ProcessIRValidationCapabilitiesV1())['entry_form'])\n",
+)
+
+
+def _rc(index):
+    return "$ref:RC%d" % index
+
+
+def _a_self_calling_member_that_re_reads_what_it_stores():
+    """Adversarial fuzz seed 1648 of the batch-22 termination lens, in this module's builders: a No
+    Data member that stores documents carrying X in RC5 and in RC2, calls itself without waiting
+    and without aborting, re-reads RC5 into a per-document self-call, and binds a request path on
+    X off RC5. PARENT stores in RC1 and calls it once per arriving document."""
+    member = _legs(
+        {"steps": [_GET, _STATIC_X], "terminal": {"kind": "cache_put", "cache_ref": _rc(5)}},
+        {"steps": [], "terminal": _call("LOOP_A", wait=False, abort_on_error=False)},
+        {"steps": [_GET, _STATIC_X], "terminal": {"kind": "cache_put", "cache_ref": _rc(2)}},
+        {"steps": [], "terminal": _call("LOOP_A", wait=True, abort_on_error=False)},
+        {"steps": [{"kind": "cache_get", "cache_ref": _rc(5)}], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR)},
+        {"steps": [{"kind": "cache_get", "cache_ref": _rc(5)}, _BOUND_GET], "terminal": _STOP})
+    parent = _passthrough_root({"steps": [_GET, _DYNAMIC_X], "terminal": {"kind": "cache_put", "cache_ref": _rc(1)}},
+                               {"steps": [], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR)})
+    return [("LOOP_A", member), ("PARENT", parent)]
+
+
+def _with_the_back_calls_removed(roots):
+    """The acyclic twin: every call a member makes to itself spelled Message -> Stop instead."""
+    import copy
+
+    twin = copy.deepcopy(roots)
+    for leg in twin[0][1]["body"]["steps"][0]["legs"]:
+        if leg["terminal"].get("process_ref") == "$ref:LOOP_A":
+            leg["terminal"], leg["steps"] = _STOP, leg["steps"] or [_MSG]
+    return twin
+
+
+def test_the_unknown_seed_is_what_refuses_a_caller_its_acyclic_twin_refuses(monkeypatch):
+    """Correction batch 22c, the measurement that kept the seed as it is. Seeding a root the
+    fixpoint cannot order with its real entry form removes the recorded over-refusal (the next
+    witness) — but the `unknown` seed's first pass also states an obligation a real-form seed
+    never grounds, and here it is the only thing refusing the member's caller. PARENT calls the
+    member once per document and the member's own row asks nothing of RC5 once its seed is real,
+    so the repeated-run question finds nothing unstable and PARENT is ADMITTED — while the acyclic
+    twin, whose member states the cached-property use as its callers' obligation, refuses PARENT
+    `PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE` exactly as the real module does. An
+    admission the twin refuses is the unsound direction, so the change was reverted
+    (oracle `b22c/impl/oracle.py`, one such request among the adversarial corpus's 3,008)."""
+    roots = _a_self_calling_member_that_re_reads_what_it_stores()
+    refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "/body/steps/1/legs/1/terminal")]
+    assert _relay_verdicts(roots)[1]["PARENT"] == refused
+    assert _relay_verdicts(_with_the_back_calls_removed(roots))[1]["PARENT"] == refused
+    _effects_with_source(monkeypatch, *_A_REAL_FORM_SEED)
+    assert _relay_verdicts(roots)[1]["PARENT"] == []
+
+
+def test_the_unknown_seed_s_recorded_over_refusal():
+    """The limit the unknown seed keeps, pinned so a change to it is a diff (verification lens
+    `b22c/other/b_seed_artifact.py`). A member whose partner is a No Data process states one real
+    requirement from its second pass on, but its first pass read the partner as the `unknown`
+    seed — an unknown CONSUMPTION of what it hands over — and the union carry keeps that `None`,
+    so PARENT's prefixed call is refused `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED`
+    while the acyclic twin, in which the partner does not call back, is admitted. Fail-closed:
+    refused where it could ship, never shipped where it must not; 260eb8c admitted it, and
+    `5b5038c` refused it with the same code."""
+    parent = ("PARENT", _passthrough_root({"steps": [{"kind": "map_ref", "map_ref": "$ref:M12"}],
+                                           "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS_ON_ERROR)},
+                                          {"steps": [_MSG], "terminal": _STOP}))
+    member = ("LOOP_A", _passthrough_root(_waited("LOOP_B"),
+                                          {"steps": [{"kind": "map_ref", "map_ref": "$ref:M22"}], "terminal": _STOP}))
+    cyclic = [parent, member, ("LOOP_B", _legs(_waited("LOOP_A"), {"steps": [_MSG], "terminal": _STOP}))]
+    acyclic = [parent, member, ("LOOP_B", _legs({"steps": [_MSG], "terminal": _STOP},
+                                                {"steps": [_MSG], "terminal": _STOP}))]
+    assert _row(cyclic, "PARENT", "LOOP_A").document_requirements == (None, "$ref:P2")
+    assert _both_routes(cyclic, "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, "/body/steps/1/legs/0/terminal")]
+    assert _row(acyclic, "PARENT", "LOOP_A").document_requirements == ("$ref:P2",)
+    assert _both_routes(acyclic, "PARENT") == []

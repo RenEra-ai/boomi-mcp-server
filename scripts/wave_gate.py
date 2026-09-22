@@ -1379,6 +1379,11 @@ def _pytest_env():
     env = dict(os.environ)
     env["PYTHONPATH"] = "src"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # Uncoloured whatever the caller's terminal exports: the output is PARSED, and a shell
+    # exporting FORCE_COLOR wrapped the collection summary in ANSI escapes, so the gate found
+    # no summary line and refused a healthy collection (issue #184, correction batch 22,
+    # measured). PY_COLORS takes precedence over FORCE_COLOR in pytest's terminal writer.
+    env["PY_COLORS"] = "0"
     env.pop("PYTHONHASHSEED", None)
     return env
 
@@ -1417,7 +1422,7 @@ def _pytest_argv(*extra):
     return [
         sys.executable, "-m", "pytest", PYTEST_TARGET,
         "--ignore={0}".format(PYTEST_IGNORE),
-        "-p", "no:cacheprovider", *extra,
+        "-p", "no:cacheprovider", "--color=no", *extra,
     ]
 
 

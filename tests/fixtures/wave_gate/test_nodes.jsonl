@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14189, "minimum_collected": 14189, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14215, "minimum_collected": 14215, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14287,3 +14287,29 @@
 {"kind": "test", "id": "pytest-014286", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_change_inside_a_module_the_replay_imports_is_not_memoized", "state": "active"}
 {"kind": "test", "id": "pytest-014287", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_field_added_to_an_existing_verdict_class_is_not_answered_from_the_cache", "state": "active"}
 {"kind": "test", "id": "pytest-014288", "node_id": "tests/test_issue_184_revision_corpus.py::test_an_entry_point_call_made_while_a_covered_module_is_imported_is_checked", "state": "active"}
+{"kind": "test", "id": "pytest-014289", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_recursive_document_requirement_settles_on_the_distinct_consumptions", "state": "active"}
+{"kind": "test", "id": "pytest-014290", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_recursive_spelling_resolves_to_a_contract[a_self_call]", "state": "active"}
+{"kind": "test", "id": "pytest-014291", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_recursive_spelling_resolves_to_a_contract[a_two_member_cycle]", "state": "active"}
+{"kind": "test", "id": "pytest-014292", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_recursive_spelling_resolves_to_a_contract[an_unguarded_self_call]", "state": "active"}
+{"kind": "test", "id": "pytest-014293", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_finite_representation_is_what_makes_the_fixpoint_settle", "state": "active"}
+{"kind": "test", "id": "pytest-014294", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_re_cache_relay_settles_however_many_caches_it_names[a_guarded_passthrough_self_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014295", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_re_cache_relay_settles_however_many_caches_it_names[a_self_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014296", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_re_cache_relay_settles_however_many_caches_it_names[a_three_member_ring]", "state": "active"}
+{"kind": "test", "id": "pytest-014297", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_re_cache_relay_settles_however_many_caches_it_names[a_two_member_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014298", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pass_counter_this_replaced_refused_every_witnessed_relay[a_guarded_passthrough_self_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014299", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pass_counter_this_replaced_refused_every_witnessed_relay[a_self_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014300", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pass_counter_this_replaced_refused_every_witnessed_relay[a_three_member_ring]", "state": "active"}
+{"kind": "test", "id": "pytest-014301", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pass_counter_this_replaced_refused_every_witnessed_relay[a_two_member_relay]", "state": "active"}
+{"kind": "test", "id": "pytest-014302", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_takes_a_fact_back_is_refused_naming_it[entry_form]", "state": "active"}
+{"kind": "test", "id": "pytest-014303", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_takes_a_fact_back_is_refused_naming_it[guaranteed_state]", "state": "active"}
+{"kind": "test", "id": "pytest-014304", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_takes_a_fact_back_is_refused_naming_it[mutated_state]", "state": "active"}
+{"kind": "test", "id": "pytest-014305", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_takes_a_fact_back_is_refused_naming_it[removed_caches]", "state": "active"}
+{"kind": "test", "id": "pytest-014306", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_contract_field_moves_by_exactly_one_rule", "state": "active"}
+{"kind": "test", "id": "pytest-014307", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_classification_that_misses_a_field_is_refused_before_the_first_pass[a_field_left_unclassified]", "state": "active"}
+{"kind": "test", "id": "pytest-014308", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_classification_that_misses_a_field_is_refused_before_the_first_pass[a_field_classified_twice]", "state": "active"}
+{"kind": "test", "id": "pytest-014309", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pinned_claims_are_what_keep_a_cycle_members_guarantee_monotone[ring2_fill_then_partner_removes]", "state": "active"}
+{"kind": "test", "id": "pytest-014310", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_pinned_claims_are_what_keep_a_cycle_members_guarantee_monotone[ring3_removal_arrives_late]", "state": "active"}
+{"kind": "test", "id": "pytest-014311", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_re_applied_pin_is_what_keeps_the_retention_claim_still", "state": "active"}
+{"kind": "test", "id": "pytest-014312", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_unknown_seed_is_what_refuses_a_caller_its_acyclic_twin_refuses", "state": "active"}
+{"kind": "test", "id": "pytest-014313", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_unknown_seed_s_recorded_over_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-014314", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_child_run_is_uncoloured_whatever_the_callers_terminal_exports", "state": "active"}

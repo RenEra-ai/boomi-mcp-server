@@ -64,9 +64,181 @@ def _producer():
 
 
 def _payload():
+    _baseline()  # the first corpus row in a process is computed after the other rows' imports
     payload = authoring_contract._compiler_revision_payload()
     assert sorted(row for row, value in payload.items() if value == "unavailable") == []
     return payload
+
+
+# ---------------------------------------------------------------------------
+# shared work: one unperturbed baseline per process, and the row computation stopped early
+# ---------------------------------------------------------------------------
+#
+# The merge with batch 21a grew the packaged corpus from 2,443 to 6,515 inputs — about 4.8 s a
+# replay on 3.11 — and this module replayed the whole corpus 66 times in-process per run, most
+# of them to re-derive the same unperturbed row or to learn only WHETHER a perturbation moves
+# it. Measured before this change: 597 s on 3.11. Neither kind of replay measured anything the
+# ones below do not, so each is done once or stopped as soon as its answer is known; every
+# witness still asserts what it asserted, and each narrowed one says why the narrower check is
+# the same check.
+
+_BASELINE = []
+
+
+def _baseline():
+    """The unperturbed state, measured ONCE per process and shared by every witness that needs
+    it only as a reference.
+
+    * ``row`` — the memoized row. The payload's other rows are computed FIRST: they import
+      modules, and a row computed before them was never stored (the key moved under it), so
+      the first witness to ask for the row replayed the corpus twice for it (measured).
+    * ``fresh_row``, ``verdicts`` and ``met`` — one replay that bypasses the memo: the REAL row
+      computation (`revision_corpus._computed_row`) over the packaged records, with each
+      record's verdict (and its canonical bytes) and every class the projection met recorded
+      as it runs. `fresh_row == row` is asserted, so the memo and a fresh replay agree here.
+    * ``others`` — the fingerprint of every payload row but the corpus row.
+
+    A witness that measures against these verdicts later in the run re-checks the one verdict
+    it relies on without its perturbation (:func:`_served_revisions_move_under`), so a state
+    that drifted since the baseline cannot pass for a perturbation that moved something.
+    """
+    if not _BASELINE:
+        others = authoring_contract._compiler_revision_payload(_without_corpus_row=True)
+        row = revision_corpus.corpus_verdict_row()
+        if not revision_corpus.memo_would_hit():
+            row = revision_corpus.corpus_verdict_row()
+        assert revision_corpus.memo_would_hit()
+        corpus_key, records, digests = revision_corpus._packaged()
+        position = {id(record): key for record, key in zip(records, digests)}
+        verdicts, met = {}, {}
+        real_replay, real_projected = revision_corpus.replay, revision_corpus._projected
+
+        def recording(record):
+            verdict = real_replay(record)
+            verdicts[position[id(record)]] = verdict
+            return verdict
+
+        def spy(value, depth=0):
+            kind = type(value)
+            if revision_corpus.declared_fields(kind):
+                met[kind] = met.get(kind, 0) + 1
+            return real_projected(value, depth)
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(revision_corpus, "replay", recording)
+            patched.setattr(revision_corpus, "_projected", spy)
+            fresh_row = revision_corpus._computed_row(records, digests)
+        assert fresh_row == row, "the memoized row is not what a fresh replay computes"
+        assert len(verdicts) == len(records)
+        _BASELINE.append(types.SimpleNamespace(
+            row=row, fresh_row=fresh_row, verdicts=verdicts, met=met, records=dict(zip(digests, records)),
+            verdict_bytes={name: revision_corpus.canonical_json(value) for name, value in verdicts.items()},
+            others=authoring_contract.sha256_fingerprint(others),
+            machinery=_digest_machinery()))
+        assert revision_corpus.memo_would_hit()
+    return _BASELINE[0]
+
+
+def _digest_machinery():
+    """Everything the row's digest is computed with: `revision_corpus.digest` over
+    `canonical_json` over `json.dumps` (a `JSONEncoder`), then `hashlib.sha256` — each read
+    from its owner's namespace, so a rebinding shows."""
+    import hashlib
+    import json as json_module
+
+    encoder = json_module.encoder
+    return (vars(revision_corpus)["digest"], vars(revision_corpus)["canonical_json"],
+            vars(revision_corpus)["json"], vars(revision_corpus)["hashlib"],
+            vars(json_module)["dumps"], vars(encoder.JSONEncoder)["encode"],
+            vars(encoder.JSONEncoder)["iterencode"], vars(encoder)["c_make_encoder"],
+            vars(encoder)["encode_basestring_ascii"], vars(hashlib)["sha256"])
+
+
+class _Moved(Exception):
+    """Stops the row computation at the first verdict that moved: ``(position, input digest)``."""
+
+
+def _first_moved_verdict():
+    """The REAL row computation under whatever is patched now, stopped as soon as it is known
+    to differ from the baseline row. ``(position, input digest)`` of the verdict that moved,
+    or ``None`` when it ran to the end with every verdict's canonical bytes unchanged — the
+    row is then the baseline row.
+
+    Why one moved verdict is a moved row, so the rest need not run: `_computed_row` digests the
+    ``[input digest, verdict]`` pairs of the packaged records, sorted by input digest, as one
+    canonical JSON list. The records are the same packaged ones in both states, so the pairs
+    line up key for key, and a pair whose canonical bytes differ makes the serialized list
+    differ — nothing the remaining records answer can undo that — and SHA-256 over different
+    bytes is a different row. The prefix computed here is the computation itself: the same
+    function (the replay is observed, not replaced), over the same records, in its own order,
+    from its own start (it clears the projection's field cache first, as every row does).
+
+    The argument needs the digest unperturbed, so it is checked: under a perturbation of the
+    digest machinery the whole row is computed and compared instead (``(None, None)`` then
+    means it differs).
+    """
+    baseline = _baseline()
+    corpus_key, records, digests = revision_corpus._packaged()
+    if _digest_machinery() != baseline.machinery:
+        row = revision_corpus._computed_row(records, digests)
+        return None if row == baseline.row else (None, None)
+    position = {id(record): (index, key) for index, (record, key) in enumerate(zip(records, digests))}
+    real = revision_corpus.replay
+
+    def observed(record):
+        verdict = real(record)
+        index, key = position[id(record)]
+        if revision_corpus.canonical_json(verdict) != baseline.verdict_bytes[key]:
+            raise _Moved(index, key)
+        return verdict
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(revision_corpus, "replay", observed)
+        try:
+            revision_corpus._computed_row(records, digests)
+        except _Moved as moved:
+            return moved.args
+    return None
+
+
+def _served_revisions_move_under(apply):
+    """Whether the two SERVED revisions move under ``apply(patched)``, answered without
+    replaying the whole corpus when the answer is known sooner: ``None`` when they do not,
+    otherwise ``(position, input digest)`` of the verdict that moved.
+
+    The chain, each link pinned: the served compiler revision is the fingerprint of
+    `_compiler_revision_payload()`, whose `behaviour_corpus` row is `corpus_verdict_row()`, and
+    the served capability revision fingerprints a manifest that carries the compiler revision
+    (`test_the_corpus_row_is_in_the_compiler_revision`, and the ride-on witness, which computes
+    the whole chain end to end under a perturbation). Here: (1) the memo MISSES under the
+    perturbation — asserted — so `corpus_verdict_row()` would return `_computed_row` over the
+    packaged records for it, not a stored row; (2) that computation produces a verdict whose
+    canonical bytes differ from the baseline's (:func:`_first_moved_verdict`), so that row
+    differs, so the payload's canonical bytes differ, so both fingerprints do — or it runs to
+    the end with none differing, and the row IS the baseline's. What this returns is exactly
+    what building the served pair and comparing it would answer, SHA-256 collisions aside —
+    the same caveat every revision comparison here carries.
+
+    (3) The verdict that moved is replayed again once the perturbation is undone and must be
+    the baseline's: the answer is the PERTURBATION's, not a state that drifted since the
+    baseline was taken.
+    """
+    with pytest.MonkeyPatch.context() as patched:
+        apply(patched)
+        assert not revision_corpus.memo_would_hit(), "the served path would answer from the memo"
+        moved = _first_moved_verdict()
+    _assert_moved_only_under_the_perturbation(moved)
+    return moved
+
+
+def _assert_moved_only_under_the_perturbation(moved):
+    if moved is None or moved[1] is None:
+        return
+    baseline = _baseline()
+    revision_corpus._DECLARED_FIELDS.clear()  # as a row starts
+    again = revision_corpus.replay(baseline.records[moved[1]])
+    assert revision_corpus.canonical_json(again) == baseline.verdict_bytes[moved[1]], (
+        "the verdict differs without the perturbation too: the state drifted since the baseline")
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +335,20 @@ def test_every_packaged_input_replays_to_a_verdict():
     measuring anything. A record the current code cannot rebuild would contribute one fixed
     token to the revision whatever the compiler does. (Inputs no test makes any more are
     NOT refused: they are still behaviour the compiler has, and the producer drops them the
-    next time it rewrites the corpus from a full harvest.)"""
+    next time it rewrites the corpus from a full harvest.)
+
+    The verdicts are the ones the served row's own computation produced for every packaged
+    input (:func:`_baseline` records them as `_computed_row` runs) — the same replay of the same
+    records this test used to repeat through `replayed_verdicts`, which is still checked to
+    agree with them on a slice."""
     records = revision_corpus.load_corpus()
-    verdicts = revision_corpus.replayed_verdicts(records)
+    captured = _baseline().verdicts
+    verdicts = sorted(([key, verdict] for key, verdict in captured.items()), key=lambda row: row[0])
+    assert len(verdicts) == len(records)
+    sample = records[:25]
+    assert revision_corpus.replayed_verdicts(sample) == sorted(
+        ([revision_corpus.digest(record), captured[revision_corpus.digest(record)]] for record in sample),
+        key=lambda row: row[0])
     broken = [[key, verdict] for key, verdict in verdicts if _degraded(verdict)]
     assert broken == []
     # Non-vacuity: acceptances beside refusals, and more than one entry kind.
@@ -184,12 +367,13 @@ def test_the_corpus_row_is_in_the_compiler_revision():
 
 def test_a_fresh_interpreter_replays_the_same_row():
     """Determinism across processes: a fresh interpreter (its own hash seed, nothing the
-    suite has warmed or patched) computes the row this process computes."""
-    script = ("import json; from boomi_mcp.authoring import revision_corpus as c; "
-              "print(json.dumps(c.corpus_verdict_row()))")
-    process = subprocess.run([sys.executable, "-c", script], cwd=str(_ROOT), capture_output=True, text=True,
-                             env=_producer().child_env(), check=True)
-    assert json.loads(process.stdout) == revision_corpus.corpus_verdict_row()
+    suite has warmed or patched) computes the row this process computes.
+
+    The row is the first `corpus_verdict_row()` of the cold child that
+    `test_the_first_replay_in_a_process_is_the_only_one` needs anyway — the very call this
+    witness's own child made, and nothing in that child runs before it — so the two share one
+    interpreter and one cold replay (:func:`_cold_child`)."""
+    assert _cold_child()["row"] == revision_corpus.corpus_verdict_row()
 
 
 def test_the_packaged_corpus_is_the_producer_s_own_serialization():
@@ -482,24 +666,28 @@ def test_a_verdict_container_field_moves_both_served_revisions(case):
 
     A verdict is now the whole returned object, projected by the authority of each class it
     is made of, so each of these moves the row and both served revisions with the packaged
-    corpus untouched."""
-    baseline_row, baseline_served = _projection_baseline()
-    with pytest.MonkeyPatch.context() as patched:
-        _CONTAINER_PERTURBATIONS[case](patched)
-        served = _served_pair()
-        row = revision_corpus.corpus_verdict_row()
-    assert row != baseline_row, case
-    assert served[0] != baseline_served[0] and served[1] != baseline_served[1], case
-    assert revision_corpus.corpus_verdict_row() == baseline_row
+    corpus untouched.
+
+    Measured on the real row computation, stopped at the first verdict that moves, with the
+    memo asserted to miss: :func:`_served_revisions_move_under` says why that is the served
+    pair's own answer. It used to build the manifest and replay all 6,515 inputs to learn the
+    same thing."""
+    baseline = _baseline()
+    assert _served_revisions_move_under(_CONTAINER_PERTURBATIONS[case]) is not None, case
+    assert revision_corpus.corpus_verdict_row() == baseline.row
 
 
 def test_a_verdict_container_subclass_alone_moves_nothing():
     """The control for the `_widened` cases: a subclass that adds NO field, carrying the same
     class path, must leave the row where it is. Without it those cases would pass on the
-    rename alone, which is what CDX-184-r8-R4-PROJ-CONTAINERWITNESS-02 measured."""
+    rename alone, which is what CDX-184-r8-R4-PROJ-CONTAINERWITNESS-02 measured.
+
+    Measured with the same helper the cases use, which has no early answer here: with no
+    verdict moving it runs the whole row computation, and "none moved" is "the row is the
+    baseline's". So the control also shows that helper does not report a move the harness
+    alone makes."""
     from boomi_mcp.compiler.process_ir.semantic_validation import pipeline as validation_pipeline
 
-    baseline_row, _served = _projection_baseline()
     real = validation_pipeline.validate_process_ir
 
     def rebuilt(*args, **kwargs):
@@ -510,9 +698,8 @@ def test_a_verdict_container_subclass_alone_moves_nothing():
             _fields_set=set(report.__pydantic_fields_set__),
             **{name: getattr(report, name) for name in type(report).model_fields})
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(validation_pipeline, "validate_process_ir", rebuilt)
-        assert revision_corpus.fresh_corpus_verdict_row() == baseline_row
+    assert _served_revisions_move_under(
+        lambda patched: patched.setattr(validation_pipeline, "validate_process_ir", rebuilt)) is None
 
 
 def _first_stub(stub_class):
@@ -526,20 +713,15 @@ def test_the_projection_reads_every_verdict_class_from_its_own_authority():
     its own authority: a model's fields AND computed fields, a named tuple's `_fields`, a
     slotted class's `__slots__`. Nothing here is a list of names — a class that gains a field
     is carried by the same rule the day it exists, which is what the four cases above
-    measure end to end."""
-    met = {}
-    real = revision_corpus._projected
+    measure end to end.
 
-    def spy(value, depth=0):
-        kind = type(value)
-        if revision_corpus.declared_fields(kind):
-            met.setdefault(kind, 0)
-            met[kind] += 1
-        return real(value, depth)
-
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(revision_corpus, "_projected", spy)
-        revision_corpus.fresh_corpus_verdict_row()
+    The classes are the ones the baseline's fresh replay met — the same spy on `_projected`,
+    over the same whole-corpus replay this test used to run on its own (:func:`_baseline`)."""
+    met = _baseline().met
+    # Read each authority as it is NOW, as the replay this test used to run did: every row
+    # clears the projection's field cache first, and an earlier witness may have left it holding
+    # a class it widened in place.
+    revision_corpus._DECLARED_FIELDS.clear()
     names = {kind.__name__ for kind in met}
     assert {"ValidationReportV1", "ValidationDiagnosticV1", "CompilerDiagnostic",
             "EffectResolutionV1", "EffectAuthorityFindingV1", "LineageWalkV1"} <= names, sorted(names)
@@ -656,41 +838,23 @@ def _assert_the_projection_carries(field):
     raise AssertionError("no finding class declares {0}".format(field))
 
 
-def _projection_baseline():
-    """The row and the served pair with nothing patched, built ONCE for this module: every
-    perturbation below is measured against it, so the module pays one manifest build for the
-    baseline rather than one per field."""
-    if _projection_baseline.value is None:
-        served = _served_pair()
-        _projection_baseline.value = (revision_corpus.corpus_verdict_row(), served)
-        payload = authoring_contract._compiler_revision_payload()
-        _projection_baseline.others = authoring_contract.sha256_fingerprint(
-            {name: value for name, value in payload.items() if name != _CORPUS_ROW})
-    return _projection_baseline.value
-
-
-_projection_baseline.value = None
-
-
 @pytest.mark.parametrize("field", _carried_fields())
 def test_a_projected_finding_field_moves_both_served_revisions(field):
     """Every carried field, derived from the authorities: perturbing it at the site that
-    builds the finding must move the corpus row AND the two revisions a caller compares.
-    One manifest build per field, against one baseline built once for the module."""
+    builds the finding must move the corpus row AND the two revisions a caller compares —
+    measured on the real row computation, stopped at the first verdict that moves, with the
+    memo asserted to miss (:func:`_served_revisions_move_under`), against the one baseline
+    the module builds. For the fields only the corpus sees, every OTHER row is computed under
+    the perturbation and must fingerprint exactly as the baseline's."""
     _assert_the_projection_carries(field)
-    baseline_row, baseline_served = _projection_baseline()
-    with pytest.MonkeyPatch.context() as patched:
-        _field_perturbation(field)(patched)
-        served = _served_pair()
-        row = revision_corpus.corpus_verdict_row()
-        payload = authoring_contract._compiler_revision_payload()
-    assert row != baseline_row, field
-    assert served[0] != baseline_served[0] and served[1] != baseline_served[1], field
+    baseline = _baseline()
+    assert _served_revisions_move_under(_field_perturbation(field)) is not None, field
     if field in _ONLY_THE_CORPUS_SEES:
-        assert authoring_contract.sha256_fingerprint(
-            {row_name: value for row_name, value in payload.items() if row_name != _CORPUS_ROW}
-        ) == _projection_baseline.others, field
-    assert revision_corpus.corpus_verdict_row() == baseline_row
+        with pytest.MonkeyPatch.context() as patched:
+            _field_perturbation(field)(patched)
+            others = authoring_contract._compiler_revision_payload(_without_corpus_row=True)
+        assert authoring_contract.sha256_fingerprint(others) == baseline.others, field
+    assert revision_corpus.corpus_verdict_row() == baseline.row
 
 
 def test_what_a_compile_returns_beside_its_plan_moves_both_served_revisions():
@@ -700,20 +864,18 @@ def test_what_a_compile_returns_beside_its_plan_moves_both_served_revisions():
     and both revisions byte-identical."""
     from boomi_mcp.compiler.process_ir import pipeline as compile_pipeline
 
-    baseline_row, baseline_served = _projection_baseline()
+    baseline = _baseline()
     real = compile_pipeline._compile_parsed_process_ir_v1
 
     def without_the_first_exit(*args, **kwargs):
         cfg, plan = real(*args, **kwargs)
         return cfg.model_copy(update={"exit_node_ids": tuple(cfg.exit_node_ids[1:])}), plan
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(compile_pipeline, "_compile_parsed_process_ir_v1", without_the_first_exit)
-        served = _served_pair()
-        row = revision_corpus.corpus_verdict_row()
-    assert row != baseline_row
-    assert served[0] != baseline_served[0] and served[1] != baseline_served[1]
-    assert revision_corpus.corpus_verdict_row() == baseline_row
+    # The served pair's own answer, stopped at the first moved verdict
+    # (:func:`_served_revisions_move_under`).
+    assert _served_revisions_move_under(lambda patched: patched.setattr(
+        compile_pipeline, "_compile_parsed_process_ir_v1", without_the_first_exit)) is not None
+    assert revision_corpus.corpus_verdict_row() == baseline.row
 
 
 def test_the_projection_reads_an_enum_by_value_and_a_raise_by_type():
@@ -882,34 +1044,36 @@ def _mutated_walk(select, mutate):
                 if isinstance(const, types.CodeType) and const.co_name == "_walk_lineage")
 
 
-def _payload_with_walk(code):
-    # `inspect.unwrap`: the guard may have wrapped the walk, and the wrapper calls through.
-    walk = inspect.unwrap(lineage._walk_lineage)
-    real = walk.__code__
-    walk.__code__ = code
-    try:
-        return _payload()
-    finally:
-        walk.__code__ = real
+def _with_the_walk(code):
+    """``apply(patched)`` giving `_walk_lineage` the code object ``code``. `inspect.unwrap`: the
+    guard may have wrapped the walk, and the wrapper calls through."""
+    def apply(patched):
+        patched.setattr(inspect.unwrap(lineage._walk_lineage), "__code__", code)
+    return apply
 
 
 @pytest.mark.parametrize("carry", sorted(_TEST_KILLED_CARRIES))
 def test_a_carry_the_tests_kill_moves_the_compiler_revision(carry):
     """(b) Each neutralised in memory by giving `_walk_lineage` the same code minus that one
     argument. Measured before this row: the compiler revision did not move for any of them,
-    while a test failed for each."""
-    baseline = _payload()
-    perturbed = _payload_with_walk(_mutated_walk(*_TEST_KILLED_CARRIES[carry]))
-    assert perturbed["behaviour_corpus"] != baseline["behaviour_corpus"], carry
-    assert authoring_contract.sha256_fingerprint(perturbed) != authoring_contract.sha256_fingerprint(baseline)
+    while a test failed for each.
+
+    Whether the row — and so the payload's fingerprint, the compiler revision — moves is the
+    real row computation's answer, stopped at the first verdict that moves, with the memo
+    asserted to miss under the swapped code (:func:`_served_revisions_move_under`). The
+    control below still replays the whole corpus: "nothing moved" has no early answer."""
+    assert _served_revisions_move_under(_with_the_walk(_mutated_walk(*_TEST_KILLED_CARRIES[carry]))) is not None, carry
 
 
 def test_an_unchanged_walk_recompiled_moves_nothing():
     """The control: the same harness with no mutation leaves the row where it is, so a moved
-    row above is a changed verdict, never a replaced code object."""
-    baseline = _payload()
-    perturbed = _payload_with_walk(_mutated_walk(_a_retrieve_of_unknown_content, _unchanged))
-    assert perturbed["behaviour_corpus"] == baseline["behaviour_corpus"]
+    row above is a changed verdict, never a replaced code object.
+
+    Measured with the helper the carries use, which runs the whole row computation when no
+    verdict moves ("none moved" is "the row is the baseline's") — so this also shows it does
+    not report a move the harness alone makes."""
+    assert _served_revisions_move_under(
+        _with_the_walk(_mutated_walk(_a_retrieve_of_unknown_content, _unchanged))) is None
 
 
 # ---------------------------------------------------------------------------
@@ -919,7 +1083,9 @@ def test_an_unchanged_walk_recompiled_moves_nothing():
 
 def _primed():
     """The row, with the memo holding it. A cold process's first replay imports modules the
-    payload's other rows use, so that computation is not stored and the second is."""
+    payload's other rows use, so that computation is not stored and the second is — which
+    :func:`_baseline` avoids by computing those rows first."""
+    _baseline()
     row = revision_corpus.corpus_verdict_row()
     if not revision_corpus.memo_would_hit():
         row = revision_corpus.corpus_verdict_row()
@@ -1015,8 +1181,13 @@ def test_the_memo_misses_under_every_perturbation_the_revision_tests_apply(monke
     maps. With the memo holding only the unperturbed row, each perturbation must MISS — and a
     miss is a replay, which is exactly the forced-fresh computation — and once it is undone the
     memo must HIT again, with the row a fresh replay computes. So the memoized row equals a
-    fresh one both ways, without replaying a hundred times to show it."""
-    fresh = revision_corpus.fresh_corpus_verdict_row()
+    fresh one both ways, without replaying a hundred times to show it.
+
+    The fresh row is the module's (:func:`_baseline`), replayed once for every witness: the
+    memo's row for the state now must equal it — a hit answers the entry stored beside it, and
+    a miss (a lazily filled cache moves the key) replays, so a state that drifted since would
+    fail here rather than pass."""
+    fresh = _baseline().fresh_row
     assert _primed() == fresh
     # Only the unperturbed entry: an entry an earlier test computed for one of these very
     # perturbations (the same cached code object, say) would be a CORRECT hit, and would hide
@@ -1045,18 +1216,26 @@ def test_a_perturbed_state_the_memo_holds_is_answered_with_its_own_row(monkeypat
     """The other half of (a), for the multi-entry memo: a hit under a perturbation is legal
     only when the memo computed THAT state. Replaying a perturbation twice with the same objects
     (the cached code object of a carry) hits the second time, with the row a fresh replay
-    computes under it — and not the unperturbed row."""
+    computes under it — and not the unperturbed row.
+
+    The fresh replay is the FIRST call's own: the memo's computation counter proves it was
+    computed, not answered, and a computation is `_computed_row` over the packaged records —
+    the very call `fresh_corpus_verdict_row` makes — so a second, identical replay to compare
+    it with measured nothing more."""
     baseline = _primed()
     select, mutate = _TEST_KILLED_CARRIES["the_retrieve_attribution"]
     code = _mutated_walk(select, mutate)
     with monkeypatch.context() as patched:
         patched.setattr(inspect.unwrap(lineage._walk_lineage), "__code__", code)
+        computations = revision_corpus._MEMO.computations
         first = revision_corpus.corpus_verdict_row()
+        # `first` was replayed, not answered: it IS the fresh row of this state.
+        assert revision_corpus._MEMO.computations == computations + 1, "answered, not replayed"
         assert revision_corpus.memo_would_hit()
         hits = revision_corpus._MEMO.hits
         second = revision_corpus.corpus_verdict_row()
         assert revision_corpus._MEMO.hits == hits + 1
-        assert first == second == revision_corpus.fresh_corpus_verdict_row() != baseline
+        assert first == second != baseline
     assert revision_corpus.corpus_verdict_row() == baseline
 
 
@@ -1112,7 +1291,14 @@ def test_a_patched_non_package_binding_the_replay_calls_misses_the_memo(binding)
     replay under the perturbation.
 
     Bound by hand, not with monkeypatch: `pydantic.BaseModel.model_dump` is read off the
-    class, and restoring it must put back exactly the object the key held."""
+    class, and restoring it must put back exactly the object the key held.
+
+    One replay, not two: the SERVED row is computed under the perturbation — the memo's
+    computation counter proves it was replayed rather than answered — and a computation is
+    `_computed_row` over the packaged records, the very call `fresh_corpus_verdict_row` makes.
+    So the served row IS the fresh replay; comparing it with a second, identical replay
+    measured nothing more. (Whole rows here, not the early answer the projection witnesses
+    use: two of these perturb the digest machinery itself.)"""
     import importlib
 
     module_name, owner_name, attribute, make = _NON_PACKAGE_PERTURBATIONS[binding]
@@ -1124,9 +1310,13 @@ def test_a_patched_non_package_binding_the_replay_calls_misses_the_memo(binding)
     setattr(owner, attribute, make(real))
     try:
         assert not revision_corpus.memo_would_hit(), binding
-        fresh = revision_corpus.fresh_corpus_verdict_row()
-        assert fresh != baseline, binding
-        assert revision_corpus.corpus_verdict_row() == fresh, binding
+        computations = revision_corpus._MEMO.computations
+        served = revision_corpus.corpus_verdict_row()
+        # The served row was replayed under the perturbation, so it IS the fresh row
+        # (`served == fresh` before this change), and it differs from the baseline
+        # (`fresh != baseline`).
+        assert revision_corpus._MEMO.computations == computations + 1, binding
+        assert served != baseline, binding
     finally:
         setattr(owner, attribute, real)
     assert revision_corpus.memo_would_hit()
@@ -1162,7 +1352,10 @@ def test_the_non_package_modules_the_key_holds_are_re_measured_here():
             called.add(owner(arg))
         return None
 
-    revision_corpus.fresh_corpus_verdict_row()  # warm: the replay's own imports have happened
+    # Warm: the replay's own imports have happened. Through the memo, which replays when this
+    # process has not yet (a lone run, a child) and otherwise answers — a replay in this
+    # process has already walked every path, so repeating one to warm them measured nothing.
+    revision_corpus.corpus_verdict_row()
     _sys.setprofile(profile)
     try:
         revision_corpus.fresh_corpus_verdict_row()
@@ -1184,6 +1377,14 @@ def test_the_non_package_modules_the_key_holds_are_re_measured_here():
     # Non-vacuity of the holding itself: the listed modules do contribute a real surface.
     held = revision_corpus._non_package_identity()
     assert len(held) > 1000 and len(set(map(id, held))) > 500
+    session = _producer()._SESSION
+    if session is not None and session.installed:
+        _PROFILED_IN_A_COMBINED_SESSION.append(sorted(outside))
+
+
+#: Set when the witness above passed in a session whose guard wrappers were INSTALLED — a
+#: covered module collected in this same run, which is every full-suite run.
+_PROFILED_IN_A_COMBINED_SESSION = []
 
 
 def test_the_profile_witness_holds_when_a_covered_module_is_collected_too():
@@ -1191,7 +1392,15 @@ def test_the_profile_witness_holds_when_a_covered_module_is_collected_too():
     guard's wrappers are installed at collection, so the replay the witness profiles runs
     through them. Measured before the fix: the witness failed with `['_revision_corpus']`
     whenever any covered module was collected — i.e. in every full-suite run
-    (CDX-184-r7-SUITE3-PROFILE-01)."""
+    (CDX-184-r7-SUITE3-PROFILE-01).
+
+    When THIS process is that shape — a covered module collected, the guard's wrappers
+    installed while the witness above profiled its replay and passed, as in every full-suite
+    run — the child would re-measure the same thing in a second interpreter, so its answer is
+    taken from here. Run on its own (no covered module collected), the child runs."""
+    if _PROFILED_IN_A_COMBINED_SESSION:
+        assert _PROFILED_IN_A_COMBINED_SESSION[-1], "the combined profile measured nothing"
+        return
     producer = _producer()
     node = "{0}::{1}".format(producer.GUARD_MODULE,
                              "test_the_non_package_modules_the_key_holds_are_re_measured_here")
@@ -1204,7 +1413,10 @@ def test_a_keyword_default_set_in_place_misses_the_memo():
     by identity, so setting a keyword default IN PLACE — the one live instance is the
     provenance the lowering stamps on a cfg edge, which the emission plan a compile
     acceptance is digested over carries — served a stale row. The tables are walked now, like
-    any other module-level container."""
+    any other module-level container.
+
+    One replay: the served row is replayed under the change — the memo's computation counter
+    proves it — so it IS the fresh row, as in the non-package witness above."""
     from boomi_mcp.compiler.process_ir import lowering
 
     baseline = _primed()
@@ -1213,9 +1425,11 @@ def test_a_keyword_default_set_in_place_misses_the_memo():
     defaults["provenance"] = "synthetic"
     try:
         assert not revision_corpus.memo_would_hit()
-        fresh = revision_corpus.fresh_corpus_verdict_row()
-        assert fresh != baseline
-        assert revision_corpus.corpus_verdict_row() == fresh
+        computations = revision_corpus._MEMO.computations
+        served = revision_corpus.corpus_verdict_row()
+        # Replayed, not answered: `served == fresh` and `fresh != baseline` before this change.
+        assert revision_corpus._MEMO.computations == computations + 1
+        assert served != baseline
     finally:
         defaults["provenance"] = "cfg_edge"
     assert revision_corpus.memo_would_hit()
@@ -1268,18 +1482,24 @@ def test_the_bound_names_the_container_item_the_key_cannot_see():
     while the process runs, so the key would differ between two calls in the same state and
     the memo would never hit. The bound says this in the module, and this test is what keeps
     the statement true — if the key ever grows to cover it, the first assertion fails and the
-    bound must be rewritten."""
+    bound must be rewritten.
+
+    "A fresh replay differs" is the real row computation's answer, stopped at the first verdict
+    that moves (:func:`_first_moved_verdict` says why that is the whole row's answer)."""
     import copy as copy_module
 
     baseline = _primed()
+    assert baseline == _baseline().row
     dispatch = copy_module._copy_dispatch
     real = dispatch[dict]
     dispatch[dict] = lambda value: {}
     try:
         assert revision_corpus.memo_would_hit(), "the key now sees it: rewrite THE BOUND"
-        assert revision_corpus.fresh_corpus_verdict_row() != baseline, "no longer a live instance"
+        moved = _first_moved_verdict()
+        assert moved is not None, "no longer a live instance"
     finally:
         dispatch[dict] = real
+    _assert_moved_only_under_the_perturbation(moved)
     assert revision_corpus.corpus_verdict_row() == baseline
     source = Path(revision_corpus.__file__).read_text(encoding="utf-8")
     assert "_copy_dispatch" in source, "THE BOUND must name the measured instance"
@@ -1421,7 +1641,9 @@ def test_the_bindings_the_memo_leaves_out_are_unread_by_the_replay():
     # Every excluded binding exists once the payload has been built (some are submodules the
     # manifest imports lazily); a binding that no longer exists fails, so the list stays true.
     authoring_contract._compiler_revision_payload()
-    baseline = revision_corpus.fresh_corpus_verdict_row()
+    # The module's fresh replay of the unperturbed state (:func:`_baseline`): a state that
+    # drifted since would differ from it and fail here, never pass.
+    baseline = _baseline().fresh_row
     assert _replay_with_sentinels(revision_corpus._UNREAD_BY_THE_REPLAY) == baseline
     control = {("boomi_mcp.compiler.process_ir.semantic_validation.lineage", "_overlay_cache_read")}
     assert _replay_with_sentinels(control) != baseline
@@ -1463,8 +1685,21 @@ _FIRST_REPLAY_SCRIPT = (
     "import json; from boomi_mcp.authoring import revision_corpus as c; "
     "rows = [c.corpus_verdict_row() for _ in range(3)]; "
     "print(json.dumps({'computations': c._MEMO.computations, 'hits': c._MEMO.hits, "
-    "'entries': len(c._MEMO.entries), 'same': rows[0] == rows[-1] == c.fresh_corpus_verdict_row()}))"
+    "'entries': len(c._MEMO.entries), 'same': rows[0] == rows[-1] == c.fresh_corpus_verdict_row(), "
+    "'row': rows[0]}))"
 )
+
+_COLD_CHILD = []
+
+
+def _cold_child():
+    """One fresh interpreter's measurement, shared by the two witnesses that need a cold
+    process: its first row (determinism across processes) and what its memo did."""
+    if not _COLD_CHILD:
+        process = subprocess.run([sys.executable, "-c", _FIRST_REPLAY_SCRIPT], cwd=str(_ROOT),
+                                 capture_output=True, text=True, env=_producer().child_env(), check=True)
+        _COLD_CHILD.append(json.loads(process.stdout))
+    return _COLD_CHILD[0]
 
 
 def test_the_first_replay_in_a_process_is_the_only_one():
@@ -1477,10 +1712,9 @@ def test_the_first_replay_in_a_process_is_the_only_one():
     second caller hits.
 
     In a fresh interpreter, because that is the only place the property exists: nothing in
-    this module's process is cold by the time a test runs."""
-    process = subprocess.run([sys.executable, "-c", _FIRST_REPLAY_SCRIPT], cwd=str(_ROOT),
-                             capture_output=True, text=True, env=_producer().child_env(), check=True)
-    measured = json.loads(process.stdout)
+    this module's process is cold by the time a test runs. (The same child as the determinism
+    witness's, :func:`_cold_child`; its first row is reported beside what is asserted here.)"""
+    measured = {key: value for key, value in _cold_child().items() if key != "row"}
     assert measured == {"computations": 1, "hits": 2, "entries": 1, "same": True}, measured
 
 
@@ -1549,7 +1783,11 @@ def _short_circuit_disagreements(helper, perturbations, baseline_payload):
 
     * Every other row byte-equal to the baseline: the answer rests on the corpus row, so the
       full payload gets that row REPLAYED — the helper's own replay when the memo's counter
-      proves it ran under this perturbation, otherwise a fresh one bypassing the memo.
+      proves it ran under this perturbation, otherwise a fresh one bypassing the memo, stopped
+      at the first verdict that moves (:func:`_first_moved_verdict`). The comparison needs
+      only whether the corpus row equals the baseline's (the other rows are byte-equal on this
+      branch), and a moved verdict answers that: the payload then carries a marker no row can
+      equal, so it fingerprints differently exactly as it would with the real row.
     * Some other row differs: the helper answers without the corpus row (it says so, with
       `NOT_COMPARED` in its place), and the full payload gets the BASELINE'S OWN corpus row. The
       fingerprint is SHA-256 over canonical JSON with sorted keys, so equal bytes mean every
@@ -1559,9 +1797,13 @@ def _short_circuit_disagreements(helper, perturbations, baseline_payload):
       checked exactly, with no replay.
     """
     baseline = authoring_contract.sha256_fingerprint(baseline_payload)
+    # The verdict-level answer compares against the module's baseline verdicts, so the two
+    # baselines must be the same row.
+    assert baseline_payload[_CORPUS_ROW] == _baseline().row
     other_rows = set(baseline_payload) - {_CORPUS_ROW}
     disagreements, unavailable, rested_on_the_replay, checked = [], [], [], 0
     for name, apply in perturbations:
+        verdict_moved = None
         with pytest.MonkeyPatch.context() as patched:
             apply(patched)
             computed_before = revision_corpus._MEMO.computations
@@ -1575,9 +1817,12 @@ def _short_circuit_disagreements(helper, perturbations, baseline_payload):
                         and revision_corpus._MEMO.computations > computed_before):
                     full[_CORPUS_ROW] = rows[_CORPUS_ROW]
                 else:
-                    full[_CORPUS_ROW] = revision_corpus.fresh_corpus_verdict_row()
+                    verdict_moved = _first_moved_verdict()
+                    full[_CORPUS_ROW] = (baseline_payload[_CORPUS_ROW] if verdict_moved is None
+                                         else {"a verdict moved": list(verdict_moved)})
             else:
                 full[_CORPUS_ROW] = baseline_payload[_CORPUS_ROW]
+        _assert_moved_only_under_the_perturbation(verdict_moved)
         checked += 1
         unavailable += [(name, row) for row, value in full.items() if value == "unavailable"]
         if (authoring_contract.sha256_fingerprint(full) != baseline) != moved:
@@ -1595,11 +1840,19 @@ def test_the_short_circuit_answers_exactly_as_the_full_comparison():
     another row already differs, the full payload is built with the baseline's own corpus row —
     the only corpus value that could make the payload's canonical bytes equal the baseline's —
     and if it still differs it differs with any value; when every other row is byte-equal, the
-    corpus row is replayed and compared. No full payload may read "unavailable"."""
-    baseline_payload = authoring_contract._compiler_revision_payload()
+    corpus row is replayed and compared. No full payload may read "unavailable".
+
+    The memo is handed back as it was found: the helper's replays under the five
+    perturbations that rest on the corpus row each store a row, which evicted the unperturbed
+    one and cost the next witness a whole replay to get it back."""
+    baseline_payload = _payload()
     perturbations = _every_perturbation()
-    outcome = _short_circuit_disagreements(
-        authoring_contract._compiler_revision_moved, perturbations, baseline_payload)
+    entries = list(revision_corpus._MEMO.entries)
+    try:
+        outcome = _short_circuit_disagreements(
+            authoring_contract._compiler_revision_moved, perturbations, baseline_payload)
+    finally:
+        revision_corpus._MEMO.entries[:] = entries
     assert (outcome["checked"], outcome["disagree"], outcome["unavailable"]) == (len(perturbations), [], [])
     # Non-vacuity: both arms were reached — some perturbation rests on the replay and some
     # does not. WHICH ones rest is a measurement, not a list: a perturbation rests only while
@@ -1618,11 +1871,16 @@ def test_the_short_circuit_names_the_row_it_did_not_compute():
     """CDX-184-r5-DOC-21B-05: the returned payload used to be 27 rows when the answer did not
     rest on the corpus, and the converted tests scan it for a row that degraded to
     "unavailable" — a scan that cannot see a row nobody computed. The row is now present and
-    reads `NOT_COMPARED`, which is distinguishable from both a real row and a degraded one."""
-    baseline_payload = authoring_contract._compiler_revision_payload()
-    with pytest.MonkeyPatch.context() as patched:
-        _rows_as_tuples(patched)  # byte-identical rows: the answer rests on the replay
-        moved, rested = authoring_contract._compiler_revision_moved(baseline_payload)
+    reads `NOT_COMPARED`, which is distinguishable from both a real row and a degraded one.
+
+    The half that rests on the replay is taken unperturbed: every other row is then
+    byte-identical by construction, so the answer rests on the corpus row exactly as it does
+    under a byte-identical rebuild — whose OTHER property, rows Python-unequal yet
+    byte-identical, the unsampled witness above checks on the real helper and the broken-twin
+    witness below refuses — and the row is the memo's rather than a whole replay under a
+    patch the corpus never reads."""
+    baseline_payload = _payload()
+    moved, rested = authoring_contract._compiler_revision_moved(baseline_payload)
     assert not moved and rested[_CORPUS_ROW] == baseline_payload[_CORPUS_ROW]
     with pytest.MonkeyPatch.context() as patched:
         # Any row but the corpus moving is enough: the helper then never asks for the replay.
@@ -1690,7 +1948,7 @@ def test_the_short_circuit_witness_refuses_a_broken_helper():
     as_tuples = _nested_tuples(real_rows())
     assert as_tuples != real_rows() and canonical_json_bytes(as_tuples) == canonical_json_bytes(real_rows())
 
-    baseline_payload = authoring_contract._compiler_revision_payload()
+    baseline_payload = _payload()
     name, only_the_corpus_row_moves = _a_carry_only_the_corpus_row_sees(baseline_payload)
     # The tuples case is the one `_every_perturbation` carries, so the unsampled witness above
     # runs the REAL helper on it too; here it is handed to the broken twin.
@@ -1833,8 +2091,24 @@ def _standalone_sample():
     return sorted(set(covered[::8]) | {module for module in measured if module in covered})
 
 
+#: A plugin for the standalone child: every test FUNCTION of the module runs, on its first
+#: parametrization only. Loaded by name from the test's own tmp directory; it imports nothing
+#: of the package, so it cannot change what the module's first import is.
+_FIRST_PARAMETRIZATION_ONLY = textwrap.dedent('''
+    def pytest_collection_modifyitems(config, items):
+        kept, dropped, seen = [], [], set()
+        for item in items:
+            function = item.nodeid.split("[", 1)[0]
+            (dropped if function in seen else kept).append(item)
+            seen.add(function)
+        if dropped:
+            items[:] = kept
+            config.hook.pytest_deselected(items=dropped)
+''')
+
+
 @pytest.mark.parametrize("module", _standalone_sample())
-def test_a_covered_module_passes_when_it_is_the_only_one_run(module):
+def test_a_covered_module_passes_when_it_is_the_only_one_run(module, tmp_path):
     """CDX-184-r6-GUARD-R2-01. The wrappers can only be installed on modules already
     imported, and the EXCLUSIONS — `_compiler_revision_payload`, the corpus replay — were not
     among the modules the session pre-imports. So when a covered test was the first code to
@@ -1842,9 +2116,26 @@ def test_a_covered_module_passes_when_it_is_the_only_one_run(module):
     inside it was recorded as that test's own input and refused: these two modules FAILED run
     on their own (36 and 621 absent inputs), and no regeneration could clear it, because the
     producer never records those calls. Run in a child process, one module at a time, which
-    is the only shape that reproduces it."""
+    is the only shape that reproduces it.
+
+    Each child runs every test FUNCTION of the module, on its first parametrization
+    (`_FIRST_PARAMETRIZATION_ONLY`) — a deterministic subset derived from the module itself.
+    The defect is a first-import one: whether the served revision's calls are recorded is
+    decided by which modules the session wrapped before the covered code first ran, and every
+    function's first case runs that code first; its further cases re-run code already
+    imported and wrapped. Measured on 3.11: `test_issue_184_child_state_transfer.py` alone is
+    952 tests and 110 s — 74 s of it the twelve cases of one source-mutant function, each
+    replaying the whole corpus — and its 147 functions on their first case run in ~30 s; the
+    other sampled modules lose 8, 23, 6 and 0 cases. So every function that computes the
+    served revision still runs alone, in each module — the source-mutant one on its first
+    mutant, the three in `test_issue_184_child_entries.py` (the other module the defect was
+    measured on) unchanged, as none of them is parametrized."""
     producer = _producer()
-    process = producer.run_pytest([module])
+    (tmp_path / "revision_corpus_first_parametrization.py").write_text(
+        _FIRST_PARAMETRIZATION_ONLY, encoding="utf-8")
+    search = os.pathsep.join([str(_ROOT / "src"), str(_ROOT / "tests"), str(tmp_path)])
+    process = producer.run_pytest([module, "-p", "revision_corpus_first_parametrization"],
+                                  env={"PYTHONPATH": search})
     assert process.returncode == 0, (process.stdout + process.stderr)[-4000:]
     assert "absent from the packaged corpus" not in process.stdout + process.stderr
 
@@ -2075,8 +2366,9 @@ def test_a_change_inside_a_module_the_replay_imports_is_not_memoized():
         "stored = c.corpus_verdict_row()\n"
         "c.replay = real\n"
         "print(json.dumps({'hit': c.memo_would_hit(), 'entries': len(c._MEMO.entries),\n"
-        "                  'served_is_stored': c.corpus_verdict_row() == stored,\n"
-        "                  'fresh_is_stored': c.fresh_corpus_verdict_row() == stored}))\n")
+        "                  'served_is_stored': c.corpus_verdict_row() == stored}))\n")
+    # (The child used to print a third field, a fresh replay compared with the stored row, that
+    # nothing asserted: a whole replay of the corpus in a cold interpreter, measuring nothing.)
     process = subprocess.run([sys.executable, "-c", script], cwd=str(_ROOT), capture_output=True,
                              text=True, env=producer.child_env(), check=True)
     measured = json.loads(process.stdout.strip().splitlines()[-1])
@@ -2088,10 +2380,18 @@ def test_a_field_added_to_an_existing_verdict_class_is_not_answered_from_the_cac
     """CDX-184-r8-B21B-R4-FIELDCACHE-01: the projection's field cache was per process and never
     invalidated, so widening a class IN PLACE moved the memo key but not the row — two states
     with the same key gave two rows, decided by cache history. The cache is cleared at the
-    start of every row now, so a row always reads the authority as it is."""
+    start of every row now, so a row always reads the authority as it is.
+
+    The baseline is the module's fresh replay (:func:`_baseline`); the cache is filled for the
+    class the way a replay fills it (by projecting through it); "the widened row differs" is
+    the real row computation's answer, stopped at the first verdict that moves — and that
+    computation CLEARS the cache first, which is the property under test. Only the last line,
+    "nothing differs once restored", replays the whole corpus: it has no earlier answer, and
+    it also shows the move above was the widening's."""
     from boomi_mcp.compiler.process_ir.semantic_validation.contracts import ValidationReportV1
 
-    baseline = revision_corpus.fresh_corpus_verdict_row()
+    baseline = _baseline().fresh_row
+    revision_corpus.declared_fields(ValidationReportV1)
     assert revision_corpus._DECLARED_FIELDS, "the cache is not being used at all"
     fields = ValidationReportV1.model_fields
     fields["blocked_by"] = fields["version"]
@@ -2099,7 +2399,7 @@ def test_a_field_added_to_an_existing_verdict_class_is_not_answered_from_the_cac
         # The cache still holds the pre-widening tuple for this class — and a ROW must not
         # answer from it: it clears the cache first, so the widened authority is read.
         assert "blocked_by" not in revision_corpus._DECLARED_FIELDS[ValidationReportV1]
-        assert revision_corpus.fresh_corpus_verdict_row() != baseline
+        assert _first_moved_verdict() is not None
         assert "blocked_by" in revision_corpus._DECLARED_FIELDS[ValidationReportV1]
     finally:
         del fields["blocked_by"]
@@ -2137,3 +2437,48 @@ def test_an_entry_point_call_made_while_a_covered_module_is_imported_is_checked(
     assert at_import[0]["digest"] not in {revision_corpus.digest(record)
                                           for record in revision_corpus.load_corpus()}
     assert "record" in at_import[0], "the producer must package the input, not just name it"
+
+
+# ---------------------------------------------------------------------------
+# correction batch 22: a child run's output does not depend on the caller's terminal
+# ---------------------------------------------------------------------------
+
+_COLOUR_WITNESS = "def test_that_fails():\n    assert False\n\n\ndef test_that_passes():\n    pass\n"
+
+
+def _failed_names(output):
+    return [line.split("::", 1)[1].split(" ")[0] for line in output.splitlines() if line.startswith("FAILED ")]
+
+
+def test_a_child_run_is_uncoloured_whatever_the_callers_terminal_exports(tmp_path, monkeypatch):
+    """Measured on correction batch 22: a shell exporting `FORCE_COLOR` made every child pytest
+    this module spawns wrap its `FAILED` lines in ANSI escapes, so the witnesses that parse them
+    read NOTHING and failed while the child runs themselves behaved. The producer's child is
+    now uncoloured by argument (`--color=no`) and by environment (`PY_COLORS=0`, which pytest
+    ranks above `FORCE_COLOR`), so its lines parse whatever the parent exports.
+
+    Non-vacuity: the pre-fix invocation — the same argv without `--color=no`, the same
+    environment without `PY_COLORS` — under the same parent environment IS coloured, and its
+    `FAILED` line does not parse. Either half alone keeps the child uncoloured; the control
+    removes both."""
+    producer = _producer()
+    module = tmp_path / "test_colour_witness.py"
+    module.write_text(_COLOUR_WITNESS, encoding="utf-8")
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("PY_COLORS", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    process = producer.run_pytest([str(module)])
+    output = process.stdout + process.stderr
+    assert "\x1b[" not in output, output
+    assert _failed_names(output) == ["test_that_fails"], output
+    assert "1 failed, 1 passed" in output and process.returncode == 1
+
+    env = producer.child_env()
+    env.pop("PY_COLORS", None)
+    argv = [sys.executable, "-m", "pytest", "-p", "_revision_corpus", "-p", "no:cacheprovider",
+            "-q", "--no-header", "-rfE", str(module)]
+    coloured = subprocess.run(argv, cwd=str(_ROOT), env=env, capture_output=True, text=True)
+    coloured_output = coloured.stdout + coloured.stderr
+    assert "\x1b[" in coloured_output, coloured_output
+    assert _failed_names(coloured_output) == [], coloured_output
+    assert coloured.returncode == 1

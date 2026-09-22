@@ -1913,6 +1913,12 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     "O_EXCL",
     "O_NOFOLLOW",
     "PYTHONHASHSEED",
+    # pytest's colour switches. #184's ledger names them when recording that a child
+    # pytest run inherited the caller's terminal: `FORCE_COLOR` coloured its summary
+    # lines, and `PY_COLORS=0`, which pytest ranks above it, is the fix. They are
+    # environment variables the harnesses SET, never diagnostics the gate can emit.
+    "FORCE_COLOR",
+    "PY_COLORS",
     # Collector trailer keywords, not diagnostics: the ledger quotes `STATUS:` and
     # `SCOPE:` when recording a review round's attestation.
     "SCOPE",
