@@ -3181,4 +3181,15 @@ what moves the revision. Revisions after batch 22c: `capability_revision` `sha25
 name which cache cause applies, and name the check that tells them apart; its new witness added
 packaged corpus inputs, and the census and the §11 rows did not move. Revisions after batch 24:
 `capability_revision` `sha256:13f16d33…` and `compiler_revision` `sha256:f64c242d…`; `schema_revision`
-stays `sha256:c9583e6b…`.
+stays `sha256:c9583e6b…`. **Correction batch 25
+(QA-184-s1-r24-01)** made the repeated-run refusal carry its cause: one `repeat_cause` evidence entry
+for every cause that holds — `cache_read_before_write`, `cache_retained_content` or `unknown_effects`,
+one vocabulary (`semantic_validation.contracts.PROCESS_CALL_REPEAT_CAUSES`) — read off the predicates
+that decide the refusal, and a served remediation that files one answer under each value; its sibling
+sweep keyed the placement refusal's hand-off answer on the message only lineage's hand-off check
+serves, where it had keyed it on the refusal naming the call, and widened the unknown-effect
+refusal's message and remediation — narrower than its refusals since #143 — to name every kind
+`_opaque_reason` reports (`map`, `script`, `subprocess`), with the answer each needs. Its new
+witnesses added packaged corpus inputs, and the census and the §11 rows did not move. Revisions
+after batch 25: `capability_revision` `sha256:16f62dc5…` and `compiler_revision`
+`sha256:03a5e24b…`; `schema_revision` stays `sha256:c9583e6b…`.

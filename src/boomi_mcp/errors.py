@@ -1738,7 +1738,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "Supply a contract whose content a server-side authority backs — "
                 "inspection of the resolved component, or a vetted script "
                 "registry entry — or write the state explicitly; a declaration "
-                "the server cannot corroborate is inert."
+                "the server cannot corroborate is inert. For a subprocess the "
+                "backing can be the called process's own ProcessIR, supplied in "
+                "the same request."
             ),
             owner="#143",
         ),

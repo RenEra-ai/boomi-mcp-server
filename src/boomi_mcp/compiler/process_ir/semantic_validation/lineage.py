@@ -72,6 +72,7 @@ from ..entry_policy import FUSED_ENTRY_SEMANTIC_KINDS, PASSTHROUGH, classify_ent
 from ..invariants import _CONTROL_KINDS
 from .contracts import (
     DEFAULT_VALIDATION_CAPABILITIES,
+    PROCESS_CALL_REPEAT_CAUSES,
     ProcessIRValidationCapabilitiesV1,
     StateEffectV1,
     ValidationDiagnosticV1,
@@ -1583,8 +1584,13 @@ def _caller_owes_a_cached_property(cache_ref: str, name: str, capabilities, stat
     return _caller_documents_may_reach(state, cache_ref)
 
 
-def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[str, ...]:
+def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[Tuple[str, str], ...]:
     """The caches one No Data run may change before the next run needs them (#184 amendment 1 rule 8).
+
+    Returned as ``(cause, cache_ref)`` pairs, one for each way a cache is unstable, the cause
+    a value of `PROCESS_CALL_REPEAT_CAUSES`: the refusal and the causes it serves are decided
+    by these same predicates, so the finding cannot name a cause that did not decide it
+    (QA-184-s1-r24-01). The cache references never leave this module.
 
     A No Data child runs once per arriving document, so every run after the first starts
     from the state the earlier runs left, and the lattice answers that per component. A
@@ -1611,11 +1617,17 @@ def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[str, ..
     continues past the failure starts the next run from it; a call that does not wait may
     start the next run before the removal.
     """
-    required = {key[1] for key in contract.required_reads if key[0] == CACHE}
+    required = {
+        (PROCESS_CALL_REPEAT_CAUSES.cache_read_before_write, key[1])
+        for key in contract.required_reads if key[0] == CACHE
+    }
     waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))
     if not (contract.required_caches_retain_nothing_it_stored and waits_and_aborts):
-        required |= {row[0] for row in contract.cache_requirements}
-        required |= {row[0] for row in contract.cache_property_requirements}
+        required |= {
+            (PROCESS_CALL_REPEAT_CAUSES.cache_retained_content, ref)
+            for ref in {row[0] for row in contract.cache_requirements}
+            | {row[0] for row in contract.cache_property_requirements}
+        }
     if not (contract.state_known or contract.cache_writes_known):
         # A child whose cache writes are NOT all known may write any of them, and which
         # caches those are is a fact about the CHILD. `_caches_a_call_may_write` answers
@@ -1628,7 +1640,8 @@ def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[str, ..
         # (R8-SOUND-01). Everything the child requires is the fail-closed answer, and it is
         # the child's own vocabulary.
         return tuple(sorted(required))
-    return tuple(sorted(required & set(_caches_a_call_may_write(cache_refs, contract))))
+    may_write = set(_caches_a_call_may_write(cache_refs, contract))
+    return tuple(sorted(pair for pair in required if pair[1] in may_write))
 
 
 class _RetrieveAtCall(NamedTuple):
@@ -2894,25 +2907,31 @@ def _walk_lineage(
                 ))
         if form == "scheduled" and stream.count != COUNT_ONE:
             unstable_caches = _repetition_unstable_caches(contract, cache_refs, semantic)
-            unknown_first_reads = bool(contract.required_reads and not contract.state_known)
-            if unstable_caches or unknown_first_reads:
+            causes = {cause for cause, _cache_ref in unstable_caches}
+            if contract.required_reads and not contract.state_known:
+                causes.add(PROCESS_CALL_REPEAT_CAUSES.unknown_effects)
+            if causes:
                 # A No Data child runs once per arriving document, so a later run may
                 # find a cache an earlier run changed (amendment 1 rule 8); a process
                 # property it rewrites stays established for the next run.
                 #
-                # Its own code since QA-184-s1-r21-01: under the placement code this refusal
-                # served a step-prefix message and remediation that named neither the cause
-                # nor a way out. The evidence's `state_scope` names the scope of the state
-                # involved — `cache` for an unstable cache, else the scope of the first state
-                # the child reads before writing — and does NOT tell the two causes apart: a
-                # child with unknown effects whose first read is a cache serves `cache` too.
-                # No cache reference is served — findings carry no authored text.
+                # Its own code since QA-184-s1-r21-01. The evidence's `state_scope` names the
+                # scope of the state involved — `cache` for an unstable cache, else the scope
+                # of the first state the child reads before writing — and alone does not tell
+                # the causes apart: a child with unknown effects whose first read is a cache
+                # serves `cache` too. So the finding also carries one `repeat_cause` entry for
+                # EVERY cause that holds, read off the predicates that decided the refusal
+                # above, and the served remediation keys one answer to each value
+                # (QA-184-s1-r24-01, the second instance of a remediation that branched on a
+                # cause the finding did not carry). No cache reference is served — findings
+                # carry no authored text.
                 scope = CACHE if unstable_caches else sorted(
                     key[0] for key in contract.required_reads)[0]
                 _report(
                     PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
                     node,
-                    evidence=(("state_scope", scope),),
+                    evidence=(("state_scope", scope),) + tuple(
+                        ("repeat_cause", cause) for cause in sorted(causes)),
                     phase=_CAPABILITY_PHASE,
                 )
         state = _child_may_write_caches(state, contract)

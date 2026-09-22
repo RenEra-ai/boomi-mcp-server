@@ -52,7 +52,20 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Dict, FrozenSet, Iterable, List, Literal, Optional, Tuple, Union
+from types import MappingProxyType
+from typing import (
+    Any,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
@@ -127,6 +140,9 @@ _EVIDENCE_KEYS: FrozenSet[str] = frozenset(
         "connector_action",
         "terminal_role",
         "cardinality",
+        # #184 (QA-184-s1-r24-01): one entry per cause of a repeated-run refusal that holds,
+        # each value from `PROCESS_CALL_REPEAT_CAUSES` below — the one key that may repeat.
+        "repeat_cause",
         # counts and flags
         "retry_count",
         "external_writer",
@@ -140,6 +156,40 @@ _EVIDENCE_KEYS: FrozenSet[str] = frozenset(
         "exemption",
     }
 )
+
+
+class ProcessCallRepeatCausesV1(NamedTuple):
+    """The causes a repeated-run refusal can have (#184 amendment 1 rule 8).
+
+    Each field's value is its own name, so the tuple IS the served vocabulary and each
+    cause is spelled once. `lineage` decides which causes hold at a call from the same
+    predicates that decide the refusal, and serves each under `repeat_cause`;
+    `findings` keys one answer to each value. Neither module spells a value itself.
+
+    - ``cache_read_before_write``: the child reads a cache before writing it, and may
+      also add to or empty that cache.
+    - ``cache_retained_content``: the child requires the profile or the properties of
+      what it retrieves from a cache it may also add to or empty, and the exemption for a
+      run that ends with nothing it stored left there does not hold.
+    - ``unknown_effects``: the child reads state before writing it while its own state
+      effects are unknown.
+    """
+
+    cache_read_before_write: str
+    cache_retained_content: str
+    unknown_effects: str
+
+
+#: THE vocabulary of `repeat_cause` (QA-184-s1-r24-01): one module-level constant that the
+#: emission site builds its evidence from, the remediation keys its answers to, and
+#: `ValidationEvidenceV1` holds every `repeat_cause` value to.
+PROCESS_CALL_REPEAT_CAUSES = ProcessCallRepeatCausesV1(*ProcessCallRepeatCausesV1._fields)
+
+#: Evidence keys whose values are a CLOSED vocabulary, checked at construction. A value
+#: outside it is a compiler defect, never an authored one: no caller input reaches it.
+_CLOSED_EVIDENCE_VALUES: Mapping[str, FrozenSet[str]] = MappingProxyType({
+    "repeat_cause": frozenset(PROCESS_CALL_REPEAT_CAUSES),
+})
 
 #: A structural token: lowercase, bounded, no separators that appear in ids,
 #: refs, labels or paths.
@@ -205,6 +255,13 @@ class ValidationEvidenceV1(_ValidationModel):
         if _SAFE_TOKEN.match(value) or _SAFE_CODE.match(value):
             return value
         raise ValueError("evidence value is neither a structural token nor a code")
+
+    @model_validator(mode="after")
+    def _value_is_in_its_keys_vocabulary(self) -> "ValidationEvidenceV1":
+        vocabulary = _CLOSED_EVIDENCE_VALUES.get(self.key)
+        if vocabulary is not None and (isinstance(self.value, bool) or self.value not in vocabulary):
+            raise ValueError("evidence value is outside its key's closed vocabulary")
+        return self
 
     @staticmethod
     def allowed_keys() -> FrozenSet[str]:

@@ -7700,7 +7700,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "6d9ce64e5aefda767c2403be8b8e674088abc047c391efe584104a4466277b43",
+      "sha256": "984b38711379297a429e7a12ae983f76384e5dd1f905e5f109f805f32514342a",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7837,11 +7837,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:13f16d33ddb4593653afd31ca45e0fa48276b19b58da5ea919be78c8038715fb",
+          "actual_capability_revision": "sha256:16f62dc55b4a64e1b75b977798fdf5d7951784657bbebf3d212dccd0f2d81ae0",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:13f16d33ddb4593653afd31ca45e0fa48276b19b58da5ea919be78c8038715fb",
-        "compiler_revision": "sha256:f64c242dedc8b252e084a08bca56b1fcbfb36fdfaaa8bbbb15ec739898261e71",
+        "capability_revision": "sha256:16f62dc55b4a64e1b75b977798fdf5d7951784657bbebf3d212dccd0f2d81ae0",
+        "compiler_revision": "sha256:03a5e24b294c33974a06335744057b48f994238698d8885ab65f69a617f9bc60",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -14349,7 +14349,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "733e444d1c6c54886c1d6939eae39fa91746564640cbd7c2f1a32f85d7dec269",
+      "sha256": "eb3d908a17f6c10646acd008ad7e008ddb340d8dff7d153f45e504780a243e31",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -18961,8 +18961,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:13f16d33ddb4593653afd31ca45e0fa48276b19b58da5ea919be78c8038715fb",
-          "compiler_revision": "sha256:f64c242dedc8b252e084a08bca56b1fcbfb36fdfaaa8bbbb15ec739898261e71",
+          "capability_revision": "sha256:16f62dc55b4a64e1b75b977798fdf5d7951784657bbebf3d212dccd0f2d81ae0",
+          "compiler_revision": "sha256:03a5e24b294c33974a06335744057b48f994238698d8885ab65f69a617f9bc60",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -18983,7 +18983,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "b6e9dabcccc84695d6b78d421ce7859db081de84fc0b27649940f4cfca156183",
+      "sha256": "98fe6578930225156a9ca531021c7ba55c8c0e632c86ea9b5d5a489c07644f04",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -23525,8 +23525,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:13f16d33ddb4593653afd31ca45e0fa48276b19b58da5ea919be78c8038715fb",
-          "compiler_revision": "sha256:f64c242dedc8b252e084a08bca56b1fcbfb36fdfaaa8bbbb15ec739898261e71",
+          "capability_revision": "sha256:16f62dc55b4a64e1b75b977798fdf5d7951784657bbebf3d212dccd0f2d81ae0",
+          "compiler_revision": "sha256:03a5e24b294c33974a06335744057b48f994238698d8885ab65f69a617f9bc60",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -23547,7 +23547,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "88a5a6b8d5d3007bd0c3c916963d1261f62e83cf137d72b06ca6b1246f31d59b",
+      "sha256": "28ced31cd10e7b4047b9a8b1f89ec6709793e65567e6ee9f73ca7c9178b1df4e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -27798,8 +27798,8 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:13f16d33ddb4593653afd31ca45e0fa48276b19b58da5ea919be78c8038715fb",
-          "compiler_revision": "sha256:f64c242dedc8b252e084a08bca56b1fcbfb36fdfaaa8bbbb15ec739898261e71",
+          "capability_revision": "sha256:16f62dc55b4a64e1b75b977798fdf5d7951784657bbebf3d212dccd0f2d81ae0",
+          "compiler_revision": "sha256:03a5e24b294c33974a06335744057b48f994238698d8885ab65f69a617f9bc60",
           "contract_version": "2",
           "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd"
         },
@@ -41909,7 +41909,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "96473451c515699de42132a6da7cad2cff06633407a1b618c362c20289829288",
+      "sha256": "a2ad0aa659b8157dbf0ae624ef8216d914682278d2a8945d62de4930b9d52c8e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -42191,17 +42191,17 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "f994120d15f2ce990b569b291ad5fa6784587a27deefdf8fd37a265c78db1a92",
-        "schema_name=AuthoringCompileResultV1": "733e444d1c6c54886c1d6939eae39fa91746564640cbd7c2f1a32f85d7dec269",
-        "schema_name=AuthoringPlanResultV1": "b6e9dabcccc84695d6b78d421ce7859db081de84fc0b27649940f4cfca156183",
-        "schema_name=AuthoringRequestV1": "88a5a6b8d5d3007bd0c3c916963d1261f62e83cf137d72b06ca6b1246f31d59b",
-        "schema_name=AuthoringRevisionBindingV1": "adbd07f18030749cf870d646f2661e710b55345194281e4bee3e5caecd5f20bd",
-        "schema_name=DerivedFlowRowV1": "c5364316e93074f5dc0269a727799902607f07a57722415723359cfd3fbc9040",
+        "schema_name=AuthoringBuildProvenanceV1": "b404a2f2a4cf0fbb1af5d39249e79666f2a288275b3292f45d93f26b1d131673",
+        "schema_name=AuthoringCompileResultV1": "eb3d908a17f6c10646acd008ad7e008ddb340d8dff7d153f45e504780a243e31",
+        "schema_name=AuthoringPlanResultV1": "98fe6578930225156a9ca531021c7ba55c8c0e632c86ea9b5d5a489c07644f04",
+        "schema_name=AuthoringRequestV1": "28ced31cd10e7b4047b9a8b1f89ec6709793e65567e6ee9f73ca7c9178b1df4e",
+        "schema_name=AuthoringRevisionBindingV1": "ce4d9175c9ebffdf45784321cc7e9cf544611f37d6a4ede0ebcb695efd49be23",
+        "schema_name=DerivedFlowRowV1": "8a5761816d7d282b4108d9c203fdbfc962d750c499fe30ce42a191ee52adbfd0",
         "schema_name=IntegrationSpecV1": "82b9209bfeb9f1df7252621a644024f969b16921b92e2299e47fe11273770c45",
-        "schema_name=ProcessIRV1": "3c881c7623ea7ddd3a9b2162d0b0428d3813bc0edb854841e6aded83c4b23a34",
-        "schema_name=RecordedIntentV1": "66a7cae1c6e3cc2b1086678515f5aef37ecb085c1b5bb169b9a51c67890d1fc7",
-        "schema_name=SystemTopologySpecV1": "eb1f14b615c6b70eaa5d80b2c62d1437a2d4252aac0ed247104733a0c7dee2b1",
-        "schema_name=WatermarkDeclarationV1": "7ad3b046e4fb03979c255d053cf5951b10c2142f816453d6d8c8b7b16d0be2b4",
+        "schema_name=ProcessIRV1": "9d58f4c23960c3f4649350dca6b6e9de1f410f32f3d382954613ba335bc4fbae",
+        "schema_name=RecordedIntentV1": "5217ad49979094942ad3a1aab00009830fccdba2539b1d8857df267958c62814",
+        "schema_name=SystemTopologySpecV1": "408e93e0b0de9152660f73db13a846a1b3ccad9d682f39309a04647aed787f83",
+        "schema_name=WatermarkDeclarationV1": "064dad8f454e78453952f01c6ac1acb531e2a61b7d2994e82ca695e5b878bc6a",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -42210,7 +42210,7 @@
         "schema_name=archetype:http_listener_to_db": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
         "schema_name=archetype:http_listener_to_rest": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "a39218ffcd231602eb984f0103b88de528f354217dfada7777e27e2757223747",
+        "schema_name=authoring_workflow": "8a1c36314f625c124cd473fc60ae27608611168b47d68c7f3ebc8d2319c710ca",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -42273,7 +42273,7 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "2ce20d16b194a6eafa82d847ffd3897911ee2de89bc02396cf834804021f5c36",
+        "schema_name=process_ir_authoring": "d0c02506b6456617ebb9b4179f8855658664a9bb9c6e30cb9238a0f7d224b278",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
         "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "06640b826d51c4b3a7a58128cbafefba69663da996df09ffa7c7fe5485ac9722",
         "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "2f3a47205e1c88de03a2a5fa10dc32cf6c87f01f2f1d501c5b0b14861ed708f3",
@@ -42287,7 +42287,7 @@
         "schema_name=recipe_registry": "5837fd9118e4a31b42173f74568f8bc1e00bfb7904d20772f4b36192e340ad1a",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "ad9fc6b727d243dce0020a23045e871d6cfa881e40f8204128ec8a6e28409f0d",
+        "schema_name=validation_report": "b21caaf297bd84e2b1426a55f5e9179f6a79bfbb7584c2da24549548f8bb752b",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

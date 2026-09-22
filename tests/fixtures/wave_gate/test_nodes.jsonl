@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14218, "minimum_collected": 14218, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14250, "minimum_collected": 14250, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14316,3 +14316,35 @@
 {"kind": "test", "id": "pytest-014315", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_moved_verdict_is_never_compared_with_a_baseline_measured_under_its_perturbation", "state": "active"}
 {"kind": "test", "id": "pytest-014316", "node_id": "tests/test_issue_184_revision_corpus.py::test_the_baseline_witnesses_pass_when_each_runs_alone", "state": "active"}
 {"kind": "test", "id": "pytest-014317", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_says_it_does_not_name_which_cache_cause_applies", "state": "active"}
+{"kind": "test", "id": "pytest-014318", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7039]", "state": "active"}
+{"kind": "test", "id": "pytest-014319", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7361]", "state": "active"}
+{"kind": "test", "id": "pytest-014320", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[a_cache_read_before_write]", "state": "active"}
+{"kind": "test", "id": "pytest-014321", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[b_cache_retained_content]", "state": "active"}
+{"kind": "test", "id": "pytest-014322", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[c_prime_unknown_effects_first_read_a_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-014323", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[c_unknown_effects_first_read_a_property]", "state": "active"}
+{"kind": "test", "id": "pytest-014324", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[d_read_before_write_and_unknown_effects]", "state": "active"}
+{"kind": "test", "id": "pytest-014325", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[e_read_before_write_and_retained_content]", "state": "active"}
+{"kind": "test", "id": "pytest-014326", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeated_run_finding_names_every_cause_that_holds[f_all_three]", "state": "active"}
+{"kind": "test", "id": "pytest-014327", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[a_cache_read_before_write]", "state": "active"}
+{"kind": "test", "id": "pytest-014328", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[b_cache_retained_content]", "state": "active"}
+{"kind": "test", "id": "pytest-014329", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[c_prime_unknown_effects_first_read_a_cache]", "state": "active"}
+{"kind": "test", "id": "pytest-014330", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[c_unknown_effects_first_read_a_property]", "state": "active"}
+{"kind": "test", "id": "pytest-014331", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[d_read_before_write_and_unknown_effects]", "state": "active"}
+{"kind": "test", "id": "pytest-014332", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[e_read_before_write_and_retained_content]", "state": "active"}
+{"kind": "test", "id": "pytest-014333", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_keyed_answer_is_the_one_that_admits_the_call[f_all_three]", "state": "active"}
+{"kind": "test", "id": "pytest-014334", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_cache_first_read_under_unknown_effects_is_not_a_cache_cause", "state": "active"}
+{"kind": "test", "id": "pytest-014335", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_repeat_cause_vocabulary_is_closed_and_complete", "state": "active"}
+{"kind": "test", "id": "pytest-014336", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_cause_witness_fails_on_what_815aa7b_served", "state": "active"}
+{"kind": "test", "id": "pytest-014337", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[hand_off_after_native_work_before_the_branch]", "state": "active"}
+{"kind": "test", "id": "pytest-014338", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[hand_off_into_a_child_nothing_derives]", "state": "active"}
+{"kind": "test", "id": "pytest-014339", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[hand_off_into_a_no_data_child]", "state": "active"}
+{"kind": "test", "id": "pytest-014340", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[hand_off_of_what_the_child_consumes_unstated]", "state": "active"}
+{"kind": "test", "id": "pytest-014341", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[recovery_prefix]", "state": "active"}
+{"kind": "test", "id": "pytest-014342", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves[root_prefix]", "state": "active"}
+{"kind": "test", "id": "pytest-014343", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_the_hand_off_check_serves_the_placement_tables_own_message", "state": "active"}
+{"kind": "test", "id": "pytest-014344", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_served_effect_unknown_finding_names_the_kind_it_reports[map]", "state": "active"}
+{"kind": "test", "id": "pytest-014345", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_served_effect_unknown_finding_names_the_kind_it_reports[script]", "state": "active"}
+{"kind": "test", "id": "pytest-014346", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_served_effect_unknown_finding_names_the_kind_it_reports[subprocess]", "state": "active"}
+{"kind": "test", "id": "pytest-014347", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_process_whose_process_ir_the_request_carries_is_not_opaque", "state": "active"}
+{"kind": "test", "id": "pytest-014348", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_served_effect_unknown_text_names_every_reporting_site", "state": "active"}
+{"kind": "test", "id": "pytest-014349", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_effect_unknown_finding_serves_the_kind_the_authority_returned", "state": "active"}

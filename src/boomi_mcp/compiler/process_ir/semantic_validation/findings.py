@@ -66,7 +66,11 @@ from ..diagnostics import (
     _UNREGISTERED_CODE_REMEDIATION,
     node_identity_for,
 )
-from .contracts import ValidationDiagnosticV1, ValidationEvidenceV1
+from .contracts import (
+    PROCESS_CALL_REPEAT_CAUSES,
+    ValidationDiagnosticV1,
+    ValidationEvidenceV1,
+)
 
 _MESSAGES: Dict[str, str] = {
     PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND: (
@@ -84,7 +88,8 @@ _MESSAGES: Dict[str, str] = {
     ),
     # #184 amendment 1 rule 8 (QA-184-s1-r21-01): raised by lineage at a call whose No Data
     # child more than one document can reach. The evidence's `state_scope` names the scope
-    # of the state involved and does not identify which of the two causes applies.
+    # of the state involved, and its `repeat_cause` entries name every cause that holds
+    # (QA-184-s1-r24-01), each a value of `PROCESS_CALL_REPEAT_CAUSES`.
     PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE: (
         "the called No Data process runs once for each document reaching this call, and "
         "each run may change state a later run requires: it requires something of a "
@@ -131,8 +136,14 @@ _MESSAGES: Dict[str, str] = {
     PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE: (
         "converging paths leave the last writer undetermined"
     ),
+    # QA-184-s1-r24-01's sibling sweep: `_opaque_reason` reports THREE kinds — `map`,
+    # `script` and `subprocess` — and this text named two until correction batch 25. The
+    # kind is served as the finding's `effect_kind`, so each is named here, in the
+    # remediation and in the taxonomy summary, each on its own.
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN: (
-        "a map or script has no typed effect contract, so its state effects are unknown"
+        "a map, a script or a called subprocess has no typed effect contract, and a "
+        "subprocess no derived ProcessIR that states every effect it has either, so its "
+        "state effects are unknown"
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED: (
         "state is assumed to come from a declared external writer"
@@ -162,6 +173,58 @@ _MESSAGES: Dict[str, str] = {
     ),
 }
 
+#: QA-184-s1-r24-01. The answer to each cause a repeated-run refusal serves under
+#: `repeat_cause`, keyed by the served value itself and in the vocabulary's own order, so the
+#: remediation built from it answers exactly the values the finding can carry.
+#: `_answers_exactly(...)` refuses at import a vocabulary value with no answer and an answer
+#: for no value, so neither can be served.
+_REPEAT_CAUSE_ANSWERS: Mapping[str, str] = MappingProxyType({
+    PROCESS_CALL_REPEAT_CAUSES.cache_read_before_write: (
+        "the child reads a cache before writing it, so it needs that cache established "
+        "before its own write, and an earlier run may have emptied it: no removal exempts "
+        "that one — write the cache before reading it, or give it a Data Passthrough entry "
+        "and take what it needs from the documents its callers hand over, which a No Data "
+        "child never receives."
+    ),
+    PROCESS_CALL_REPEAT_CAUSES.cache_retained_content: (
+        "the child consumes the profile or uses the properties of the documents it "
+        "retrieves from a cache it may also add to or empty, and either a run may end with "
+        "what it stored still in that cache or this call is not authored both wait=true and "
+        "abort_on_error=true. Remove the whole cache after its last write to it, in a later "
+        "leg of the same Branch that runs no connector call, cache retrieve or data process "
+        "before the removal, with this call authored wait=true and abort_on_error=true, and "
+        "with no call of its own able to write that cache after the removal or while the run "
+        "goes on: move a call that stands after the removal to before it and wait for it, "
+        "and wait for every call it makes, including a call made by a process it calls. "
+        "Supplying a called process's ProcessIR helps only where the contract derived from "
+        "it shows that process does not write that cache — for a call nothing waits for, "
+        "that is the only thing that helps. A cache this request declares an outside writer "
+        "for, where a retrieve of that cache authors external_writer, takes no such "
+        "exemption at all, whatever the child's own calls do: the writer may refill it "
+        "between runs, so either the child stops requiring that cache of its callers or it "
+        "runs once for the whole group. A declaration no retrieve names establishes nothing "
+        "and withholds nothing."
+    ),
+    PROCESS_CALL_REPEAT_CAUSES.unknown_effects: (
+        "the child reads state before writing it while its own state effects are unknown, "
+        "and is refused for that read whatever the caches do: make its effects derivable, "
+        "by supplying the ProcessIR of what it calls or replacing the step nothing can "
+        "inspect."
+    ),
+})
+
+
+def _answers_exactly(vocabulary: Tuple[str, ...], answers: Mapping[str, str]) -> Mapping[str, str]:
+    """``answers``, refused unless it keys one answer to every value of ``vocabulary``, in order."""
+    if tuple(answers) != tuple(vocabulary):
+        raise RuntimeError(
+            "a served cause vocabulary and the answers keyed to it disagree: "
+            "{0} != {1}".format(sorted(answers), sorted(vocabulary)))
+    return answers
+
+
+_answers_exactly(PROCESS_CALL_REPEAT_CAUSES, _REPEAT_CAUSE_ANSWERS)
+
 _REMEDIATION: Dict[str, str] = {
     PROCESS_IR_REFERENCE_COMPONENT_NOT_FOUND: (
         "Provide a component symbol for this reference in the component plan."
@@ -180,40 +243,23 @@ _REMEDIATION: Dict[str, str] = {
         "document and nothing a caller supplies, so run it through its caller or "
         "remove what it requires of one."
     ),
-    # QA-184-s1-r23-01: the finding serves no field that names its cause, so the remediation
-    # says so and names the check that tells the two cache answers apart.
+    # QA-184-s1-r24-01, the second instance of `served-remediation-branches-on-a-cause-the-
+    # finding-does-not-carry` (the first was QA-184-s1-r23-01): the finding serves one
+    # `repeat_cause` entry per cause that holds, and the cause half of this text is BUILT from
+    # `_REPEAT_CAUSE_ANSWERS`, one answer keyed to each value of that vocabulary.
     PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE: (
         "Make the called process run once for these documents. Either give it a Data "
         "Passthrough entry, with a passthrough step first and this call authored "
         "wait=true, so one call runs it once over the whole group; or call it from a "
         "process with no explicit entry, as the terminal of a Branch leg that has no steps "
         "of its own and no step in front of its Branch, which hands the call exactly one "
-        "document. Or answer the cause, which this finding does not name: check whether the "
-        "child reads the cache before writing it. A child that reads the "
-        "cache before writing it needs that cache established before its own write, and an "
-        "earlier run may have emptied it: no removal exempts that one — write the cache "
-        "before reading it, or give it a Data Passthrough entry and take what it needs from "
-        "the documents its callers hand over, which a No Data child never receives. "
-        "A "
-        "child that never reads the cache before writing it may instead remove the whole "
-        "cache after its last write to it, in a later leg of the same Branch that runs no "
-        "connector call, cache retrieve or data process before the removal, with this call "
-        "authored wait=true and abort_on_error=true, and with no call of its own able to "
-        "write that cache after the removal or while the run goes on: move a call that "
-        "stands after the removal to before it and wait for it, and wait for every call it "
-        "makes, including a call made by a process it calls. Supplying a called process's "
-        "ProcessIR helps only where the contract derived from it shows that process does "
-        "not write that cache — for a call nothing waits for, that is the only thing that "
-        "helps. A cache this request declares an outside writer for, where a retrieve of "
-        "that cache authors external_writer, takes no such "
-        "exemption at all, whatever the child's own calls do: the writer may refill it "
-        "between runs, so either the child stops requiring that cache of its callers or it "
-        "runs once for the whole group. A declaration no retrieve names establishes nothing "
-        "and withholds nothing. A child that reads state before writing it while its own state effects are "
-        "unknown is refused for that read whatever the caches do: make its effects "
-        "derivable, by supplying the ProcessIR of what it calls or replacing the step "
-        "nothing can inspect. "
-        "The rule is published at "
+        "document. Or answer each cause the finding names: its evidence carries one "
+        "repeat_cause entry for every cause that holds. "
+        + " ".join(
+            "For {0}, {1}".format(cause, answer)
+            for cause, answer in _REPEAT_CAUSE_ANSWERS.items()
+        )
+        + " The rule is published at "
         "get_schema_template(schema_name='process_ir_authoring', node_kind='process_call')."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE: (
@@ -253,8 +299,11 @@ _REMEDIATION: Dict[str, str] = {
         "read inside the path that writes it."
     ),
     PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN: (
-        "Declare a typed effect contract for this map or script, or set the "
-        "state explicitly with a property step. A declaration alone is not "
+        "The finding's effect_kind names which step this is: map, script or subprocess. "
+        "For a map or a script, declare a typed effect contract for it, or set the state "
+        "explicitly with a property step. For a subprocess, supply the called process's "
+        "ProcessIR in this request, so the server derives every effect it has, or declare "
+        "a typed subprocess summary for it. A declaration alone is not "
         "enough: its CONTENT must be backed by a server-side authority — "
         "inspection of the resolved map or child process, or a vetted script "
         "registry entry — and a declaration with no such backing is inert. A "
@@ -334,8 +383,9 @@ _COMPILER_WORDED_CODES: Tuple[str, ...] = (
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
     # Raised by this validator's ports of the compiler's own rules: the flow walks
     # (`flow.collect_reachability_findings` and `collect_terminal_findings`, the walks
-    # `invariants` runs on the same graph) and lineage's No Data placement check at a
-    # call, which the compiler's text covers where the refusal names the call itself.
+    # `invariants` runs on the same graph) and lineage's hand-off check at a call, which
+    # serves the compiler's own message, the one the compiler's remediation keys its
+    # hand-off answer to (correction batch 25).
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED,
     PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
     PROCESS_IR_SEMANTIC_UNREACHABLE,

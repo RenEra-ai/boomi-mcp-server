@@ -3786,7 +3786,7 @@ def test_the_repeated_run_refusal_states_its_cause_and_its_way_out(kind, child):
         assert message != compiler_diagnostics._MESSAGES[placement]
         assert remediation != compiler_diagnostics._REMEDIATION[placement]
         assert "direct predecessor" not in remediation
-    assert [(evidence.key, evidence.value) for evidence in validated[0].evidence] == [("state_scope", "cache")]
+    assert [(item.key, item.value) for item in validated[0].evidence if item.key != "repeat_cause"] == [("state_scope", "cache")]
     # The two ways out, measured on the same child.
     as_passthrough = _passthrough_root(*_branch_legs(document))
     waited = [("PARENT", _passthrough_root(*(caller_prefix + [
@@ -4800,7 +4800,7 @@ def test_rule_eight_asks_the_childs_own_vocabulary_when_its_cache_writes_are_unk
     _lineage_with_source(
         monkeypatch,
         "        return tuple(sorted(required))\n",
-        "        return tuple(sorted(required & set(_caches_a_call_may_write(cache_refs, contract))))\n")
+        "        return tuple(sorted(pair for pair in required if pair[1] in _caches_a_call_may_write(cache_refs, contract)))\n")
     assert _errors(names_no_cache, "PARENT") == []
     assert _errors(names_the_cache, "PARENT") == refused
 
@@ -6853,26 +6853,82 @@ def test_the_unknown_seed_s_recorded_over_refusal():
 
 
 # ---------------------------------------------------------------------------
-# Correction batch 24: QA-184-s1-r23-01, the served text says the finding names no cause
+# Correction batches 24 and 25: what the repeated-run finding says about its cause
 # ---------------------------------------------------------------------------
 #
-# Rule 8's refusal has two cache causes, a child that reads the cache before writing it and a
-# child that keeps what it stored there, and the finding does not say which applies: its
-# evidence is `state_scope: cache` either way. Live QA served both causes through
-# `build_integration` and received byte-identical diagnostics, while the remediation told the
-# author to "answer the cause this call was refused for". The remediation now says that the
-# finding does not name the cause, and names the check that tells the two answers apart.
+# Rule 8's refusal has three causes: the child reads a cache before writing it; it requires the
+# content of a cache it may add to or empty while a run may keep what it stored there; or it reads
+# state first while its own state effects are unknown. Batch 24 (QA-184-s1-r23-01) found the
+# finding serving nothing that told them apart — its evidence was `state_scope` alone, `cache` for
+# both cache causes — while the remediation told the author to "answer the cause this call was
+# refused for"; it made the text say that the finding does not name the cause and gave a check
+# that tells the two CACHE causes apart. Live QA round r24 (QA-184-s1-r24-01) found the second
+# instance of that defect class, `served-remediation-branches-on-a-cause-the-finding-does-not-
+# carry`: a state-scoped refusal (`state_scope: dpp`, no cache anywhere) was sent to that cache
+# check, and the answer that applies was not reached by it.
+#
+# Batch 25 is the structural fix. The finding CARRIES its cause: one `repeat_cause` entry for every
+# cause that holds, read off the very predicates that decided the refusal
+# (`lineage._repetition_unstable_caches` pairs each unstable cache with its cause), and the
+# remediation files one answer under each value of the one vocabulary,
+# `contracts.PROCESS_CALL_REPEAT_CAUSES`. The expectations below — which causes hold, which scope,
+# what each answer must say — come from amendment 1 rule 8 and the child's own contract row, never
+# from this implementation's output.
+#
+# THE COVERAGE CLAIM, derived from the authority's full case set. The emission site decides three
+# causes, so `_CAUSE_CELLS` holds one public-route cell per cause, both first-read scopes of the
+# unknown-effects cause (c: a process property; c': a cache, with no cache unstable), and every
+# multiplicity the vocabulary admits (two pairs and all three). The vocabulary test proves every
+# value is reached and nothing spells a value but the constant.
 
-#: The sentence served before batch 24. It assumed the author already knew the cause.
-_PRESUMES_THE_CAUSE = "Or answer the cause this call was refused for."
-#: The two phrases that make the served text true: the cause is not named, and here is the check.
-_THE_CAUSE_IS_NOT_NAMED = "which this finding does not name"
-_THE_CHECK = "check whether the child reads the cache before writing it"
+from typing import NamedTuple  # noqa: E402
 
+from boomi_mcp.compiler.process_ir.semantic_validation.contracts import (  # noqa: E402
+    PROCESS_CALL_REPEAT_CAUSES,
+    ValidationEvidenceV1,
+)
 
-def _says_the_cause_is_not_named(text):
-    """True when a served text says the finding does not name its cause and gives the check."""
-    return _THE_CAUSE_IS_NOT_NAMED in text and _THE_CHECK in text and _PRESUMES_THE_CAUSE not in text
+_CAUSES = PROCESS_CALL_REPEAT_CAUSES
+_REPEAT_ENTRY_ID = "diagnostic.process_ir_capability_process_call_repeated_run_unstable"
+
+# The source mutant both non-vacuity checks below apply is spelled at each call site as literals,
+# so `_source_mutants` measures it: the evidence expression at the emission site, replaced by the
+# one 815aa7b served in its place.
+
+#: The remediation 815aa7b served for this code, frozen before this batch's baseline (read with
+#: `git show 815aa7b:src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`; its digest
+#: is pinned below): the non-vacuity oracle for the served text.
+_REMEDIATION_AT_815AA7B = (
+    'Make the called process run once for these documents. Either give it a Data '
+    'Passthrough entry, with a passthrough step first and this call authored wait=true, so '
+    'one call runs it once over the whole group; or call it from a process with no explicit '
+    'entry, as the terminal of a Branch leg that has no steps of its own and no step in '
+    'front of its Branch, which hands the call exactly one document. Or answer the cause, '
+    'which this finding does not name: check whether the child reads the cache before '
+    'writing it. A child that reads the cache before writing it needs that cache '
+    'established before its own write, and an earlier run may have emptied it: no removal '
+    'exempts that one — write the cache before reading it, or give it a Data Passthrough '
+    'entry and take what it needs from the documents its callers hand over, which a No Data '
+    'child never receives. A child that never reads the cache before writing it may instead '
+    'remove the whole cache after its last write to it, in a later leg of the same Branch '
+    'that runs no connector call, cache retrieve or data process before the removal, with '
+    'this call authored wait=true and abort_on_error=true, and with no call of its own able '
+    'to write that cache after the removal or while the run goes on: move a call that '
+    'stands after the removal to before it and wait for it, and wait for every call it '
+    "makes, including a call made by a process it calls. Supplying a called process's "
+    'ProcessIR helps only where the contract derived from it shows that process does not '
+    'write that cache — for a call nothing waits for, that is the only thing that helps. A '
+    'cache this request declares an outside writer for, where a retrieve of that cache '
+    "authors external_writer, takes no such exemption at all, whatever the child's own "
+    'calls do: the writer may refill it between runs, so either the child stops requiring '
+    'that cache of its callers or it runs once for the whole group. A declaration no '
+    'retrieve names establishes nothing and withholds nothing. A child that reads state '
+    'before writing it while its own state effects are unknown is refused for that read '
+    'whatever the caches do: make its effects derivable, by supplying the ProcessIR of what '
+    'it calls or replacing the step nothing can inspect. The rule is published at '
+    "get_schema_template(schema_name='process_ir_authoring', node_kind='process_call')."
+)
+_REMEDIATION_AT_815AA7B_SHA256 = "350fed065822fcb799178704ca827e3f602d14ff865894ee20b1d3045cbbff12"
 
 
 def _the_two_cache_causes():
@@ -6896,15 +6952,23 @@ def _the_two_cache_causes():
     }
 
 
-def _served_repeated_run_findings(roots, calls):
+def _served_repeated_run_findings(roots, calls, references=()):
     """The repeated-run diagnostics ``build_integration(action="plan")`` serves for PARENT.
 
     The client is mocked as this module's other public-route tests mock it. The components
-    are the same ones the proved-fill test above declares, with CACHE2 in place of CACHE."""
+    are the same ones the proved-fill test above declares, with CACHE2 in place of CACHE.
+    ``references`` names processes the request only NAMES (`reference_only`), so nothing in it
+    derives their effects — r24's underivable fixture."""
     from unittest.mock import MagicMock
 
     from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
-    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from test_issue_158_listener_deployment import (
+        _PROFILE,
+        _ApplyBoundary,
+        _reference_child,
+        _request,
+        _unit,
+    )
     from boomi_mcp.categories.integration_builder import build_integration_action
 
     profile = {"key": "P2", "type": "profile.json", "name": "E184 P2", "action": "create",
@@ -6921,6 +6985,7 @@ def _served_repeated_run_findings(roots, calls):
     components = [profile, cache2, dict(APPLIABLE_CONN, key="RCONN"),
                   dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
                        config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN"))]
+    components += [_reference_child(key, component_id="reference-" + key.lower()) for key in references]
     keys = tuple(spec["key"] for spec in components)
     raw = _request(
         [_unit(document, keys + calls.get(key, ()), key=key, name="E184 " + key)
@@ -6934,24 +6999,19 @@ def _served_repeated_run_findings(roots, calls):
 
 
 def test_the_repeated_run_finding_says_it_does_not_name_which_cache_cause_applies(monkeypatch):
-    """QA-184-s1-r23-01. The two cache causes are measured apart on the child's own contract:
-    one reads CACHE2 before writing it, the other does not and keeps what it stored. Through
-    the public plan route they still receive the same code, pointer, message, remediation,
-    evidence and citation. So the served remediation, and the catalog entry the finding cites,
-    must say that the finding does not name the cause, and must give the check. The check is
-    the clause each of the two answers opens with.
+    """QA-184-s1-r23-01, rewritten by correction batch 25 to the opposite truth. The name is kept
+    so the node id the wave-gate manifest pins (`pytest-014317`) still collects; what it pinned
+    became false when the finding started naming its cause.
 
-    Non-vacuity, on the text the author actually receives: the old sentence, served through the
-    same route and through the same catalog builder, fails the same assertions."""
-    from boomi_mcp.authoring.process_ir_projection import (
-        build_process_ir_authoring_entries,
-        collect_projection_sources,
-    )
-    from boomi_mcp.categories import meta_tools
-    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+    The premise batch 24 measured on the child's own contract stands: one child reads CACHE2
+    before writing it, the other does not and keeps what it stored. Batch 24 found the two served
+    byte-identically through the public plan route. They now differ in exactly one field, the
+    evidence, and each names its own cause; the sentence saying that the finding does not name the
+    cause is gone, because it is no longer true.
 
+    Non-vacuity: with the emission put back to 815aa7b's evidence, the two are served identically
+    again, with `state_scope: cache` alone."""
     causes = _the_two_cache_causes()
-    # The premise: two different causes, told apart by the check the remediation names.
     reads_first = _row(causes["read_before_write"][0], "PARENT", "CACHE_CHILD")
     keeps_what_it_stored = _row(causes["unwaited_writer"][0], "PARENT", "CACHE_CHILD")
     assert ("cache", "$ref:CACHE2") in reads_first.required_reads, reads_first
@@ -6962,42 +7022,693 @@ def test_the_repeated_run_finding_says_it_does_not_name_which_cache_cause_applie
     for cause, items in served.items():
         assert [(item["code"], item["path"]) for item in items] == [
             ("AUTHORING_COMPILE_BLOCKED", _PER_DOCUMENT_CALL)], (cause, items)
-    # Nothing in the served finding tells the two causes apart.
-    assert served["read_before_write"] == served["unwaited_writer"]
-    [item] = served["read_before_write"]
-    assert item["evidence"] == [{"key": "state_scope", "value": "cache"}], item["evidence"]
+    [reads_first_item] = served["read_before_write"]
+    [keeps_item] = served["unwaited_writer"]
+    assert {key: value for key, value in reads_first_item.items() if key != "evidence"} == {
+        key: value for key, value in keeps_item.items() if key != "evidence"}
+    assert reads_first_item["evidence"] == [
+        {"key": "repeat_cause", "value": "cache_read_before_write"},
+        {"key": "state_scope", "value": "cache"}], reads_first_item["evidence"]
+    assert keeps_item["evidence"] == [
+        {"key": "repeat_cause", "value": "cache_retained_content"},
+        {"key": "state_scope", "value": "cache"}], keeps_item["evidence"]
+    for retired in ("which this finding does not name", "Or answer the cause this call was refused for."):
+        assert retired not in reads_first_item["remediation"], retired
 
-    remediation = item["remediation"]
-    assert _says_the_cause_is_not_named(remediation), remediation
-    # The check sends the author to exactly one of the two answers that follow it.
-    check = remediation.index(_THE_CHECK)
-    first = remediation.index("A child that reads the cache before writing it")
-    second = remediation.index("A child that never reads the cache before writing it")
-    assert check < first < second, remediation
+    with monkeypatch.context() as patched:
+        _lineage_with_source(
+            patched,
+            'evidence=(("state_scope", scope),) + tuple(\n'
+            '                        ("repeat_cause", cause) for cause in sorted(causes)),',
+            'evidence=(("state_scope", scope),),')
+        old = {cause: _served_repeated_run_findings(*shape) for cause, shape in causes.items()}
+    assert old["read_before_write"] == old["unwaited_writer"]
+    assert old["read_before_write"][0]["evidence"] == [{"key": "state_scope", "value": "cache"}]
 
-    [cited] = item["authoring_contract_entry_ids"]
-    assert cited == "diagnostic.process_ir_capability_process_call_repeated_run_unstable"
-    page = meta_tools.get_schema_template_action(schema_name="process_ir_authoring", authoring_entry_id=cited)
+
+# --- correction batch 25: one cell per cause, every multiplicity, each with its answer ------------
+
+#: How the served text files an answer under a value of the vocabulary.
+_KEYED = "For {0}, "
+
+#: What each keyed answer must say, from the substance the rule gives it: the no-removal-exempts
+#: rule for a read before write; the whole-cache-removal exemption and its conditions, the
+#: supplied-ProcessIR note and the outside-writer rule for retained content; "make its effects
+#: derivable" for unknown effects. Written here, never read off the served text.
+_ANSWER_PHRASES = {
+    "cache_read_before_write": (
+        "reads a cache before writing it", "no removal exempts that one",
+        "write the cache before reading it", "give it a Data Passthrough entry"),
+    "cache_retained_content": (
+        "Remove the whole cache after its last write to it", "wait=true and abort_on_error=true",
+        "shows that process does not write that cache", "takes no such exemption at all"),
+    "unknown_effects": (
+        "its own state effects are unknown", "make its effects derivable",
+        "supplying the ProcessIR of what it calls", "replacing the step nothing can inspect"),
+}
+
+#: Reads the process property K before this child writes anything: its first state read.
+_K_INTO_Z = {"kind": "set_dpp", "name": "Z", "source_values": [{"value_type": "dpp", "property_name": "K"}]}
+#: A step nothing can inspect, which a script with no vetted contract is.
+_AN_OPAQUE_LEG = {"steps": [_SCRIPT], "terminal": _STOP}
+
+
+def _asked(child, first_leg, flags=_WAITS_AND_ABORTS_ON_ERROR, extra=(), references=()):
+    """One request: a Data Passthrough PARENT whose first leg is ``first_leg`` and whose second
+    calls CACHE_CHILD once per arriving document, with ``flags``; ``extra`` roots the child calls,
+    and ``references`` processes the request only names. ``(roots, calls, references)``."""
+    roots = [("PARENT", _passthrough_root(first_leg, {"steps": [], "terminal": _call("CACHE_CHILD", **flags)})),
+             ("CACHE_CHILD", child)] + list(extra)
+    calls = {"PARENT": ("CACHE_CHILD",)}
+    if extra:
+        calls["CACHE_CHILD"] = tuple(key for key, _document in extra)
+    return roots, calls, tuple(references)
+
+
+class _CauseCell(NamedTuple):
+    #: The request refused, the causes that hold at its call, and the scope `state_scope` names.
+    refused: tuple
+    causes: tuple
+    scope: str
+    #: The same request with every served cause's keyed answer applied: admitted.
+    answered: tuple
+    #: ``(what was applied, request, the causes still served)``: one answer at a time, or another
+    #: spelling of the same answer.
+    applied: tuple = ()
+
+
+_WAITS_ONLY = {"wait": True}
+_RBW, _RETAINED, _UNKNOWN = "cache_read_before_write", "cache_retained_content", "unknown_effects"
+
+_CAUSE_CELLS = {
+    # (a) R23-N6: the child reads CACHE2 before writing it; its removal cannot exempt that.
+    "a_cache_read_before_write": _CauseCell(
+        refused=_asked(_legs(_BINDS2, _EMPTIES2), _DYNAMIC_INTO_CACHE2),
+        causes=(_RBW,), scope="cache",
+        answered=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2), _DYNAMIC_INTO_CACHE2)),
+    # (b) the child fills CACHE2 and binds on what it retrieves, leaving what it stored there,
+    # under a call that waits but continues past a failed run.
+    "b_cache_retained_content": _CauseCell(
+        refused=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2), _STORES_NOTHING, flags=_WAITS_ONLY),
+        causes=(_RETAINED,), scope="cache",
+        answered=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2), _STORES_NOTHING),
+        applied=(
+            ("the removal alone", _asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2), _STORES_NOTHING,
+                                         flags=_WAITS_ONLY), (_RETAINED,)),
+            ("abort_on_error alone", _asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2), _STORES_NOTHING), (_RETAINED,)),
+        )),
+    # (c) r24's ST_unknown_waited: the child's first read is the process property K, then it waits
+    # for a process the request only names. No cache anywhere.
+    "c_unknown_effects_first_read_a_property": _CauseCell(
+        refused=_asked(_legs({"steps": [_K_INTO_Z], "terminal": _STOP}, _waited("EXTERNAL")),
+                       {"steps": [_SET_K], "terminal": _STOP}, references=("EXTERNAL",)),
+        causes=(_UNKNOWN,), scope="dpp",
+        answered=_asked(_legs({"steps": [_K_INTO_Z], "terminal": _STOP}, _STORES_NOTHING),
+                        {"steps": [_SET_K], "terminal": _STOP}),
+        applied=(
+            ("the ProcessIR of what it calls supplied",
+             _asked(_legs({"steps": [_K_INTO_Z], "terminal": _STOP}, _waited("EXTERNAL")),
+                    {"steps": [_SET_K], "terminal": _STOP},
+                    extra=(("EXTERNAL", _legs(_STORES_NOTHING, _STORES_NOTHING)),)), ()),
+        )),
+    # (c') the child's first read IS a cache its caller filled and it never writes, so no cache is
+    # unstable; a script nothing can inspect makes its effects unknown. `state_scope` says `cache`
+    # and the cause is not a cache cause — the case batch 24's comment named.
+    "c_prime_unknown_effects_first_read_a_cache": _CauseCell(
+        refused=_asked(_legs({"steps": [_READ2, _SCRIPT], "terminal": _STOP}, _STORES_NOTHING),
+                       {"steps": [_MSG], "terminal": _PUT2}),
+        causes=(_UNKNOWN,), scope="cache",
+        answered=_asked(_legs({"steps": [_READ2, _MSG], "terminal": _STOP}, _STORES_NOTHING),
+                        {"steps": [_MSG], "terminal": _PUT2})),
+    "d_read_before_write_and_unknown_effects": _CauseCell(
+        refused=_asked(_legs(_BINDS2, _AN_OPAQUE_LEG, _EMPTIES2), _DYNAMIC_INTO_CACHE2),
+        causes=(_RBW, _UNKNOWN), scope="cache",
+        answered=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _STORES_NOTHING, _EMPTIES2), _DYNAMIC_INTO_CACHE2),
+        applied=(
+            ("the opaque step replaced", _asked(_legs(_BINDS2, _STORES_NOTHING, _EMPTIES2), _DYNAMIC_INTO_CACHE2),
+             (_RBW,)),
+            # Writing the cache first removes the child's ONLY read before a write, and the unknown-
+            # effects cause is about such a read, so both go.
+            ("the cache written before it is read",
+             _asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _AN_OPAQUE_LEG, _EMPTIES2), _DYNAMIC_INTO_CACHE2), ()),
+        )),
+    "e_read_before_write_and_retained_content": _CauseCell(
+        refused=_asked(_legs(_BINDS2, _DYNAMIC_INTO_CACHE2, _EMPTIES2), _DYNAMIC_INTO_CACHE2, flags=_WAITS_ONLY),
+        causes=(_RBW, _RETAINED), scope="cache",
+        answered=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2), _DYNAMIC_INTO_CACHE2),
+        applied=(
+            ("the cache written before it is read",
+             _asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _EMPTIES2), _DYNAMIC_INTO_CACHE2, flags=_WAITS_ONLY),
+             (_RETAINED,)),
+            ("wait=true and abort_on_error=true",
+             _asked(_legs(_BINDS2, _DYNAMIC_INTO_CACHE2, _EMPTIES2), _DYNAMIC_INTO_CACHE2), (_RBW,)),
+        )),
+    "f_all_three": _CauseCell(
+        refused=_asked(_legs(_BINDS2, _AN_OPAQUE_LEG, _DYNAMIC_INTO_CACHE2, _EMPTIES2), _DYNAMIC_INTO_CACHE2,
+                       flags=_WAITS_ONLY),
+        causes=(_RBW, _RETAINED, _UNKNOWN), scope="cache",
+        answered=_asked(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, _STORES_NOTHING, _EMPTIES2), _DYNAMIC_INTO_CACHE2)),
+}
+
+
+def _keyed_answer(remediation, cause):
+    """What the served text files under ``cause``: from its key to the next key or the citation."""
+    opener = _KEYED.format(cause)
+    if remediation.count(opener) != 1:
+        return None
+    start = remediation.index(opener) + len(opener)
+    ends = [remediation.find(_KEYED.format(other), start) for other in _ANSWER_PHRASES if other != cause]
+    ends.append(remediation.find(" The rule is published at ", start))
+    return remediation[start:min([end for end in ends if end != -1] or [len(remediation)])]
+
+
+def _cited_facts(item):
+    """The ordering facts of the catalog entry the served finding cites."""
+    from boomi_mcp.categories import meta_tools
+
+    assert item["authoring_contract_entry_ids"] == [_REPEAT_ENTRY_ID], item["authoring_contract_entry_ids"]
+    page = meta_tools.get_schema_template_action(
+        schema_name="process_ir_authoring", authoring_entry_id=_REPEAT_ENTRY_ID)
     assert page["_success"] is True, page
     [entry] = page["contract_page"]["entries"]
-    assert [fact for fact in entry["ordering_facts"] if _says_the_cause_is_not_named(fact)] == [
-        "[semantic validator] " + remediation], entry["ordering_facts"]
+    return entry["ordering_facts"]
 
-    # NON-VACUITY. The same remediation with the old sentence put back in place of the new one.
-    new_sentence = remediation[remediation.index("Or answer the cause"):check + len(_THE_CHECK) + 1]
-    old = remediation.replace(new_sentence, _PRESUMES_THE_CAUSE)
-    assert old != remediation and not _says_the_cause_is_not_named(old)
-    with monkeypatch.context() as patched:
-        patched.setitem(findings._REMEDIATION, PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, old)
-        [old_item] = _served_repeated_run_findings(*causes["read_before_write"])
-    assert old_item["remediation"] == old
-    assert not _says_the_cause_is_not_named(old_item["remediation"])
+
+def _carries_its_causes(item, causes, facts):
+    """THE WITNESS: the served finding names exactly ``causes``; its remediation files, under each
+    served value, the answer that value needs; and the catalog entry it cites carries that text."""
+    served = sorted(pair["value"] for pair in item["evidence"] if pair["key"] == "repeat_cause")
+    if served != sorted(causes):
+        return False
+    for cause in served:
+        answer = _keyed_answer(item["remediation"], cause)
+        if answer is None or not all(phrase in answer for phrase in _ANSWER_PHRASES[cause]):
+            return False
+    return "[semantic validator] " + item["remediation"] in facts
+
+
+def _validated_causes(roots):
+    """The causes the VALIDATE entry point serves for PARENT's repeated-run finding, or None."""
+    irs, resolution = _resolve(roots)
+    report = validate_process_ir(irs["PARENT"], _symbols(), capabilities=(
+        resolution.capabilities_by_root["PARENT"] or DEFAULT_VALIDATION_CAPABILITIES))
+    found = [item for item in report.errors if item.code == PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE]
+    assert len(found) <= 1, found
+    return None if not found else tuple(item.value for item in found[0].evidence if item.key == "repeat_cause")
+
+
+@pytest.mark.parametrize("cell", sorted(_CAUSE_CELLS))
+def test_the_repeated_run_finding_names_every_cause_that_holds(cell):
+    """QA-184-s1-r24-01, the coverage cells. Through the public plan route each request is refused
+    at its per-document call, its evidence names exactly the causes that hold — one `repeat_cause`
+    entry each, beside the unchanged `state_scope` — its remediation files the working answer
+    under each served value, and the catalog entry it cites serves the same remediation. The
+    validate and compile entry points agree."""
+    shape = _CAUSE_CELLS[cell]
+    items = _served_repeated_run_findings(*shape.refused)
+    assert [(item["code"], item["path"]) for item in items] == [
+        ("AUTHORING_COMPILE_BLOCKED", _PER_DOCUMENT_CALL)], items
+    [item] = items
+    assert item["evidence"] == [{"key": "repeat_cause", "value": cause} for cause in sorted(shape.causes)] + [
+        {"key": "state_scope", "value": shape.scope}], item["evidence"]
+    assert _carries_its_causes(item, shape.causes, _cited_facts(item)), item["remediation"]
+    assert _validated_causes(shape.refused[0]) == tuple(sorted(shape.causes))
+    assert _both_routes(shape.refused[0], "PARENT") == [
+        (PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+
+
+@pytest.mark.parametrize("cell", sorted(_CAUSE_CELLS))
+def test_each_keyed_answer_is_the_one_that_admits_the_call(cell):
+    """Each value's answer works: the request with every served cause's keyed answer applied is
+    admitted on the public route and on both entry points. Applied one at a time, each answer
+    removes its own cause and the finding goes on naming exactly the causes left."""
+    shape = _CAUSE_CELLS[cell]
+    assert _served_repeated_run_findings(*shape.answered) == []
+    assert _both_routes(shape.answered[0], "PARENT") == []
+    for label, request, remaining in shape.applied:
+        # Unconditional on purpose: an assertion behind an `if` hides an unreached case.
+        refused = [(PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, _PER_DOCUMENT_CALL)]
+        assert (_validated_causes(request[0]) or ()) == remaining, label
+        assert _both_routes(request[0], "PARENT") == (refused if remaining else []), label
+
+
+def test_a_cache_first_read_under_unknown_effects_is_not_a_cache_cause():
+    """(c'), constructed rather than argued: the child's first read is CACHE2, which its caller
+    filled and it never writes, and its cache writes are all known although its state effects are
+    not (a script writes no cache). So no cache is unstable — `_repetition_unstable_caches` pairs
+    none — while the unknown-effects cause holds, and `state_scope` alone would have said `cache`."""
+    roots = _CAUSE_CELLS["c_prime_unknown_effects_first_read_a_cache"].refused[0]
+    row = _row(roots, "PARENT", "CACHE_CHILD")
+    assert ("cache", "$ref:CACHE2") in row.required_reads
+    assert ("cache", "$ref:CACHE2") not in row.mutated_state
+    assert (row.state_known, row.cache_writes_known) == (False, True)
+    assert _validated_causes(roots) == (_UNKNOWN,)
+
+
+def _spells_a_cause(source):
+    """Every quoted spelling of a vocabulary value in ``source``."""
+    return sorted(cause for cause in _CAUSES for quote in ('"', "'") if quote + cause + quote in source)
+
+
+def test_the_repeat_cause_vocabulary_is_closed_and_complete():
+    """The vocabulary is ONE constant, every value it defines is reached, and nothing but the
+    constant spells a value: the emission builds its evidence from it, the remediation keys its
+    answers to it in its own order (refused at import otherwise), and the evidence model refuses
+    any other `repeat_cause` value at construction."""
+    import ast
+
+    from boomi_mcp.compiler.process_ir.semantic_validation import contracts, findings
+
+    # Complete: every value is reached by a cell, and every value has its expected answer here.
+    assert {cause for shape in _CAUSE_CELLS.values() for cause in shape.causes} == set(_CAUSES)
+    assert set(_ANSWER_PHRASES) == set(_CAUSES) == {_RBW, _RETAINED, _UNKNOWN}
+    # One spelling: each value is its own field name.
+    assert tuple(_CAUSES) == type(_CAUSES)._fields
+    # The answers are keyed to the vocabulary in its order, and any other keying is refused.
+    assert tuple(findings._REPEAT_CAUSE_ANSWERS) == tuple(_CAUSES)
+    answers = dict(findings._REPEAT_CAUSE_ANSWERS)
+    for mutant in ({key: answers[key] for key in list(answers)[:-1]},
+                   dict(answers, cache_other="an answer for no value"),
+                   dict(reversed(list(answers.items())))):
+        with pytest.raises(RuntimeError):
+            findings._answers_exactly(_CAUSES, mutant)
+    assert findings._answers_exactly(_CAUSES, findings._REPEAT_CAUSE_ANSWERS) is findings._REPEAT_CAUSE_ANSWERS
+    # Closed at construction.
+    for cause in _CAUSES:
+        assert ValidationEvidenceV1(key="repeat_cause", value=cause).value == cause
+    for value in ("cache_other", True, 1):
+        with pytest.raises(ValidationError):
+            ValidationEvidenceV1(key="repeat_cause", value=value)
+    # Nothing in the served package spells a value: the constant is the only authority.
+    package = _ROOT / "src" / "boomi_mcp"
+    assert [(str(path.relative_to(_ROOT)), _spells_a_cause(path.read_text(encoding="utf-8")))
+            for path in sorted(package.rglob("*.py")) if _spells_a_cause(path.read_text(encoding="utf-8"))] == []
+    # The emission site: the key once, beside `state_scope` alone, and every value the vocabulary
+    # defines reached through the constant.
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    [key] = [node for node in ast.walk(tree) if isinstance(node, ast.Constant) and node.value == "repeat_cause"]
+    [emission] = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_report" and node.args
+        and getattr(node.args[0], "id", None) == "PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE"]
+    [evidence] = [keyword.value for keyword in emission.keywords if keyword.arg == "evidence"]
+    assert {node.value for node in ast.walk(evidence) if isinstance(node, ast.Constant)} == {
+        "state_scope", "repeat_cause"}
+    assert key in list(ast.walk(evidence))
+    assert {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+            and getattr(node.value, "id", None) == "PROCESS_CALL_REPEAT_CAUSES"} == set(type(_CAUSES)._fields)
+    # ... and the key serves this code alone: the allowlist and the vocabulary check name it, and
+    # the one emission above uses it.
+    assert sorted(str(path.relative_to(_ROOT)) for path in sorted(package.rglob("*.py"))
+                  if '"repeat_cause"' in path.read_text(encoding="utf-8")) == [
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py",
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py"]
+    assert contracts._CLOSED_EVIDENCE_VALUES["repeat_cause"] == frozenset(_CAUSES)
+    # Non-vacuity of the source scan: one value spelled by hand is found.
+    mutant = source.replace("PROCESS_CALL_REPEAT_CAUSES.unknown_effects", '"unknown_effects"', 1)
+    assert mutant != source and _spells_a_cause(mutant) == [_UNKNOWN]
+
+
+def test_the_cause_witness_fails_on_what_815aa7b_served(monkeypatch):
+    """NON-VACUITY of the witness, on the evidence and the text 815aa7b served: with its evidence
+    (`state_scope` alone), with its remediation (frozen above, digest pinned), and with both, the
+    witness fails for EVERY cell; unmutated it holds for every cell. The catalog entry built from
+    815aa7b's text files no answer under any value either."""
+    import hashlib
+
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_entries,
+        collect_projection_sources,
+    )
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    assert hashlib.sha256(_REMEDIATION_AT_815AA7B.encode("utf-8")).hexdigest() == _REMEDIATION_AT_815AA7B_SHA256
+
+    def witnessed():
+        verdicts = {}
+        for name, shape in sorted(_CAUSE_CELLS.items()):
+            [item] = _served_repeated_run_findings(*shape.refused)
+            verdicts[name] = _carries_its_causes(item, shape.causes, _cited_facts(item))
+        return verdicts
+
+    assert set(witnessed().values()) == {True}
+    for label, old_evidence, old_text in (("815aa7b's evidence", True, False),
+                                          ("815aa7b's remediation", False, True),
+                                          ("both", True, True)):
+        with monkeypatch.context() as patched:
+            if old_evidence:
+                _lineage_with_source(
+                    patched,
+                    'evidence=(("state_scope", scope),) + tuple(\n'
+                    '                        ("repeat_cause", cause) for cause in sorted(causes)),',
+                    'evidence=(("state_scope", scope),),')
+            if old_text:
+                patched.setitem(findings._REMEDIATION, PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE,
+                                _REMEDIATION_AT_815AA7B)
+            verdicts = witnessed()
+        assert set(verdicts.values()) == {False}, (label, verdicts)
     old_specs = tuple(
-        dict(spec, remediation=old)
+        dict(spec, remediation=_REMEDIATION_AT_815AA7B)
         if spec["code"] == PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE else spec
         for spec in collect_projection_sources().finding_specs)
     [old_entry] = [candidate for candidate in build_process_ir_authoring_entries(
         collect_projection_sources()._replace(finding_specs=old_specs))
-        if candidate.contract_entry_id == cited]
-    assert not [fact for fact in old_entry.ordering_facts if _says_the_cause_is_not_named(fact)]
-    assert "[semantic validator] " + old in old_entry.ordering_facts
+        if candidate.contract_entry_id == _REPEAT_ENTRY_ID]
+    assert "[semantic validator] " + _REMEDIATION_AT_815AA7B in old_entry.ordering_facts
+    assert [cause for cause in _CAUSES for fact in old_entry.ordering_facts if _keyed_answer(fact, cause)] == []
+    assert set(witnessed().values()) == {True}
+
+
+# --- the sibling sweep's one instance: the placement refusal's hand-off answer ------------------
+#
+# Every remediation served for a code #184 owns or whose served text it changed was swept for the
+# same mechanism (the batch-25 report tabulates them). One more branched on something that does
+# not decide it: PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED sent the author to the
+# called process "when the refusal names the call itself", and a catch body's recovery prefix is
+# refused at the call's own terminal too, so that author was sent to the child for a rule about
+# the steps in front of the call. What the finding serves that DOES decide is its message: every
+# prefix and root verdict serves one naming its rule, and only lineage's hand-off check serves the
+# table's own message, which the remediation now quotes to key the hand-off answer.
+
+_PLACEMENT = PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED
+#: A Data Passthrough child that consumes nothing of what it is handed.
+_ACCEPTS_ANYTHING = _doc(_ENTRY, {"kind": "branch", "legs": [_STORES_NOTHING, _STORES_NOTHING]})
+_NOTIFY = {"kind": "notify", "level": "ERROR", "message_template": "caught meta.base.catcherrorsmessage"}
+#: The No Data child, given a Data Passthrough entry in front of the same steps.
+_NODATA_AS_PASSTHROUGH = _doc(_ENTRY, *_NODATA["body"]["steps"])
+
+
+def _recovers_with(step):
+    """A process whose catch body runs ``step`` and then hands the caught document to CHILD."""
+    return {"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "try_catch", "scope": "process",
+        "try_body": {"steps": [_GET], "terminal": _STOP},
+        "catch_body": {"steps": [step], "terminal": _call("CHILD", **_WAITS_AND_ABORTS_ON_ERROR)}}]}}
+
+
+#: Every placement refusal kind, by what raises it: ``(layer, refused roots, the pointer it is
+#: served at, the rule phrase its answer states, the roots with that answer applied)``.
+_PLACEMENT_CAUSES = {
+    "root_prefix": (
+        "parser", [("PARENT", _doc(_MSG, _call("CHILD"))), ("CHILD", _ACCEPTS_ANYTHING)], "/body/steps/0",
+        "a root sequence admits no step before its call, so move such a prefix into a branch leg",
+        [("PARENT", _legs({"steps": [_MSG], "terminal": _call("CHILD")}, _STORES_NOTHING)),
+         ("CHILD", _ACCEPTS_ANYTHING)]),
+    "recovery_prefix": (
+        "parser", [("PARENT", _recovers_with(_MSG)), ("CHILD", _ACCEPTS_ANYTHING)],
+        "/body/steps/0/catch_body/terminal",
+        "recovery call admits only notify steps before it",
+        [("PARENT", _recovers_with(_NOTIFY)), ("CHILD", _ACCEPTS_ANYTHING)]),
+    "hand_off_into_a_no_data_child": (
+        "lineage", [("PARENT", _parent([_MSG], _call("NODATA"))), ("NODATA", _NODATA)],
+        "/body/steps/1/legs/0/terminal", "is admitted only into a Data Passthrough child",
+        [("PARENT", _parent([_MSG], _call("NODATA"))), ("NODATA", _NODATA_AS_PASSTHROUGH)]),
+    "hand_off_into_a_child_nothing_derives": (
+        "lineage", [("PARENT", _parent([_MSG], _call("EXTERNAL")))],
+        "/body/steps/1/legs/0/terminal", "whose ProcessIR this request carries",
+        [("PARENT", _parent([_MSG], _call("EXTERNAL"))), ("EXTERNAL", _ACCEPTS_ANYTHING)]),
+    "hand_off_of_what_the_child_consumes_unstated": (
+        "lineage", [("PARENT", _parent(_P2_PREFIX, _call("CHILD"))), ("CHILD", _doc(_ENTRY, _SCRIPT, _STOP))],
+        "/body/steps/1/legs/0/terminal", "that states the profile of everything it consumes",
+        [("PARENT", _parent(_P2_PREFIX, _call("CHILD"))), ("CHILD", _CHILD)]),
+    "hand_off_after_native_work_before_the_branch": (
+        "lineage", [("PARENT", _doc(_ENTRY, _MSG, {"kind": "branch", "legs": [
+            {"steps": [], "terminal": _call("NODATA")}, _STORES_NOTHING]})), ("NODATA", _NODATA)],
+        "/body/steps/2/legs/0/terminal", "work before the Branch or Decision around it",
+        [("PARENT", _doc(_ENTRY, _MSG, {"kind": "branch", "legs": [
+            {"steps": [], "terminal": _call("NODATA")}, _STORES_NOTHING]})), ("NODATA", _NODATA_AS_PASSTHROUGH)]),
+}
+
+
+def _served_placement(layer, roots):
+    """``(path, message, remediation)`` of each placement refusal PARENT is served."""
+    document = dict(roots)["PARENT"]
+    if layer == "parser":
+        with pytest.raises(Exception) as caught:
+            parse_process_ir_v1(document)
+        return [(item.path, item.message, item.remediation)
+                for item in caught.value.diagnostics if item.code == _PLACEMENT]
+    irs, resolution = _resolve(roots)
+    report = validate_process_ir(irs["PARENT"], _symbols(), capabilities=(
+        resolution.capabilities_by_root["PARENT"] or DEFAULT_VALIDATION_CAPABILITIES))
+    return [(item.path, item.message, item.remediation) for item in report.errors if item.code == _PLACEMENT]
+
+
+@pytest.mark.parametrize("cause", sorted(_PLACEMENT_CAUSES))
+def test_the_placement_refusal_keys_its_hand_off_answer_on_what_the_finding_serves(cause):
+    """Each placement refusal names the call or its prefix, serves a message, and gets the answer
+    keyed to that message: a prefix or root rule's own message names its rule, and the
+    remediation states that rule; the hand-off refusal serves the table's own message, and the
+    remediation keys the hand-off answer to exactly that message. Each answer, applied, is
+    admitted on both entry points."""
+    from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
+
+    layer, refused, pointer, rule, answered = _PLACEMENT_CAUSES[cause]
+    [(path, message, remediation)] = _served_placement(layer, refused)
+    assert path == pointer
+    table_message = compiler_diagnostics._MESSAGES[_PLACEMENT]
+    hand_off_key = "When the message says only that {0}, ".format(table_message)
+    assert hand_off_key in remediation, remediation
+    assert rule in remediation, (rule, remediation)
+    if layer == "lineage":
+        assert message == table_message
+        assert rule in remediation[remediation.index(hand_off_key):]
+        assert _both_routes(refused, "PARENT") == [(_PLACEMENT, pointer)]
+    else:
+        assert message != table_message and "process_call" in message, message
+        assert rule in remediation[:remediation.index(hand_off_key)]
+    parse_process_ir_v1(dict(answered)["PARENT"])
+    assert _both_routes(answered, "PARENT") == []
+
+
+def test_only_the_hand_off_check_serves_the_placement_tables_own_message():
+    """The coverage claim behind the key, read off the raisers: every parser and compiler raise of
+    the placement code passes the message its verdict names, and lineage's `_report` passes none,
+    so the table's message is served by the hand-off check alone. Non-vacuity, on the text 815aa7b
+    served: it keyed the hand-off answer on the refusal naming the call itself, and the recovery
+    prefix — a parser refusal whose answer is about the steps in front of the call — names the
+    call's own terminal too."""
+    import ast
+
+    from boomi_mcp.compiler.process_ir import body_capabilities
+    from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
+    from boomi_mcp.models import process_ir as parser_module
+
+    def calls(module, name):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        return [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == name and node.args]
+
+    parser_raises = calls(parser_module, "_process_call_placement_error")
+    assert len(parser_raises) >= 3 and all(isinstance(node.args[0], ast.Name) for node in parser_raises)
+    compiler_raises = [node for node in calls(body_capabilities, "raise_compile_error")
+                       if getattr(node.args[0], "id", None) == "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"]
+    assert len(compiler_raises) == 2 and all(
+        any(keyword.arg == "message" for keyword in node.keywords) for node in compiler_raises)
+    lineage_reports = [node for node in calls(lineage, "_report")
+                       if getattr(node.args[0], "id", None) == "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"]
+    assert len(lineage_reports) == 1 and not any(keyword.arg == "message" for keyword in lineage_reports[0].keywords)
+    # One spelling per layer, quoted by that layer's remediation from the constant it is built from.
+    for module in (compiler_diagnostics, parser_module):
+        assert module._MESSAGES[_PLACEMENT] == module._PLACEMENT_HAND_OFF_MESSAGE
+        assert "says only that " + module._PLACEMENT_HAND_OFF_MESSAGE + "," in module._REMEDIATION[_PLACEMENT]
+        assert Path(module.__file__).read_text(encoding="utf-8").count(
+            '"a process call is placed after a composition ProcessIR v1 does not admit"') == 1
+    # Non-vacuity: 815aa7b's discriminator is true of a refusal its hand-off answer does not fit.
+    old_key = "When the refusal names the call itself, the called process must accept what this path hands it"
+    assert old_key not in compiler_diagnostics._REMEDIATION[_PLACEMENT]
+    layer, refused, pointer, _rule, _answered = _PLACEMENT_CAUSES["recovery_prefix"]
+    [(path, message, _remediation)] = _served_placement(layer, refused)
+    assert path.endswith("/terminal") and path == pointer, path
+    assert message != compiler_diagnostics._MESSAGES[_PLACEMENT]
+
+
+# --- correction batch 25, the sweep's second instance: served text narrower than its refusals ---
+#
+# `served-diagnostic-narrower-than-its-refusals` (the class batch 6 fixed structurally for the
+# profile-mismatch code, whose witness is
+# `test_issue_184_component_identity.py::test_the_served_profile_mismatch_text_names_every_reporting_site`):
+# a served text left describing the sites the code had when the text was written.
+# `_opaque_reason` decides THREE kinds — `map`, `script` and `subprocess`, the last refined by
+# this slice (amendment 3 §8: a derived child whose state is known is no longer opaque) — and each
+# is served as the finding's `effect_kind`, while the message and the remediation named two.
+# Both now name all three, as the taxonomy summary already did, and the invariant below is derived
+# from `_opaque_reason`'s own returns rather than from a hand-list.
+
+_EFFECT_UNKNOWN = "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+
+#: What the served remediation must offer for each kind: the answer that discharges THAT kind.
+_EFFECT_ANSWERS = {
+    "map": ("For a map or a script, declare a typed effect contract for it",),
+    "script": ("For a map or a script, declare a typed effect contract for it",
+               "vetted script registry entry"),
+    "subprocess": ("For a subprocess, supply the called process's ProcessIR in this request",),
+}
+
+
+def _opaque_kinds(source=None):
+    """Every kind `_opaque_reason` can return, read off its own source — THE authority on the
+    sites that report `…LINEAGE_EFFECT_UNKNOWN`, since the site serves what it returns."""
+    import ast
+
+    tree = ast.parse(source if source is not None else Path(lineage.__file__).read_text(encoding="utf-8"))
+    [reason] = [node for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef) and node.name == "_opaque_reason"]
+    return {inner.value
+            for node in ast.walk(reason) if isinstance(node, ast.Return)
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str)}
+
+
+def _effect_unknown_texts():
+    """The three served texts for the code, each from the table that owns it."""
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+    from boomi_mcp.errors import ERROR_TAXONOMY
+
+    return {"message": findings._MESSAGES[_EFFECT_UNKNOWN],
+            "remediation": findings._REMEDIATION[_EFFECT_UNKNOWN],
+            "summary": ERROR_TAXONOMY[_EFFECT_UNKNOWN].summary}
+
+
+def _kinds_no_text_names(texts, kinds):
+    """``(text, kind)`` for every kind a served text does not name — each text on its own."""
+    return sorted((name, kind) for name, text in texts.items()
+                  for kind in kinds if kind not in text.lower())
+
+
+def _served_effect_unknown(roots, calls, references=(), components=()):
+    """Every `…LINEAGE_EFFECT_UNKNOWN` diagnostic ``build_integration(action="plan")`` serves.
+
+    Its own request: the code is reported at a map, a script and a call, so the components are the
+    two profiles, the REST connection, one operation declaring an output profile, and whatever a
+    cell adds. Errors, warnings and advisories are all read — this code is a WARNING."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import (
+        _PROFILE,
+        _ApplyBoundary,
+        _reference_child,
+        _request,
+        _unit,
+    )
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    profile = {"key": "P1", "type": "profile.json", "name": "E184 P1", "action": "create",
+               "config": {"component_type": "profile.json", "profile_type": "json.generated",
+                          "component_name": "E184 P1", "root": {
+                              "name": "Root", "kind": "object", "children": [
+                                  {"name": "id", "kind": "simple", "data_type": "character"}]}}}
+    second = dict(profile, key="P2", name="E184 P2",
+                  config=dict(profile["config"], component_name="E184 P2"))
+    specs = [profile, second, dict(APPLIABLE_CONN, key="RCONN"),
+             dict(APPLIABLE_OP, key="GETP1", depends_on=["RCONN", "P1"], config=dict(
+                 APPLIABLE_OP["config"], connection_ref_key="RCONN",
+                 response_profile_id="$ref:P1", response_profile_type="json"))]
+    specs += list(components)
+    specs += [_reference_child(key, component_id="reference-" + key.lower()) for key in references]
+    keys = tuple(spec["key"] for spec in specs)
+    raw = _request(
+        [_unit(document, keys + calls.get(key, ()), key=key, name="E184 " + key)
+         for key, document in roots],
+        specs,
+    ).model_dump(mode="json")
+    with _ApplyBoundary().installed():
+        result = build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+    served = result["authoring_result"]
+    return [item for bucket in ("errors", "warnings", "advisories")
+            for item in (served.get(bucket) or ())
+            if _EFFECT_UNKNOWN in (item.get("cause_codes") or ())]
+
+
+#: A map the request carries and declares no effect for.
+_AN_UNCONTRACTED_MAP = {
+    "key": "M12", "type": "transform.map", "name": "E184 M12", "action": "create",
+    "depends_on": ["P1", "P2"], "config": {
+        "component_type": "transform.map", "component_name": "E184 M12",
+        "source_profile_id": "$ref:P1", "target_profile_id": "$ref:P2",
+        "source_profile_type": "json", "target_profile_type": "json"}}
+_GETP1 = {"kind": "connector_call", "operation_ref": "$ref:GETP1"}
+
+#: One request per kind `_opaque_reason` decides: ``(roots, calls, references, components, pointer)``.
+_EFFECT_KIND_CELLS = {
+    "map": ([("ROOT", _doc(_GETP1, {"kind": "map_ref", "map_ref": "$ref:M12"}, _STOP))], {}, (),
+            (_AN_UNCONTRACTED_MAP,), "/body/steps/1"),
+    "script": ([("ROOT", _doc(_GETP1, _SCRIPT, _STOP))], {}, (), (), "/body/steps/1"),
+    "subprocess": ([("ROOT", _parent([], _call("EXTERNAL")))], {}, ("EXTERNAL",), (),
+                   "/body/steps/1/legs/0/terminal"),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_EFFECT_KIND_CELLS))
+def test_the_served_effect_unknown_finding_names_the_kind_it_reports(kind):
+    """One public-route cell per kind the code reports: the finding serves that kind as its
+    `effect_kind`, and the served message, remediation and taxonomy summary each name it, with
+    the answer that discharges that kind in the remediation."""
+    roots, calls, references, components, pointer = _EFFECT_KIND_CELLS[kind]
+    items = _served_effect_unknown(roots, calls, references, components)
+    assert [(item["path"], item["evidence"]) for item in items] == [
+        (pointer, [{"key": "effect_kind", "value": kind}])], items
+    [item] = items
+    texts = _effect_unknown_texts()
+    assert item["message"] == texts["message"] and item["remediation"] == texts["remediation"]
+    assert _kinds_no_text_names(texts, {kind}) == []
+    for answer in _EFFECT_ANSWERS[kind]:
+        assert answer in item["remediation"], (answer, item["remediation"])
+
+
+def test_a_called_process_whose_process_ir_the_request_carries_is_not_opaque():
+    """The subprocess answer is the one that works: the same call, with the called process's
+    ProcessIR supplied, reports nothing — which is what makes naming the kind actionable."""
+    roots, calls, _references, components, _pointer = _EFFECT_KIND_CELLS["subprocess"]
+    supplied = list(roots) + [("EXTERNAL", _ACCEPTS_ANYTHING)]
+    assert _served_effect_unknown(supplied, {"ROOT": ("EXTERNAL",)}, (), components) == []
+    assert _errors(supplied, "ROOT") == []
+
+
+def test_the_served_effect_unknown_text_names_every_reporting_site():
+    """The invariant, derived from the authority: every kind `_opaque_reason` can return is named
+    by the message, by the remediation AND by the taxonomy summary, each on its own — a site named
+    by one text only passed the batch-6 version of this check for the profile-mismatch code.
+
+    Non-vacuity, in both directions: blinding any one kind in any one of the three texts fails,
+    naming exactly that pair; and the reader is a real reader — a fourth kind added to a copy of
+    `lineage.py`'s source is found and is named by none of the three texts."""
+    kinds = _opaque_kinds()
+    # The floor: the three kinds, so a reader that silently found nothing cannot pass.
+    assert kinds == {"map", "script", "subprocess"}, kinds
+    texts = _effect_unknown_texts()
+    assert _kinds_no_text_names(texts, kinds) == []
+    for name in sorted(texts):
+        for kind in sorted(kinds):
+            blinded = dict(texts, **{name: texts[name].replace(kind, "a step")})
+            assert _kinds_no_text_names(blinded, kinds) == [(name, kind)], (name, kind)
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    mutant = source.replace('    if kind == "data_process":',
+                            '    if kind == "notify":\n        return "notify"\n'
+                            '    if kind == "data_process":', 1)
+    assert mutant != source
+    assert _opaque_kinds(mutant) == kinds | {"notify"}
+    assert _kinds_no_text_names(texts, _opaque_kinds(mutant)) == [
+        ("message", "notify"), ("remediation", "notify"), ("summary", "notify")]
+
+
+def test_the_effect_unknown_finding_serves_the_kind_the_authority_returned():
+    """The served `effect_kind` IS `_opaque_reason`'s answer, read off the emission site: the
+    evidence carries the name the walk bound from it, and no kind spelled beside it."""
+    import ast
+
+    tree = ast.parse(Path(lineage.__file__).read_text(encoding="utf-8"))
+    [emission] = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_report" and node.args
+        and getattr(node.args[0], "id", None) == "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"]
+    [evidence] = [keyword.value for keyword in emission.keywords if keyword.arg == "evidence"]
+    assert {node.value for node in ast.walk(evidence) if isinstance(node, ast.Constant)} == {"effect_kind"}
+    [served] = [node.id for node in ast.walk(evidence) if isinstance(node, ast.Name)]
+    [bound] = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)
+               and [target.id for target in node.targets if isinstance(target, ast.Name)] == [served]
+               and isinstance(node.value, ast.Call)
+               and getattr(node.value.func, "id", None) == "_opaque_reason"]
+    assert bound.lineno < emission.lineno

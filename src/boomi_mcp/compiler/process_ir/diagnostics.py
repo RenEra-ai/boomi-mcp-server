@@ -99,6 +99,14 @@ _NODE_LIST_SEGMENTS = frozenset({"steps", "legs"})
 # Segment names that are themselves an authored node position.
 _NODE_LEAF_SEGMENTS = frozenset({"terminal"})
 
+#: The one message a process-call placement refusal serves from this table: every prefix
+#: and root verdict supplies a message naming its own rule, so only lineage's hand-off check
+#: at a call (which passes none) serves this one. The remediation quotes it to key its
+#: hand-off answer (correction batch 25), so the two cannot drift.
+_PLACEMENT_HAND_OFF_MESSAGE = (
+    "a process call is placed after a composition ProcessIR v1 does not admit"
+)
+
 _REMEDIATION = {
     # --- #141 M12.6 -------------------------------------------------------
     PROCESS_IR_SCHEMA_BRANCH_CARDINALITY: (
@@ -159,16 +167,27 @@ _REMEDIATION = {
         "own path, or into the called process."
     ),
     # --- #184 -------------------------------------------------------------
+    # Correction batch 25, the sibling sweep of QA-184-s1-r24-01: this text used to key its
+    # hand-off answer on "when the refusal names the call itself", and every prefix refusal
+    # names the call too (a catch body's recovery prefix is refused at the call's own
+    # terminal). What tells the hand-off refusal apart is its MESSAGE: every prefix and root
+    # verdict serves a message naming its rule, and only lineage's hand-off check serves this
+    # table's own message, which the answer below quotes from the constant it is built from.
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
-        "Author the process call as the terminal of a branch leg or a decision "
-        "true-arm, and end the steps before it on a direct predecessor that live "
-        "captures attest for that context; the admitted predecessors are "
-        "published at get_schema_template(schema_name='process_ir_authoring', "
-        "category='placement'). A root sequence admits no step before a call, so "
-        "move the prefix into a branch leg. When the refusal names the call "
-        "itself, the called process must accept what this path hands it: see "
-        "get_schema_template(schema_name='process_ir_authoring', "
-        "node_kind='process_call')."
+        "Follow the rule the message names. In a branch leg or a decision true-arm, the "
+        "steps before a process call must end on a direct predecessor that live captures "
+        "attest for that context; the admitted predecessors are published at "
+        "get_schema_template(schema_name='process_ir_authoring', category='placement'). A "
+        "catch body's recovery call admits only notify steps before it; a root sequence "
+        "admits no step before its call, so move such a prefix into a branch leg; and no "
+        "other body admits any. When "
+        "the message says only that " + _PLACEMENT_HAND_OFF_MESSAGE + ", the placement "
+        "is admitted and the hand-off is what fails: native work on this path before the "
+        "call — the step in front of it, or, in a Data Passthrough process, work before "
+        "the Branch or Decision around it — is admitted only into a Data Passthrough child "
+        "whose ProcessIR this request carries, called wait=true, that states the profile "
+        "of everything it consumes; see "
+        "get_schema_template(schema_name='process_ir_authoring', node_kind='process_call')."
     ),
     # --- #175 -------------------------------------------------------------
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
@@ -452,9 +471,7 @@ _MESSAGES = {
     PROCESS_IR_CAPABILITY_PROCESS_CALL_RETURN_PATH_BINDING_UNSUPPORTED: (
         "a process call may not be followed by another node in ProcessIR v1"
     ),
-    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
-        "a process call is placed after a composition ProcessIR v1 does not admit"
-    ),
+    PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: _PLACEMENT_HAND_OFF_MESSAGE,
     PROCESS_IR_SEMANTIC_RETRY_SOURCE_REEXECUTION: (
         "a positive retry count would re-run the flow's document source"
     ),

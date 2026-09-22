@@ -340,7 +340,7 @@ carry one.
 | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` | error | a leg depends on state written by a LATER leg |
 | `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` | error | a cache is read with no preceding write |
 | `PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE` | error | **taxonomy-only — no collector emits it** (see §10 B) |
-| `PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN` | warning | a map/script has no typed effect contract |
+| `PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN` | warning | a map, script or called subprocess has no typed effect contract the server backs |
 | `PROCESS_IR_SEMANTIC_LINEAGE_EXTERNAL_WRITER_ASSUMED` | warning | state is assumed to come from a declared external writer |
 | `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNSAFE` | error | a demonstrated unordered dependency behind a non-waiting `process_call` |
 | `PROCESS_IR_SEMANTIC_SIDE_EFFECT_ORDERING_UNKNOWN` | warning | a non-waiting call with undeclared child effects |
