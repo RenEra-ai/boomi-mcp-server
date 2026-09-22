@@ -3176,4 +3176,9 @@ witnesses, the pinned claims that growth check's monotonicity rests on, made the
 keep `None` and `""` apart, and measured — then refused — seeding a cycle member with its real
 entry form; its new witnesses added packaged corpus inputs, which is
 what moves the revision. Revisions after batch 22c: `capability_revision` `sha256:973f1985…` and
-`compiler_revision` `sha256:46792b20…`; `schema_revision` stays `sha256:c9583e6b…`.
+`compiler_revision` `sha256:46792b20…`; `schema_revision` stays `sha256:c9583e6b…`. **Correction batch 24
+(QA-184-s1-r23-01)** made the repeated-run refusal's served remediation say that the finding does not
+name which cache cause applies, and name the check that tells them apart; its new witness added
+packaged corpus inputs, and the census and the §11 rows did not move. Revisions after batch 24:
+`capability_revision` `sha256:13f16d33…` and `compiler_revision` `sha256:f64c242d…`; `schema_revision`
+stays `sha256:c9583e6b…`.

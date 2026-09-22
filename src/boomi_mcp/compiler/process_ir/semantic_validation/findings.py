@@ -180,13 +180,16 @@ _REMEDIATION: Dict[str, str] = {
         "document and nothing a caller supplies, so run it through its caller or "
         "remove what it requires of one."
     ),
+    # QA-184-s1-r23-01: the finding serves no field that names its cause, so the remediation
+    # says so and names the check that tells the two cache answers apart.
     PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE: (
         "Make the called process run once for these documents. Either give it a Data "
         "Passthrough entry, with a passthrough step first and this call authored "
         "wait=true, so one call runs it once over the whole group; or call it from a "
         "process with no explicit entry, as the terminal of a Branch leg that has no steps "
         "of its own and no step in front of its Branch, which hands the call exactly one "
-        "document. Or answer the cause this call was refused for. A child that reads the "
+        "document. Or answer the cause, which this finding does not name: check whether the "
+        "child reads the cache before writing it. A child that reads the "
         "cache before writing it needs that cache established before its own write, and an "
         "earlier run may have emptied it: no removal exempts that one — write the cache "
         "before reading it, or give it a Data Passthrough entry and take what it needs from "

@@ -6850,3 +6850,154 @@ def test_the_unknown_seed_s_recorded_over_refusal():
         (PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED, "/body/steps/1/legs/0/terminal")]
     assert _row(acyclic, "PARENT", "LOOP_A").document_requirements == ("$ref:P2",)
     assert _both_routes(acyclic, "PARENT") == []
+
+
+# ---------------------------------------------------------------------------
+# Correction batch 24: QA-184-s1-r23-01, the served text says the finding names no cause
+# ---------------------------------------------------------------------------
+#
+# Rule 8's refusal has two cache causes, a child that reads the cache before writing it and a
+# child that keeps what it stored there, and the finding does not say which applies: its
+# evidence is `state_scope: cache` either way. Live QA served both causes through
+# `build_integration` and received byte-identical diagnostics, while the remediation told the
+# author to "answer the cause this call was refused for". The remediation now says that the
+# finding does not name the cause, and names the check that tells the two answers apart.
+
+#: The sentence served before batch 24. It assumed the author already knew the cause.
+_PRESUMES_THE_CAUSE = "Or answer the cause this call was refused for."
+#: The two phrases that make the served text true: the cause is not named, and here is the check.
+_THE_CAUSE_IS_NOT_NAMED = "which this finding does not name"
+_THE_CHECK = "check whether the child reads the cache before writing it"
+
+
+def _says_the_cause_is_not_named(text):
+    """True when a served text says the finding does not name its cause and gives the check."""
+    return _THE_CAUSE_IS_NOT_NAMED in text and _THE_CHECK in text and _PRESUMES_THE_CAUSE not in text
+
+
+def _the_two_cache_causes():
+    """``{cause: (roots, the processes each root calls)}``, one root per cause. Both are
+    refused at the same per-document call.
+
+    read_before_write: the child reads CACHE2 before writing it (R23-N6, from R8-TXT-01).
+    unwaited_writer: the child writes CACHE2 before reading it, then leaves a write to it
+    unwaited (R23-N5 flat, from B21A-R4-SOUND-01)."""
+    extra, unwaited_call = _ASYNC_DEPTHS["flat"]
+    return {
+        "read_before_write": (
+            [("PARENT", _passthrough_root(_DYNAMIC_INTO_CACHE2, {"steps": [], "terminal": _call(
+                "CACHE_CHILD", **_WAITS_AND_ABORTS_ON_ERROR)})),
+             ("CACHE_CHILD", _legs(_BINDS2, _EMPTIES2))],
+            {"PARENT": ("CACHE_CHILD",)}),
+        "unwaited_writer": (
+            _per_document(_legs(_DYNAMIC_INTO_CACHE2, _BINDS2, unwaited_call, _EMPTIES2),
+                          **_WAITS_AND_ABORTS_ON_ERROR) + extra,
+            {"PARENT": ("CACHE_CHILD",), "CACHE_CHILD": ("WRITER2",)}),
+    }
+
+
+def _served_repeated_run_findings(roots, calls):
+    """The repeated-run diagnostics ``build_integration(action="plan")`` serves for PARENT.
+
+    The client is mocked as this module's other public-route tests mock it. The components
+    are the same ones the proved-fill test above declares, with CACHE2 in place of CACHE."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    profile = {"key": "P2", "type": "profile.json", "name": "E184 P2", "action": "create",
+               "config": {"component_type": "profile.json", "profile_type": "json.generated",
+                          "component_name": "E184 P2", "root": {
+                              "name": "Root", "kind": "object", "children": [
+                                  {"name": "id", "kind": "simple", "data_type": "character"}]}}}
+    cache2 = {"key": "CACHE2", "type": "documentcache", "name": "E184 CACHE2", "action": "create",
+              "depends_on": ["P2"], "config": {
+                  "component_type": "documentcache", "component_name": "E184 CACHE2",
+                  "profile_type": "profile.json", "profile_id": "$ref:P2",
+                  "indexes": [{"index_id": 1, "index_name": "by id", "keys": [
+                      {"id": 1, "element_key": "3", "name": "id (Root/id)"}]}]}}
+    components = [profile, cache2, dict(APPLIABLE_CONN, key="RCONN"),
+                  dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                       config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN"))]
+    keys = tuple(spec["key"] for spec in components)
+    raw = _request(
+        [_unit(document, keys + calls.get(key, ()), key=key, name="E184 " + key)
+         for key, document in roots],
+        components,
+    ).model_dump(mode="json")
+    with _ApplyBoundary().installed():
+        result = build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+    return [item for item in result["authoring_result"]["errors"]
+            if PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE in (item.get("cause_codes") or ())]
+
+
+def test_the_repeated_run_finding_says_it_does_not_name_which_cache_cause_applies(monkeypatch):
+    """QA-184-s1-r23-01. The two cache causes are measured apart on the child's own contract:
+    one reads CACHE2 before writing it, the other does not and keeps what it stored. Through
+    the public plan route they still receive the same code, pointer, message, remediation,
+    evidence and citation. So the served remediation, and the catalog entry the finding cites,
+    must say that the finding does not name the cause, and must give the check. The check is
+    the clause each of the two answers opens with.
+
+    Non-vacuity, on the text the author actually receives: the old sentence, served through the
+    same route and through the same catalog builder, fails the same assertions."""
+    from boomi_mcp.authoring.process_ir_projection import (
+        build_process_ir_authoring_entries,
+        collect_projection_sources,
+    )
+    from boomi_mcp.categories import meta_tools
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings
+
+    causes = _the_two_cache_causes()
+    # The premise: two different causes, told apart by the check the remediation names.
+    reads_first = _row(causes["read_before_write"][0], "PARENT", "CACHE_CHILD")
+    keeps_what_it_stored = _row(causes["unwaited_writer"][0], "PARENT", "CACHE_CHILD")
+    assert ("cache", "$ref:CACHE2") in reads_first.required_reads, reads_first
+    assert ("cache", "$ref:CACHE2") not in keeps_what_it_stored.required_reads, keeps_what_it_stored
+    assert keeps_what_it_stored.required_caches_retain_nothing_it_stored is False
+
+    served = {cause: _served_repeated_run_findings(*shape) for cause, shape in causes.items()}
+    for cause, items in served.items():
+        assert [(item["code"], item["path"]) for item in items] == [
+            ("AUTHORING_COMPILE_BLOCKED", _PER_DOCUMENT_CALL)], (cause, items)
+    # Nothing in the served finding tells the two causes apart.
+    assert served["read_before_write"] == served["unwaited_writer"]
+    [item] = served["read_before_write"]
+    assert item["evidence"] == [{"key": "state_scope", "value": "cache"}], item["evidence"]
+
+    remediation = item["remediation"]
+    assert _says_the_cause_is_not_named(remediation), remediation
+    # The check sends the author to exactly one of the two answers that follow it.
+    check = remediation.index(_THE_CHECK)
+    first = remediation.index("A child that reads the cache before writing it")
+    second = remediation.index("A child that never reads the cache before writing it")
+    assert check < first < second, remediation
+
+    [cited] = item["authoring_contract_entry_ids"]
+    assert cited == "diagnostic.process_ir_capability_process_call_repeated_run_unstable"
+    page = meta_tools.get_schema_template_action(schema_name="process_ir_authoring", authoring_entry_id=cited)
+    assert page["_success"] is True, page
+    [entry] = page["contract_page"]["entries"]
+    assert [fact for fact in entry["ordering_facts"] if _says_the_cause_is_not_named(fact)] == [
+        "[semantic validator] " + remediation], entry["ordering_facts"]
+
+    # NON-VACUITY. The same remediation with the old sentence put back in place of the new one.
+    new_sentence = remediation[remediation.index("Or answer the cause"):check + len(_THE_CHECK) + 1]
+    old = remediation.replace(new_sentence, _PRESUMES_THE_CAUSE)
+    assert old != remediation and not _says_the_cause_is_not_named(old)
+    with monkeypatch.context() as patched:
+        patched.setitem(findings._REMEDIATION, PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, old)
+        [old_item] = _served_repeated_run_findings(*causes["read_before_write"])
+    assert old_item["remediation"] == old
+    assert not _says_the_cause_is_not_named(old_item["remediation"])
+    old_specs = tuple(
+        dict(spec, remediation=old)
+        if spec["code"] == PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE else spec
+        for spec in collect_projection_sources().finding_specs)
+    [old_entry] = [candidate for candidate in build_process_ir_authoring_entries(
+        collect_projection_sources()._replace(finding_specs=old_specs))
+        if candidate.contract_entry_id == cited]
+    assert not [fact for fact in old_entry.ordering_facts if _says_the_cause_is_not_named(fact)]
+    assert "[semantic validator] " + old in old_entry.ordering_facts
