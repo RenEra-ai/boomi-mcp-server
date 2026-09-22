@@ -154,6 +154,16 @@ def _digest_machinery():
             vars(encoder)["encode_basestring_ascii"], vars(hashlib)["sha256"])
 
 
+def _measured_baseline():
+    """The baseline :func:`_baseline` already measured — never measured here, where a
+    perturbation may be installed (see :func:`_first_moved_verdict`)."""
+    if not _BASELINE:
+        raise AssertionError(
+            "no unperturbed baseline was measured before this perturbation was installed: call "
+            "_baseline() first (CDX-184-r22-01)")
+    return _BASELINE[0]
+
+
 class _Moved(Exception):
     """Stops the row computation at the first verdict that moved: ``(position, input digest)``."""
 
@@ -176,8 +186,15 @@ def _first_moved_verdict():
     The argument needs the digest unperturbed, so it is checked: under a perturbation of the
     digest machinery the whole row is computed and compared instead (``(None, None)`` then
     means it differs).
+
+    It only READS the baseline, and refuses when none was measured yet. Measured lazily here,
+    the baseline was taken under whatever is patched now — the perturbation itself — so a
+    witness that happened to run first in its process compared the perturbed verdicts with
+    themselves: a moving perturbation read as none, and a no-move control passed whatever the
+    perturbation did (CDX-184-r22-01, measured on a single-node run). The caller measures it
+    before installing anything (:func:`_served_revisions_move_under`).
     """
-    baseline = _baseline()
+    baseline = _measured_baseline()
     corpus_key, records, digests = revision_corpus._packaged()
     if _digest_machinery() != baseline.machinery:
         row = revision_corpus._computed_row(records, digests)
@@ -223,6 +240,7 @@ def _served_revisions_move_under(apply):
     the baseline's: the answer is the PERTURBATION's, not a state that drifted since the
     baseline was taken.
     """
+    _baseline()  # measured unperturbed, BEFORE `apply` installs anything (CDX-184-r22-01)
     with pytest.MonkeyPatch.context() as patched:
         apply(patched)
         assert not revision_corpus.memo_would_hit(), "the served path would answer from the memo"
@@ -2482,3 +2500,52 @@ def test_a_child_run_is_uncoloured_whatever_the_callers_terminal_exports(tmp_pat
     assert "\x1b[" in coloured_output, coloured_output
     assert _failed_names(coloured_output) == [], coloured_output
     assert coloured.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# order independence (CDX-184-r22-01)
+# ---------------------------------------------------------------------------
+
+#: A witness each of whose verdicts rests on the shared baseline, run FIRST in its own process:
+#: the node the review ran alone (a perturbation that moves a verdict) and the two no-move
+#: controls, which are the direction a baseline measured under the perturbation would pass
+#: vacuously.
+_RUN_ALONE = (
+    "test_a_carry_the_tests_kill_moves_the_compiler_revision[the_retrieve_attribution]",
+    "test_a_verdict_container_subclass_alone_moves_nothing",
+    "test_an_unchanged_walk_recompiled_moves_nothing",
+)
+
+
+def test_a_moved_verdict_is_never_compared_with_a_baseline_measured_under_its_perturbation():
+    """The structural half of CDX-184-r22-01: the comparison cannot measure the baseline, so
+    a later witness that forgets to measure it first fails loudly instead of comparing a
+    perturbed state with itself. Non-vacuity: with no baseline measured, the comparison
+    refuses; with it measured, the same call answers."""
+    baseline = _baseline()
+    saved = list(_BASELINE)
+    _BASELINE.clear()
+    try:
+        with pytest.raises(AssertionError, match="CDX-184-r22-01"):
+            _first_moved_verdict()
+    finally:
+        _BASELINE[:] = saved
+    assert _BASELINE[0] is baseline
+    assert _first_moved_verdict() is None
+
+
+def test_the_baseline_witnesses_pass_when_each_runs_alone():
+    """CDX-184-r22-01: before the fix, the first of these to run in a process measured the
+    shared baseline under its own perturbation, so the moving witness failed when run alone
+    and the two controls could pass whatever their perturbation did. Each now runs first in a
+    fresh process — concurrently, so the witness costs one replay's wall time — and passes."""
+    import concurrent.futures
+
+    producer = _producer()
+    module = Path(__file__).resolve().relative_to(_ROOT).as_posix()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(_RUN_ALONE)) as pool:
+        runs = dict(zip(_RUN_ALONE, pool.map(
+            lambda node: producer.run_pytest(["{0}::{1}".format(module, node)]), _RUN_ALONE)))
+    for node, process in runs.items():
+        output = process.stdout + process.stderr
+        assert process.returncode == 0 and "1 passed" in output, (node, output[-3000:])
