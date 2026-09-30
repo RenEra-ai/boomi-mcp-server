@@ -7712,3 +7712,220 @@ def test_the_effect_unknown_finding_serves_the_kind_the_authority_returned():
                and isinstance(node.value, ast.Call)
                and getattr(node.value.func, "id", None) == "_opaque_reason"]
     assert bound.lineno < emission.lineno
+
+
+# --- correction batch 26: the placement remediation cites the page that publishes the fact -----
+#
+# QA-184-s1-r25-01. The predecessor sentence sent the author to
+# `get_schema_template(schema_name='process_ir_authoring', category='placement')` for "the
+# admitted predecessors". That category publishes ten entries, each naming the node kinds one
+# `(context, slot)` admits AS A STEP — a strict superset that includes `connector_call`, never an
+# attested predecessor — and none of them mentions a prefix at all. Measured: an author who
+# followed it and put a connector_call immediately before the call was refused again, under
+# `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY` by the connector-mixing gate, whose own
+# remediation never mentions the predecessor rule. The attested list IS published — in the
+# ordering rules of the `node.process_call` entry, the page this same remediation already cites
+# for the hand-off. The clause predates batch 25, which rewrote the rest of this text and kept it.
+
+#: The anchor both the old and the corrected text share: the fact whose citation is under test
+#: is the one stated immediately after it.
+_PREDECESSOR_CLAUSE = "attest for that context; "
+
+#: Verbatim, the citation df5576a served, for the faithful revert mutant.
+_B26_OLD_CITATION = (
+    "the admitted predecessors are published at "
+    "get_schema_template(schema_name='process_ir_authoring', category='placement')."
+)
+_B26_NEW_CITATION = (
+    "those attested predecessors are named in the ordering rules at "
+    "get_schema_template(schema_name='process_ir_authoring', node_kind='process_call')."
+)
+
+#: How the cited page WORDS each kind of `PROCESS_CALL_ATTESTED_PREDECESSORS`. A translation
+#: table, not a second copy of the fact: its key set is checked against the authority's own
+#: projection below, so a kind added there fails here instead of passing silently, and its
+#: values are checked against the page's own enumeration, so a phrase invented here fails too.
+#: Two pairs share one phrase because the page speaks the author's language and each pair lowers
+#: to a single platform step — the collapsing the authority's own comment records for the
+#: capture's cache retrieve row.
+_PREDECESSOR_WORDS = {
+    "map_ref": "a map",
+    "set_ddp": "a property write",
+    "set_dpp": "a property write",
+    "cache_get": "a cache read",
+    "document_cache_retrieve": "a cache read",
+    "flow_control": "flow control",
+    "message": "a message",
+    "data_process": "a data process",
+}
+
+#: Where the cited page enumerates them. Read, never assumed: the enumeration is compared with
+#: the translation table's values, so the two cannot drift apart in either direction.
+_ENUMERATION_ANCHOR = "the step immediately before it is one live captures attest there ("
+
+
+def _attested_predecessor_kinds():
+    """THE authority, projected to what a prefix may END ON — the same projection
+    `_ATTESTED_PREFIX_PAIRS` takes for the parser's own prefix check."""
+    from boomi_mcp.models.process_ir import PROCESS_CALL_ATTESTED_PREDECESSORS
+
+    return {kind for _context, kind, _form, _wait in PROCESS_CALL_ATTESTED_PREDECESSORS}
+
+
+def _cited_selector(text, after):
+    """The `get_schema_template` kwargs a served text cites for the fact stated after ``after``.
+
+    Parsed out of the served string itself — the author's own route — rather than restated
+    here, so the test follows whatever the text says and fails when it says something else."""
+    import ast
+
+    start = text.index(after) + len(after)
+    opener = "get_schema_template("
+    at = text.index(opener, start) + len(opener)
+    depth, end = 1, at
+    while depth:
+        depth += {"(": 1, ")": -1}.get(text[end], 0)
+        end += 1
+    call = ast.parse("f({0})".format(text[at:end - 1]), mode="eval").body
+    assert not call.args, text[at:end - 1]
+    return {keyword.arg: ast.literal_eval(keyword.value) for keyword in call.keywords}
+
+
+def _entry_text(entry):
+    """Everything a served entry says, in one string — no field can be missed."""
+    import json
+
+    return json.dumps(entry, sort_keys=True, ensure_ascii=False)
+
+
+def _predecessors_unnamed(text):
+    """The attested kinds ``text`` does not name, by the words the page uses for them.
+
+    A kind with no translation must appear by its own spelling, so a new authority row can
+    never be satisfied by silence."""
+    return sorted(kind for kind in _attested_predecessor_kinds()
+                  if _PREDECESSOR_WORDS.get(kind, kind) not in text)
+
+
+def _cited_entries(remediation):
+    """Every entry the PUBLIC selector this remediation cites returns, keyed by id."""
+    from boomi_mcp.categories import meta_tools
+
+    page = meta_tools.get_schema_template_action(
+        **_cited_selector(remediation, _PREDECESSOR_CLAUSE))
+    assert page["_success"] is True, page
+    return {entry["contract_entry_id"]: entry for entry in page["contract_page"]["entries"]}
+
+
+def _naming_every_predecessor(entries):
+    """The ids of ``entries`` that name every attested predecessor."""
+    return {entry_id for entry_id, entry in entries.items()
+            if not _predecessors_unnamed(_entry_text(entry))}
+
+
+def _predecessor_enumeration(entry):
+    """The predecessor list the cited page enumerates, in the page's own phrases."""
+    [fact] = [text for text in entry["ordering_facts"] if _ENUMERATION_ANCHOR in text]
+    start = fact.index(_ENUMERATION_ANCHOR) + len(_ENUMERATION_ANCHOR)
+    phrases = set()
+    for item in fact[start:fact.index(")", start)].split(", "):
+        phrases.update(part.strip() for part in item.split(" or "))
+    return phrases
+
+
+def test_the_placement_remediation_cites_the_page_that_names_the_attested_predecessors():
+    """THE INVARIANT, derived from the authority: follow the citation the served remediation
+    gives for the predecessor fact, with the public `get_schema_template` selector exactly as it
+    is written, and the entry it returns must name every kind in
+    `PROCESS_CALL_ATTESTED_PREDECESSORS`. The placement category may not be what it cites,
+    because that category publishes a different fact — the node kinds each slot admits as a
+    step, measured here to be a strict superset of the attested set and to name none of it.
+
+    Non-vacuity in both directions: df5576a's citation, restored verbatim, names not one of
+    them; and blinding any one kind's words on the cited page fails, naming exactly the kinds
+    that share those words."""
+    from boomi_mcp.categories import meta_tools
+    from boomi_mcp.compiler.process_ir import diagnostics as compiler_diagnostics
+    from boomi_mcp.compiler.process_ir.semantic_validation import findings as semantic_findings
+    from boomi_mcp.models import process_ir as parser_module
+
+    remediation = compiler_diagnostics._REMEDIATION[_PLACEMENT]
+    assert {parser_module._REMEDIATION[_PLACEMENT],
+            semantic_findings._REMEDIATION[_PLACEMENT]} == {remediation}
+
+    # The translation table is complete against the authority, so it cannot go stale silently.
+    kinds = _attested_predecessor_kinds()
+    assert kinds, "the authority is empty — the check would be vacuous"
+    assert set(_PREDECESSOR_WORDS) == kinds, sorted(set(_PREDECESSOR_WORDS) ^ kinds)
+
+    entries = _cited_entries(remediation)
+    assert _naming_every_predecessor(entries) == {"node.process_call"}, sorted(entries)
+    # ...and the page names no predecessor the authority does not attest: its own enumeration is
+    # exactly the phrases the table translates to.
+    assert _predecessor_enumeration(entries["node.process_call"]) == set(_PREDECESSOR_WORDS.values())
+
+    # The placement category is not what it cites, and could not be: every step row admits kinds
+    # the authority does not attest, and no placement entry names the attested list.
+    assert _cited_selector(remediation, _PREDECESSOR_CLAUSE).get("category") != "placement"
+    placement = meta_tools.get_schema_template_action(
+        schema_name="process_ir_authoring", category="placement", limit=50)
+    assert placement["_success"] is True, placement
+    rows = {entry["contract_entry_id"]: set(entry["node_kinds"])
+            for entry in placement["contract_page"]["entries"]}
+    step_rows = {entry_id: row for entry_id, row in rows.items() if entry_id.endswith(".step")}
+    assert step_rows, rows
+    assert all(row - kinds for row in step_rows.values()), step_rows
+    assert _naming_every_predecessor(
+        {entry["contract_entry_id"]: entry for entry in placement["contract_page"]["entries"]}) == set()
+
+    # Non-vacuity A: the citation df5576a served, restored verbatim on this same text.
+    old = remediation.replace(_B26_NEW_CITATION, _B26_OLD_CITATION)
+    assert old != remediation and old.count(_B26_OLD_CITATION) == 1
+    assert _naming_every_predecessor(_cited_entries(old)) == set()
+
+    # Non-vacuity B: a kind removed from the cited page's text.
+    text = _entry_text(entries["node.process_call"])
+    assert _predecessors_unnamed(text) == []
+    for kind in sorted(kinds):
+        words = _PREDECESSOR_WORDS[kind]
+        blinded = text.replace(words, "a step")
+        assert blinded != text, kind
+        assert _predecessors_unnamed(blinded) == sorted(
+            other for other in kinds if _PREDECESSOR_WORDS[other] == words), kind
+
+
+def test_the_public_plan_serves_the_corrected_citation_and_an_author_can_follow_it():
+    """The public route, end to end. A prefix refusal `build_integration(action="plan")` serves
+    carries the corrected citation and not df5576a's, and following that citation with the
+    public selector returns the entry naming every attested predecessor.
+
+    The hand-off refusal is the prefix refusal an `AuthoringRequestV1` can carry: `_unit` parses
+    each document as it is built, so a parser-layer prefix refusal never reaches the request
+    model at all. Same shape as `_PLACEMENT_CAUSES['hand_off_into_a_no_data_child']`, with the
+    client mocked as this module's other public-route tests mock it."""
+    from unittest.mock import MagicMock
+
+    from test_issue_158_listener_deployment import (
+        _PROFILE,
+        _ApplyBoundary,
+        _request,
+        _unit,
+    )
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    roots = [("PARENT", _parent([_MSG], _call("NODATA"))), ("NODATA", _NODATA)]
+    raw = _request(
+        [_unit(document, ("NODATA",) if key == "PARENT" else (), key=key, name="E184 " + key)
+         for key, document in roots],
+        [],
+    ).model_dump(mode="json")
+    with _ApplyBoundary().installed():
+        result = build_integration_action(
+            MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+    items = [item for item in result["authoring_result"]["errors"]
+             if _PLACEMENT in (item.get("cause_codes") or ())]
+    assert [item["path"] for item in items] == ["/body/steps/1/legs/0/terminal"], items
+    [item] = items
+    assert _B26_NEW_CITATION in item["remediation"], item["remediation"]
+    assert _B26_OLD_CITATION not in item["remediation"], item["remediation"]
+    assert _naming_every_predecessor(_cited_entries(item["remediation"])) == {"node.process_call"}

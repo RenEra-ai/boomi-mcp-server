@@ -3192,4 +3192,17 @@ refusal's message and remediation — narrower than its refusals since #143 — 
 `_opaque_reason` reports (`map`, `script`, `subprocess`), with the answer each needs. Its new
 witnesses added packaged corpus inputs, and the census and the §11 rows did not move. Revisions
 after batch 25: `capability_revision` `sha256:16f62dc5…` and `compiler_revision`
-`sha256:03a5e24b…`; `schema_revision` stays `sha256:c9583e6b…`.
+`sha256:03a5e24b…`; `schema_revision` stays `sha256:c9583e6b…`. **Correction batch 26
+(QA-184-s1-r25-01)** corrected the page the placement refusal's remediation cited for the attested
+direct predecessors. It named `category='placement'`, which publishes something else — the node
+kinds each `(context, slot)` admits AS A STEP, a strict superset that includes `connector_call`,
+never an attested predecessor, and that mentions prefixes nowhere — so an author who followed it
+and put a connector step in front of the call was refused again, by the connector-mixing gate
+under `PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY`, whose remediation never mentions the
+predecessor rule. The attested predecessors are named in the ordering rules of the
+`node.process_call` entry, the page this same remediation already cites for the hand-off, and the
+parser's, the compiler's and the semantic validator's tables serve the corrected citation
+byte-equal. The clause predates batch 25, which rewrote the rest of this text and kept it; no
+verdict moved and no rule changed. Its new witnesses added packaged corpus inputs, and the census
+and the §11 rows did not move. Revisions after batch 26: `capability_revision` `sha256:3511fbb4…`
+and `compiler_revision` `sha256:e11d7c7b…`; `schema_revision` stays `sha256:c9583e6b…`.

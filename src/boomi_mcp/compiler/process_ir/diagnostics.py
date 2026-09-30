@@ -173,11 +173,20 @@ _REMEDIATION = {
     # terminal). What tells the hand-off refusal apart is its MESSAGE: every prefix and root
     # verdict serves a message naming its rule, and only lineage's hand-off check serves this
     # table's own message, which the answer below quotes from the constant it is built from.
+    #
+    # Correction batch 26 (QA-184-s1-r25-01) fixes the citation that sentence carried, which
+    # predates batch 25 and which batch 25 kept: `category='placement'` publishes the node
+    # kinds each `(context, slot)` admits AS A STEP — a strict superset that names
+    # `connector_call`, never an attested predecessor, and that mentions prefixes nowhere. An
+    # author who followed it was refused again, by the connector-mixing gate under a different
+    # code. The attested predecessors are named on the `node.process_call` entry's ordering
+    # rules, which is the page this text already cites for the hand-off, so it is cited here too.
     PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED: (
         "Follow the rule the message names. In a branch leg or a decision true-arm, the "
         "steps before a process call must end on a direct predecessor that live captures "
-        "attest for that context; the admitted predecessors are published at "
-        "get_schema_template(schema_name='process_ir_authoring', category='placement'). A "
+        "attest for that context; those attested predecessors are named in the ordering "
+        "rules at get_schema_template(schema_name='process_ir_authoring', "
+        "node_kind='process_call'). A "
         "catch body's recovery call admits only notify steps before it; a root sequence "
         "admits no step before its call, so move such a prefix into a branch leg; and no "
         "other body admits any. When "

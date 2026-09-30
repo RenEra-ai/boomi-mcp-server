@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14250, "minimum_collected": 14250, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14252, "minimum_collected": 14252, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14348,3 +14348,5 @@
 {"kind": "test", "id": "pytest-014347", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_process_whose_process_ir_the_request_carries_is_not_opaque", "state": "active"}
 {"kind": "test", "id": "pytest-014348", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_served_effect_unknown_text_names_every_reporting_site", "state": "active"}
 {"kind": "test", "id": "pytest-014349", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_effect_unknown_finding_serves_the_kind_the_authority_returned", "state": "active"}
+{"kind": "test", "id": "pytest-014350", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_remediation_cites_the_page_that_names_the_attested_predecessors", "state": "active"}
+{"kind": "test", "id": "pytest-014351", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_serves_the_corrected_citation_and_an_author_can_follow_it", "state": "active"}
