@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14263, "minimum_collected": 14263, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14278, "minimum_collected": 14278, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14361,3 +14361,18 @@
 {"kind": "test", "id": "pytest-014360", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_stream_field_is_classified_once_and_the_helper_applies_its_class", "state": "active"}
 {"kind": "test", "id": "pytest-014361", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_stream_the_transfer_builds_goes_through_the_helper_or_is_a_listed_producer", "state": "active"}
 {"kind": "test", "id": "pytest-014362", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_sweep_catches_a_bare_stream_in_a_count_preserving_branch", "state": "active"}
+{"kind": "test", "id": "pytest-014363", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8787]", "state": "active"}
+{"kind": "test", "id": "pytest-014364", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8818]", "state": "active"}
+{"kind": "test", "id": "pytest-014365", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_property_markers_survive_a_step_exactly_when_its_documents_keep_their_properties", "state": "active"}
+{"kind": "test", "id": "pytest-014366", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[legacy-a_dynamic_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014367", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[legacy-a_literal_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014368", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[legacy-documents_without_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014369", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[typed-a_dynamic_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014370", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[typed-a_literal_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014371", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_connector_call_is_owed_to_the_cache_its_documents_were_retrieved_from[typed-documents_without_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014372", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_refuses_the_caller_a_connector_call_hid_from_the_binding", "state": "active"}
+{"kind": "test", "id": "pytest-014373", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_shared_retrieve_and_a_bound_use_earns_its_flattened_twins_verdict[legacy]", "state": "active"}
+{"kind": "test", "id": "pytest-014374", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_shared_retrieve_and_a_bound_use_earns_its_flattened_twins_verdict[typed]", "state": "active"}
+{"kind": "test", "id": "pytest-014375", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_identity_keying_put_back_re_admits_the_connector_caller", "state": "active"}
+{"kind": "test", "id": "pytest-014376", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_connector_call_back_on_the_producer_list_re_admits_its_caller", "state": "active"}
+{"kind": "test", "id": "pytest-014377", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_producer_rule_accepts_every_listed_site_for_its_stated_reason", "state": "active"}

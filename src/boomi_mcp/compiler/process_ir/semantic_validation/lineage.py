@@ -393,8 +393,14 @@ class _Stream(NamedTuple):
     #: the same answer `caller_cache` carries, asked once at the retrieve. A bound path
     #: riding on them is a bound use of THIS cache, which is not always the cache the
     #: property came from: a child that re-caches what it read binds on documents its
-    #: caller may also have stored in the second cache. Unlike `caller_cache` it survives a
-    #: step that hands on exactly the documents it received.
+    #: caller may also have stored in the second cache. A PROPERTY-channel marker: every
+    #: consumer reads it for a use of a document property (a bound path, a DDP read, a
+    #: re-cache's property cohort), never for the payload. Unlike `caller_cache`, the
+    #: payload-channel marker, it therefore survives every step whose documents keep their
+    #: properties — the measured authority `_discards_document_properties`, the same
+    #: predicate the in-process walk drops document keys by — including a connector call,
+    #: whose output is a new payload carrying the properties of the documents it received
+    #: (correction batch 28, QA-184-s1-r27-01).
     #:
     #: None where the walk proved this path emptied the cache and refilled it only from its
     #: own writes: no caller's document is there for the binding to ride on, so crediting
@@ -406,8 +412,8 @@ class _Stream(NamedTuple):
     #: carries from a re-cache (`_cohort_at_write`). A caller's documents may be in each of
     #: them, so a use of a property of these documents is a use of those caches' documents too,
     #: and its obligation is recorded against each. Carried beside `retrieved_from` and by the
-    #: same steps, and never re-filtered: the authority was asked where each cache's documents
-    #: were taken out of it.
+    #: same steps (the property authority, `_handed_on`), and never re-filtered: the authority
+    #: was asked where each cache's documents were taken out of it.
     retrieved_origins: Tuple[str, ...] = ()
     #: #184 amendment 1 rule 7: True when this path provably carries AT LEAST ONE document,
     #: whatever their number — the question a write behind a step asks, which `count` can
@@ -928,7 +934,7 @@ _COUNT_PRESERVING_KINDS = frozenset({
 })
 
 
-# --- what a stream a step hands on keeps of the stream it received (#184 correction batch 27) ---
+# --- what a stream a step hands on keeps of the stream it received (#184 correction batches 27-28) ---
 #
 # ARCH-184-r3-01. `_advance_stream` builds a fresh `_Stream` in several branches, and a field the
 # fresh stream does not name silently takes its default. Correction batch 20 added the carry of
@@ -940,8 +946,24 @@ _COUNT_PRESERVING_KINDS = frozenset({
 # received goes through `_handed_on`, which applies the classification. Asserted at import that
 # the classes partition `_Stream._fields`, so a field added later cannot default silently, and
 # swept from the source by `test_issue_184_child_state_transfer` so a branch cannot bypass it.
+#
+# QA-184-s1-r27-01 (correction batch 28), the third instance of the same escape. Each class reads
+# ONE of the two authorities this module holds about a step, and batch 27 keyed the carried class
+# on the wrong one:
+#
+# - what the documents ARE — `DOCUMENT_STREAM_REPLACING_KINDS` (content) and
+#   `_COUNT_PRESERVING_KINDS` (identity: exactly the documents received, one for one);
+# - what the documents CARRY — `PROPERTY_SURVIVAL_V1`, measured live, read through
+#   `_discards_document_properties` (the property question).
+#
+# The retrieved-cache markers serve property uses only, so they follow the property authority —
+# the same predicate the in-process walk drops document-scoped keys by
+# (`_drop_replaced_document_keys`). Keyed on identity, a connector call (not count-preserving, yet
+# a step whose documents keep their properties) dropped them while the flattened twin kept the
+# caller's writer across it, and a caller's literal path segment escaped again.
 
 #: What the step itself decides: which documents it hands on and what proves their profile.
+#: Authority: the step's own branch in `_advance_stream`.
 _STREAM_SET_BY_THE_STEP = frozenset({"state", "identity", "origin", "origin_node"})
 #: Re-applied by the walk's controller after every step from the INCOMING stream, whatever the
 #: step built (`_walk_lineage`, the `stream._replace` after `_advance_stream`): the proved count,
@@ -950,24 +972,44 @@ _STREAM_SET_BY_THE_STEP = frozenset({"state", "identity", "origin", "origin_node
 #: the step's own value is kept rather than the received one: carrying the received value here
 #: would keep it past a producer that may return no rows. The test pins this class to the
 #: keywords of that `_replace`, both ways.
+#:
+#: Authorities, per field. The counted fields — `count`, `provably_nonempty`, `leg_input` — read
+#: the IDENTITY question (how many documents, and which ones), so they survive exactly the
+#: `_COUNT_PRESERVING_KINDS` (`leg_input` less the controls) and nothing about a step's
+#: properties moves them. `properties_unknown` is carried from the incoming stream and only ever
+#: SET by the controller (a passthrough entry, an opaque map or script) or re-derived at a
+#: retrieve, so no step can lose it. `native_kind` is amendment 1 rule 3's marker. Correction
+#: batch 28 left this class and the controller unchanged.
 _STREAM_SET_BY_THE_CONTROLLER = frozenset(
     {"count", "properties_unknown", "native_kind", "provably_nonempty", "leg_input"})
-#: The cache the documents were retrieved from, and the caches they came out of before it. The
-#: documents' IDENTITY survives a step that hands on exactly the documents it received
-#: (`_COUNT_PRESERVING_KINDS`), so these survive with it: a bound use or a re-cache past such a
-#: step is still a use of those caches' documents, and dropping them discards a writer
-#: alternative (amendment 3 §7). Dropped by every other step — a producer's documents are not
-#: the retrieved ones, and crediting a caller for them charged it for the producer's output.
-_STREAM_CARRIED_WITH_THE_DOCUMENTS = frozenset({"retrieved_from", "retrieved_origins"})
+#: The cache the documents were retrieved from, and the caches they came out of before it —
+#: the PROPERTY-channel markers. Every consumer reads them for a use of a document property: a
+#: bound path riding on the documents, a DDP read, the property cohort a re-cache stores. A
+#: caller's value of such a property travels on the documents exactly as far as the platform
+#: keeps their properties, so these survive a step exactly when its documents keep their
+#: properties — authority: `_discards_document_properties` (the measured
+#: `PROPERTY_SURVIVAL_V1`), the ONE predicate the in-process walk also drops document-scoped keys
+#: by, so the child's contract and its flattened twin agree on this channel by construction.
+#: Dropping them past such a step discards a writer alternative (amendment 3 §7).
+#:
+#: Until correction batch 28 they were keyed on the identity authority (`_COUNT_PRESERVING_KINDS`)
+#: on the ground that a producer's documents are not the retrieved ones and crediting a caller
+#: for them would charge it for the producer's output (B21A-R3-OR-01, recorded as fail-closed).
+#: That is a CONTENT argument, and the content markers (`caller_cache`, and the identity the step
+#: builds) are rightly dropped there. For properties it was measured false twice: behind a map
+#: (ARCH-184-r3-01) and behind a connector call (QA-184-s1-r27-01), each an escape the flattened
+#: twin refused.
+_STREAM_CARRIED_WITH_THE_PROPERTIES = frozenset({"retrieved_from", "retrieved_origins"})
 #: The cache a CONSUMER of the retrieved payload owes: past any step that rebuilds the stream the
 #: payload is no longer the cached one a caller stored (its own docstring). Only the retrieve sets
 #: it; a step that hands on the stream it received UNCHANGED keeps it by not rebuilding.
+#: Authority: the CONTENT question — a rebuild is a new payload, whatever its properties.
 _STREAM_DROPPED_BY_A_REBUILD = frozenset({"caller_cache"})
 
 _STREAM_FIELD_CLASSES = (
     _STREAM_SET_BY_THE_STEP,
     _STREAM_SET_BY_THE_CONTROLLER,
-    _STREAM_CARRIED_WITH_THE_DOCUMENTS,
+    _STREAM_CARRIED_WITH_THE_PROPERTIES,
     _STREAM_DROPPED_BY_A_REBUILD,
 )
 
@@ -984,18 +1026,26 @@ if _unclassified_stream_fields(_Stream._fields, _STREAM_FIELD_CLASSES):  # pragm
         _unclassified_stream_fields(_Stream._fields, _STREAM_FIELD_CLASSES)))
 
 
-def _handed_on(kind: str, received: "_Stream", built: "_Stream") -> "_Stream":
-    """The stream a step of ``kind`` hands on, built as ``built`` from the ``received`` one.
+def _handed_on(semantic, received: "_Stream", built: "_Stream") -> "_Stream":
+    """The stream the step ``semantic`` hands on, built as ``built`` from the ``received`` one.
 
     The ONE construction path for a stream a step rebuilds from the documents it received
-    (ARCH-184-r3-01). The step's own fields and the controller's are ``built``'s; the fields
-    that travel with the documents are ``received``'s across a count-preserving step and their
-    default across any other; the fields no rebuild keeps take their default.
+    (ARCH-184-r3-01). The step's own fields and the controller's are ``built``'s; the
+    property-channel markers are ``received``'s across a step whose documents keep their
+    properties and their default across any other; the fields no rebuild keeps take their
+    default.
+
+    Takes the step's SEMANTIC, not its kind: the property authority answers per
+    ``(kind, step operation)`` — a ``data_process`` is decided by what it runs — and it is the
+    predicate the in-process walk drops document-scoped keys by, so the markers a child's
+    contract exports and the writers its flattened twin keeps cannot disagree (correction batch
+    28, QA-184-s1-r27-01). Batch 27 keyed this on `_COUNT_PRESERVING_KINDS`, the identity
+    authority, and a connector call dropped the markers its own documents' properties kept.
     """
-    keeps = kind in _COUNT_PRESERVING_KINDS
+    keeps = not _discards_document_properties(semantic)
     defaults = _Stream._field_defaults
     fields = built._asdict()
-    for name in _STREAM_CARRIED_WITH_THE_DOCUMENTS:
+    for name in _STREAM_CARRIED_WITH_THE_PROPERTIES:
         fields[name] = getattr(received, name) if keeps else defaults[name]
     for name in _STREAM_DROPPED_BY_A_REBUILD:
         fields[name] = defaults[name]
@@ -2068,7 +2118,7 @@ def _walk_lineage(
         when the read is of a property the documents retrieved from it must carry.
 
         ``rides_on`` names the cache the documents were retrieved from, carried past a step
-        that hands on exactly the documents it received (`_Stream.retrieved_from`). A read of
+        whose documents keep their properties (`_Stream.retrieved_from`). A read of
         a document property there is a use of that cache's documents exactly as a binding
         riding on them is, so it is recorded the same way (`read_cache_origins`) and credited
         to that cache wherever a seeded caller cohort clears it. Without it the ordinary read
@@ -2539,7 +2589,7 @@ def _walk_lineage(
                             mismatch(node, sub_path)
                     elif stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _handed_on(kind, stream, _Stream(
+                            stream = _handed_on(semantic, stream, _Stream(
                                 STREAM_CALLER_ENTRY, identity,
                                 provably_nonempty=stream.provably_nonempty))
                         elif identity != stream.identity:
@@ -2567,7 +2617,7 @@ def _walk_lineage(
                     _requires(stream, required, ref)
                     if stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _handed_on(kind, stream, _Stream(
+                            stream = _handed_on(semantic, stream, _Stream(
                                 STREAM_CALLER_ENTRY, required,
                                 provably_nonempty=stream.provably_nonempty))
                         elif required != stream.identity:
@@ -2631,10 +2681,18 @@ def _walk_lineage(
             # source produced upstream no longer reaches the next consumer.
             if not binding.capability.produces_output:
                 return state, _Stream(STREAM_ABSENT), False
+            # Its output is a NEW payload — the call builds the identity and origin, and the
+            # payload marker `caller_cache` is dropped — but the documents keep the properties
+            # of the ones it received (the property authority: a connector call is not a step
+            # `_discards_document_properties` names, and the in-process walk keeps every
+            # document-scoped key across it). So the property-channel markers travel on through
+            # `_handed_on`: a bound use behind the call rides on the cache the documents were
+            # retrieved from exactly as the flattened twin's binding keeps that cache's writer
+            # (correction batch 28, QA-184-s1-r27-01).
             output = _identity(binding.output_profile_ref)
             if output is None:
-                return state, _Stream(STREAM_UNKNOWN, origin="undeclared"), False
-            return state, _Stream(STREAM_KNOWN, output, "call", node), False
+                return state, _handed_on(semantic, stream, _Stream(STREAM_UNKNOWN, origin="undeclared")), False
+            return state, _handed_on(semantic, stream, _Stream(STREAM_KNOWN, output, "call", node)), False
 
         if kind == "map":
             if stream.state in NO_PRODUCER_STREAMS:
@@ -2669,12 +2727,12 @@ def _walk_lineage(
             if checked and contradicted:
                 mismatch(node, "/map_ref")
             # The map owns its own input mismatch. Downstream consumers are judged
-            # against what it declares it emits, so one wrong map is reported once. It hands
-            # on exactly the documents it received, so the caches they were retrieved from
-            # travel on with them (`_handed_on`, ARCH-184-r3-01).
+            # against what it declares it emits, so one wrong map is reported once. Its
+            # documents keep their properties, so the caches they were retrieved from travel
+            # on with them (`_handed_on`, ARCH-184-r3-01).
             if target is None:
-                return state, _handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="map")), legacy
-            return state, _handed_on(kind, stream, _Stream(STREAM_KNOWN, target, "map", node)), legacy
+                return state, _handed_on(semantic, stream, _Stream(STREAM_UNKNOWN, origin="map")), legacy
+            return state, _handed_on(semantic, stream, _Stream(STREAM_KNOWN, target, "map", node)), legacy
 
         if kind == "cache_put" and stream.state == STREAM_CALLER_ENTRY:
             # Staging the caller's documents: the cache's declared profile is what
@@ -2770,36 +2828,37 @@ def _walk_lineage(
                 # its input's content and records no requirement.
                 _requires(stream, None, None)
             if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
-                return state, _handed_on(kind, stream, _Stream(STREAM_TOUCHED_ENTRY)), legacy
+                return state, _handed_on(semantic, stream, _Stream(STREAM_TOUCHED_ENTRY)), legacy
             if stream.state == STREAM_ABSENT:
                 return state, stream, legacy
-            # The documents' IDENTITY survives a step that hands on exactly the documents
-            # it received, so the cache they were RETRIEVED from survives with them, whichever
-            # branch rebuilds the stream: `_handed_on` is the one construction path, and
-            # `_COUNT_PRESERVING_KINDS` the authority on which kinds keep them. A binding
-            # behind a Message is still a bound use of that cache, and the caller that filled
-            # it is still one of the writers the path must pass for: amendment 3 §7 requires a
-            # bound path to pass for every possible selected writer and never to discard an
-            # inconvenient writer alternative. Dropping it admitted a caller whose LITERAL path
-            # segment reached the request path, while the flattened twin of the same legs was
-            # refused (ARCH-184-r2-01).
+            # The cache the documents were RETRIEVED from survives a step whose documents keep
+            # their properties, whichever branch rebuilds the stream: `_handed_on` is the one
+            # construction path, and `_discards_document_properties` — the measured property
+            # authority the in-process walk drops document keys by — decides. A Message keeps
+            # the properties, so a binding behind it is still a bound use of that cache, and the
+            # caller that filled it is still one of the writers the path must pass for:
+            # amendment 3 §7 requires a bound path to pass for every possible selected writer
+            # and never to discard an inconvenient writer alternative. Dropping it admitted a
+            # caller whose LITERAL path segment reached the request path, while the flattened
+            # twin of the same legs was refused (ARCH-184-r2-01). A data process the authority
+            # does not measure to keep them drops them, exactly as the in-process walk drops the
+            # writers there.
             #
-            # Until correction batch 27 the carry lived HERE and nowhere else, and this comment
-            # recorded that a map, whose own branch above returned a fresh `_Stream`, dropped
-            # both markers "whatever that set says", calling the direction fail-closed
-            # (B21A-R3-OR-01). It is not: behind a map, a bound use on documents retrieved from
-            # a cache a caller shares was never charged to that cache, so the caller's literal
-            # path segment there escaped both compiler entry points while the flattened twin
-            # was refused (ARCH-184-r3-01). What stays true is the connector call: its output is
-            # not the documents it received, so it keeps building its own stream and crediting
-            # the caller for it would charge the caller for the connector's output.
+            # This comment once recorded that the steps which build their own stream — a map,
+            # then a connector call — dropped both markers, calling the direction fail-closed
+            # because crediting the caller would charge it for the step's output
+            # (B21A-R3-OR-01). Measured false twice: behind a map (ARCH-184-r3-01) and behind a
+            # connector call (QA-184-s1-r27-01) a bound use on documents retrieved from a cache a
+            # caller shares was never charged to that cache, and the caller's literal path
+            # segment escaped both compiler entry points while the flattened twin was refused.
+            # The argument is about the PAYLOAD, and the payload marker is what a rebuild drops.
             #
-            # Only the identity travels. `caller_cache` stays withheld: past a step that
-            # rebuilds the stream the payload is no longer the cached one a caller stored —
-            # the cohort seed already clears the binding through the ordinary read that
-            # recorded the row. Both markers already carry the retrieve's own answer to
-            # `_caller_documents_may_reach`, so nothing re-asks it here.
-            return state, _handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="opaque")), legacy
+            # `caller_cache` stays withheld: past a step that rebuilds the stream the payload is
+            # no longer the cached one a caller stored — the cohort seed already clears the
+            # binding through the ordinary read that recorded the row. Both markers already
+            # carry the retrieve's own answer to `_caller_documents_may_reach`, so nothing
+            # re-asks it here.
+            return state, _handed_on(semantic, stream, _Stream(STREAM_UNKNOWN, origin="opaque")), legacy
 
         return state, stream, legacy
 

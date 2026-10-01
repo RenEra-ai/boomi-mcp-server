@@ -955,10 +955,10 @@ def test_the_ride_on_carry_past_a_stream_replacement_moves_the_compiler_revision
     assert served[0] == authoring_contract.sha256_fingerprint(baseline)
     real_handed_on = lineage._handed_on
 
-    def without_the_ride_on_marker(kind, received, built):
+    def without_the_ride_on_marker(semantic, received, built):
         if built.origin == "opaque":
             received = received._replace(retrieved_from=None)
-        return real_handed_on(kind, received, built)
+        return real_handed_on(semantic, received, built)
 
     with monkeypatch.context() as patched:
         patched.setattr(lineage, "_handed_on", without_the_ride_on_marker)
@@ -1174,10 +1174,10 @@ def _every_perturbation():
     real_handed_on = lineage._handed_on
 
     def ride_on_wrapper(patched):
-        def without_the_ride_on_marker(kind, received, built):
+        def without_the_ride_on_marker(semantic, received, built):
             if built.origin == "opaque":
                 received = received._replace(retrieved_from=None)
-            return real_handed_on(kind, received, built)
+            return real_handed_on(semantic, received, built)
 
         patched.setattr(lineage, "_handed_on", without_the_ride_on_marker)
 

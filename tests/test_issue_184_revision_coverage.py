@@ -184,7 +184,7 @@ def _perturbations():
         # (correction batch 21a). Answering yes everywhere forgets every proved removal and
         # refill, so the removed-and-refilled chain charges its caller again.
         ("lineage", "_caller_documents_may_reach"): lambda state, cache_ref: True,
-        ("lineage", "_handed_on"): lambda kind, received, built: built,
+        ("lineage", "_handed_on"): lambda semantic, received, built: built,
         # The proof a removal's MAY-set clear and seal rest on. Dropping its relative half — a
         # removal on the documents a Branch hands its leg runs whenever a later leg runs —
         # keeps a document written before a shared-trigger removal reaching a later leg again.
@@ -223,10 +223,10 @@ def _perturbations():
         ("lineage", "DOCUMENT_STREAM_REPLACING_KINDS"): frozenset(),
         ("lineage", "_ABNORMAL_EXIT_ROLES"): frozenset({"exception", "process_call"}),
         ("lineage", "_COUNT_PRESERVING_KINDS"): frozenset(),
-        # correction batch 27: the one construction path for a stream a step rebuilds, and the
+        # correction batches 27-28: the one construction path for a stream a step rebuilds, and the
         # two field classes it applies. The dropped class is WIDENED to the carried fields: as
         # authored it names a field no rebuilt stream sets, so emptying it would change nothing.
-        ("lineage", "_STREAM_CARRIED_WITH_THE_DOCUMENTS"): frozenset(),
+        ("lineage", "_STREAM_CARRIED_WITH_THE_PROPERTIES"): frozenset(),
         ("lineage", "_STREAM_DROPPED_BY_A_REBUILD"): frozenset({"caller_cache", "retrieved_from"}),
         ("lineage", "_DERIVED_ENTRY_FORMS"): frozenset(),
         ("lineage", "_DOCUMENT_LIFETIME_SCOPES"): frozenset(),

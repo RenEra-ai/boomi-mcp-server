@@ -3224,4 +3224,26 @@ Message; the connector-call half is unchanged. `properties_unknown` was measured
 the controller re-applies it from the incoming stream after every step. No served text moved. Its
 new witnesses added packaged corpus inputs, and the census and the §11 rows did not move. Revisions
 after batch 27: `capability_revision` `sha256:73ef1dc5…` and `compiler_revision` `sha256:02f535ac…`;
-`schema_revision` stays `sha256:c9583e6b…`.
+`schema_revision` stays `sha256:c9583e6b…`. **Correction batch 28
+(QA-184-s1-r27-01)** keyed the retrieved-cache markers on the property authority. `retrieved_from`
+and `retrieved_origins` serve property uses only — a bound path riding on the documents, a DDP read,
+the property cohort a re-cache stores — but batch 27 carried them across exactly the
+`_COUNT_PRESERVING_KINDS`, the identity authority, and listed the connector call's output as a
+producer that builds its own stream. A connector call keeps its documents' properties (it is not a
+step `_discards_document_properties` names, so the in-process walk keeps X's writers across it), and
+a child that retrieved documents from a cache its caller shares and bound the next call's path to X
+behind a connector call was admitted, in the typed and the legacy dialect, for a caller whose
+literal X or X-less documents the flattened twin refused. `_handed_on` now takes the step's
+semantic and hands the markers on exactly when `not _discards_document_properties(semantic)` — the
+one predicate the in-process walk drops document-scoped keys by — so a child's contract and its
+flattened twin agree on the property channel by construction; the class is renamed
+`_STREAM_CARRIED_WITH_THE_PROPERTIES`, the payload marker `caller_cache` is still dropped by every
+rebuild, and the controller's counted fields stay on the identity authority, unchanged. The connector
+call's output goes through the helper and left the producer list, whose admission rule is now
+derived from the construction and the authorities (an entry, a step that hands on no documents, or
+a retrieve that sets both markers itself) rather than from the identity set. The recorded limit for
+a connector call BEFORE a re-cache (B21A-R3-OR-01) closed: the child no longer refuses on its own
+walk, names both caches to its callers, and every cell's codes equal the flattened twin's. No served
+text moved. Its new witnesses added packaged corpus inputs, and the census and the §11 rows did not
+move. Revisions after batch 28: `capability_revision` `sha256:002c7866…` and `compiler_revision`
+`sha256:a55eff1d…`; `schema_revision` stays `sha256:c9583e6b…`.
