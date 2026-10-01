@@ -373,9 +373,13 @@ class _Stream(NamedTuple):
     properties_unknown: bool = False
     #: #184 amendment 1 rule 6, amendment 3 §7: the cache these documents were read from
     #: when documents this process did not write may be in it at the read
-    #: (`_caller_documents_may_reach`), so a caller may have stored some of them. A consumer
-    #: of them records what it needs of that cache's callers. Dropped by every step that
-    #: rebuilds the stream: past one the payload is no longer the cached one.
+    #: (`_caller_documents_may_reach`), so a caller may have stored some of them. A CONTENT
+    #: consumer of them (a profile requirement, `_requires`) records what it needs of that
+    #: cache's callers. Dropped by every step that rebuilds the stream: past one the payload
+    #: is no longer the cached one. A PROPERTY use never reads it — it reads `retrieved_from`,
+    #: which the same steps keep while the documents keep their properties (correction batch
+    #: 29, QA-184-s1-r28-01; pinned by the marker-channel sweep in
+    #: `test_issue_184_child_state_transfer`).
     #:
     #: Keyed on "no write of this process reached the read" until correction batch 21a. A
     #: shared cache appends, so a process's own write never takes a caller's documents out
@@ -1004,6 +1008,13 @@ _STREAM_CARRIED_WITH_THE_PROPERTIES = frozenset({"retrieved_from", "retrieved_or
 #: payload is no longer the cached one a caller stored (its own docstring). Only the retrieve sets
 #: it; a step that hands on the stream it received UNCHANGED keeps it by not rebuilding.
 #: Authority: the CONTENT question — a rebuild is a new payload, whatever its properties.
+#:
+#: The READ side follows the same split (correction batch 29, QA-184-s1-r28-01): this marker is
+#: read only by a site that records a content (profile) requirement, and the property-channel
+#: markers only by a site that answers a property question. `_caller_cached_origin` answers a
+#: DDP question and read `caller_cache`, so a property use behind a Message, a map or a connector
+#: call — documents that keep their properties — was reported as the child's own defect while the
+#: flattened twin charged the caller. The test module sweeps every read of the three markers.
 _STREAM_DROPPED_BY_A_REBUILD = frozenset({"caller_cache"})
 
 _STREAM_FIELD_CLASSES = (
@@ -1361,17 +1372,33 @@ def _caller_cached_origin(key, stream, invalidated) -> Optional[str]:
 
     Past a triggered retrieve the documents are the cached ones, so a document property
     the retrieve did not guarantee can come only from what was stored with them. When a
-    caller's documents may be in that cache (the stream's `caller_cache`, set by
+    caller's documents may be in that cache (the stream's `retrieved_from`, set from
     `_caller_documents_may_reach` at the retrieve), the read is a cached-property requirement
     of that caller, proved at each call, and never a read of the caller's own state or
     documents. None for any other read. A read the retrieve DID prove owes its callers
     through the `CALLER_CACHE_WRITER` alternative instead.
+
+    A PROPERTY question — a DDP key, asked for a binding, an ordinary read, a child's required
+    read or a declared read — so it reads the PROPERTY-channel marker, which survives exactly the
+    steps whose documents keep their properties (`_handed_on`, the measured property authority).
+    Until correction batch 29 it read `caller_cache`, the CONTENT marker every rebuild drops: past
+    a Message, a map or a connector call the property still rode on the caller's documents, but
+    the use was reported as the child's own defect — a dynamic-X caller was refused in the child
+    and a literal one was blamed on the child's binding, while the flattened twin admitted the
+    first and refused the second at the caller's literal segment (QA-184-s1-r28-01). Both markers
+    carry the same `_caller_documents_may_reach` answer at the retrieve, so this is not a
+    fallback between them: the property channel is the one authority for this question.
+
+    The caches the documents came out of BEFORE that retrieve (`retrieved_origins`) are not part
+    of the answer: every caller of this function passes them on as ``origins``, and each consumer
+    already records the same cached-property row per origin (`_classify_unmet_read`,
+    `_check_bound_key`, `_check_one_writer`), so naming them here would only repeat those rows.
     """
-    if key[0] != DDP or stream is None or stream.caller_cache is None:
+    if key[0] != DDP or stream is None or stream.retrieved_from is None:
         return None
     if CACHE_TRANSFER_UNPROVED not in invalidated:
         return None
-    return stream.caller_cache
+    return stream.retrieved_from
 
 
 def _nonstrict_read_can_fail(
@@ -2854,8 +2881,10 @@ def _walk_lineage(
             # The argument is about the PAYLOAD, and the payload marker is what a rebuild drops.
             #
             # `caller_cache` stays withheld: past a step that rebuilds the stream the payload is
-            # no longer the cached one a caller stored — the cohort seed already clears the
-            # binding through the ordinary read that recorded the row. Both markers already
+            # no longer the cached one a caller stored, so no CONTENT requirement is recorded
+            # against it. A PROPERTY use behind the step still records the cached-property row
+            # itself, through the property marker (`_caller_cached_origin`, correction batch 29,
+            # QA-184-s1-r28-01) — not only where a cohort seed clears it. Both markers already
             # carry the retrieve's own answer to `_caller_documents_may_reach`, so nothing
             # re-asks it here.
             return state, _handed_on(semantic, stream, _Stream(STREAM_UNKNOWN, origin="opaque")), legacy

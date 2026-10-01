@@ -3246,4 +3246,34 @@ a connector call BEFORE a re-cache (B21A-R3-OR-01) closed: the child no longer r
 walk, names both caches to its callers, and every cell's codes equal the flattened twin's. No served
 text moved. Its new witnesses added packaged corpus inputs, and the census and the §11 rows did not
 move. Revisions after batch 28: `capability_revision` `sha256:002c7866…` and `compiler_revision`
-`sha256:a55eff1d…`; `schema_revision` stays `sha256:c9583e6b…`.
+`sha256:a55eff1d…`; `schema_revision` stays `sha256:c9583e6b…`. **Correction batch 29
+(QA-184-s1-r28-01)** made the one property consumer that still read the content marker read the
+property marker. `_caller_cached_origin` turns an unmet DDP read or binding on retrieved documents
+into the caller's cached-property requirement — a property question — but answered it from
+`caller_cache`, the content marker every rebuild drops, so batch 28's property-keyed carry never
+reached it. A No Data child that never writes the cache its caller filled (no re-cache leg, so no
+cohort of its own is seeded) and that retrieved those documents, passed them through a step that
+keeps their properties (a Message, a map in either dialect, a connector call with a declared or
+undeclared output) and then bound a request path to X or read X, was refused on its own walk:
+`DYNAMIC_PATH_DDP_NOT_ESTABLISHED` at its binding or `LINEAGE_PROPERTY_READ_BEFORE_WRITE` at its
+read, even under a caller writing a dynamic X, while the flattened twin admitted; a caller's
+literal X was blamed on the child's binding instead of refused `DYNAMIC_PATH_NO_DYNAMIC_SEGMENT` at
+the caller's call. The function now reads `retrieved_from` — not a fallback between the two
+markers, which carry the same `_caller_documents_may_reach` answer at the retrieve — and
+`retrieved_origins` stays out of its answer: every caller passes the origins on as `origins` and
+each consumer already records the same row per origin, measured as a no-op over every unperturbed walk the #184
+and lineage suites make. The structural half is a marker-channel sweep: every read of the three
+`_Stream` markers is classified from what the site does (a DDP guard, a DDP-keyed pairing, a
+DDP-keyed function, followed through keyword arguments into the callee; the requirement list it
+lands in), the content marker may be read only into the profile-requirement list and the property
+markers only where a DDP question decides the read, with non-vacuity on source copies. Batch 28's
+differential was extended with the no-re-cache child in its branch and top-level forms. The recorded
+limit "a use behind a Message that no cohort seed clears" (the fail-closed
+`test_a_bound_use_no_cohort_clears_keeps_the_childs_own_refusal`) closed: those cells of the cache
+obligation case set are determined and answer as the runtime does. The three ride-on credits
+(the cleared-binding rule, the cache a cleared binding rides on, the ordinary read's ride-on record)
+are no longer the only carrier behind a Message: each is now a second carrier beside the property
+marker's own row, and their witnesses assert both. No served text moved. Its new witnesses added
+packaged corpus inputs, and the census and the §11 rows did not move. Revisions after batch 29:
+`capability_revision` `sha256:657f74f0…` and `compiler_revision` `sha256:06c6a433…`; `schema_revision`
+stays `sha256:c9583e6b…`.

@@ -1149,12 +1149,15 @@ def _caller_cached_properties(
     cache write of the child's own that may reach the retrieve: the defect stays the
     child's. Both entry forms: a retrieve replaces whatever documents the child had.
 
-    A BOUND request path the same seed clears is a bound use of those cached properties
-    even where its own refusal recorded no row of its own: the caller-cache marker rides
-    on the stream, and a Message or a re-cache between the retrieve and the binding
-    rebuilds it. Recording the ordinary row alone left the call proving establishment
-    only, so a literal path segment the caller stored reached a bound request path
-    (correction batch 18).
+    A BOUND request path the same seed clears is a bound use of those cached properties.
+    Recording the ordinary row alone left the call proving establishment only, so a literal
+    path segment the caller stored reached a bound request path (correction batch 18). The
+    binding's own refusal records that row too wherever the documents keep their properties
+    between the retrieve and the binding — a Message, a map, a connector call, a re-cache and
+    its retrieve — because it reads the PROPERTY-channel marker the walk carries across
+    them (correction batch 29, QA-184-s1-r28-01); the cleared-binding credit below is a
+    second carrier of the same row, measured as no longer the only one on any shape the #184
+    suites build.
 
     Which cache such a binding belongs to is measured the same way, ONE seeded cache at a
     time: the bound use is of the cache whose own seed clears it. Crediting it to every

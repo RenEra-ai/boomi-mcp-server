@@ -612,18 +612,18 @@ def test_a_bound_use_the_caller_cohort_clears_is_a_bound_requirement(use):
 
 
 def test_a_bound_use_no_cohort_clears_keeps_the_childs_own_refusal():
-    """The conservative limit, fail-closed: with no use of X on the retrieve's own stream
-    there is nothing for a seeded cohort to clear, so no row crosses the boundary and the
-    child keeps its own refusal wherever it binds the path."""
+    """Was the fail-closed limit; correction batch 29 (QA-184-s1-r28-01) lifted it. A Message keeps
+    the properties, so the binding's own refusal records the bound row through the property marker
+    and the call proves it: the child is clean and the dynamic caller admitted, as the twin is."""
     child = _doc(_READ, _MSG, _BOUND_GET, _STOP)
     roots = [("PARENT", _stage_and_call(_STAGES_X)), ("CACHE_CHILD", child)]
-    assert _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements == ()
-    assert (_NOT_ESTABLISHED, "/body/steps/2/path_binding") in _errors(roots, "CACHE_CHILD")
+    assert _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements == (("$ref:CACHE", "X", None, True),)
+    assert _errors(roots, "CACHE_CHILD") == [] and _errors(roots, "PARENT") == []
 
 
 def test_the_cleared_binding_rule_is_load_bearing(monkeypatch):
-    """Non-vacuity: with the pre-batch measurement in its place — only a refusal that
-    recorded a cached row of its own counts — the literal parent is admitted again."""
+    """With the pre-batch measurement in its place the literal parent now STAYS refused: batch 29's
+    property-marker row is a second carrier (`test_each_ride_on_credit_and_the_property_...`)."""
     from boomi_mcp.authoring import process_ir_effects
 
     def cached_rows_only(prepared, capabilities, walk):
@@ -643,7 +643,7 @@ def test_the_cleared_binding_rule_is_load_bearing(monkeypatch):
                ("CACHE_CHILD", _ESCAPED_BOUND_USES["past_a_message"])]
     assert (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL) in _errors(literal, "PARENT")
     monkeypatch.setattr(process_ir_effects, "_caller_cached_properties", cached_rows_only)
-    assert _errors(literal, "PARENT") == []
+    assert (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL) in _errors(literal, "PARENT")
 
 
 def _chain(outer_leg, use="no_data_bound"):
@@ -927,8 +927,8 @@ def test_the_cache_a_binding_rides_on_is_load_bearing(monkeypatch):
     §7: "Append possible cohorts; do not treat the last cache write as replacing earlier
     contents") — so that refusal records the second cache's row directly and the mutant
     leaves it refused; that second carrier is asserted below rather than assumed. Behind a
-    Message the marker is withheld, as it always was, and the credit alone carries the row:
-    there the mutant re-admits the literal caller, which is the claim."""
+    Message the content marker is withheld, but since batch 29 the PROPERTY marker records the row
+    there too, so the mutant leaves it refused; both removed re-admit it (`test_each_ride_on_...`)."""
     from boomi_mcp.authoring import process_ir_effects
 
     def the_seeded_cache_only(prepared, capabilities, walk):
@@ -957,9 +957,9 @@ def test_the_cache_a_binding_rides_on_is_load_bearing(monkeypatch):
     assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(roots, "PARENT")
     assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(beside, "PARENT")
     monkeypatch.setattr(process_ir_effects, "_caller_cached_properties", the_seeded_cache_only)
-    assert _errors(roots, "PARENT") == []
-    assert _compile_errors(roots, "PARENT") == []
-    assert ("$ref:CACHE2", "X", None, True) not in _row(
+    assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _errors(roots, "PARENT")
+    assert (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL) in _compile_errors(roots, "PARENT")
+    assert ("$ref:CACHE2", "X", None, True) in _row(
         roots, "PARENT", "CACHE_CHILD").cache_property_requirements
     # The second carrier, with no Message: the binding's own refusal names the second cache,
     # so the row survives the mutant and the literal caller stays refused.
@@ -3640,9 +3640,9 @@ def test_an_ordinary_read_past_a_recache_rides_on_that_cache_past_a_message_too(
 
 
 def test_the_ride_on_credit_for_an_ordinary_read_is_load_bearing(monkeypatch):
-    """Non-vacuity: with the walk's ordinary-read ride-on record dropped, the X-less caller of
-    the second cache is admitted again behind the Message, while the read with no step keeps its
-    refusal through the retrieve's own marker."""
+    """With the walk's ordinary-read ride-on record dropped the X-less caller of the second cache
+    now STAYS refused behind the Message too: batch 29's property-marker row is a second carrier
+    there, as the retrieve's own marker is with no step (`test_each_ride_on_credit_...`)."""
     into_cache, into_cache2, expected = _RECACHE_READ_CALLERS["x_less_in_the_cache_the_read_rides_on"]
     parent = _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})
     past = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_READS_PAST_A_MESSAGE)]
@@ -3654,7 +3654,7 @@ def test_the_ride_on_credit_for_an_ordinary_read_is_load_bearing(monkeypatch):
         return real(prepared, capabilities)._replace(read_cache_origins=())
 
     monkeypatch.setattr(lineage, "walk_lineage", without_the_read_ride_on)
-    assert _errors(past, "PARENT") == []
+    assert _errors(past, "PARENT") == list(expected)
     assert _errors(beside, "PARENT") == list(expected)
 
 
@@ -4108,10 +4108,10 @@ def _matrix_undetermined(removal, form, step, site, fills, use):
       profile; a Message rebuilds the payload the map would consume.
     - A retrieve of the seeded cache after a removal nothing refilled: a read of a cache that may
       be empty (amendment 3 §8, `CACHE_WRITER_MISSING`).
-    - A property used only behind a Message, with no use on the retrieve's own stream and no fill
-      of the process's own to prove it: the fail-closed limit
-      `test_a_bound_use_no_cohort_clears_keeps_the_childs_own_refusal` records. At the inherited
-      site the grandchild never fills, so every Message cell there is in it.
+    - (Lifted by correction batch 29, QA-184-s1-r28-01: a property used only behind a Message, with
+      no use on the retrieve's own stream and no fill of its own, was the fail-closed limit
+      `test_a_bound_use_no_cohort_clears_keeps_the_childs_own_refusal` recorded. The Message keeps
+      the properties, so those cells are DETERMINED now and answer as the runtime does.)
 
     - A grandchild a middle calls behind a Split: the Split is native work in front of the call,
       and no attested hand-off admits it into a No Data child (the placement refusal). That is
@@ -4135,8 +4135,8 @@ def _matrix_undetermined(removal, form, step, site, fills, use):
         # no better — so the family carries the empty-cache refusal and the use's own.
         families.append(("a read of a cache the removal may have emptied",
                          frozenset({_CACHE_WRITER_MISSING, in_the_child})))
-    if step == "message" and (site == "inherited" or (form == "same" and not fills)):
-        families.append(("a use behind a Message that no cohort seed clears", frozenset({in_the_child})))
+    # Batch 29: no "a use behind a Message that no cohort seed clears" family — the property
+    # marker records the row behind a Message (QA-184-s1-r28-01), so those cells are determined.
     if not families:
         return None
     # A cell can sit in more than one recorded limit, and then it carries all of them: the
@@ -4252,9 +4252,9 @@ def test_the_case_set_is_the_whole_product_and_every_axis_value_is_determined_so
     assert len(_MATRIX_CELLS) == product == len(set(_MATRIX_CELLS))
     recorded = [_matrix_undetermined(*cell) for cell in _MATRIX_CELLS]
     families = {reason for entry in recorded if entry is not None for reason in entry[0]}
-    assert len(families) == 4, families
+    assert len(families) == 3, families  # batch 29 lifted "a use behind a Message ... no cohort clears"
     # Every recorded limit names the codes it is a limit OF (TI2-184-21a-02), and every one of
-    # the four is inhabited on its own, not only in combination with another.
+    # the three is inhabited on its own, not only in combination with another.
     assert all(entry[1] for entry in recorded if entry is not None)
     assert {entry[0][0] for entry in recorded if entry is not None and len(entry[0]) == 1} == families
     determined = [cell for cell in _MATRIX_CELLS if _matrix_undetermined(*cell) is None]
@@ -8838,3 +8838,595 @@ def test_the_producer_rule_accepts_every_listed_site_for_its_stated_reason():
     assert all(reasons.values()), reasons
     assert set(reasons.values()) == {"NO DOCUMENTS", "SETS ITS OWN MARKERS", "ENTRY"}
     assert _b28_pinned_first("source") and not _b28_pinned_first("connector_call")
+
+
+# --- correction batch 29 (QA-184-s1-r28-01): a PROPERTY consumer reads the PROPERTY marker ---
+#
+# A caller stores documents carrying X in CACHE2 and calls a No Data child that never writes
+# CACHE2 itself — no re-cache leg, so no cohort of its own is seeded. The child retrieves CACHE2,
+# passes the documents through a step that keeps their properties (a Message, a map, a connector
+# call), then binds a request path to X or reads X. Batch 28 re-keyed how the property markers are
+# CARRIED; `_caller_cached_origin`, the one function that turns an unmet DDP use on retrieved
+# documents into the caller's cached-property requirement, still READ `caller_cache`, the content
+# marker every rebuild drops. So the use was reported as the child's own defect: a dynamic-X
+# caller was refused in the child, and a literal one was blamed on the child's binding with the
+# wrong code, while the flattened twin of the same legs admitted the first and refused the second
+# with NO_DYNAMIC_SEGMENT at the caller's literal segment. Expected verdicts come from the
+# flattened twin and amendment 3 §7, never from this implementation. Batch 28's differential always
+# included the re-cache leg, which seeds a cohort and masked this path.
+
+#: What the caller stores in CACHE2 and what the twin serves for a BOUND use and for an ORDINARY
+#: read of X (None: admitted).
+_B29_CALLERS = {
+    "a_literal_x": (_NO_DYNAMIC_SEGMENT, None),
+    "documents_without_x": (_NOT_ESTABLISHED, _READ_BEFORE_WRITE),
+    "a_dynamic_x": (None, None),
+}
+_B29_USES = {"bound": _BOUND_GET, "ordinary": _READS_X}
+#: Where a use's caller-side refusal lands: a bound path at the call's `/process_ref`, an ordinary
+#: read at the call itself.
+_B29_AT_THE_CALL = {"bound": _B27_AT_THE_CALL, "ordinary": "/body/steps/0/legs/2/terminal"}
+_B29_FORMS = ("branch", "top_level")
+
+
+def _b29_swap(value, use):
+    """``value`` with every bound use of X replaced by ``use`` (a bound use is left as it is)."""
+    if value == _BOUND_GET:
+        return use
+    if isinstance(value, dict):
+        return {key: _b29_swap(item, use) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_b29_swap(item, use) for item in value]
+    return value
+
+
+def _b29_roots(caller, steps, terminal, typed, form="branch"):
+    """The no-re-cache composition and its flattened twin. The child retrieves CACHE2 — which
+    only its caller fills — runs ``steps`` and ends in ``terminal``; the ``branch`` form puts that
+    leg beside a Message leg, the ``top_level`` form makes it the child's whole body. The legacy
+    child starts with a `source`; the typed one under the synthesized scheduled start."""
+    into_cache2 = _B27_CALLERS[caller][0]
+    head = () if typed else (_B27_SOURCE,)
+    leg = {"steps": [_READ2, *steps], "terminal": terminal}
+    legs = [leg, {"steps": [_MSG], "terminal": _STOP}] if form == "branch" else [leg]
+    parent = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, into_cache2,
+                   {"steps": [], "terminal": _call("CACHE_CHILD")})
+    if form == "branch":
+        child = _doc(*head, {"kind": "branch", "legs": legs})
+    else:
+        child = _doc(*head, _READ2, *steps, terminal)
+    flat = _doc(*head, {"kind": "branch", "legs": [
+        {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, into_cache2] + legs})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], flat
+
+
+def _b29_expected(caller, use, extra=()):
+    """The composition's verdict the flattened twin implies: the caller's property code at its
+    call, plus any caller-independent finding ``extra`` the twin also serves."""
+    code = _B29_CALLERS[caller][0 if use == "bound" else 1]
+    found = list(extra) + ([] if code is None else [(code, _B29_AT_THE_CALL[use])])
+    return sorted(found)
+
+
+#: The steps QA r28 found the child refused behind (QA-184-s1-r28-01), as authored nodes.
+_B29_KEEPING_STEPS = {"message": [_MSG], "connector_call": [_GET], "map": [_B27_M22]}
+
+
+@pytest.mark.parametrize("use", sorted(_B29_USES))
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behind_a_step_that_keeps_properties(dialect, use):
+    """QA-184-s1-r28-01, QA's NR shapes in both dialects, both child forms, behind a Message, a
+    connector call and a map, through both resolver spellings and both compiler entry points
+    (`_b28_verdict`). Expected, from the flattened twin: a dynamic X is admitted; a literal X is
+    refused NO_DYNAMIC_SEGMENT at the caller's call `/process_ref` for a bound use and admitted for
+    an ordinary read; documents without X are refused DDP_NOT_ESTABLISHED at the call's
+    `/process_ref` for a bound use and READ_BEFORE_WRITE at the call for an ordinary read. The child
+    alone is clean, and its contract names CACHE2's X."""
+    typed = _B28_DIALECTS[dialect]
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    placed = set()
+    for form in _B29_FORMS:
+        for step, steps in sorted(_B29_KEEPING_STEPS.items()):
+            for caller in sorted(_B29_CALLERS):
+                try:
+                    roots, flat = _b29_roots(caller, steps + [_B29_USES[use]], _STOP, typed, form)
+                    parent, row = _b28_verdict(roots, "PARENT", typed)
+                except ProcessIRValidationError as exc:
+                    # Measured: a legacy `source` cannot head a body whose next step is a retrieve.
+                    assert (dialect, form) == ("legacy", "top_level"), (form, step, exc)
+                    continue
+                twin, _ = _b28_verdict([("PARENT", flat)], "PARENT", typed)
+                child, _ = _b28_verdict(roots, "CACHE_CHILD", typed)
+                # A typed map whose stated profile the cached documents do not prove is refused in
+                # BOTH graphs (QA r28: "the same property codes plus PROFILE_MISMATCH, which the twin
+                # also serves") — caller-independent, at the child's map and at the call alike.
+                extra = [(code, _B27_AT_THE_CALL) for code, _path in twin
+                         if code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH]
+                assert {code for code, _path in child} <= {code for code, _path in extra}, (form, step, caller, child)
+                assert sorted(parent) == _b29_expected(caller, use, extra), (form, step, caller, parent, twin)
+                assert sorted({code for code, _ in parent}) == sorted({code for code, _ in twin}), (
+                    form, step, caller, twin)
+                assert ("$ref:CACHE2", "X", None, use == "bound") in row, (form, step, caller, row)
+                placed.add((form, step))
+    assert {(form, step) for form in ("branch",) for step in _B29_KEEPING_STEPS} <= placed, placed
+    if typed:
+        assert {("top_level", step) for step in _B29_KEEPING_STEPS} <= placed, placed
+
+
+def test_the_public_plan_judges_the_no_recache_child_at_the_callers_call():
+    """The same compositions through `build_integration(action="plan")`, both dialects, behind a
+    Message and a connector call, and in the legacy dialect behind a map held `reference_only` (no
+    stated profiles), for a bound use and an ordinary read, three callers — the MagicMock client and
+    metadata stub of the batch-27 and batch-28 public witnesses."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    def held(key, component_type):
+        return {"key": key, "type": component_type, "name": "E184 " + key, "action": "create",
+                "config": {"reference_only": True, "component_id": "held-" + key.lower()}}
+
+    specs = [dict(APPLIABLE_CONN, key="RCONN"),
+             dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                  config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN")),
+             held("M22", "transform.map"), held("CACHE", "documentcache"), held("CACHE2", "documentcache")]
+    keys = tuple(spec["key"] for spec in specs)
+    seen = 0
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        for step, steps in sorted(_B29_KEEPING_STEPS.items()):
+            if typed and step == "map":
+                # A typed child's map is profile-checked against the cache content in both graphs
+                # (the in-process witness above covers it); QA's public map cell is legacy (`mapro`).
+                continue
+            for use, node in sorted(_B29_USES.items()):
+                for caller in sorted(_B29_CALLERS):
+                    roots, _flat = _b29_roots(caller, steps + [node], _STOP, typed)
+                    raw = _request([_unit(document, keys + (("CACHE_CHILD",) if key == "PARENT" else ()),
+                                          key=key, name="E184 " + key) for key, document in roots],
+                                   specs).model_dump(mode="json")
+                    with _ApplyBoundary().installed():
+                        result = build_integration_action(
+                            MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+                    served = result["authoring_result"]
+                    blamed = sorted((code, item["path"]) for item in served.get("errors") or ()
+                                    for code in item.get("cause_codes") or ())
+                    expected = _b29_expected(caller, use)
+                    cell = (dialect, step, use, caller, blamed)
+                    assert served["validation_report"]["is_valid"] is (not expected), cell
+                    assert blamed == expected, cell
+                    seen += 1
+    assert seen == (2 + 3) * 2 * 3
+
+
+def _b29_cells(kind, use):
+    """``[(cell, steps, terminal)]``: batch 28's placements of ``kind`` between the retrieve and
+    the use (`_b28_between`), with the bound use swapped for ``use`` where it is an ordinary read."""
+    return [(cell, _b29_swap(steps, use), _b29_swap(terminal, use)) for cell, steps, terminal in _b28_between(kind)]
+
+
+def _b29_differential(dialect, form):
+    """Every step kind that can stand between the retrieve and the use (the emission authority,
+    `_b28_kinds_that_can_be_between`), both uses, three callers, against the flattened twin.
+
+    Returns ``(placed, refused, diverging)``. A cell DIVERGES unless: the composition (parent and
+    child) serves exactly the twin's codes; a property code the CHILD serves is one the twin serves
+    for EVERY caller (the step discarded the property, so the defect is the child's own); and every
+    property code the twin serves for only SOME callers is the parent's, at its call."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    typed = _B28_DIALECTS[dialect]
+    property_codes = {_NO_DYNAMIC_SEGMENT, _NOT_ESTABLISHED, _READ_BEFORE_WRITE}
+    placed, refused, diverging = set(), {}, []
+    for kind in _b28_kinds_that_can_be_between():
+        for use, node in sorted(_B29_USES.items()):
+            for cell, steps, terminal in _b29_cells(kind, node):
+                verdicts = {}
+                for caller in sorted(_B29_CALLERS):
+                    try:
+                        roots, flat = _b29_roots(caller, steps, terminal, typed, form)
+                        verdicts[caller] = (_b28_verdict(roots, "PARENT", typed)[0],
+                                            _b28_verdict(roots, "CACHE_CHILD", typed)[0],
+                                            _b28_verdict([("PARENT", flat)], "PARENT", typed)[0])
+                    except ProcessIRValidationError as exc:
+                        refused[cell] = str(exc)
+                if not verdicts:
+                    continue
+                assert len(verdicts) == len(_B29_CALLERS), (cell, refused.get(cell))
+                placed.add(cell)
+                every = set.intersection(*({code for code, _ in twin} for _p, _c, twin in verdicts.values()))
+                for caller, (parent, child, twin) in sorted(verdicts.items()):
+                    served = {code for code, _ in parent} | {code for code, _ in child}
+                    twins = {code for code, _ in twin}
+                    at_the_call = {code for code, path in parent if path.startswith(_B29_AT_THE_CALL["ordinary"])}
+                    if (served != twins or not ({code for code, _ in child} & property_codes) <= every
+                            or not ((twins & property_codes) - every) <= at_the_call):
+                        diverging.append((cell, use, caller, parent, child, twin))
+    return placed, refused, diverging
+
+
+#: What the MODEL refuses between the retrieve and the use, per dialect and child form — measured,
+#: each refusal carrying one of the model's own codes below (`_b29_differential` asserts a refusal
+#: is total over the three callers). A legacy `source` heads no top-level body that goes on past a
+#: retrieve to anything but a Decision; a top-level typed body ends in no Branch or Decision.
+_B29_REFUSED_BETWEEN = {
+    ("legacy", "branch"): {"branch", "notify", "source", "target", "try_catch"},
+    ("typed", "branch"): {"branch", "notify", "source", "target", "try_catch"},
+    ("legacy", "top_level"): {"branch", "cache_get", "connector_call", "data_process", "document_cache_retrieve",
+                              "flow_control", "map_ref", "message", "notify", "set_ddp", "set_dpp", "source",
+                              "target", "try_catch"},
+    ("typed", "top_level"): {"branch", "decision", "notify", "source", "target", "try_catch"},
+}
+#: The floor each form must place: the steps QA found the child refused behind, a
+#: property-discarding data process, and the steps it already matched behind.
+_B29_PLACED_FLOOR = {
+    "branch": {"connector_call", "map_ref", "message", "data_process.custom_scripting",
+               "flow_control", "set_ddp", "set_dpp", "decision"},
+    "top_level": {"connector_call", "map_ref", "message", "data_process.custom_scripting",
+                  "flow_control", "set_ddp", "set_dpp"},
+}
+
+
+@pytest.mark.parametrize("form", _B29_FORMS)
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_every_step_between_a_retrieve_of_a_cache_only_the_caller_filled_and_a_use_earns_its_flattened_twins_verdict(dialect, form):
+    """THE EXTENDED DIFFERENTIAL (batch 28's, without the re-cache leg that seeded a cohort and
+    masked QA-184-s1-r28-01): every step kind the emission authority admits between the retrieve
+    and the use, both dialects, both child forms, a bound use and an ordinary read, the literal-X,
+    no-X and dynamic-X callers — each against its flattened twin. Measured before the correction:
+    72 of 216 cells of QA's own families diverged (`docs/plans/issue-184-resume/work/b29/`)."""
+    from boomi_mcp.errors import (
+        PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED, PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+        PROCESS_IR_CAPABILITY_UNSUPPORTED, PROCESS_IR_SCHEMA_INVALID_CARDINALITY)
+
+    placed, refused, diverging = _b29_differential(dialect, form)
+    assert diverging == [], diverging[:6]
+    model_codes = (PROCESS_IR_CAPABILITY_ERROR_SCOPE_UNSUPPORTED, PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY,
+                   PROCESS_IR_CAPABILITY_UNSUPPORTED, PROCESS_IR_SCHEMA_INVALID_CARDINALITY)
+    assert all(any(code in text for code in model_codes) for text in refused.values()), refused
+    assert {cell.split(".")[0] for cell in refused} == _B29_REFUSED_BETWEEN[(dialect, form)], sorted(refused)
+    assert not placed & set(refused)
+    if (dialect, form) == ("legacy", "top_level"):
+        # Recorded, never skipped silently: the one cell this form places is measured above.
+        assert placed == {"decision"}, sorted(placed)
+        return
+    assert _B29_PLACED_FLOOR[form] <= placed, sorted(placed)
+
+
+# The marker-channel invariant. Each `_Stream` marker belongs to ONE channel — `caller_cache` is the
+# CONTENT marker (`_STREAM_DROPPED_BY_A_REBUILD`), `retrieved_from` and `retrieved_origins` the
+# PROPERTY markers (`_STREAM_CARRIED_WITH_THE_PROPERTIES`) — and a site may read a marker only for a
+# question of the marker's channel. The channel of what a site records is DERIVED from the source:
+# a read is a property read when a DDP question decides it — a DDP guard dominates it, it is paired
+# with a DDP-scoped key, or its function checks a DDP key — followed through a keyword argument into
+# every use of the callee's parameter; a read is a content read when no DDP question decides it and
+# its value lands only in a requirement list no property read lands in.
+
+def _b29_marker_reads(source):
+    """``{(function, marker): [channel evidence per read]}`` for every read of a `_Stream` marker
+    in ``source``, plus the lists each read lands in.
+
+    Returns ``(sites, landing)``: ``sites`` maps ``(enclosing function, marker)`` to a list of
+    ``"property"`` / ``"content"`` / ``"none"`` per non-presence read; ``landing`` maps it to the
+    requirement lists its reads land in (through keyword arguments too). A presence test
+    (``marker is None`` / ``is not None``) records nothing and is not a read of a channel."""
+    import ast
+
+    tree = ast.parse(source)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    functions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.setdefault(node.name, []).append(node)
+    ddp_keys = {"DDP"} | {name for name, value in vars(lineage).items()
+                          if isinstance(value, tuple) and len(value) == 2 and value[0] == lineage.DDP}
+    comprehension = (ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)
+
+    def names_a_ddp_key(node):
+        if isinstance(node, ast.Name) and node.id in ddp_keys - {"DDP"}:
+            return True
+        return (isinstance(node, ast.Tuple) and node.elts
+                and isinstance(node.elts[0], ast.Name) and node.elts[0].id == "DDP")
+
+    def asks_ddp(test):
+        return any(isinstance(sub, ast.Compare) and any(
+            isinstance(side, ast.Name) and side.id in ddp_keys for side in [sub.left, *sub.comparators])
+            for sub in ast.walk(test))
+
+    def enclosing_function(node):
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return node
+        return None
+
+    def own_statements(function):
+        """The function's statements, not those of a function nested in it."""
+        stack, out = list(function.body), []
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            out.append(node)
+            stack.extend(ast.iter_child_nodes(node))
+        return out
+
+    def decided_by_ddp(node):
+        """A DDP question decides ``node``: a guard, a DDP-keyed pairing, or a DDP-keyed function."""
+        child = node
+        while child in parents:
+            parent = parents[child]
+            if isinstance(parent, (ast.If, ast.IfExp, ast.While)) and child is not parent.test and asks_ddp(parent.test):
+                return True
+            if isinstance(parent, ast.BoolOp) and any(asks_ddp(value) for value in parent.values if value is not child):
+                return True
+            if isinstance(parent, ast.comprehension) and any(asks_ddp(test) for test in parent.ifs):
+                return True
+            if isinstance(parent, comprehension) and any(
+                    names_a_ddp_key(sub) for sub in ast.walk(parent.elt if not isinstance(parent, ast.DictComp)
+                                                             else parent.key)):
+                return True
+            if isinstance(parent, ast.Tuple) and any(names_a_ddp_key(elt) for elt in parent.elts if elt is not child):
+                return True
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                body = own_statements(parent)
+                # A guard that returns before the read, or a DDP key the function checks.
+                for statement in parent.body:
+                    if statement is child:
+                        break
+                    if (isinstance(statement, ast.If) and asks_ddp(statement.test)
+                            and statement.body and isinstance(statement.body[-1], ast.Return)):
+                        return True
+                if any(isinstance(sub, ast.Assign) and names_a_ddp_key(sub.value) for sub in body):
+                    return True
+                return False
+            child = parent
+        return False
+
+    def is_presence_test(node):
+        parent = parents.get(node)
+        return (isinstance(parent, ast.Compare) and len(parent.ops) == 1
+                and isinstance(parent.ops[0], (ast.Is, ast.IsNot))
+                and isinstance(parent.comparators[0], ast.Constant) and parent.comparators[0].value is None)
+
+    def lands(node, seen):
+        """``(channel evidence, the lists it lands in)`` for the value at ``node``."""
+        if decided_by_ddp(node):
+            evidence = "property"
+        else:
+            evidence = "none"
+        lists = set()
+        child = node
+        while child in parents:
+            parent = parents[child]
+            if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
+                    and parent.func.attr == "append" and isinstance(parent.func.value, ast.Name):
+                lists.add(parent.func.value.id)
+                break
+            if isinstance(parent, ast.keyword) and isinstance(parents.get(parent), ast.Call) \
+                    and isinstance(parents[parent].func, ast.Name) and parents[parent].func.id in functions:
+                callee, parameter = parents[parent].func.id, parent.arg
+                if (callee, parameter) in seen:
+                    break
+                uses = [sub for function in functions[callee] for sub in ast.walk(function)
+                        if isinstance(sub, ast.Name) and sub.id == parameter and isinstance(sub.ctx, ast.Load)
+                        and not is_presence_test(sub)]
+                assert uses, (callee, parameter)
+                followed = [lands(use, seen | {(callee, parameter)}) for use in uses]
+                if evidence == "none" and all(found == "property" for found, _lists in followed):
+                    evidence = "property"
+                for _found, found_lists in followed:
+                    lists |= found_lists
+                break
+            if isinstance(parent, ast.stmt):
+                break
+            child = parent
+        return evidence, lists
+
+    markers = set(lineage._STREAM_CARRIED_WITH_THE_PROPERTIES) | set(lineage._STREAM_DROPPED_BY_A_REBUILD)
+    sites, landing = {}, {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute) and node.attr in markers and isinstance(node.ctx, ast.Load)):
+            continue
+        function = enclosing_function(node)
+        key = (function.name if function is not None else "<module>", node.attr)
+        sites.setdefault(key, [])
+        landing.setdefault(key, set())
+        if is_presence_test(node):
+            continue
+        evidence, lists = lands(node, frozenset())
+        sites[key].append(evidence)
+        landing[key] |= lists
+    return sites, landing
+
+
+def _b29_channel_violations(source):
+    """Every site that reads a marker for the other channel's question (empty when sound), and the
+    classified sites. The marker channels come from `_STREAM_FIELD_CLASSES`, never listed here."""
+    sites, landing = _b29_marker_reads(source)
+    content = set(lineage._STREAM_DROPPED_BY_A_REBUILD)
+    property_lists = set().union(*(landing[key] for key in sites if key[1] not in content and sites[key]))
+    violations, classified = [], {}
+    for key, reads in sorted(sites.items()):
+        if not reads:
+            violations.append((key, "only presence tests: the site records nothing it reads"))
+            continue
+        if key[1] in content:
+            if "property" in reads:
+                violations.append((key, "content marker read for a DDP question"))
+            elif not landing[key] or landing[key] & property_lists:
+                violations.append((key, "content marker landing outside a content requirement list",
+                                   sorted(landing[key])))
+            classified[key] = "content"
+        else:
+            if any(read != "property" for read in reads):
+                violations.append((key, "property marker read where no DDP question decides it", reads))
+            classified[key] = "property"
+    return violations, classified, landing
+
+
+def test_every_read_of_a_stream_marker_answers_its_own_channels_question():
+    """THE MARKER-CHANNEL SWEEP (correction batch 29's structural half). Every read of the three
+    `_Stream` markers in the module is classified by what the site does; the content marker is read
+    only where no DDP question decides it and only into a content requirement list, and the
+    property markers only where a DDP question decides it. The classified sites are pinned both
+    ways, so a site added later is measured the moment it is written."""
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    violations, classified, landing = _b29_channel_violations(source)
+    assert violations == [], violations
+    assert classified == {
+        ("_caller_cached_origin", "retrieved_from"): "property",
+        ("_check_path_binding", "retrieved_from"): "property",
+        ("_check_path_binding", "retrieved_origins"): "property",
+        ("_cohort_at_write", "retrieved_from"): "property",
+        ("_cohort_at_write", "retrieved_origins"): "property",
+        ("_discharge_child_contract", "retrieved_from"): "property",
+        ("_discharge_child_contract", "retrieved_origins"): "property",
+        ("_transfer", "retrieved_from"): "property",
+        ("_transfer", "retrieved_origins"): "property",
+        ("_requires", "caller_cache"): "content",
+    }, classified
+    # The content marker lands in the one profile-requirement list; the property markers never do.
+    assert landing[("_requires", "caller_cache")] == {"cache_requirement_refs"}
+    assert all("cache_requirement_refs" not in lists for key, lists in landing.items() if key[1] != "caller_cache")
+
+
+def test_the_marker_channel_sweep_catches_a_read_of_the_wrong_channel():
+    """Non-vacuity, on copies of the real source: `_caller_cached_origin` reading `caller_cache`
+    again (the defect QA-184-s1-r28-01 measured) is caught as a content marker read for a DDP
+    question; the content site switched to `retrieved_from` is caught as a property marker read
+    where no DDP question decides it; and a property site switched to `caller_cache` is caught."""
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    mutants = {
+        "the_cached_origin_reads_the_content_marker": (
+            _B29_CACHED_ORIGIN_READS_THE_PROPERTY_MARKER, _B29_CACHED_ORIGIN_READS_THE_CONTENT_MARKER,
+            ("_caller_cached_origin", "caller_cache"), "content marker read for a DDP question"),
+        "the_content_site_reads_the_property_marker": (
+            "        elif stream.caller_cache is not None:\n"
+            "            cache_requirement_refs.append((stream.caller_cache, ref))\n",
+            "        elif stream.retrieved_from is not None:\n"
+            "            cache_requirement_refs.append((stream.retrieved_from, ref))\n",
+            ("_requires", "retrieved_from"), "property marker read where no DDP question decides it"),
+        "a_binding_rides_on_the_content_marker": (
+            "            rides_on=None if stream is None else stream.retrieved_from,\n"
+            "            origins=() if stream is None else stream.retrieved_origins,\n        )\n",
+            "            rides_on=None if stream is None else stream.caller_cache,\n"
+            "            origins=() if stream is None else stream.retrieved_origins,\n        )\n",
+            ("_check_path_binding", "caller_cache"), "content marker"),
+    }
+    for label, (old, new, site, reason) in sorted(mutants.items()):
+        assert source.count(old) == 1, label
+        violations, _classified, _landing = _b29_channel_violations(source.replace(old, new))
+        assert [entry[0] for entry in violations] == [site], (label, violations)
+        assert violations[0][1].startswith(reason), (label, violations)
+
+
+_B29_CACHED_ORIGIN_READS_THE_PROPERTY_MARKER = (
+    "    if key[0] != DDP or stream is None or stream.retrieved_from is None:\n"
+    "        return None\n"
+    "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+    "        return None\n"
+    "    return stream.retrieved_from\n")
+_B29_CACHED_ORIGIN_READS_THE_CONTENT_MARKER = (
+    "    if key[0] != DDP or stream is None or stream.caller_cache is None:\n"
+    "        return None\n"
+    "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+    "        return None\n"
+    "    return stream.caller_cache\n")
+
+
+def test_the_content_marker_read_back_in_the_cached_origin_re_refuses_the_dynamic_caller(monkeypatch):
+    """Non-vacuity of the correction: batch 28's `_caller_cached_origin` restored as a source
+    mutant re-refuses the dynamic-X caller IN THE CHILD behind a Message and behind a connector
+    call, in both dialects, and blames the literal caller's composition on the child's binding with
+    DDP_NOT_ESTABLISHED instead of NO_DYNAMIC_SEGMENT at the call — while the flattened twin, which
+    no child contract reaches, is untouched."""
+    # The pair is spelled as literals: the mutant sweep (`_source_mutants`) reads call sites.
+    _lineage_with_source(
+        monkeypatch,
+        "    if key[0] != DDP or stream is None or stream.retrieved_from is None:\n"
+        "        return None\n"
+        "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+        "        return None\n"
+        "    return stream.retrieved_from\n",
+        "    if key[0] != DDP or stream is None or stream.caller_cache is None:\n"
+        "        return None\n"
+        "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+        "        return None\n"
+        "    return stream.caller_cache\n")
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        binding = {"legacy": "/body/steps/1/legs/0/steps/2/path_binding",
+                   "typed": "/body/steps/0/legs/0/steps/2/path_binding"}[dialect]
+        for step in ("message", "connector_call"):
+            steps = _B29_KEEPING_STEPS[step] + [_BOUND_GET]
+            roots, flat = _b29_roots("a_dynamic_x", steps, _STOP, typed)
+            assert _b28_verdict(roots, "CACHE_CHILD", typed)[0] == [(_NOT_ESTABLISHED, binding)], (dialect, step)
+            assert _b28_verdict([("PARENT", flat)], "PARENT", typed)[0] == [], (dialect, step)
+            roots, _flat = _b29_roots("a_literal_x", steps, _STOP, typed)
+            parent, row = _b28_verdict(roots, "PARENT", typed)
+            assert parent == [] and ("$ref:CACHE2", "X", None, True) not in row, (dialect, step, parent, row)
+
+
+def test_each_ride_on_credit_and_the_property_marker_row_are_two_carriers_of_one_obligation(monkeypatch):
+    """What batch 29 did to the three ride-on credits' non-vacuity witnesses, measured rather than
+    assumed. Behind a Message each credit used to be the ONLY carrier of the row; the property
+    marker now records it at the use's own refusal, so removing a credit alone leaves the caller
+    refused (the witnesses assert that), and removing the credit together with batch 29's read
+    re-admits it — each carrier is sufficient, and the two together are load-bearing:
+
+    - the cleared-binding rule (`_caller_cached_properties`'s cleared bindings);
+    - the cache a cleared binding rides on (`binding_cache_origins`);
+    - the ordinary read's ride-on record (`read_cache_origins`)."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    real_properties, real_walk = process_ir_effects._caller_cached_properties, lineage.walk_lineage
+
+    def no_cleared_bindings(prepared, capabilities, walk):
+        return real_properties(prepared, capabilities, walk._replace(unestablished_bindings=()))
+
+    def no_binding_ride_on(prepared, capabilities, walk):
+        return real_properties(prepared, capabilities, walk._replace(binding_cache_origins=()))
+
+    def no_read_ride_on(prepared, capabilities=DEFAULT_VALIDATION_CAPABILITIES):
+        return real_walk(prepared, capabilities)._replace(read_cache_origins=())
+
+    literal = [("PARENT", _stage_and_call(_STAGES_LITERAL_X)),
+               ("CACHE_CHILD", _ESCAPED_BOUND_USES["past_a_message"])]
+    into_cache, into_cache2, read_expected = _RECACHE_READ_CALLERS["x_less_in_the_cache_the_read_rides_on"]
+    cases = {
+        "cleared_binding": (process_ir_effects, "_caller_cached_properties", no_cleared_bindings, literal,
+                            (_NO_DYNAMIC_SEGMENT, _AT_THE_CALL)),
+        "binding_ride_on": (process_ir_effects, "_caller_cached_properties", no_binding_ride_on,
+                            [("PARENT", _legs(_STAGES_X, _LITERAL_INTO_CACHE2,
+                                              {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                             ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)],
+                            (_NO_DYNAMIC_SEGMENT, _AT_THE_THIRD_LEGS_CALL)),
+        "read_ride_on": (lineage, "walk_lineage", no_read_ride_on,
+                         [("PARENT", _legs(into_cache, into_cache2, {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                          ("CACHE_CHILD", _RECACHES_THEN_READS_PAST_A_MESSAGE)],
+                         read_expected[0]),
+    }
+    for label, (module, name, without, roots, refusal) in sorted(cases.items()):
+        assert refusal in _errors(roots, "PARENT"), label
+        with monkeypatch.context() as patched:
+            patched.setattr(module, name, without)
+            assert refusal in _errors(roots, "PARENT"), (label, "the property marker's row alone")
+    for label, (module, name, without, roots, refusal) in sorted(cases.items()):
+        with monkeypatch.context() as patched:
+            _lineage_with_source(
+                patched,
+                "    if key[0] != DDP or stream is None or stream.retrieved_from is None:\n"
+                "        return None\n"
+                "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+                "        return None\n"
+                "    return stream.retrieved_from\n",
+                "    if key[0] != DDP or stream is None or stream.caller_cache is None:\n"
+                "        return None\n"
+                "    if CACHE_TRANSFER_UNPROVED not in invalidated:\n"
+                "        return None\n"
+                "    return stream.caller_cache\n")
+            assert refusal in _errors(roots, "PARENT"), (label, "the credit alone")
+            patched.setattr(module, name, without)
+            assert _errors(roots, "PARENT") == [], (label, "neither carrier")

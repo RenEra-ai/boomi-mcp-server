@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14278, "minimum_collected": 14278, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14293, "minimum_collected": 14293, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14376,3 +14376,18 @@
 {"kind": "test", "id": "pytest-014375", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_identity_keying_put_back_re_admits_the_connector_caller", "state": "active"}
 {"kind": "test", "id": "pytest-014376", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_connector_call_back_on_the_producer_list_re_admits_its_caller", "state": "active"}
 {"kind": "test", "id": "pytest-014377", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_producer_rule_accepts_every_listed_site_for_its_stated_reason", "state": "active"}
+{"kind": "test", "id": "pytest-014378", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9347]", "state": "active"}
+{"kind": "test", "id": "pytest-014379", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9418]", "state": "active"}
+{"kind": "test", "id": "pytest-014380", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behind_a_step_that_keeps_properties[legacy-bound]", "state": "active"}
+{"kind": "test", "id": "pytest-014381", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behind_a_step_that_keeps_properties[legacy-ordinary]", "state": "active"}
+{"kind": "test", "id": "pytest-014382", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behind_a_step_that_keeps_properties[typed-bound]", "state": "active"}
+{"kind": "test", "id": "pytest-014383", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behind_a_step_that_keeps_properties[typed-ordinary]", "state": "active"}
+{"kind": "test", "id": "pytest-014384", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_judges_the_no_recache_child_at_the_callers_call", "state": "active"}
+{"kind": "test", "id": "pytest-014385", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_retrieve_of_a_cache_only_the_caller_filled_and_a_use_earns_its_flattened_twins_verdict[legacy-branch]", "state": "active"}
+{"kind": "test", "id": "pytest-014386", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_retrieve_of_a_cache_only_the_caller_filled_and_a_use_earns_its_flattened_twins_verdict[legacy-top_level]", "state": "active"}
+{"kind": "test", "id": "pytest-014387", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_retrieve_of_a_cache_only_the_caller_filled_and_a_use_earns_its_flattened_twins_verdict[typed-branch]", "state": "active"}
+{"kind": "test", "id": "pytest-014388", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_step_between_a_retrieve_of_a_cache_only_the_caller_filled_and_a_use_earns_its_flattened_twins_verdict[typed-top_level]", "state": "active"}
+{"kind": "test", "id": "pytest-014389", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_read_of_a_stream_marker_answers_its_own_channels_question", "state": "active"}
+{"kind": "test", "id": "pytest-014390", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_marker_channel_sweep_catches_a_read_of_the_wrong_channel", "state": "active"}
+{"kind": "test", "id": "pytest-014391", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_content_marker_read_back_in_the_cached_origin_re_refuses_the_dynamic_caller", "state": "active"}
+{"kind": "test", "id": "pytest-014392", "node_id": "tests/test_issue_184_child_state_transfer.py::test_each_ride_on_credit_and_the_property_marker_row_are_two_carriers_of_one_obligation", "state": "active"}
