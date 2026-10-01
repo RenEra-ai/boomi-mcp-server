@@ -953,15 +953,15 @@ def test_the_ride_on_carry_past_a_stream_replacement_moves_the_compiler_revision
     baseline = _payload()
     served = _served_pair()
     assert served[0] == authoring_contract.sha256_fingerprint(baseline)
-    real_stream = lineage._Stream
+    real_handed_on = lineage._handed_on
 
-    def without_the_ride_on_marker(*args, **kwargs):
-        if kwargs.get("origin") == "opaque":
-            kwargs.pop("retrieved_from", None)
-        return real_stream(*args, **kwargs)
+    def without_the_ride_on_marker(kind, received, built):
+        if built.origin == "opaque":
+            received = received._replace(retrieved_from=None)
+        return real_handed_on(kind, received, built)
 
     with monkeypatch.context() as patched:
-        patched.setattr(lineage, "_Stream", without_the_ride_on_marker)
+        patched.setattr(lineage, "_handed_on", without_the_ride_on_marker)
         perturbed = _payload()
         perturbed_served = _served_pair()
     assert perturbed["behaviour_corpus"] != baseline["behaviour_corpus"]
@@ -1171,15 +1171,15 @@ def _every_perturbation():
         for module in (validation_pipeline, lineage):
             patched.setattr(module, "canonical_cache_capabilities", lambda capabilities, canonical: capabilities)
 
-    real_stream = lineage._Stream
+    real_handed_on = lineage._handed_on
 
     def ride_on_wrapper(patched):
-        def without_the_ride_on_marker(*args, **kwargs):
-            if kwargs.get("origin") == "opaque":
-                kwargs.pop("retrieved_from", None)
-            return real_stream(*args, **kwargs)
+        def without_the_ride_on_marker(kind, received, built):
+            if built.origin == "opaque":
+                received = received._replace(retrieved_from=None)
+            return real_handed_on(kind, received, built)
 
-        patched.setattr(lineage, "_Stream", without_the_ride_on_marker)
+        patched.setattr(lineage, "_handed_on", without_the_ride_on_marker)
 
     applied += [("equivalent decisions (inline)", equivalent_decisions),
                 ("no cache canonicalization (inline)", no_cache_canonicalization),

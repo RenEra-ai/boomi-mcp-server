@@ -3205,4 +3205,23 @@ parser's, the compiler's and the semantic validator's tables serve the corrected
 byte-equal. The clause predates batch 25, which rewrote the rest of this text and kept it; no
 verdict moved and no rule changed. Its new witnesses added packaged corpus inputs, and the census
 and the §11 rows did not move. Revisions after batch 26: `capability_revision` `sha256:3511fbb4…`
-and `compiler_revision` `sha256:e11d7c7b…`; `schema_revision` stays `sha256:c9583e6b…`.
+and `compiler_revision` `sha256:e11d7c7b…`; `schema_revision` stays `sha256:c9583e6b…`. **Correction batch 27
+(ARCH-184-r3-01)** made the stream a step hands on keep the cache its documents were retrieved from
+across every step that hands on exactly the documents it received. The map's own branch of the
+stream transfer rebuilt the stream fresh and dropped `retrieved_from` and `retrieved_origins`,
+which batch 20 carried only in the stream-replacement branch below it, although `map` is in
+`_COUNT_PRESERVING_KINDS`; a bound use behind a map on documents a child retrieved from a cache
+its caller shares was therefore never charged to that cache, and a caller's literal path segment
+or X-less documents there escaped both compiler entry points while the flattened twin was refused.
+The correction is structural: every `_Stream` field is classified once — set by the step, re-applied
+by the controller, carried with the documents, or dropped by a rebuild — with the classes asserted
+at import to partition `_Stream._fields`; every stream a step rebuilds from the documents it received
+goes through the one helper that applies them (`_handed_on`); and a sweep of the transfer
+function's source admits no other construction except a listed producer in a branch no
+count-preserving kind reaches. The recorded limit for a map BEFORE a re-cache became more precise:
+the child no longer refuses on its own walk and names both caches to its callers, as it does past a
+Message; the connector-call half is unchanged. `properties_unknown` was measured not to be a sibling:
+the controller re-applies it from the incoming stream after every step. No served text moved. Its
+new witnesses added packaged corpus inputs, and the census and the §11 rows did not move. Revisions
+after batch 27: `capability_revision` `sha256:73ef1dc5…` and `compiler_revision` `sha256:02f535ac…`;
+`schema_revision` stays `sha256:c9583e6b…`.

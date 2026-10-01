@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14252, "minimum_collected": 14252, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14263, "minimum_collected": 14263, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14350,3 +14350,14 @@
 {"kind": "test", "id": "pytest-014349", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_effect_unknown_finding_serves_the_kind_the_authority_returned", "state": "active"}
 {"kind": "test", "id": "pytest-014350", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_placement_remediation_cites_the_page_that_names_the_attested_predecessors", "state": "active"}
 {"kind": "test", "id": "pytest-014351", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_serves_the_corrected_citation_and_an_author_can_follow_it", "state": "active"}
+{"kind": "test", "id": "pytest-014352", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8155]", "state": "active"}
+{"kind": "test", "id": "pytest-014353", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_map_is_owed_to_the_cache_its_documents_were_retrieved_from[a_dynamic_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014354", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_map_is_owed_to_the_cache_its_documents_were_retrieved_from[a_literal_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014355", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_bound_use_behind_a_map_is_owed_to_the_cache_its_documents_were_retrieved_from[documents_without_x]", "state": "active"}
+{"kind": "test", "id": "pytest-014356", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_public_plan_refuses_the_caller_a_map_hid_from_the_binding", "state": "active"}
+{"kind": "test", "id": "pytest-014357", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_count_preserving_kind_between_the_retrieve_and_the_bound_use_keeps_the_attribution", "state": "active"}
+{"kind": "test", "id": "pytest-014358", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_map_carrying_the_attribution_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-014359", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_one_construction_path_is_load_bearing_for_every_rebuilding_kind", "state": "active"}
+{"kind": "test", "id": "pytest-014360", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_stream_field_is_classified_once_and_the_helper_applies_its_class", "state": "active"}
+{"kind": "test", "id": "pytest-014361", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_stream_the_transfer_builds_goes_through_the_helper_or_is_a_listed_producer", "state": "active"}
+{"kind": "test", "id": "pytest-014362", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_sweep_catches_a_bare_stream_in_a_count_preserving_branch", "state": "active"}

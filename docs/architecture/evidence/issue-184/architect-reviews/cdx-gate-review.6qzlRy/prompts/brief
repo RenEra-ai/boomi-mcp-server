@@ -1,0 +1,137 @@
+# Architect implementation review, evaluation 3 — issue #184 (M12.24: ProcessIR native document-sequence composition and non-returning staged workflows, bridge A)
+
+You are the architect who wrote the plans of record inlined below: the base design plan, then amendments 1, 2 and 3. Amendment 3 governs wherever they differ. Review the IMPLEMENTATION on branch `codex/issue-184` at HEAD against those plans. This is a read-only review; you may not edit anything.
+
+## Scope
+
+- Two earlier evaluations are archived under `docs/architecture/evidence/issue-184/architect-reviews/`; each finding is a row in `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`, section "Finding rows", with its reconciliation, disposition and witnessing tests.
+  - **Evaluation 1** ran over `80bdd30` (`cdx-gate-review.j1rWJg`): ISSUES FOUND, nine findings, rows `ARCH-184-r1-01` … `-09`.
+  - **Evaluation 2** ran over the correction delta `80bdd30..bb739a8` (`cdx-gate-review.eyeniv`): ISSUES FOUND, two findings, rows `ARCH-184-r2-01` and `ARCH-184-r2-02`. It accepted seven of the nine evaluation-1 findings as fixed, and accepted `C5a`, `C7a`, `C13a` and `C14a`.
+- **This evaluation judges only the correction delta since evaluation 2,** `git diff bb739a8033fb4bd16f5640fd51e621ee85c5f4c0..HEAD`: correction batches 20 through 26 and their validation archives. The changed files are listed at the end of this brief, excluding the archived evidence under `docs/architecture/evidence/issue-184/`.
+  - **Batch 20** answers your evaluation-2 finding 1 (`ARCH-184-r2-01`).
+  - **Batch 21** answers the Codex commit review of batch 20 (`CDX-184-r20-01`, `CDX-184-r20-02`) and live QA round r21 (`QA-184-s1-r21-01`), plus the defects its own verification found — rows `SELF-184-56` … `SELF-184-66`. Its record of every admission that became a refusal, and the reverse, is summarised in those rows.
+  - **Batch 22** answers the Codex commit review of batch 21 (`CDX-184-r21-01`), plus the defects its own verification found (`SELF-184-67` … `SELF-184-70`).
+  - **Batch 23** answers the Codex commit review of batch 22 (`CDX-184-r22-01`): an ordering defect in the revision-corpus guard module's shared baseline, confined to tests.
+  - **Batch 24** answers live QA round r23 (`QA-184-s1-r23-01`): the repeated-run refusal's served remediation now says the finding does not name which of its two cache causes applies, and how the author tells.
+  - **Batch 25** answers live QA round r24 (`QA-184-s1-r24-01`) structurally, and two further instances its own sibling sweep found (`SELF-184-71`, `SELF-184-72`). Judged under item 5.
+  - **Batch 26** answers live QA round r25 (`QA-184-s1-r25-01`): the placement refusal's remediation cited the `placement` category for the attested predecessors, a page that publishes each slot's admitted step kinds — a superset — and not that list; it now cites the process-call node page that names them. Judged under item 5.
+  - **Where the cycle work lands (`QA-184-s1-r23-02`, measured).** Through the public tool, every spelling of a call cycle is refused by the component-plan dependency check (`INTEGRATION_DEPENDENCY_CYCLE` / `INTEGRATION_DEPENDENCY_REQUIRED`), at every arm, because process dependencies enter one topological order with one cycle check. So the cycle verdicts of items 4(g), 4(h) and 5 are reached only through the internal planning entry, not by a caller of the tool. At the boundary, batch 22's visible effect is that six cycle requests which returned an untyped `RuntimeError` at `260eb8c` now return the typed dependency refusal. Judge the cycle machinery as defence in depth under that fact.
+  - The CI job's time cap was raised with the owner's approval (`CI-184-01`); that is infrastructure, not a plan question.
+  - Do not re-review what evaluation 2 already judged.
+  - `git diff 73b9d3ddc8e547eba09b857275050fb336c06b59..HEAD` is the whole implementation, if a claim needs context.
+- The repository's own gates already ran on this delta:
+  - **Codex commit reviews, each delta-scoped, collected and archived under `docs/architecture/evidence/issue-184/commit-reviews/`:** round r20 over `4c67685..5b5038c` (correction batch 20 and the records before it), two P2 findings, `CDX-184-r20-01` and `CDX-184-r20-02`, both answered in batch 21; round r21 over `5b5038c..260eb8c` (batch 21), one P2, `CDX-184-r21-01`, answered in batch 22; round r22 over `260eb8c..133dca1` (batch 22), one P2, `CDX-184-r22-01`, answered in batch 23; round r23 over `133dca1..708c5ff` (batch 23), clean; round r24 over `708c5ff..815aa7b` (batch 24), clean; round r25 over `815aa7b..df5576a` (batch 25), clean; round r26 over `df5576a..9476d67` (batch 26), clean.
+  - **Live QA through the public MCP tool boundary, `boomi-qa-tester`, reports under `agents/reports/` (gitignored):** round r21 on batch 20, one Low, `QA-184-s1-r21-01`, answered in batch 21; round r22 was interrupted and never reported, and is replaced by round r23; round r23 on batches 21 and 22, two Low — `QA-184-s1-r23-01`, answered in batch 24, and `QA-184-s1-r23-02`, a correction to the record — which also proved batch 23 dark; round r24 on batch 24, one Low, `QA-184-s1-r24-01`, answered structurally in batch 25; round r25 on batch 25, which found every claim of the batch true at the boundary and raised two Low findings, both pre-existing — `QA-184-s1-r25-01`, answered in batch 26, and `QA-184-s1-r25-02`, recorded; round r26 on batch 26, clean, no finding.
+  - **The whole non-KB suite on Python 3.11 and 3.12** before each of these commits, and the required CI check `Python 3.11 non-KB` green on `133dca1` (run `35691967668`, 84 minutes under the cap raised with the owner's approval).
+  - **The batches' own pre-commit verification**, recorded as `SELF-184-67` … `SELF-184-72`: three independent lenses on the fixed point's termination, which found the bound defect the reviews had not; three more on the monotonicity invariant that replaced it, which found none reachable and named the precondition the argument rests on; and the sibling sweeps of the served-text corrections, which found the two further instances batch 25 fixed.
+
+## What to judge
+
+1. **`ARCH-184-r2-01` (your P1) — fixed in correction batch 20.** Decide whether the correction realizes amendment 3 §7: "A bound path must pass for every possible selected writer. Never discard an inconvenient writer alternative."
+   - **The change.** In `semantic_validation/lineage.py` (the `_replaces_document_stream` branch of the walk), the opaque stream that a replacing step rebuilds now keeps `retrieved_from` when the step's kind is in `_COUNT_PRESERVING_KINDS`. That set is the authority the count carry and the non-emptiness carry already read. `caller_cache` stays withheld.
+   - **The recorded sibling sweep.** Every field of the stream at the binding was compared with and without a replacement between the retrieve and the binding. The only facts genuinely dropped are:
+     - the documents' identity and origin;
+     - the caller-cache marker (measured to move no verdict);
+     - the ride-on cache, which was the defect.
+   - **Witnesses** in `tests/test_issue_184_child_state_transfer.py`: the three-caller matrix past a Message, its non-vacuity mutant, and the per-document caller.
+   - **What to decide:** whether the carry reaches every sibling the plans require — every kind that hands on exactly the documents it received, and every site that rebuilds a stream between a retrieve and a bound use.
+   - **One disclosed consequence to judge.** A Data Passthrough caller of the re-cache child past a Message is now refused by amendment 1 rule 8 (`_repetition_unstable_caches`), as its Message-free twin already was. The restored ride-on row makes that No Data child both require and append to the cache while it runs once per document.
+2. **`ARCH-184-r2-02` (your P2) was reconciled as SCOPED, not fixed. Judge that scoping explicitly.** The ledger row carries the full measurement. In short:
+   - **The behaviour reproduces exactly:** on both compiler entry points and both public routes, in both spellings of the forwarder.
+   - **The sentence you cited is permissive.** Amendment 3 §8 says waited successful completion "may establish" later-parent guarantees. The binding half of that sentence is its negative — asynchronous and tolerated-failure paths contribute possible effects only — and the current gate satisfies it.
+   - **No plan sentence states the execution-proof condition in the at-least-one form** your finding says the singleton narrows.
+   - **Relaxing the gate is not a one-line change.** The served machine-facing contract states the singleton, so relaxing it moves served text, re-freezes the byte-frozen snapshot, and flips seven tests, including the non-vacuity witness that pins the gate. It also widens admission through the newest and least-exercised carry in the module.
+   - **The limit predates this slice.** It was recorded earlier (the disposition of `QA-184-s1-r20-01`), and it is carried to the owner as a follow-up candidate.
+
+   If you still hold that the plans REQUIRE the forwarder to export the guarantee, quote the sentence that requires it; "may establish" alone is permissive. Otherwise accept the scoping.
+3. **The two revised correction rows you rejected in evaluation 2.**
+   - `C21a` (mapped to your finding 1): decide whether it is now fully realized.
+   - `C20a` (mapped to your finding 2): decide whether it is realized under the scoping in item 2.
+   - The revision `SELF-184-42a` records why the limit `SELF-184-42` had accepted was not acceptable residue; judge it with `C21a`.
+4. **Correction batch 21 — judge each change against the plans.** Each is a row in the ledger with its measurement, witnesses and recorded limits; read the row before judging.
+   - **(a) One authority on whether a caller's documents may still be in a cache** (`CDX-184-r20-01`). `lineage._caller_documents_may_reach` answers "not in `state.sealed`", and every site that turns a cache attribution into a caller obligation asks it; a derived sweep (`_OBLIGATION_SITES` and its guard test) fails if a new obligation site is added without asking it.
+   - **(b) A child's own write no longer ends its callers' obligation** (`SELF-184-56`). Amendment 3 §7: "Append possible cohorts; do not treat the last cache write as replacing earlier contents."
+   - **(c) A whole-cache removal clears what the cache may hold only where the walk proves it runs** (`SELF-184-57`), with a relative proof: a removal whose leg hands on its Branch's input unchanged has run for every later leg of that Branch.
+   - **(d) A re-cache carries where its documents came from** (`SELF-184-59`): a cohort records the caches its documents were retrieved from, so a use off the re-cache owes the cache the documents actually came out of.
+   - **(e) A failed path writer owes what a proved one owes** (`SELF-184-58`, `SELF-184-60`), at all three binding-check sites.
+   - **(f) Amendment 1 rule 8** — the repeated-run refusal now serves its own code, `PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE`, stating its cause and its ways out (`QA-184-s1-r21-01`); a child whose cache writes are unknown is judged by its own required caches, not its caller's vocabulary (`SELF-184-61`); and a per-document child that ends every run with nothing it stored in the cache is exempt, only when the call waits and aborts on error and nothing — no later call, no unwaited call at any depth, no declared outside writer — can write that cache after the removal (`SELF-184-62`, `SELF-184-64`). Judge whether each exemption condition is what rule 8 requires, and whether the served text states it truly.
+   - **(g) Call cycles** (`SELF-184-63`): a root nothing can order is seeded with a fail-closed contract, and the unordered set's obligations are iterated to a fixed point, so a supplied cyclic ProcessIR is never weaker evidence than an absent one and an obligation between two cycle members reaches the caller.
+   - **(h) Two refusals kept deliberately**, both justified by amendment 3 §7 "Possible opaque/external/child writes introduce unknown possibilities": a second waited call into a child that fills and reads a cache, and a middle that calls a cache writer before a self-filling consumer. Their flattened in-process twins are admitted. Decide whether §7 requires these refusals or whether the batch over-reads it.
+   - **(i) Amendment 3 §10** (`CDX-184-r20-02`): "include emission descriptors, overlay policy and child-contract behavior in revision material. Perturbation witnesses must show behavior changes move revisions." `compiler_revision` now folds in the replayed verdicts of a packaged, deduplicated corpus of the graphs the covered tests exercise (`src/boomi_mcp/authoring/revision_corpus.py`, `revision_corpus_v1.json.gz`), with an in-suite guard that refuses a covered test whose input the corpus lacks. Decide whether this realizes §10, and whether the bound stated in `docs/architecture/AUTHORING_WORKFLOW_V1.md` §4 is honest.
+5. **Correction batches 22, 24, 25 and 26.** Two changes to the cycle fixed point in (g), and the served text of rule 8's refusal and of the placement refusal.
+   - **`CDX-184-r21-01`:** it did not settle for a recursive child with a profile consumer; the child's document requirements are now carried as distinct entries, so it settles. Decide whether the representation loses an obligation the plans require.
+   - **`SELF-184-69`, found by the batch's own verification:** the iteration stopped at a fixed pass count and raised there. That count was below what a re-cache relay needs, since a relay adds one caller obligation per pass per cache. The counter is gone: every carried field must now grow or stay equal on each pass, and the loop ends when a pass changes nothing. The fail-closed fields — the four obligation row sets, the positional document requirements as distinct entries, and the unwaited cache writes — are carried as a union. The permissive ones — `removed_caches`, `guaranteed_state`, `mutated_state` — are taken from the latest derivation, never carried (D5b), and asserted to contain their previous value. Scalars are asserted equal. An adversarial check of about 30,000 requests found no parser-valid request that trips the check, and it named one precondition the argument rests on, now stated in the code and pinned by witnesses: a cycle member's `guaranteed_state` and `mutated_state` stay empty only because its callees' claims are pinned. The seed stays `unknown`, deliberately: seeding a member's real entry form removed a recorded over-refusal but admitted a caller its acyclic twin refuses (`SELF-184-68`). Decide whether a caller can be left owing less than the plans require, and whether the fail-closed obligations are all carried.
+   - **The served text of rule 8's refusal (batches 24 and 25).** Live QA found the refusal's remediation telling the author to answer the cause it was refused for, while nothing served named that cause; batch 24 said so in the text, and QA then found that its check separated only the two cache causes, leaving the third — a child reading state before writing it while its own effects are unknown — pointed at a cache it does not have. Batch 25 stops modelling the cause set in prose: the finding now carries one `repeat_cause` evidence entry per cause that holds, from a vocabulary defined once and closed at construction, built at the emission site from the very predicates that decide the refusal, and the remediation answers each value from a table refused at import unless it answers every value. The refusal condition is unchanged. Its sibling sweep fixed two more served texts under the same principle: the placement refusal keys its hand-off answer on the served message rather than on a test true of every prefix refusal (`SELF-184-71`), and the unknown-effect warning's message and remediation now name all three kinds its reason function can return, with the invariant parsed out of that function (`SELF-184-72`). Batch 26 then corrected one more citation in the placement remediation (`QA-184-s1-r25-01`), pinned by a witness that follows the served citation through the public selector and checks the page it lands on against the parser's own attested-predecessor set. **What to decide:** whether serving the cause as machine-facing evidence, and keying each answer to it, states amendment 1 rule 8 truly — and whether any answer the text now names is not in fact a way out.
+6. **Recorded limits.** The batch-21 and batch-22 rows record limits they did not close (for example: a defaulted read one hop back from a path writer, identical in the flattened twin; the origin marker dropped by a connector call or a map between a retrieve and a re-cache, fail-closed; a removal inherited through a cycle member being invisible to its caller; the `unknown` cycle seed's over-refusal, `SELF-184-68`, where a caller of a cycle member is refused a placement its acyclic twin is admitted, equal to what an absent ProcessIR gets; and `QA-184-s1-r25-02`, the parser's "predecessor not attested" placement message, which no authorable document reaches because the three step kinds it would name are each refused first by another check). For each, decide only whether a plan sentence REQUIRES it closed; quote the sentence if so.
+7. **Regressions.** Name anything in this delta that breaks:
+   - a plan correction you accepted (C1–C19, C22–C25, `C5a`, `C7a`, `C13a`, `C14a`);
+   - an evaluation-1 finding you accepted as fixed;
+   - either owner decision recorded in the ledger.
+
+## Constraints
+
+- Do NOT call Boomi MCP tools, GitHub tools or any network tool. A headless turn parks on an elicitation it cannot answer. Ground every claim in the source, tests, ledger and plans in this checkout.
+- You may run targeted tests to check a claim:
+  `PYTHONPATH=src BOOMI_LOCAL=true BOOMI_DOCS_ENABLED=false BOOMI_GOTCHAS_ENABLED=false PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider <node ids>`.
+  Do not run the full suite. A probe that builds a mocked client must stub `boomi_mcp.categories.integration_builder.paginate_metadata`: the mocked pager otherwise never ends.
+- Report only concrete, verifiable findings. For each finding give:
+  - a priority label from `[P0]` (breaks the plan's core contract) to `[P3]` (minor);
+  - the file and line;
+  - the plan section it concerns (quote the requirement);
+  - the concrete input and the wrong behaviour or missing realization.
+
+  A correction you accept needs no finding. Do not report prose, comment or historical-count nits.
+
+## Output
+
+1. Start with one line `Reviewed files:` naming the files you actually read.
+2. List the findings, most severe first, or state that there are none.
+3. For `ARCH-184-r2-01`, one short line: fixed, or not fixed with the finding it maps to. For `ARCH-184-r2-02`, one short line: scoping accepted, or rejected with the finding it maps to.
+4. For `C20a` and `C21a`, one short line each: accepted, or rejected with the finding it maps to.
+5. For each of items 4(a)–4(i) and 5, one short line: accepted, or not accepted with the finding it maps to.
+
+END with a verdict on its OWN FINAL line: exactly `VERDICT: NO ISSUES` or `VERDICT: ISSUES FOUND`.
+
+## Changed files in the correction delta (excluding `docs/architecture/evidence/issue-184/`)
+
+- `.github/workflows/tests.yml`
+- `Dockerfile`
+- `docs/architecture/AUTHORING_WORKFLOW_V1.md`
+- `docs/architecture/ISSUE_184_AUDIT_LEDGER.md`
+- `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`
+- `docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md`
+- `docs/architecture/PROCESS_IR_V1.md`
+- `scripts/wave_gate.py`
+- `src/boomi_mcp/authoring/contract.py`
+- `src/boomi_mcp/authoring/process_ir_effects.py`
+- `src/boomi_mcp/authoring/process_ir_projection.py`
+- `src/boomi_mcp/authoring/revision_corpus.py`
+- `src/boomi_mcp/authoring/revision_corpus_v1.json.gz`
+- `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/context.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/findings.py`
+- `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+- `src/boomi_mcp/errors.py`
+- `src/boomi_mcp/models/process_ir.py`
+- `tests/_m12_11_support.py`
+- `tests/_m12_12_legacy_inventory.py`
+- `tests/_revision_corpus.py`
+- `tests/conftest.py`
+- `tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json`
+- `tests/fixtures/m12_12/legacy_reachability_inventory.json`
+- `tests/fixtures/process_ir/semantic_report_linear_flow.json`
+- `tests/fixtures/wave_gate/test_nodes.jsonl`
+- `tests/test_connector_replay_review_round3.py`
+- `tests/test_issue_153_canonical_apply_e2e.py`
+- `tests/test_issue_155_contract_id_grammar.py`
+- `tests/test_issue_155_discovery.py`
+- `tests/test_issue_155_identity_projection.py`
+- `tests/test_issue_184_child_entries.py`
+- `tests/test_issue_184_child_state_transfer.py`
+- `tests/test_issue_184_ddp_invalidation.py`
+- `tests/test_issue_184_passthrough_entry.py`
+- `tests/test_issue_184_revision_corpus.py`
+- `tests/test_issue_184_revision_coverage.py`
+- `tests/test_m12_11_authoring_compile.py`
+- `tests/test_wave_gate.py`

@@ -1031,14 +1031,14 @@ def test_the_ride_on_cache_surviving_a_stream_replacement_is_load_bearing(monkey
     roots = [("PARENT", parent), ("CACHE_CHILD", _RECACHES_THEN_BINDS_PAST_A_MESSAGE)]
     assert _errors(roots, "PARENT") == list(expected)
 
-    real_stream = lineage._Stream
+    real_handed_on = lineage._handed_on
 
-    def without_the_ride_on_marker(*args, **kwargs):
-        if kwargs.get("origin") == "opaque":
-            kwargs.pop("retrieved_from", None)
-        return real_stream(*args, **kwargs)
+    def without_the_ride_on_marker(kind, received, built):
+        if built.origin == "opaque":
+            received = received._replace(retrieved_from=None)
+        return real_handed_on(kind, received, built)
 
-    monkeypatch.setattr(lineage, "_Stream", without_the_ride_on_marker)
+    monkeypatch.setattr(lineage, "_handed_on", without_the_ride_on_marker)
     assert _errors(roots, "PARENT") == []
     assert _compile_errors(roots, "PARENT") == []
     assert ("$ref:CACHE2", "X", None, True) not in _row(
@@ -6272,37 +6272,37 @@ def test_the_three_surfaces_state_the_predicate_the_code_evaluates():
 
 @pytest.mark.parametrize("between", ("a_message", "a_connector_call", "a_map"),)
 def test_the_origin_of_a_re_cache_survives_only_a_step_that_hands_the_documents_on(between):
-    """B21A-R3-OR-01, recorded rather than changed. The cohort's origin travels with the
-    documents, and `_advance_stream` rebuilds the stream at a connector call and at a map before
-    the count-preserving carry is reached, so both drop it — `map` in particular is in
-    `_COUNT_PRESERVING_KINDS` and still loses it.
-
-    The direction is fail-closed and identical at 5b5038c: the child is refused on its own walk
-    with no row a caller could satisfy, while the flattened graph of the same legs runs for the
-    caller that stores the property. Moving the carry past a connector call is a behaviour
-    change — the documents there are the connector's output, not the caller's — so this pins
-    what the walk does today rather than asserting what it should do."""
+    """B21A-R3-OR-01, recorded rather than changed for the connector call. The cohort's origin
+    travels with the documents, and a connector call hands on its OWN output, so it drops it.
+    Until correction batch 27 a map dropped it too — its branch of `_advance_stream` returned a
+    fresh stream before the count-preserving carry was reached — although `map` is in
+    `_COUNT_PRESERVING_KINDS`; `_handed_on` now carries it there as it does past a Message.
+    For the connector call the direction is fail-closed and identical at 5b5038c: the child is
+    refused on its own walk with no row a caller could satisfy, while the flattened graph of the
+    same legs runs for the caller that stores the property. Moving the carry past a connector
+    call would credit the caller for the connector's output, so this pins that half as it is.
+    The map half is measured to move TOWARD the flattened twin (ARCH-184-r3-01)."""
     step = {"a_message": _MSG, "a_connector_call": _GET, "a_map": _TO_P2}[between]
     child = _legs({"steps": [_READ, step], "terminal": _PUT2},
                   {"steps": [_READ2, _READS_X], "terminal": _STOP})
     roots = [("PARENT", _legs(_STAGES_X, _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
     rows = {(row[0], row[1]) for row in _row(roots, "PARENT", "CACHE_CHILD").cache_property_requirements}
     twin = _errors([("PARENT", _legs(_STAGES_X, *_branch_legs(child)))], "PARENT")
-    if between == "a_message":
+    if between != "a_connector_call":
         assert _both_routes(roots, "CACHE_CHILD") == []
         assert ("$ref:CACHE", "X") in rows and ("$ref:CACHE2", "X") in rows
-        assert _both_routes(roots, "PARENT") == [] and twin == []
+        # The map's own profile rule refuses the unproved documents in both graphs, and only it.
+        assert {code for code, _path in _both_routes(roots, "PARENT")} == {code for code, _path in twin}
+        assert between == "a_map" or _both_routes(roots, "PARENT") == [] == twin
     else:
-        # The recorded limit: nothing carries the origin across a step that rebuilds the stream,
-        # so the child keeps its own refusal and names no cache to its callers. (A map of
-        # documents whose profile nothing proves is refused for that too, which is its own
-        # rule and not what this cell is about.)
+        # The recorded limit: nothing carries the origin across a connector call's output,
+        # so the child keeps its own refusal and names no cache to its callers.
         assert (_READ_BEFORE_WRITE, "/body/steps/0/legs/1/steps/1") in _both_routes(roots, "CACHE_CHILD")
         assert rows == set()
         # The flattened graph of the same legs reads the property fine: the disagreement is the
-        # recorded limit. (A map of documents whose profile nothing proves is refused for THAT
-        # in both graphs, which is its own rule and not what this cell is about.)
+        # recorded limit.
         assert _READ_BEFORE_WRITE not in {code for code, _path in twin}, twin
+        assert twin == [], twin
 
 
 # --- B21A-R3-TI-01/-02: the guards, and the revision oracle --------------------------------
@@ -7929,3 +7929,458 @@ def test_the_public_plan_serves_the_corrected_citation_and_an_author_can_follow_
     assert _B26_NEW_CITATION in item["remediation"], item["remediation"]
     assert _B26_OLD_CITATION not in item["remediation"], item["remediation"]
     assert _naming_every_predecessor(_cited_entries(item["remediation"])) == {"node.process_call"}
+
+
+# --- correction batch 27: ARCH-184-r3-01, a map hands on the documents it received ------------
+#
+# Architect evaluation 3, finding 1 (P1). `_advance_stream`'s map branch returned a FRESH `_Stream`
+# and so dropped `retrieved_from` and `retrieved_origins`, which batch 20 carried only in the
+# stream-replacement branch below it — although `map` is in `_COUNT_PRESERVING_KINDS`, the repo's
+# authority on steps that hand on exactly the documents they received. A bound use behind a map,
+# on documents a legacy child retrieved from a cache its caller shares, was then never charged to
+# that cache: the caller's literal path segment (or its X-less documents) there escaped both
+# compiler entry points while the flattened twin of the same legs was refused. Expected verdicts
+# come from amendment 3 §7 ("A bound path must pass for every possible selected writer. Never
+# discard an inconvenient writer alternative.") and from the flattened twin, never from this
+# implementation's output. The dialect is the legacy one the architect used: a `source` endpoint
+# and a map whose component states neither profile, so no profile rule speaks and the binding's
+# writers are the only question.
+#
+# The recurrence of `child-contract-omits-cache-content` after a structural fix: the correction is
+# not a second carry in a second branch but ONE construction path (`lineage._handed_on`) applying a
+# classification of every `_Stream` field (`lineage._STREAM_FIELD_CLASSES`, asserted at import to
+# partition `_Stream._fields`), and a sweep of the transfer function's source that admits no
+# construction outside the helper except a listed producer in a branch no count-preserving kind
+# reaches.
+
+_B27_SOURCE = {"kind": "source", "connection_ref": "$ref:RCONN", "operation_ref": "$ref:GET"}
+_B27_M22 = {"kind": "map_ref", "map_ref": "$ref:M22"}
+#: What the caller stores in the cache the binding rides on, and the code the flattened twin
+#: refuses it with (None: admitted, the dynamic-writer control).
+_B27_CALLERS = {
+    "a_literal_x": ({"steps": [_GET, _STATIC_X], "terminal": _PUT2}, _NO_DYNAMIC_SEGMENT),
+    "documents_without_x": ({"steps": [_GET], "terminal": _PUT2}, _NOT_ESTABLISHED),
+    "a_dynamic_x": ({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT2}, None),
+}
+_B27_AT_THE_CALL = "/body/steps/0/legs/2/terminal/process_ref"
+_B27_AT_THE_TWINS_BINDING = "/body/steps/1/legs/3/steps/2/path_binding"
+
+
+def _b27_symbols():
+    """The child-entry symbol table with M22's two profiles unset: the legacy dialect."""
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    return SymbolTableV1(symbols=tuple(
+        symbol.model_copy(update={"input_profile_ref": None, "output_profile_ref": None})
+        if symbol.ref == "$ref:M22" else symbol for symbol in _symbols().symbols))
+
+
+def _b27_child_legs(steps=(_B27_M22, _BOUND_GET), terminal=_STOP):
+    """Re-caches CACHE's documents into CACHE2, then retrieves CACHE2 and runs ``steps``."""
+    return [{"steps": [_READ, _READS_X], "terminal": _PUT2},
+            {"steps": [_READ2, *steps], "terminal": terminal}]
+
+
+def _b27_roots(caller, steps=(_B27_M22, _BOUND_GET), terminal=_STOP):
+    into_cache2 = _B27_CALLERS[caller][0]
+    parent = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, into_cache2,
+                   {"steps": [], "terminal": _call("CACHE_CHILD")})
+    child = _doc(_B27_SOURCE, {"kind": "branch", "legs": _b27_child_legs(steps, terminal)})
+    flat = _doc(_B27_SOURCE, {"kind": "branch", "legs": [
+        {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, into_cache2] + _b27_child_legs(steps, terminal)})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], flat
+
+
+def _b27_verdict(roots, key):
+    """One verdict from both compiler entry points and both resolver spellings, asserted equal."""
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.models.authoring_workflow import ProcessIREffectDeclarationsV1
+
+    symbols = _b27_symbols()
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    seen, rows = [], []
+    for declarations in (None, ProcessIREffectDeclarationsV1()):
+        resolution = resolve_process_ir_effect_declarations(
+            parsed, declarations, symbols, [], child_roots={"$ref:" + name: ir for name, ir in parsed})
+        assert resolution.ok, resolution.findings
+        capabilities = resolution.capabilities_by_root[key] or DEFAULT_VALIDATION_CAPABILITIES
+        validated = [(item.code, item.path) for item in validate_process_ir(
+            dict(parsed)[key], symbols, capabilities=capabilities).errors]
+        try:
+            compile_process_ir_v1(dict(parsed)[key], symbols, capabilities=capabilities)
+            compiled = []
+        except ProcessIRCompileError as exc:
+            compiled = [(item.code, item.path) for item in exc.diagnostics]
+        assert sorted(compiled) == sorted(validated), (key, validated, compiled)
+        seen.append(validated)
+        called = resolution.capabilities_by_root.get("PARENT")
+        row = called.child_entry_contract("$ref:CACHE_CHILD") if called is not None else None
+        rows.append(set(row.cache_property_requirements) if row is not None else None)
+    assert seen[0] == seen[1] and rows[0] == rows[1], (seen, rows)
+    return seen[0], rows[0]
+
+
+@pytest.mark.parametrize("caller", sorted(_B27_CALLERS))
+def test_a_bound_use_behind_a_map_is_owed_to_the_cache_its_documents_were_retrieved_from(caller):
+    """ARCH-184-r3-01, the architect's reproduction and its no-X variant. The caller's writer in
+    the cache the binding rides on is a writer the bound path must pass for, whatever steps that
+    hand the documents on stand between the retrieve and the binding — a map included. Refused at
+    the parent's call exactly where the flattened twin is refused at its binding, and with the
+    same code; the dynamic-writer control stays admitted in both graphs. The child alone is clean:
+    the refusal belongs to the call."""
+    roots, flat = _b27_roots(caller)
+    expected = _B27_CALLERS[caller][1]
+    parent, row = _b27_verdict(roots, "PARENT")
+    twin, _row_of_the_twin = _b27_verdict([("PARENT", flat)], "PARENT")
+    assert parent == ([] if expected is None else [(expected, _B27_AT_THE_CALL)])
+    assert twin == ([] if expected is None else [(expected, _B27_AT_THE_TWINS_BINDING)])
+    assert ("$ref:CACHE2", "X", None, True) in row, row
+    assert _b27_verdict(roots, "CACHE_CHILD")[0] == []
+
+
+def test_the_public_plan_refuses_the_caller_a_map_hid_from_the_binding():
+    """The same three callers through `build_integration(action="plan")`, the MagicMock client
+    and the metadata stub this module's other public-route tests use. The map, the two caches
+    and the process components the account already holds are named `reference_only`, so apply
+    writes none of their configuration and the derived symbol table states no profile of the
+    map: the legacy dialect of the in-process witness, reached through the public route."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    def held(key, component_type):
+        return {"key": key, "type": component_type, "name": "E184 " + key, "action": "create",
+                "config": {"reference_only": True, "component_id": "held-" + key.lower()}}
+
+    specs = [dict(APPLIABLE_CONN, key="RCONN"),
+             dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                  config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN")),
+             held("M22", "transform.map"), held("CACHE", "documentcache"), held("CACHE2", "documentcache")]
+    keys = tuple(spec["key"] for spec in specs)
+    for caller in sorted(_B27_CALLERS):
+        roots, _flat = _b27_roots(caller)
+        raw = _request([_unit(document, keys + (("CACHE_CHILD",) if key == "PARENT" else ()),
+                              key=key, name="E184 " + key) for key, document in roots],
+                       specs).model_dump(mode="json")
+        with _ApplyBoundary().installed():
+            result = build_integration_action(
+                MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+        served = result["authoring_result"]
+        blamed = [(code, item["path"]) for item in served.get("errors") or ()
+                  for code in item.get("cause_codes") or ()]
+        expected = _B27_CALLERS[caller][1]
+        assert served["validation_report"]["is_valid"] is (expected is None), (caller, blamed)
+        assert blamed == ([] if expected is None else [(expected, _B27_AT_THE_CALL)]), (caller, blamed)
+
+
+def _b27_kinds_that_can_stand_between():
+    """The authored kinds whose semantic kind `_COUNT_PRESERVING_KINDS` names and which hand
+    their documents to a successor — the ones that can stand between a retrieve and a use. A
+    kind that ends its path (stop, return_documents, exception) has nothing after it to carry
+    anything to. Derived from the document-emission authority, never listed."""
+    from boomi_mcp.models.process_ir_document_semantics import CONTINUATION_NONE, DOCUMENT_EMISSION_V1
+
+    return sorted(kind for kind, row in DOCUMENT_EMISSION_V1.items()
+                  if row.semantic_kind in lineage._COUNT_PRESERVING_KINDS
+                  and row.continuation != CONTINUATION_NONE)
+
+
+def _b27_standing_between(kind):
+    """``(steps, terminal)`` of the retrieving leg with ``kind`` between the retrieve and the
+    bound use. A control holds the bound use in its first body."""
+    placed = {
+        "map_ref": [_B27_M22],
+        "message": [_MSG],
+        "set_ddp": [{"kind": "set_ddp", "name": "Z", "source_values": [{"value_type": "static", "value": "v"}]}],
+        "set_dpp": [{"kind": "set_dpp", "name": "Z", "source_values": [{"value_type": "static", "value": "v"}]}],
+        "flow_control": [{"kind": "flow_control", "for_each_count": 1}],
+        "notify": [{"kind": "notify", "level": "INFO", "message_template": "n"}],
+    }
+    if kind in placed:
+        return placed[kind] + [_BOUND_GET], _STOP
+    body = {"steps": [_BOUND_GET], "terminal": _STOP}
+    other = {"steps": [_MSG], "terminal": _STOP}
+    controls = {
+        "decision": dict(_decision(_STOP), true_arm=body),
+        "branch": {"kind": "branch", "legs": [body, other]},
+        "try_catch": {"kind": "try_catch", "scope": "process", "try_body": body, "catch_body": other},
+    }
+    return [], controls[kind]
+
+
+def test_every_count_preserving_kind_between_the_retrieve_and_the_bound_use_keeps_the_attribution():
+    """Coverage derived from the authority, not hand-picked: every authored kind whose semantic
+    kind hands on exactly the documents it received and has a successor, placed between the
+    retrieve of the shared cache and the bound use, earns the flattened twin's verdict for every
+    caller. A kind the ProcessIR model does not admit in a Branch leg is refused by the MODEL, with
+    its own code, and is recorded as unable to stand there rather than skipped silently."""
+    from boomi_mcp.errors import PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    kinds = _b27_kinds_that_can_stand_between()
+    placed, refused = [], {}
+    for kind in kinds:
+        steps, terminal = _b27_standing_between(kind)
+        try:
+            for caller in sorted(_B27_CALLERS):
+                roots, flat = _b27_roots(caller, steps, terminal)
+                expected = _B27_CALLERS[caller][1]
+                parent, row = _b27_verdict(roots, "PARENT")
+                twin, _row = _b27_verdict([("PARENT", flat)], "PARENT")
+                assert [code for code, _path in twin] == ([] if expected is None else [expected]), (kind, twin)
+                assert parent == ([] if expected is None else [(expected, _B27_AT_THE_CALL)]), (kind, caller)
+                assert ("$ref:CACHE2", "X", None, True) in row, (kind, row)
+        except ProcessIRValidationError as exc:
+            assert PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY in str(exc), (kind, exc)
+            refused[kind] = str(exc)
+            continue
+        placed.append(kind)
+    # The floor: the kinds that REBUILD the stream in `_advance_stream` (a map, a Message, a
+    # property write on a caller's entry) and the kinds that pass it on unchanged are both here.
+    assert {"map_ref", "message", "set_ddp", "set_dpp", "flow_control", "decision"} <= set(placed), placed
+    assert set(placed) | set(refused) == set(kinds) and not set(placed) & set(refused)
+    assert sorted(refused) == ["branch", "notify", "try_catch"], refused
+
+
+def test_the_map_carrying_the_attribution_is_load_bearing(monkeypatch):
+    """Non-vacuity: the map branch's pre-correction return restored — a fresh stream built
+    without the helper — re-admits exactly the two callers the flattened twin refuses, drops the
+    CACHE2 row, and leaves the dynamic-writer control and the Message twin where they were."""
+    message = (_MSG, _BOUND_GET)
+    before = {caller: _b27_verdict(_b27_roots(caller)[0], "PARENT")[0] for caller in sorted(_B27_CALLERS)}
+    assert all(before[caller] for caller in ("a_literal_x", "documents_without_x")), before
+    _lineage_with_source(
+        monkeypatch,
+        '                return state, _handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="map")), legacy\n'
+        '            return state, _handed_on(kind, stream, _Stream(STREAM_KNOWN, target, "map", node)), legacy\n',
+        '                return state, _Stream(STREAM_UNKNOWN, origin="map"), legacy\n'
+        '            return state, _Stream(STREAM_KNOWN, target, "map", node), legacy\n')
+    for caller in sorted(_B27_CALLERS):
+        parent, row = _b27_verdict(_b27_roots(caller)[0], "PARENT")
+        assert parent == [], (caller, parent)
+        assert ("$ref:CACHE2", "X", None, True) not in row, (caller, row)
+        assert _b27_verdict(_b27_roots(caller, message)[0], "PARENT")[0] == (
+            [] if _B27_CALLERS[caller][1] is None else [(_B27_CALLERS[caller][1], _B27_AT_THE_CALL)])
+
+
+def test_the_one_construction_path_is_load_bearing_for_every_rebuilding_kind(monkeypatch):
+    """Non-vacuity of the helper itself: with `_handed_on` returning what the branch built, the
+    map AND the Message re-admit the literal caller, so the helper is the carrier for both and no
+    branch keeps a private copy of the carry."""
+    for steps in ((_B27_M22, _BOUND_GET), (_MSG, _BOUND_GET)):
+        assert _b27_verdict(_b27_roots("a_literal_x", steps)[0], "PARENT")[0] == [
+            (_NO_DYNAMIC_SEGMENT, _B27_AT_THE_CALL)]
+    monkeypatch.setattr(lineage, "_handed_on", lambda kind, received, built: built)
+    for steps in ((_B27_M22, _BOUND_GET), (_MSG, _BOUND_GET)):
+        assert _b27_verdict(_b27_roots("a_literal_x", steps)[0], "PARENT")[0] == [], steps
+
+
+def test_every_stream_field_is_classified_once_and_the_helper_applies_its_class():
+    """The classification is derived from `_Stream._fields` and partitions them; the controller's
+    class IS the set of fields the controller re-applies; and `_handed_on` applies each class, for
+    every semantic kind the document-emission authority names."""
+    import ast
+
+    from boomi_mcp.models.process_ir_document_semantics import DOCUMENT_EMISSION_V1
+
+    fields, classes = lineage._Stream._fields, lineage._STREAM_FIELD_CLASSES
+    assert lineage._unclassified_stream_fields(fields, classes) == ()
+    assert set().union(*classes) == set(fields)
+    # Non-vacuity of the partition check, in each direction it guards.
+    assert lineage._unclassified_stream_fields(fields + ("a_later_field",), classes) == ("a_later_field",)
+    assert lineage._unclassified_stream_fields(fields, classes + (frozenset({"count"}),)) == ("count",)
+    assert lineage._unclassified_stream_fields(fields, classes + (frozenset({"gone"}),)) == ("gone",)
+    # ... and the import-time guard fires on a field added to `_Stream` itself.
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    anchor = "    leg_input: bool = False\n"
+    assert source.count(anchor) == 1
+    namespace = {"__name__": lineage.__name__, "__package__": lineage.__package__, "__file__": lineage.__file__}
+    with pytest.raises(RuntimeError, match="a_later_field"):
+        exec(compile(source.replace(anchor, anchor + "    a_later_field: bool = False\n"),  # noqa: S102
+                     lineage.__file__, "exec"), namespace)
+
+    # The controller's class, read off the controller: the one `stream = stream._replace(...)` in
+    # `_transfer` names exactly those fields.
+    tree = ast.parse(source)
+    [transfer] = [node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "_transfer"]
+    replaced = [node.value for node in ast.walk(transfer)
+                if isinstance(node, ast.Assign) and [getattr(t, "id", None) for t in node.targets] == ["stream"]
+                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "_replace"]
+    assert len(replaced) == 1, len(replaced)
+    assert {keyword.arg for keyword in replaced[0].keywords} == lineage._STREAM_SET_BY_THE_CONTROLLER
+
+    received = lineage._Stream(
+        lineage.STREAM_UNKNOWN, ("R", "json"), "cache", "retrieve", count=lineage.COUNT_ONE,
+        properties_unknown=True, caller_cache="$ref:CACHE", native_kind="cache_get",
+        retrieved_from="$ref:CACHE", retrieved_origins=("$ref:C0",), provably_nonempty=True, leg_input=True)
+    built = lineage._Stream(lineage.STREAM_KNOWN, ("B", "json"), "map", "the map", count="built",
+                            native_kind="built", provably_nonempty=False, leg_input=False)
+    kinds = {row.semantic_kind for row in DOCUMENT_EMISSION_V1.values() if row.semantic_kind}
+    defaults = lineage._Stream._field_defaults
+    kept = set()
+    for kind in sorted(kinds):
+        out = lineage._handed_on(kind, received, built)
+        for name in lineage._STREAM_SET_BY_THE_STEP | lineage._STREAM_SET_BY_THE_CONTROLLER:
+            assert getattr(out, name) == getattr(built, name), (kind, name)
+        for name in lineage._STREAM_DROPPED_BY_A_REBUILD:
+            assert getattr(out, name) == defaults[name], (kind, name)
+        for name in lineage._STREAM_CARRIED_WITH_THE_DOCUMENTS:
+            expected = getattr(received, name) if kind in lineage._COUNT_PRESERVING_KINDS else defaults[name]
+            assert getattr(out, name) == expected, (kind, name)
+        if out.retrieved_from is not None:
+            kept.add(kind)
+    # Both sides of the carry are inhabited by kinds the authority names.
+    assert kept == kinds & lineage._COUNT_PRESERVING_KINDS and kept and kinds - kept
+
+
+#: Every `_Stream` the transfer function builds OUTSIDE `_handed_on`, keyed by the branch it sits
+#: in (the top-level test of `_advance_stream`, unparsed) and the state it builds. Each is a
+#: producer whose documents are not the ones it received, or a step that hands on none — and the
+#: sweep below derives, rather than trusts, that no count-preserving kind reaches its branch.
+_B27_PRODUCER_SITES = {
+    ("kind == 'passthrough'", "STREAM_CALLER_ENTRY"):
+        "a Data Passthrough entry: its caller's group, which no retrieve in this process handed on",
+    ("kind == 'connector'", "STREAM_UNKNOWN"):
+        "a legacy source endpoint: its own output replaces the documents",
+    ("kind == 'listener'", "STREAM_UNKNOWN"): "a listener's inbound documents, undeclared",
+    ("kind == 'listener'", "STREAM_KNOWN"): "a listener's inbound documents, of its declared profile",
+    ("kind == 'connector_call'", "STREAM_ABSENT"): "a call that produces no output hands on nothing",
+    ("kind == 'connector_call'", "STREAM_UNKNOWN"):
+        "a connector call's own output, undeclared: it must NOT inherit the caller's cache "
+        "attribution, which would charge the caller for the connector's documents (B21A-R3-OR-01)",
+    ("kind == 'connector_call'", "STREAM_KNOWN"):
+        "a connector call's own output, of its declared profile: the same reason",
+    ("kind == 'cache_put' and stream.state == STREAM_CALLER_ENTRY", "STREAM_ABSENT"):
+        "Add to Cache hands on no documents",
+    ("kind == 'cache_put'", "STREAM_ABSENT"): "Add to Cache hands on no documents",
+    ("cache_reads and kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS", "STREAM_KNOWN"):
+        "a retrieve hands on the CACHE's documents and sets both markers itself",
+    ("cache_reads and kind in TRIGGERED_REPLACEMENT_SEMANTIC_KINDS", "STREAM_UNKNOWN"):
+        "a retrieve hands on the CACHE's documents and sets both markers itself",
+    ("kind == 'cache_remove'", "STREAM_ABSENT"): "a whole-cache removal hands on no documents",
+}
+
+
+def _b27_stream_sites(source):
+    """The transfer function's `_Stream` constructions, read off ``source``.
+
+    Returns ``(through_the_helper, producers, reaching, rewrites)``: the branches of the sites
+    handed straight to `_handed_on`; the ``(branch, state)`` key of every other site, with
+    repeats; the kinds that reach each branch, derived from its test (`kind == '...'`,
+    `kind in NAME` resolved on the module, `_replaces_document_stream(...)`) and EVERY kind where
+    the test says nothing a kind can be read from; and each `._replace(...)` in the function that
+    names a field a rebuild must not set by hand."""
+    import ast
+    import builtins
+
+    from boomi_mcp.models.process_ir_document_semantics import DOCUMENT_EMISSION_V1
+
+    everything = {row.semantic_kind for row in DOCUMENT_EMISSION_V1.values() if row.semantic_kind}
+    tree = ast.parse(source)
+    [advance] = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef) and node.name == "_advance_stream"]
+    parents = {child: parent for parent in ast.walk(advance) for child in ast.iter_child_nodes(parent)}
+
+    def branch_of(node):
+        while node in parents:
+            if parents[node] is advance and isinstance(node, ast.If):
+                return node.test
+            node = parents[node]
+        return None
+
+    def kinds_of(test):
+        if test is None:
+            return set(everything)
+        found = set()
+        for node in ast.walk(test):
+            if isinstance(node, ast.Compare) and getattr(node.left, "id", None) == "kind":
+                for op, right in zip(node.ops, node.comparators):
+                    if isinstance(op, ast.Eq) and isinstance(right, ast.Constant):
+                        found.add(right.value)
+                    elif isinstance(op, ast.In) and isinstance(right, ast.Name):
+                        found |= set(getattr(lineage, right.id))
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_replaces_document_stream":
+                found |= set(lineage.DOCUMENT_STREAM_REPLACING_KINDS)
+        return found or set(everything)
+
+    def builds_a_stream(node):
+        func = node.func
+        return (isinstance(func, ast.Name) and func.id == "_Stream") or (
+            isinstance(func, ast.Attribute) and (func.attr == "_Stream" or (
+                func.attr == "_make" and getattr(func.value, "id", getattr(func.value, "attr", None)) == "_Stream")))
+
+    guarded = lineage._STREAM_CARRIED_WITH_THE_DOCUMENTS | lineage._STREAM_DROPPED_BY_A_REBUILD
+    helper, producers, reaching, rewrites = [], [], {}, []
+    for node in ast.walk(advance):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "_replace":
+            rewrites += sorted({keyword.arg for keyword in node.keywords} & guarded) or (
+                ["**"] if any(keyword.arg is None for keyword in node.keywords) else [])
+            continue
+        if not builds_a_stream(node):
+            continue
+        test = branch_of(node)
+        label = ast.unparse(test) if test is not None else "<no branch>"
+        reaching[label] = kinds_of(test)
+        outer = parents.get(node)
+        if (isinstance(outer, ast.Call) and getattr(outer.func, "id", None) == "_handed_on"
+                and node in outer.args[2:]):
+            helper.append(label)
+            continue
+        state = ast.unparse(node.args[0]) if node.args else "<no state>"
+        producers.append((label, state))
+    assert not hasattr(builtins, "_Stream")
+    return helper, producers, reaching, rewrites
+
+
+def test_every_stream_the_transfer_builds_goes_through_the_helper_or_is_a_listed_producer():
+    """THE SWEEP, derived from the source (ARCH-184-r3-01's structural half). Every `_Stream(`
+    construction in `_advance_stream` is either handed straight to `_handed_on`, or is a listed
+    producer, each once — and no count-preserving kind reaches a listed producer's branch, so the
+    list cannot be used to excuse the defect this batch fixes. No `._replace` in the function
+    sets a carried or dropped field by hand."""
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    helper, producers, reaching, rewrites = _b27_stream_sites(source)
+    assert sorted(producers) == sorted(_B27_PRODUCER_SITES), {
+        "unlisted": sorted(set(producers) - set(_B27_PRODUCER_SITES)),
+        "listed_but_absent": sorted(set(_B27_PRODUCER_SITES) - set(producers))}
+    for label, _state in producers:
+        assert not reaching[label] & lineage._COUNT_PRESERVING_KINDS, (label, reaching[label])
+    assert rewrites == [], rewrites
+    # The floor: the rebuilding branches this batch and batch 20 fixed are both helper sites.
+    assert {"kind == 'map'", "_replaces_document_stream(semantic)", "kind == 'set_property'"} <= set(helper), helper
+
+
+def test_the_sweep_catches_a_bare_stream_in_a_count_preserving_branch():
+    """Non-vacuity of the sweep, on copies of the real source: the map's pre-correction return, a
+    bare opaque stream in the replacement branch, and a hand-set marker are each caught — the first
+    two as an unlisted site that a count-preserving kind reaches, the third as a rewrite."""
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    mutants = {
+        "the_maps_old_return": (
+            '_handed_on(kind, stream, _Stream(STREAM_KNOWN, target, "map", node))',
+            '_Stream(STREAM_KNOWN, target, "map", node)', ("kind == 'map'", "STREAM_KNOWN")),
+        "a_bare_opaque_stream": (
+            '_handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="opaque"))',
+            '_Stream(STREAM_UNKNOWN, origin="opaque")',
+            ("_replaces_document_stream(semantic)", "STREAM_UNKNOWN")),
+    }
+    for label, (old, new, site) in sorted(mutants.items()):
+        assert source.count(old) == 1, label
+        _helper, producers, reaching, _rewrites = _b27_stream_sites(source.replace(old, new))
+        assert set(producers) - set(_B27_PRODUCER_SITES) == {site}, (label, producers)
+        assert reaching[site[0]] & lineage._COUNT_PRESERVING_KINDS, label
+    hand_set = source.replace(
+        "            if stream.state == STREAM_ABSENT:\n                return state, stream, legacy\n"
+        "            # The documents' IDENTITY",
+        "            if stream.state == STREAM_ABSENT:\n"
+        "                return state, stream._replace(retrieved_from=None), legacy\n"
+        "            # The documents' IDENTITY", 1)
+    assert hand_set != source
+    assert _b27_stream_sites(hand_set)[3] == ["retrieved_from"]

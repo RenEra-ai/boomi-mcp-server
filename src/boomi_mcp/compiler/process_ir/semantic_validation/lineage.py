@@ -928,6 +928,80 @@ _COUNT_PRESERVING_KINDS = frozenset({
 })
 
 
+# --- what a stream a step hands on keeps of the stream it received (#184 correction batch 27) ---
+#
+# ARCH-184-r3-01. `_advance_stream` builds a fresh `_Stream` in several branches, and a field the
+# fresh stream does not name silently takes its default. Correction batch 20 added the carry of
+# the retrieve's cache markers to ONE of those branches; the map's own branch returned first and
+# dropped them, so a bound use behind a map on documents retrieved from a cache a caller shares
+# was never charged to that cache, and a caller's literal path segment escaped while the
+# flattened twin was refused. The carry is therefore not a line in a branch: every field of
+# `_Stream` is classified here, once, and every stream a step builds from the documents it
+# received goes through `_handed_on`, which applies the classification. Asserted at import that
+# the classes partition `_Stream._fields`, so a field added later cannot default silently, and
+# swept from the source by `test_issue_184_child_state_transfer` so a branch cannot bypass it.
+
+#: What the step itself decides: which documents it hands on and what proves their profile.
+_STREAM_SET_BY_THE_STEP = frozenset({"state", "identity", "origin", "origin_node"})
+#: Re-applied by the walk's controller after every step from the INCOMING stream, whatever the
+#: step built (`_walk_lineage`, the `stream._replace` after `_advance_stream`): the proved count,
+#: the property knowledge, the native-work marker and the leg-input proof. `provably_nonempty` is
+#: OR-ed there with what the step built, which is how a Data Passthrough entry establishes it, so
+#: the step's own value is kept rather than the received one: carrying the received value here
+#: would keep it past a producer that may return no rows. The test pins this class to the
+#: keywords of that `_replace`, both ways.
+_STREAM_SET_BY_THE_CONTROLLER = frozenset(
+    {"count", "properties_unknown", "native_kind", "provably_nonempty", "leg_input"})
+#: The cache the documents were retrieved from, and the caches they came out of before it. The
+#: documents' IDENTITY survives a step that hands on exactly the documents it received
+#: (`_COUNT_PRESERVING_KINDS`), so these survive with it: a bound use or a re-cache past such a
+#: step is still a use of those caches' documents, and dropping them discards a writer
+#: alternative (amendment 3 §7). Dropped by every other step — a producer's documents are not
+#: the retrieved ones, and crediting a caller for them charged it for the producer's output.
+_STREAM_CARRIED_WITH_THE_DOCUMENTS = frozenset({"retrieved_from", "retrieved_origins"})
+#: The cache a CONSUMER of the retrieved payload owes: past any step that rebuilds the stream the
+#: payload is no longer the cached one a caller stored (its own docstring). Only the retrieve sets
+#: it; a step that hands on the stream it received UNCHANGED keeps it by not rebuilding.
+_STREAM_DROPPED_BY_A_REBUILD = frozenset({"caller_cache"})
+
+_STREAM_FIELD_CLASSES = (
+    _STREAM_SET_BY_THE_STEP,
+    _STREAM_SET_BY_THE_CONTROLLER,
+    _STREAM_CARRIED_WITH_THE_DOCUMENTS,
+    _STREAM_DROPPED_BY_A_REBUILD,
+)
+
+
+def _unclassified_stream_fields(fields, classes) -> Tuple[str, ...]:
+    """The fields of ``fields`` that ``classes`` does not name exactly once (empty when sound)."""
+    named = [name for group in classes for name in group]
+    return tuple(sorted(
+        {name for name in fields if named.count(name) != 1} | (set(named) - set(fields))))
+
+
+if _unclassified_stream_fields(_Stream._fields, _STREAM_FIELD_CLASSES):  # pragma: no cover
+    raise RuntimeError("_Stream fields not classified exactly once: {0!r}".format(
+        _unclassified_stream_fields(_Stream._fields, _STREAM_FIELD_CLASSES)))
+
+
+def _handed_on(kind: str, received: "_Stream", built: "_Stream") -> "_Stream":
+    """The stream a step of ``kind`` hands on, built as ``built`` from the ``received`` one.
+
+    The ONE construction path for a stream a step rebuilds from the documents it received
+    (ARCH-184-r3-01). The step's own fields and the controller's are ``built``'s; the fields
+    that travel with the documents are ``received``'s across a count-preserving step and their
+    default across any other; the fields no rebuild keeps take their default.
+    """
+    keeps = kind in _COUNT_PRESERVING_KINDS
+    defaults = _Stream._field_defaults
+    fields = built._asdict()
+    for name in _STREAM_CARRIED_WITH_THE_DOCUMENTS:
+        fields[name] = getattr(received, name) if keeps else defaults[name]
+    for name in _STREAM_DROPPED_BY_A_REBUILD:
+        fields[name] = defaults[name]
+    return _Stream(**fields)
+
+
 def _cohort_at_write(on_documents, writers, stream) -> "_Cohort":
     """The property cohort an executing Add to Cache stores (#184 amendment 3 §7).
 
@@ -2465,8 +2539,9 @@ def _walk_lineage(
                             mismatch(node, sub_path)
                     elif stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _Stream(STREAM_CALLER_ENTRY, identity,
-                                             provably_nonempty=stream.provably_nonempty)
+                            stream = _handed_on(kind, stream, _Stream(
+                                STREAM_CALLER_ENTRY, identity,
+                                provably_nonempty=stream.provably_nonempty))
                         elif identity != stream.identity:
                             mismatch(node, sub_path)
                     elif stream.state == STREAM_EMPTY_ENTRY or (
@@ -2492,8 +2567,9 @@ def _walk_lineage(
                     _requires(stream, required, ref)
                     if stream.state == STREAM_CALLER_ENTRY:
                         if stream.identity is None:
-                            stream = _Stream(STREAM_CALLER_ENTRY, required,
-                                             provably_nonempty=stream.provably_nonempty)
+                            stream = _handed_on(kind, stream, _Stream(
+                                STREAM_CALLER_ENTRY, required,
+                                provably_nonempty=stream.provably_nonempty))
                         elif required != stream.identity:
                             mismatch(node, "/process_ref")
                     elif stream.state != STREAM_KNOWN or required is None or required != stream.identity:
@@ -2593,10 +2669,12 @@ def _walk_lineage(
             if checked and contradicted:
                 mismatch(node, "/map_ref")
             # The map owns its own input mismatch. Downstream consumers are judged
-            # against what it declares it emits, so one wrong map is reported once.
+            # against what it declares it emits, so one wrong map is reported once. It hands
+            # on exactly the documents it received, so the caches they were retrieved from
+            # travel on with them (`_handed_on`, ARCH-184-r3-01).
             if target is None:
-                return state, _Stream(STREAM_UNKNOWN, origin="map"), legacy
-            return state, _Stream(STREAM_KNOWN, target, "map", node), legacy
+                return state, _handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="map")), legacy
+            return state, _handed_on(kind, stream, _Stream(STREAM_KNOWN, target, "map", node)), legacy
 
         if kind == "cache_put" and stream.state == STREAM_CALLER_ENTRY:
             # Staging the caller's documents: the cache's declared profile is what
@@ -2692,40 +2770,36 @@ def _walk_lineage(
                 # its input's content and records no requirement.
                 _requires(stream, None, None)
             if stream.state in (STREAM_EMPTY_ENTRY, STREAM_TOUCHED_ENTRY):
-                return state, _Stream(STREAM_TOUCHED_ENTRY), legacy
+                return state, _handed_on(kind, stream, _Stream(STREAM_TOUCHED_ENTRY)), legacy
             if stream.state == STREAM_ABSENT:
                 return state, stream, legacy
             # The documents' IDENTITY survives a step that hands on exactly the documents
-            # it received, so the cache they were RETRIEVED from survives with them.
-            # `_COUNT_PRESERVING_KINDS` is the authority on which kinds those are, and this
-            # invents no second carrier — but the carry happens HERE, on the branch that
-            # rebuilds the stream for a document-preserving step. A kind whose own branch
-            # above returns a fresh `_Stream` — a connector call, a map — drops both cache
-            # markers whatever that set says, and only the count is re-applied afterwards
-            # (B21A-R3-OR-01, recorded: the direction is fail-closed, and moving the carry
-            # past a connector call would credit the caller for the connector's own output).
-            # A binding behind a Message is still a bound use of that cache, and
-            # the caller that filled it is still one of the writers the path must pass
-            # for: amendment 3 §7 requires a bound path to pass for every possible
-            # selected writer and never to discard an inconvenient writer alternative.
-            # Dropping it admitted a caller whose LITERAL path segment reached the request
-            # path, while the flattened twin of the same legs was refused (ARCH-184-r2-01).
+            # it received, so the cache they were RETRIEVED from survives with them, whichever
+            # branch rebuilds the stream: `_handed_on` is the one construction path, and
+            # `_COUNT_PRESERVING_KINDS` the authority on which kinds keep them. A binding
+            # behind a Message is still a bound use of that cache, and the caller that filled
+            # it is still one of the writers the path must pass for: amendment 3 §7 requires a
+            # bound path to pass for every possible selected writer and never to discard an
+            # inconvenient writer alternative. Dropping it admitted a caller whose LITERAL path
+            # segment reached the request path, while the flattened twin of the same legs was
+            # refused (ARCH-184-r2-01).
+            #
+            # Until correction batch 27 the carry lived HERE and nowhere else, and this comment
+            # recorded that a map, whose own branch above returned a fresh `_Stream`, dropped
+            # both markers "whatever that set says", calling the direction fail-closed
+            # (B21A-R3-OR-01). It is not: behind a map, a bound use on documents retrieved from
+            # a cache a caller shares was never charged to that cache, so the caller's literal
+            # path segment there escaped both compiler entry points while the flattened twin
+            # was refused (ARCH-184-r3-01). What stays true is the connector call: its output is
+            # not the documents it received, so it keeps building its own stream and crediting
+            # the caller for it would charge the caller for the connector's output.
             #
             # Only the identity travels. `caller_cache` stays withheld: past a step that
             # rebuilds the stream the payload is no longer the cached one a caller stored —
             # the cohort seed already clears the binding through the ordinary read that
             # recorded the row. Both markers already carry the retrieve's own answer to
             # `_caller_documents_may_reach`, so nothing re-asks it here.
-            return state, _Stream(
-                STREAM_UNKNOWN,
-                origin="opaque",
-                retrieved_from=(
-                    stream.retrieved_from if kind in _COUNT_PRESERVING_KINDS else None
-                ),
-                retrieved_origins=(
-                    stream.retrieved_origins if kind in _COUNT_PRESERVING_KINDS else ()
-                ),
-            ), legacy
+            return state, _handed_on(kind, stream, _Stream(STREAM_UNKNOWN, origin="opaque")), legacy
 
         return state, stream, legacy
 
