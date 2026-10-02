@@ -299,7 +299,7 @@ _SIDES = ("requirement", "possible_effect", "guaranteed_effect")
 _BOUNDARY = {
     ("document", "requirement"): ("document_requirements", "required_writers", "required_reads"),
     ("document", "possible_effect"):
-        "withheld: a child's document properties never land on its caller's sibling copies (rule 7)",
+        ("document_property_writes",),  # writer EXISTENCE only: they never land on the caller's copies (rule 7)
     ("document", "guaranteed_effect"):
         "withheld: rule 7 again, and the contract refuses a document property as a guarantee",
     ("execution", "requirement"): ("required_reads",),
@@ -320,7 +320,7 @@ _BOUNDARY = {
     # the repetition check for a LATER RUN of the same child (amendment 1 rule 8). A caller's
     # own later reads still meet what a child may store as an unknown possibility.
     ("content", "guaranteed_effect"): ("required_caches_retain_nothing_it_stored",),
-    ("cohorts", "requirement"): ("cache_property_requirements",),
+    ("cohorts", "requirement"): ("cache_property_requirements", "nonstrict_cached_reads"),
     ("cohorts", "possible_effect"):
         "carried by the content cells: every cache a child may write gets an unknown cohort",
     ("cohorts", "guaranteed_effect"):
@@ -478,9 +478,9 @@ _UNGUARANTEED = {
     # a passthrough parent proves no count, so the child may run no times at all
     "several_documents": (_call_then_read(passthrough=True, **_WAITS_AND_ABORTS), _SETS_K, (("dpp", "K"),),
                           {(_READ_BEFORE_WRITE, "/body/steps/1/legs/1/steps/0")}),
-    # rule 7: a child's document property never lands on the parent's copies
+    # rule 7: a child's document property never lands on the parent's copies (batch 30: on another copy)
     "a_document_property": (_call_then_read(later=_READS_D_LATER, **_WAITS_AND_ABORTS), _SETS_D, (),
-                            {(_READ_BEFORE_WRITE, _LATER_READ)}),
+                            {(PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID, _LATER_READ)}),
 }
 
 
@@ -1936,7 +1936,7 @@ def test_a_declared_external_writer_is_refused_before_the_seal_is_consulted(monk
 
     def at_the_call():
         return [(sealed, external) for site, sealed, external in asked
-                if site == "_discharge_child_contract"]
+                if site in ("_discharge_child_contract", "_judge_a_cached_property_row")]
 
     monkeypatch.setattr(lineage, "_caller_owes_a_cached_property", recording)
     declared = _cell(roots, _external_writer_declaration(), key="MID")
@@ -1944,7 +1944,7 @@ def test_a_declared_external_writer_is_refused_before_the_seal_is_consulted(monk
     assert (_NOT_ESTABLISHED, at_the_forward) in declared["errors"]
     assert (_NOT_ESTABLISHED, at_the_forward) in declared["compile_errors"]
     assert at_the_call() == [], asked
-    assert {site for site, _sealed, _external in asked} <= {"_discharge_child_contract", "_transfer"}, asked
+    assert {site for site, _sealed, _external in asked} <= {"_discharge_child_contract", "_judge_a_cached_property_row", "_transfer"}, asked
     assert not any(sealed and external for _site, sealed, external in asked), asked
     # With no external writer declared the gate IS consulted — and only ever about a cache
     # no external writer touches, which is exactly why the removed clause could not fire.
@@ -2599,10 +2599,10 @@ def test_the_boundary_shapes_still_get_the_verdicts_the_rule_was_written_against
         (_READ_BEFORE_WRITE, "/body/steps/1/legs/1/steps/0")}
     assert measured[("cache", "no_abort", "walk")]["errors"] == {
         (_CACHE_WRITER_MISSING, _LATER_READ)}
-    # rule 7: the gated call is the shape a document property most looks established at,
-    # and it is refused there too — a verified declaration only changes the code.
+    # rule 7: the gated call is the shape a document property most looks established at, and it is
+    # refused there too — derived or declared, the child's writer is one on another copy (batch 30).
     assert measured[("ddp", "gated", "walk")]["errors"] == {
-        (_READ_BEFORE_WRITE, _LATER_READ)}
+        (_DDP_SCOPE_INVALID, _LATER_READ)}
     assert measured[("ddp", "gated", "declared")]["errors"] == {
         (_DDP_SCOPE_INVALID, _LATER_READ)}
     assert measured[("external_writer", "flagged", "declared")]["warnings"] == {
@@ -8027,16 +8027,16 @@ def test_a_bound_use_behind_a_map_is_owed_to_the_cache_its_documents_were_retrie
     the cache the binding rides on is a writer the bound path must pass for, whatever steps that
     hand the documents on stand between the retrieve and the binding — a map included. Refused at
     the parent's call exactly where the flattened twin is refused at its binding, and with the
-    same code; the dynamic-writer control stays admitted in both graphs. The child alone is clean:
-    the refusal belongs to the call."""
+    same code. Since correction batch 30 the child's untyped legacy map is PROFILE_MISMATCH in both
+    graphs (caller-independent); the property refusal still belongs to the call."""
     roots, flat = _b27_roots(caller)
     expected = _B27_CALLERS[caller][1]
     parent, row = _b27_verdict(roots, "PARENT")
     twin, _row_of_the_twin = _b27_verdict([("PARENT", flat)], "PARENT")
     assert parent == ([] if expected is None else [(expected, _B27_AT_THE_CALL)])
-    assert twin == ([] if expected is None else [(expected, _B27_AT_THE_TWINS_BINDING)])
+    assert sorted(twin) == sorted([(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _B27_AT_THE_TWINS_BINDING.replace("2/path_binding", "1/map_ref"))] + ([] if expected is None else [(expected, _B27_AT_THE_TWINS_BINDING)]))
     assert ("$ref:CACHE2", "X", None, True) in row, row
-    assert _b27_verdict(roots, "CACHE_CHILD")[0] == []
+    assert {code for code, _path in _b27_verdict(roots, "CACHE_CHILD")[0]} == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
 
 
 def test_the_public_plan_refuses_the_caller_a_map_hid_from_the_binding():
@@ -8072,8 +8072,8 @@ def test_the_public_plan_refuses_the_caller_a_map_hid_from_the_binding():
         blamed = [(code, item["path"]) for item in served.get("errors") or ()
                   for code in item.get("cause_codes") or ()]
         expected = _B27_CALLERS[caller][1]
-        assert served["validation_report"]["is_valid"] is (expected is None), (caller, blamed)
-        assert blamed == ([] if expected is None else [(expected, _B27_AT_THE_CALL)]), (caller, blamed)
+        assert served["validation_report"]["is_valid"] is False and PROCESS_IR_SEMANTIC_PROFILE_MISMATCH in {code for code, _path in blamed}, (caller, blamed)
+        assert [item for item in blamed if item[0] != PROCESS_IR_SEMANTIC_PROFILE_MISMATCH] == ([] if expected is None else [(expected, _B27_AT_THE_CALL)]), (caller, blamed)
 
 
 def _b27_kinds_that_can_stand_between():
@@ -8130,7 +8130,7 @@ def test_every_count_preserving_kind_between_the_retrieve_and_the_bound_use_keep
                 expected = _B27_CALLERS[caller][1]
                 parent, row = _b27_verdict(roots, "PARENT")
                 twin, _row = _b27_verdict([("PARENT", flat)], "PARENT")
-                assert [code for code, _path in twin] == ([] if expected is None else [expected]), (kind, twin)
+                assert [code for code, _path in twin if (code, kind) != (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "map_ref")] == ([] if expected is None else [expected]), (kind, twin)
                 assert parent == ([] if expected is None else [(expected, _B27_AT_THE_CALL)]), (kind, caller)
                 assert ("$ref:CACHE2", "X", None, True) in row, (kind, row)
         except ProcessIRValidationError as exc:
@@ -8942,10 +8942,10 @@ def test_a_child_that_never_writes_the_callers_cache_is_judged_at_the_call_behin
                 # BOTH graphs (QA r28: "the same property codes plus PROFILE_MISMATCH, which the twin
                 # also serves") — caller-independent, at the child's map and at the call alike.
                 extra = [(code, _B27_AT_THE_CALL) for code, _path in twin
-                         if code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH]
-                assert {code for code, _path in child} <= {code for code, _path in extra}, (form, step, caller, child)
+                         if code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH and typed]
+                assert {code for code, _path in child} <= {code for code, _path in twin if code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}, (form, step, caller, child)
                 assert sorted(parent) == _b29_expected(caller, use, extra), (form, step, caller, parent, twin)
-                assert sorted({code for code, _ in parent}) == sorted({code for code, _ in twin}), (
+                assert sorted({code for code, _ in parent + child}) == sorted({code for code, _ in twin}), (
                     form, step, caller, twin)
                 assert ("$ref:CACHE2", "X", None, use == "bound") in row, (form, step, caller, row)
                 placed.add((form, step))
@@ -8995,8 +8995,8 @@ def test_the_public_plan_judges_the_no_recache_child_at_the_callers_call():
                                     for code in item.get("cause_codes") or ())
                     expected = _b29_expected(caller, use)
                     cell = (dialect, step, use, caller, blamed)
-                    assert served["validation_report"]["is_valid"] is (not expected), cell
-                    assert blamed == expected, cell
+                    assert served["validation_report"]["is_valid"] is (not expected and (typed or step != "map")), cell
+                    assert [item for item in blamed if (typed or step != "map") or item[0] != PROCESS_IR_SEMANTIC_PROFILE_MISMATCH] == expected, cell
                     seen += 1
     assert seen == (2 + 3) * 2 * 3
 
@@ -9430,3 +9430,714 @@ def test_each_ride_on_credit_and_the_property_marker_row_are_two_carriers_of_one
             assert refusal in _errors(roots, "PARENT"), (label, "the credit alone")
             patched.setattr(module, name, without)
             assert _errors(roots, "PARENT") == [], (label, "neither carrier")
+
+
+# --- correction batch 30 (QA-184-s1-r29-01, QA-184-s1-r29-02) ---------------------------------
+#
+# QA-184-s1-r29-01. A No Data child retrieves the documents its caller stored in CACHE2 and reaches
+# a Decision whose operand is DDP X with no default — a NON-strict read. The flattened twin of the
+# same legs refuses the read READ_BEFORE_WRITE wherever its process holds a writer of X the read can
+# never see (`lineage._nonstrict_read_can_fail`): the caller's writer of X on other documents, or on
+# these documents behind a step that discards their properties. The composition was admitted: the
+# read loop skipped a non-strict read BEFORE the recorder whenever the CHILD held no writer, so no
+# cached-from, ride-on or origin row was ever recorded and the call had nothing to judge. The
+# correction routes the read to the same recorder, exports what the callers must not do
+# (`ChildEntryContractV1.nonstrict_cached_reads`), and the call applies the in-process predicate to
+# its OWN process: a caller that writes X makes the row a cached-property requirement of that cache
+# (or, cache-less, a read that fails outright); a caller that writes nothing passes it on.
+#
+# QA-184-s1-r29-02. In the legacy dialect a retrieve handed the `legacy` flag on unchanged, so a
+# first-class call's cached documents kept the named exemption in one process — the twin admitted a
+# declared-input connector call the composition's caller refused. The owner's decision: the twin is
+# the escape. The legacy scope now ends at a retrieve unless every write reaching the cache stored
+# documents the legacy source last produced, read off the content facts (`CacheContentFact`).
+#
+# Expected verdicts come from the flattened twin, never from this implementation. The Decision
+# operand's spelling is the served `TrackOperandV1` (`value_type: "track"`, the `dynamicdocument.`
+# wire scope), the fixture QA's r29 builders read off the served `$defs`.
+
+_B30_TRACK_X = {"value_type": "track", "property_id": "dynamicdocument.X", "property_name": "X"}
+_B30_PATCH = {"kind": "connector_call", "operation_ref": "$ref:PATCH"}  # declares request profile P2
+_B30_GETP1 = {"kind": "connector_call", "operation_ref": "$ref:GETP1"}
+_B30_M12 = {"kind": "map_ref", "map_ref": "$ref:M12"}
+_B30_AT_THE_CALL = "/body/steps/0/legs/2/terminal"
+
+
+def _b30_decision(left=_B30_TRACK_X, true_steps=(_MSG,)):
+    return {"kind": "decision", "comparison": "equals", "left": dict(left),
+            "right": {"value_type": "static", "static_value": "a"},
+            "true_arm": {"steps": list(true_steps), "terminal": _STOP},
+            "false_arm": {"steps": [_MSG], "terminal": _STOP}}
+
+
+#: The three Decision uses of X: no default (non-strict), a default (cannot fail), and a bound use of
+#: X in its true arm (the Decision reads X, then a strict bound use follows).
+_B30_USES = {
+    "decision": _b30_decision(),
+    "decision_with_default": _b30_decision(dict(_B30_TRACK_X, default_value="")),
+    "decision_binding_in_its_true_arm": _b30_decision(true_steps=(_BOUND_GET,)),
+}
+_B30_DATA_PROCESSES = dict(
+    {"data_process." + operation: {"kind": "data_process", "steps": [step]}
+     for operation, step in _B28_OPERATIONS.items()},
+    **{"data_process.mixed": {"kind": "data_process", "steps": [
+        _B28_OPERATIONS["split_documents"], _B28_OPERATIONS["combine_documents"]]}})
+
+
+def _b30_between(kind, use):
+    """``[(cell, steps, terminal)]`` placing ``kind`` between the retrieve and the Decision ``use``:
+    a control holds the Decision as its first body's terminal; a data process gets one cell per
+    operation the grammar admits plus a mixed one; ``none`` is the bare retrieve."""
+    if kind == "none":
+        return [("none", [], use)]
+    if kind == "data_process":
+        return [(cell, [node], use) for cell, node in sorted(_B30_DATA_PROCESSES.items())]
+    holding = {"steps": [], "terminal": use}
+    controls = {
+        "decision": dict(_decision(_STOP), true_arm=holding),
+        "branch": {"kind": "branch", "legs": [holding, _B28_BODY]},
+        "try_catch": {"kind": "try_catch", "scope": "process", "try_body": holding, "catch_body": _B28_BODY},
+    }
+    if kind in controls:
+        return [(kind, [], controls[kind])]
+    return [(kind, [_B28_NODES[kind]], use)]
+
+
+def _b30_codes(found):
+    return {code for code, _path in found}
+
+
+def _b30_rows(roots, typed):
+    """The child's served non-strict rows, as the caller's resolution carries them."""
+    symbols = _symbols() if typed else _b27_symbols()
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = resolve_process_ir_effect_declarations(
+        parsed, None, symbols, [], child_roots={"$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok, resolution.findings
+    row = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:CACHE_CHILD")
+    return set(row.nonstrict_cached_reads)
+
+
+def _b30_differential(dialect, recache, use):
+    """Every step kind the emission authority admits between the retrieve and the Decision
+    (`_b28_kinds_that_can_be_between`, plus the bare retrieve), the three callers, one child shape
+    (the re-caching child of batch 28, or batch 29's child that never writes the caller's cache):
+    ``(placed, refused, diverging)``, a cell diverging unless parent and child together serve
+    exactly the flattened twin's codes."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    typed = _B28_DIALECTS[dialect]
+    build = _b28_roots if recache else _b29_roots
+    placed, refused, diverging = set(), {}, []
+    for kind in ["none"] + list(_b28_kinds_that_can_be_between()):
+        for cell, steps, terminal in _b30_between(kind, _B30_USES[use]):
+            for caller in sorted(_B29_CALLERS):
+                try:
+                    roots, flat = build(caller, steps, terminal, typed)
+                    parent = _b28_verdict(roots, "PARENT", typed)[0]
+                    child = _b28_verdict(roots, "CACHE_CHILD", typed)[0]
+                    twin = _b28_verdict([("PARENT", flat)], "PARENT", typed)[0]
+                except ProcessIRValidationError as exc:
+                    refused[cell] = str(exc)
+                    continue
+                placed.add(cell)
+                if _b30_codes(parent) | _b30_codes(child) != _b30_codes(twin):
+                    diverging.append((cell, caller, parent, child, twin))
+    return placed, refused, diverging
+
+
+#: The floor every shape must place: property-KEEPING steps and property-DISCARDING ones.
+_B30_PLACED_FLOOR = {"none", "message", "connector_call", "map_ref", "flow_control", "set_ddp", "set_dpp",
+                     "data_process.custom_scripting", "data_process.split_documents",
+                     "data_process.combine_documents", "data_process.mixed"}
+
+
+@pytest.mark.parametrize("use", sorted(_B30_USES))
+@pytest.mark.parametrize("recache", (False, True), ids=("never_re_caches", "re_caches"))
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_every_step_between_a_retrieve_and_a_decision_on_the_cached_property_earns_its_flattened_twins_verdict(dialect, recache, use):
+    """THE DECISION DIFFERENTIAL (batches 28-29's, extended to Decision uses): a Decision on X with
+    no default, with a default, and with a bound use of X in its true arm, behind every step kind the
+    emission authority admits — property-keeping and property-discarding alike — in both dialects,
+    for the re-caching child and the child that never re-caches, under the literal-X, no-X and
+    dynamic-X callers. Every cell's code set equals its flattened twin's. Measured before the
+    correction: see `docs/plans/issue-184-resume/work/b30/differential_counts.txt`."""
+    from boomi_mcp.errors import PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY, PROCESS_IR_SEMANTIC_NESTING_LIMIT
+
+    placed, refused, diverging = _b30_differential(dialect, recache, use)
+    assert diverging == [], diverging[:6]
+    # What the MODEL refuses there, each with its own code — measured, never skipped silently: a
+    # Branch, a notify, an endpoint or a try/catch in a leg, and a Decision directly in a Decision's arm.
+    assert sorted(refused) == ["branch", "decision", "notify", "source", "target", "try_catch"], sorted(refused)
+    assert PROCESS_IR_SEMANTIC_NESTING_LIMIT in refused["decision"], refused["decision"]
+    assert all(PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY in text
+               for kind, text in refused.items() if kind != "decision"), refused
+    assert not placed & set(refused)
+    assert _B30_PLACED_FLOOR <= placed, sorted(_B30_PLACED_FLOOR - placed)
+
+
+def _b30_solo_roots(stage, steps, typed):
+    """QA's `solo_` shape: the caller ONLY stages CACHE2 (no other writer of X anywhere) and calls a
+    child that retrieves CACHE2, runs ``steps`` and reaches the no-default Decision on X."""
+    head = () if typed else (_B27_SOURCE,)
+    legs = [{"steps": [_READ2, *steps], "terminal": _b30_decision()}, {"steps": [_MSG], "terminal": _STOP}]
+    parent = _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    child = _doc(*head, {"kind": "branch", "legs": legs})
+    flat = _doc(*head, {"kind": "branch", "legs": [stage] + legs})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], flat
+
+
+_B30_SCRIPT = _B30_DATA_PROCESSES["data_process.custom_scripting"]
+#: QA's r29 public confirmations (`R29_H_dtr_*`), as ``(builder, expected parent code or None,
+#: expected non-strict row)``. The `_b29_roots` callers also write a dynamic X onto CACHE.
+_B30_QA_SHAPES = {
+    "dtr_none_none": (lambda typed: _b29_roots("documents_without_x", [], _b30_decision(), typed),
+                      _READ_BEFORE_WRITE, ("$ref:CACHE2", "X")),
+    "dtr_msg_none": (lambda typed: _b29_roots("documents_without_x", [_MSG], _b30_decision(), typed),
+                     _READ_BEFORE_WRITE, ("$ref:CACHE2", "X")),
+    "dtr_conn_none": (lambda typed: _b29_roots("documents_without_x", [_GET], _b30_decision(), typed),
+                      _READ_BEFORE_WRITE, ("$ref:CACHE2", "X")),
+    "dtr_dp_dyn": (lambda typed: _b29_roots("a_dynamic_x", [_B30_SCRIPT], _b30_decision(), typed),
+                   _READ_BEFORE_WRITE, (None, "X")),
+    "dtr_dp_lit": (lambda typed: _b29_roots("a_literal_x", [_B30_SCRIPT], _b30_decision(), typed),
+                   _READ_BEFORE_WRITE, (None, "X")),
+    "dtr_recache_none": (lambda typed: _b28_roots("documents_without_x", [], _b30_decision(), typed),
+                         _READ_BEFORE_WRITE, ("$ref:CACHE2", "X")),
+    "dtr_solo_dp_dyn": (lambda typed: _b30_solo_roots(_B27_CALLERS["a_dynamic_x"][0], [_B30_SCRIPT], typed),
+                        _READ_BEFORE_WRITE, (None, "X")),
+    "dtr_solo_dp_lit": (lambda typed: _b30_solo_roots(_B27_CALLERS["a_literal_x"][0], [_B30_SCRIPT], typed),
+                        _READ_BEFORE_WRITE, (None, "X")),
+    # Controls the twin admits: a defaulted operand, the dynamic writer behind a keeping step, and a
+    # caller that writes X nowhere — the row is still exported, and nothing applies it.
+    "dtrd_none_none": (lambda typed: _b29_roots("documents_without_x", [], _B30_USES["decision_with_default"], typed),
+                       None, None),
+    "dtr_msg_dyn": (lambda typed: _b29_roots("a_dynamic_x", [_MSG], _b30_decision(), typed),
+                    None, ("$ref:CACHE2", "X")),
+    "dtr_solo_dp_none": (lambda typed: _b30_solo_roots(_B27_CALLERS["documents_without_x"][0], [_B30_SCRIPT], typed),
+                         None, (None, "X")),
+    "dtr_solo_msg_dyn": (lambda typed: _b30_solo_roots(_B27_CALLERS["a_dynamic_x"][0], [_MSG], typed),
+                         None, ("$ref:CACHE2", "X")),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_B30_QA_SHAPES))
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_a_called_childs_decision_on_a_cached_property_is_judged_against_its_callers_writers(dialect, shape):
+    """QA-184-s1-r29-01, QA's exact shapes, both dialects, through both resolver spellings and both
+    compiler entry points (`_b28_verdict`). Where the flattened twin refuses the Decision's read
+    READ_BEFORE_WRITE, the composition is refused with that code at the CALLER's call — the child
+    alone stays clean, because nothing in it writes X — and the child's contract names what the
+    caller must not do: CACHE2's X behind a step that keeps the documents' properties, a cache-less
+    row behind one that discards them. Where the twin admits, so does the composition."""
+    typed = _B28_DIALECTS[dialect]
+    build, code, row = _B30_QA_SHAPES[shape]
+    roots, flat = build(typed)
+    parent, _row = _b28_verdict(roots, "PARENT", typed)
+    child, _row = _b28_verdict(roots, "CACHE_CHILD", typed)
+    twin, _row = _b28_verdict([("PARENT", flat)], "PARENT", typed)
+    call = "/body/steps/0/legs/1/terminal" if shape.startswith("dtr_solo") else _B30_AT_THE_CALL
+    assert child == [], (shape, child)
+    assert _b30_codes(twin) == ({code} if code else set()), (shape, twin)
+    assert parent == ([(code, call)] if code else []), (shape, parent)
+    rows = _b30_rows(roots, typed)
+    assert (row in rows) if row else rows == set(), (shape, rows)
+
+
+def test_the_public_plan_refuses_a_caller_whose_writer_the_childs_decision_can_never_see():
+    """The Decision compositions through `build_integration(action="plan")`, both dialects, behind
+    nothing, a Message, a connector call and a custom script, three callers — the MagicMock client and
+    metadata stub of the batch-27 to batch-29 public witnesses. Each served verdict equals the
+    flattened twin's: READ_BEFORE_WRITE at the caller's call where the twin refuses, admitted where it
+    admits."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    def held(key, component_type):
+        return {"key": key, "type": component_type, "name": "E184 " + key, "action": "create",
+                "config": {"reference_only": True, "component_id": "held-" + key.lower()}}
+
+    specs = [dict(APPLIABLE_CONN, key="RCONN"),
+             dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                  config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN")),
+             held("CACHE", "documentcache"), held("CACHE2", "documentcache")]
+    keys = tuple(spec["key"] for spec in specs)
+    steps_by_name = {"none": [], "message": [_MSG], "connector_call": [_GET], "custom_script": [_B30_SCRIPT]}
+    seen, refused = 0, 0
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        for name, steps in sorted(steps_by_name.items()):
+            for caller in sorted(_B29_CALLERS):
+                roots, flat = _b29_roots(caller, steps, _b30_decision(), typed)
+                twin = _b28_verdict([("PARENT", flat)], "PARENT", typed)[0]
+                raw = _request([_unit(document, keys + (("CACHE_CHILD",) if key == "PARENT" else ()),
+                                      key=key, name="E184 " + key) for key, document in roots],
+                               specs).model_dump(mode="json")
+                with _ApplyBoundary().installed():
+                    result = build_integration_action(
+                        MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+                served = result["authoring_result"]
+                blamed = sorted((code, item["path"]) for item in served.get("errors") or ()
+                                for code in item.get("cause_codes") or ())
+                expected = sorted((code, _B30_AT_THE_CALL) for code in _b30_codes(twin))
+                cell = (dialect, name, caller, blamed, twin)
+                assert served["validation_report"]["is_valid"] is (not expected), cell
+                assert blamed == expected, cell
+                seen += 1
+                refused += bool(expected)
+    assert seen == 2 * 4 * 3
+    # Non-vacuity: both outcomes are served — the no-X caller behind every step, and every caller
+    # behind the script, are refused; the dynamic-X caller behind a keeping step is admitted.
+    assert 0 < refused < seen, (refused, seen)
+
+
+def test_a_child_that_writes_the_property_itself_keeps_its_own_row_and_a_defaulted_operand_owes_nothing():
+    """The two controls the correction must not move. A child that writes X on another leg holds a
+    writer the read can never see: its own non-strict read is refused-or-charged as before (the
+    caller judges the cached row), so no non-strict row is exported — the strict row carries it. A
+    defaulted operand cannot fail: no row of either kind."""
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        head = () if typed else (_B27_SOURCE,)
+        own = [{"steps": [_READ2], "terminal": _b30_decision()}, {"steps": [_GET, _DYNAMIC_X], "terminal": _STOP}]
+        for caller in sorted(_B29_CALLERS):
+            parent = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, _B27_CALLERS[caller][0],
+                           {"steps": [], "terminal": _call("CACHE_CHILD")})
+            roots = [("PARENT", parent), ("CACHE_CHILD", _doc(*head, {"kind": "branch", "legs": own}))]
+            flat = _doc(*head, {"kind": "branch", "legs": [
+                {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, _B27_CALLERS[caller][0]] + own})
+            composed = _b30_codes(_b28_verdict(roots, "PARENT", typed)[0]) | _b30_codes(
+                _b28_verdict(roots, "CACHE_CHILD", typed)[0])
+            assert composed == _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", typed)[0]), (dialect, caller)
+            assert _b30_rows(roots, typed) == set(), (dialect, caller)
+            _parent, strict = _b28_verdict(roots, "PARENT", typed)
+            assert ("$ref:CACHE2", "X", None, False) in strict, (dialect, caller, strict)
+            defaulted, _flat = _b29_roots(caller, [_MSG], _B30_USES["decision_with_default"], typed)
+            assert _b30_rows(defaulted, typed) == set(), (dialect, caller)
+            assert _b28_verdict(defaulted, "PARENT", typed)[0] == [], (dialect, caller)
+
+
+def test_a_middle_that_writes_nothing_passes_the_row_on_and_one_that_writes_the_property_applies_it():
+    """The non-strict row crosses a forwarding middle unchanged in kind, and the first process up the
+    chain that writes X applies it: a grandparent that stores X-less documents in CACHE2 and writes a
+    dynamic X elsewhere is refused at its call into the middle, exactly as the three-process flattened
+    twin refuses the read; with X on its CACHE2 documents it is admitted."""
+    child = _doc({"kind": "branch", "legs": [
+        {"steps": [_READ2, _MSG], "terminal": _b30_decision()}, {"steps": [_MSG], "terminal": _STOP}]})
+    middle = _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    for caller, expected in (("documents_without_x", _READ_BEFORE_WRITE), ("a_dynamic_x", None)):
+        grand = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, _B27_CALLERS[caller][0],
+                      {"steps": [], "terminal": _call("MID")})
+        roots = [("PARENT", grand), ("MID", middle), ("CACHE_CHILD", child)]
+        flat = _doc({"kind": "branch", "legs": [
+            {"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, _B27_CALLERS[caller][0],
+            {"steps": [_MSG], "terminal": _STOP}] + child["body"]["steps"][0]["legs"]})
+        twin = _b28_verdict([("PARENT", flat)], "PARENT", True)[0]
+        assert _b30_codes(twin) == ({expected} if expected else set()), (caller, twin)
+        assert _b28_verdict(roots, "CACHE_CHILD", True)[0] == []
+        assert _b28_verdict(roots, "MID", True)[0] == []
+        assert _b28_verdict(roots, "PARENT", True)[0] == (
+            [(expected, _B30_AT_THE_CALL)] if expected else []), caller
+        parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+        resolution = resolve_process_ir_effect_declarations(
+            parsed, None, _symbols(), [], child_roots={"$ref:" + name: ir for name, ir in parsed})
+        row = resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:MID")
+        assert ("$ref:CACHE2", "X") in row.nonstrict_cached_reads, row
+
+
+# QA-184-s1-r29-02: the legacy scope ends at a retrieve of documents the legacy source did not produce.
+
+#: What the caller stores in CACHE2 for a declared-input (P2) connector call in the child, and the
+#: twin's code: undeclared documents and P1 documents are not P2; P2 documents (a P1 call through
+#: the P1->P2 map) are.
+_B30_CONTENT_CALLERS = {
+    "undeclared": ({"steps": [_GET], "terminal": _PUT2}, PROCESS_IR_SEMANTIC_PROFILE_MISMATCH),
+    "p1": ({"steps": [_B30_GETP1], "terminal": _PUT2}, PROCESS_IR_SEMANTIC_PROFILE_MISMATCH),
+    "p2": ({"steps": [_B30_GETP1, _B30_M12], "terminal": _PUT2}, None),
+}
+
+
+def _b30_tyin_roots(stage, between, consumer, typed, recache=False):
+    """QA's `tyin` shape: the caller writes a dynamic X onto CACHE, stores ``stage``'s documents in
+    CACHE2 and calls a child that retrieves CACHE2, runs ``between`` and ``consumer``; the legacy
+    child starts with a `source` (its twin too)."""
+    head = () if typed else (_B27_SOURCE,)
+    legs = ([{"steps": [_READ, _READS_X], "terminal": _PUT2}] if recache else []) + [
+        {"steps": [_READ2, *between, *consumer], "terminal": _STOP}] + (
+        [] if recache else [{"steps": [_MSG], "terminal": _STOP}])
+    parent = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, stage,
+                   {"steps": [], "terminal": _call("CACHE_CHILD")})
+    child = _doc(*head, {"kind": "branch", "legs": legs})
+    flat = _doc(*head, {"kind": "branch", "legs": [{"steps": [_GET, _DYNAMIC_X], "terminal": _PUT}, stage] + legs})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], flat
+
+
+@pytest.mark.parametrize("caller", sorted(_B30_CONTENT_CALLERS))
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_a_legacy_childs_declared_input_call_on_a_callers_cache_is_refused_in_the_twin_too(dialect, caller):
+    """QA-184-s1-r29-02, QA's exact shape (`R29_H_tyin_legacy_np`) and its typed and matching-profile
+    controls. The composition is refused PROFILE_MISMATCH at the caller's call wherever the cached
+    documents are not P2; the flattened twin now refuses the same documents at the call's
+    `/operation_ref` in BOTH dialects, because the legacy scope ended at the retrieve of a first-class
+    call's documents. P2 documents are admitted in both graphs, and so is a Message between the
+    retrieve and the call (which consumes nothing of the cached payload)."""
+    typed = _B28_DIALECTS[dialect]
+    stage, code = _B30_CONTENT_CALLERS[caller]
+    roots, flat = _b30_tyin_roots(stage, [], [_B30_PATCH], typed)
+    parent = _b28_verdict(roots, "PARENT", typed)[0]
+    twin = _b28_verdict([("PARENT", flat)], "PARENT", typed)[0]
+    at_the_patch = "/body/steps/{0}/legs/2/steps/1/operation_ref".format(0 if typed else 1)
+    assert parent == ([(code, _B27_AT_THE_CALL)] if code else []), (dialect, caller, parent)
+    assert twin == ([(code, at_the_patch)] if code else []), (dialect, caller, twin)
+    assert _b28_verdict(roots, "CACHE_CHILD", typed)[0] == []
+    roots, flat = _b30_tyin_roots(stage, [_MSG], [_B30_PATCH], typed)
+    assert _b28_verdict(roots, "PARENT", typed)[0] == [] == _b28_verdict([("PARENT", flat)], "PARENT", typed)[0]
+
+
+def test_the_public_plan_refuses_the_legacy_composition_its_twin_now_refuses():
+    """`R29_H_tyin_legacy_np` and its twin through `build_integration(action="plan")`: both refused
+    PROFILE_MISMATCH — the composition at the caller's call, the twin at the connector call's
+    operation — and the P2 caller admitted in both."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from test_issue_158_listener_deployment import _PROFILE, _ApplyBoundary, _request, _unit
+    from boomi_mcp.categories.integration_builder import build_integration_action
+
+    def held(key, component_type):
+        return {"key": key, "type": component_type, "name": "E184 " + key, "action": "create",
+                "config": {"reference_only": True, "component_id": "held-" + key.lower()}}
+
+    specs = [dict(APPLIABLE_CONN, key="RCONN"),
+             dict(APPLIABLE_OP, key="GET", depends_on=["RCONN"],
+                  config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN")),
+             {"key": "P2", "type": "profile.json", "name": "E184 P2", "action": "create",
+              "config": {"component_type": "profile.json", "profile_type": "json.generated",
+                         "component_name": "E184 P2",
+                         "root": {"name": "Root", "kind": "object", "children": [
+                             {"name": "id", "kind": "simple", "data_type": "character", "required": False}]}}},
+             dict(APPLIABLE_OP, key="PATCH", depends_on=["RCONN", "P2"],
+                  config=dict(APPLIABLE_OP["config"], connection_ref_key="RCONN", method="PATCH",
+                              request_profile_id="$ref:P2", request_profile_type="json")),
+             held("CACHE", "documentcache"), held("CACHE2", "documentcache")]
+    keys = tuple(spec["key"] for spec in specs)
+
+    def served(roots):
+        called = ("CACHE_CHILD",) if len(roots) > 1 else ()
+        raw = _request([_unit(document, keys + (called if key == "PARENT" else ()),
+                              key=key, name="E184 " + key) for key, document in roots],
+                       specs).model_dump(mode="json")
+        with _ApplyBoundary().installed():
+            result = build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+        return result["authoring_result"]
+
+    roots, flat = _b30_tyin_roots(_B30_CONTENT_CALLERS["undeclared"][0], [], [_B30_PATCH], False)
+    for graph in (roots, [("PARENT", flat)]):
+        answer = served(graph)
+        codes = {code for item in answer.get("errors") or () for code in item.get("cause_codes") or ()}
+        assert answer["validation_report"]["is_valid"] is False, answer.get("errors")
+        assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH in codes, answer.get("errors")
+
+
+@pytest.mark.parametrize("consumer", ("an_undeclared_map", "a_declared_input_call"))
+def test_a_legacy_process_that_caches_its_own_source_documents_keeps_the_exemption(consumer):
+    """The control the correction must keep: a legacy process that stores its OWN `source` documents
+    in a cache and retrieves them still holds documents the legacy source last produced, so a
+    consumer behind the retrieve keeps the named exemption — standalone and as a called child — while
+    the same shape whose cached documents a first-class call produced is checked and refused."""
+    node = {"an_undeclared_map": _B27_M22, "a_declared_input_call": _B30_PATCH}[consumer]
+
+    def process(filler):
+        return _doc(_B27_SOURCE, {"kind": "branch", "legs": [
+            {"steps": list(filler), "terminal": _PUT2}, {"steps": [_READ2, node], "terminal": _STOP}]})
+
+    assert _b28_verdict([("PARENT", process([]))], "PARENT", False)[0] == []
+    caller = _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [], "terminal": _call("CACHE_CHILD")})
+    called = [("PARENT", caller), ("CACHE_CHILD", process([]))]
+    assert _b28_verdict(called, "PARENT", False)[0] == []
+    assert _b28_verdict(called, "CACHE_CHILD", False)[0] == []
+    refused = _b28_verdict([("PARENT", process([_GET]))], "PARENT", False)[0]
+    assert _b30_codes(refused) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}, refused
+
+
+#: QA's `ty_`/`tyr_` CONTENT families: what stands between the retrieve and the typed consumer, the
+#: consumer, and the caller's staging leg.
+_B30_TY_BETWEEN = {"none": [], "msg": [_MSG], "conn": [_GET], "connp1": [_B30_GETP1],
+                   "fc": [_B28_NODES["flow_control"]], "ddp": [_B28_NODES["set_ddp"]],
+                   "map": [_B27_M22], "conn_map": [_GET, _B27_M22]}
+_B30_TY_CONSUMERS = {"map": [_B27_M22], "declared_input_call": [_B30_PATCH], "map_then_bound": [_B27_M22, _BOUND_GET]}
+_B30_TY_CALLERS = {
+    "p2": {"steps": [_B30_GETP1, _B30_M12], "terminal": _PUT2},
+    "bare": {"steps": [_GET], "terminal": _PUT2},
+    "p2dyn": {"steps": [_B30_GETP1, _B30_M12, _DYNAMIC_X], "terminal": _PUT2},
+    "lit": {"steps": [_GET, _STATIC_X], "terminal": _PUT2},
+}
+
+
+@pytest.mark.parametrize("recache", (False, True), ids=("ty", "tyr"))
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_every_typed_consumer_on_a_callers_cache_earns_its_flattened_twins_verdict(dialect, recache):
+    """THE LEGACY DIFFERENTIAL: QA's `ty_` (never re-caches) and `tyr_` (re-caches) families — a map,
+    a declared-input connector call, and a map then a bound use, behind each step QA placed, under
+    the P2, undeclared, P2-with-dynamic-X and literal-X callers — in both dialects. Every cell's code
+    set equals its twin's: in the legacy dialect that is the exemption ending at the retrieve
+    (QA-184-s1-r29-02 measured 12 such cells refused by the composition and admitted by the twin)."""
+    typed = _B28_DIALECTS[dialect]
+    diverging, cells = [], 0
+    for between_name, between in sorted(_B30_TY_BETWEEN.items()):
+        for consumer_name, consumer in sorted(_B30_TY_CONSUMERS.items()):
+            for caller, stage in sorted(_B30_TY_CALLERS.items()):
+                roots, flat = _b30_tyin_roots(stage, between, consumer, typed, recache)
+                composed = _b30_codes(_b28_verdict(roots, "PARENT", typed)[0]) | _b30_codes(
+                    _b28_verdict(roots, "CACHE_CHILD", typed)[0])
+                twin = _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", typed)[0])
+                cells += 1
+                if composed != twin:
+                    diverging.append((between_name, consumer_name, caller, sorted(composed), sorted(twin)))
+    assert cells == len(_B30_TY_BETWEEN) * len(_B30_TY_CONSUMERS) * len(_B30_TY_CALLERS)
+    assert diverging == [], diverging[:6]
+
+
+def test_the_non_strict_skip_restored_re_admits_the_decision_composition(monkeypatch):
+    """Non-vacuity of QA-184-s1-r29-01's correction: the read loop's `continue` before the recorder
+    restored as a source mutant re-admits the no-X caller behind a Message and every X-writing caller
+    behind a script, in both dialects, and the child exports no non-strict row — while the flattened
+    twin, which no child contract reaches, still refuses each."""
+    _lineage_with_source(
+        monkeypatch,
+        "                _classify_unmet_read(\n"
+        "                    node, semantic, key, leg, invalidated=invalidated,\n"
+        "                    cached_from=_caller_cached_origin(key, stream, invalidated),\n"
+        "                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins,\n"
+        "                    nonstrict=True,\n"
+        "                )\n"
+        "                continue\n",
+        "                continue\n")
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        for caller, steps in (("documents_without_x", [_MSG]), ("a_dynamic_x", [_B30_SCRIPT]),
+                              ("a_literal_x", [_B30_SCRIPT])):
+            roots, flat = _b29_roots(caller, steps, _b30_decision(), typed)
+            assert _b28_verdict(roots, "PARENT", typed)[0] == [], (dialect, caller)
+            assert _b30_rows(roots, typed) == set(), (dialect, caller)
+            assert _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", typed)[0]) == {_READ_BEFORE_WRITE}
+
+
+def test_the_retrieves_legacy_pass_through_restored_re_admits_the_twin(monkeypatch):
+    """Non-vacuity of QA-184-s1-r29-02's correction: the retrieve handing `legacy` on unchanged,
+    restored as a source mutant, re-admits the legacy twin of QA's shape while the composition's
+    caller still refuses it — the divergence QA measured — and re-admits the undeclared legacy map
+    behind a retrieve of a first-class call's documents."""
+    _lineage_with_source(
+        monkeypatch,
+        "            legacy = legacy and state.holds_only_legacy_source_documents(cache_reads[0])\n",
+        "")
+    roots, flat = _b30_tyin_roots(_B30_CONTENT_CALLERS["undeclared"][0], [], [_B30_PATCH], False)
+    assert _b28_verdict([("PARENT", flat)], "PARENT", False)[0] == []
+    assert _b28_verdict(roots, "PARENT", False)[0] == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _B27_AT_THE_CALL)]
+    first_class = _doc(_B27_SOURCE, {"kind": "branch", "legs": [
+        {"steps": [_GET], "terminal": _PUT2}, {"steps": [_READ2, _B27_M22], "terminal": _STOP}]})
+    assert _b28_verdict([("PARENT", first_class)], "PARENT", False)[0] == []
+
+
+# The obligation-site registry (`test_every_caller_obligation_is_recorded_through_the_one_authority`),
+# updated HERE so no earlier line of this module moves: the call's cached-property judgement moved
+# into one helper shared by the strict and non-strict rows, and the non-strict channel is new.
+_OBLIGATION_SITES[("_judge_a_cached_property_row", "unestablished_cached_keys")] = _OBLIGATION_SITES.pop(
+    ("_discharge_child_contract", "unestablished_cached_keys"))
+_OBLIGATION_SITES.update({
+    ("_classify_unmet_read", "nonstrict_cached_reads"): (
+        "correction batch 30: a non-strict read no writer here can fail records the caches a caller's "
+        "documents could have carried the property in — the same `cached_from` and origin caches a "
+        "strict read names, so the retrieve's own `_caller_documents_may_reach` answer — or one "
+        "cache-less row; measured by the Decision differential and QA's r29 shapes"),
+    ("_owe_the_caches_behind", "nonstrict_cached_reads"): (
+        "correction batch 30: what a passed-on non-strict row owes through the `CALLER_CACHE_WRITER` "
+        "alternatives of documents a call retrieves for its child, which exist only where "
+        "`_caller_owes_a_cached_property` said yes"),
+    ("_judge_a_cached_property_row", "nonstrict_cached_reads"): (
+        "correction batch 30: a passed-on non-strict row a call proved or answered vacuously, "
+        "recorded only when `_caller_owes_a_cached_property` says this process's callers may share "
+        "the cache; measured by the forwarding middle witness"),
+    ("_discharge_child_contract", "nonstrict_cached_reads"): (
+        "correction batch 30: a cache-less non-strict row passed on unchanged by a call whose process "
+        "writes the property nowhere — no cache is involved, so the authority has nothing to answer; "
+        "measured by the script cells of the Decision differential behind a forwarding middle"),
+})
+
+
+#: The lattice table's non-default witness for the new requirement field
+#: (`test_the_child_contract_carries_every_lattice_component`), added here so no earlier line moves.
+_NON_DEFAULT["nonstrict_cached_reads"] = (
+    _b29_roots("documents_without_x", [], _b30_decision(), True)[0], "CACHE_CHILD")
+
+
+# --- correction batch 30, sibling sweep: the writer-existence fact across the boundary ------------
+#
+# The structural-fix rule's sibling sweep for `_nonstrict_read_can_fail` at a call. Three siblings:
+#
+# 1. FIXED — the writer lives in a SIBLING child (or its grandchild). The caller asked
+#    `_written_anywhere` of its own nodes only, so a Decision on X in child A was admitted while the
+#    flattened twin, holding child B's writer of X in the same process, refused the read. The one
+#    writer set (`lineage._keys_written_anywhere`) now counts what each called child exports
+#    (`ChildEntryContractV1.document_property_writes`, derived from that same set), so the caller's
+#    predicate and the twin's count the same writers.
+# 2. JUSTIFIED — a direct non-strict read off a child's ENTRY documents, the caller writing X on
+#    another leg: the twin refuses `DDP_SCOPE_INVALID` (a different document copy, never past a
+#    retrieve), while the only row a call can apply asserts the documents were retrieved or had their
+#    properties discarded and serves `READ_BEFORE_WRITE`; matching needs a new row kind. Pinned below.
+# 3. JUSTIFIED — a non-strict DPP read: the twin's refusal is `BRANCH_ORDER_INVALID`, the
+#    execution-scope later-leg rule, not the document writer-existence predicate. Pinned below.
+
+def _b30s_decision(property_id):
+    return dict(_b30_decision(), left={"value_type": "track", "property_id": property_id,
+                                       "property_name": property_id.split(".", 1)[1]})
+
+
+_B30S_STAGE = {"steps": [_GET], "terminal": _PUT2}
+_B30S_WRITER = _legs({"steps": [_GET, _DYNAMIC_X], "terminal": _STOP}, {"steps": [_MSG], "terminal": _STOP})
+_B30S_FORWARDS_TO_ITS_WRITER = _legs({"steps": [], "terminal": _call("ENRICH")}, {"steps": [_MSG], "terminal": _STOP})
+
+
+def _b30s_sibling_roots(placement, steps, typed):
+    """``(roots, flat)``: the caller stores X-less documents in CACHE2 and calls child A (reads X
+    with a no-default Decision behind ``steps`` off its retrieve of CACHE2) and a writer of X: child B
+    on an earlier or a later leg, B called without waiting, or B's own child (a grandchild)."""
+    head = () if typed else (_B27_SOURCE,)
+    reader = _doc(*head, {"kind": "branch", "legs": [
+        {"steps": [_READ2, *steps], "terminal": _b30_decision()}, {"steps": [_MSG], "terminal": _STOP}]})
+    reader_legs = reader["body"]["steps"][-1]["legs"]
+    writer_legs = _B30S_WRITER["body"]["steps"][-1]["legs"]
+    to_reader = {"steps": [], "terminal": _call("CACHE_CHILD")}
+    if placement == "grandchild":
+        to_writer = {"steps": [], "terminal": _call("WRITER")}
+        roots = [("PARENT", _legs(_B30S_STAGE, to_writer, to_reader)), ("WRITER", _B30S_FORWARDS_TO_ITS_WRITER),
+                 ("ENRICH", _B30S_WRITER), ("CACHE_CHILD", reader)]
+        flat_legs = [_B30S_STAGE] + writer_legs + [{"steps": [_MSG], "terminal": _STOP}] + reader_legs
+    else:
+        to_writer = {"steps": [], "terminal": _call("WRITER", **({"wait": False} if placement == "unwaited" else {}))}
+        order = [to_reader, to_writer] if placement == "later_leg" else [to_writer, to_reader]
+        roots = [("PARENT", _legs(_B30S_STAGE, *order)), ("WRITER", _B30S_WRITER), ("CACHE_CHILD", reader)]
+        flat_legs = [_B30S_STAGE] + (reader_legs + writer_legs if placement == "later_leg" else writer_legs + reader_legs)
+    return roots, _doc(*head, {"kind": "branch", "legs": flat_legs})
+
+
+_B30S_PLACEMENTS = ("earlier_leg", "later_leg", "unwaited", "grandchild")
+
+
+@pytest.mark.parametrize("dialect", sorted(_B28_DIALECTS))
+def test_a_writer_in_a_sibling_child_fails_the_decision_as_its_twin_does(dialect):
+    """SIBLING 1, the twin differential: a writer of X in a sibling child — on an earlier or a later
+    leg, called without waiting, or one call deeper — behind no step, a Message and a custom script.
+    Every composition serves exactly its flattened twin's codes: READ_BEFORE_WRITE, at the caller's
+    call into the reader, where the reader alone stays clean. The no-writer control stays admitted in
+    both graphs, and the writer's own contract names X."""
+    typed = _B28_DIALECTS[dialect]
+    for placement in _B30S_PLACEMENTS:
+        for name, steps in (("none", []), ("message", [_MSG]), ("custom_script", [_B30_SCRIPT])):
+            roots, flat = _b30s_sibling_roots(placement, steps, typed)
+            composed = set()
+            for key, _document in roots:
+                composed |= _b30_codes(_b28_verdict(roots, key, typed)[0])
+            twin = _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", typed)[0])
+            assert twin == {_READ_BEFORE_WRITE}, (placement, name, twin)
+            assert composed == twin, (placement, name, composed)
+            assert _b28_verdict(roots, "CACHE_CHILD", typed)[0] == [], (placement, name)
+    roots, flat = _b30s_sibling_roots("earlier_leg", [_MSG], typed)
+    roots = [(key, _B30S_FORWARDS_TO_ITS_WRITER if key == "WRITER" else document) for key, document in roots]
+    roots = [item for item in roots if item[0] != "ENRICH"]
+    parsed = [(key, parse_process_ir_v1(document)) for key, document in roots]
+    resolution = resolve_process_ir_effect_declarations(
+        parsed, None, _symbols() if typed else _b27_symbols(), [],
+        child_roots={"$ref:" + key: ir for key, ir in parsed})
+    # A child nothing derives (ENRICH is no root here) states no write: only proved writers count.
+    assert resolution.capabilities_by_root["PARENT"].child_entry_contract("$ref:WRITER").document_property_writes == ()
+    no_writer = [("PARENT", _legs(_B30S_STAGE, {"steps": [_MSG], "terminal": _STOP},
+                                  {"steps": [], "terminal": _call("CACHE_CHILD")})),
+                 ("CACHE_CHILD", _b30s_sibling_roots("earlier_leg", [_MSG], typed)[0][-1][1])]
+    assert _b28_verdict(no_writer, "PARENT", typed)[0] == []
+
+
+def test_the_writer_set_a_child_exports_is_the_one_the_in_process_rule_reads():
+    """One predicate, both sides: the child's exported `document_property_writes` is exactly the DDP
+    part of `_keys_written_anywhere` over its own graph, transitively through the processes it calls,
+    and the caller's `_written_anywhere` answers yes for it."""
+    roots, _flat = _b30s_sibling_roots("grandchild", [], True)
+    parsed = [(key, parse_process_ir_v1(document)) for key, document in roots]
+    resolution = resolve_process_ir_effect_declarations(
+        parsed, None, _symbols(), [], child_roots={"$ref:" + key: ir for key, ir in parsed})
+    caller = resolution.capabilities_by_root["PARENT"]
+    assert caller.child_entry_contract("$ref:WRITER").document_property_writes == ("X",)
+    assert caller.child_entry_contract("$ref:CACHE_CHILD").document_property_writes == ()
+    from boomi_mcp.compiler.process_ir.semantic_validation.context import prepare_validation_context
+
+    prepared = prepare_validation_context(dict(parsed)["PARENT"], _symbols())
+    assert lineage._written_anywhere(prepared, (lineage.DDP, "X"), caller)
+    assert not lineage._written_anywhere(prepared, (lineage.DDP, "X"), DEFAULT_VALIDATION_CAPABILITIES)
+
+
+def test_a_direct_read_off_a_childs_entry_documents_is_recorded_not_matched():
+    """SIBLING 2, JUSTIFIED and pinned with its discriminating evidence. A No Data or Data Passthrough
+    child reaches a no-default Decision on X straight off its entry documents (no retrieve), its caller
+    writing X on another leg. The flattened twin refuses DDP_SCOPE_INVALID — `_classify_unmet_read`'s
+    different-document-copy branch, which needs the key never invalidated and no retrieve on the path.
+    The only row a call can apply (`nonstrict_cached_reads`, cache-less) asserts the documents were
+    retrieved or discarded their properties and would serve READ_BEFORE_WRITE (measured:
+    `docs/plans/issue-184-resume/work/b30/siblings/s2_experiment.txt`), so matching the twin needs a
+    new row kind. The composition stays admitted; this test fails the moment that changes."""
+    for form, head in (("no_data", ()), ("passthrough", (_ENTRY,))):
+        child = _doc(*head, {"kind": "branch", "legs": [
+            {"steps": [_MSG], "terminal": _b30_decision()}, {"steps": [_MSG], "terminal": _STOP}]})
+        other = {"steps": [_GET, _DYNAMIC_X], "terminal": _STOP}
+        call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}
+        roots = [("PARENT", _legs(other, call)), ("CACHE_CHILD", child)]
+        flat = _doc({"kind": "branch", "legs": [other] + child["body"]["steps"][-1]["legs"]})
+        assert _b28_verdict(roots, "PARENT", True)[0] == [] == _b28_verdict(roots, "CACHE_CHILD", True)[0], form
+        assert _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", True)[0]) == {
+            PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID}, form
+
+
+def test_a_non_strict_process_property_read_is_recorded_not_matched():
+    """SIBLING 3, JUSTIFIED and pinned with its discriminating evidence. A child's no-default Decision
+    on a dynamic PROCESS property agrees with its twin when the caller writes it on an earlier leg
+    (admitted) or never (admitted). Written on a LATER leg, the twin refuses BRANCH_ORDER_INVALID —
+    the execution-scope later-leg rule (`_written_in_a_later_leg`), which `_nonstrict_read_can_fail`
+    answers through `_established_anywhere`, not through the document writer set; no contract row a
+    call applies carries leg order, so it stays the recorded limit and the composition is admitted."""
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID
+
+    child = _doc({"kind": "branch", "legs": [
+        {"steps": [_MSG], "terminal": _b30s_decision("process.X")}, {"steps": [_MSG], "terminal": _STOP}]})
+    child_legs = child["body"]["steps"][-1]["legs"]
+    writes = {"steps": [{"kind": "set_dpp", "name": "X", "source_values": [{"value_type": "static", "value": "v"}]}],
+              "terminal": _STOP}
+    call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}
+    for order, expected_twin in (("before", set()), ("after", {PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID})):
+        legs = [writes, call] if order == "before" else [call, writes]
+        roots = [("PARENT", _legs(*legs)), ("CACHE_CHILD", child)]
+        flat_legs = [leg for item in legs for leg in (child_legs if item is call else [item])]
+        assert _b28_verdict(roots, "PARENT", True)[0] == [], order
+        assert _b30_codes(_b28_verdict([("PARENT", _doc({"kind": "branch", "legs": flat_legs}))], "PARENT", True)[0]) \
+            == expected_twin, order
+
+
+def test_the_childrens_writes_left_out_of_the_writer_set_re_admits_the_sibling_reader(monkeypatch):
+    """Non-vacuity of sibling 1's fix: the called children's exported writes removed from
+    `_keys_written_anywhere` as a source mutant re-admits every sibling-writer composition, while the
+    flattened twin — whose writer is its own node — still refuses each."""
+    _lineage_with_source(
+        monkeypatch,
+        "        if node.semantic.semantic_kind == \"process_call\":\n"
+        "            contract = capabilities.child_entry_contract(node.semantic.process_ref)\n"
+        "            if contract is not None:\n"
+        "                written.update((DDP, name) for name in contract.document_property_writes)\n",
+        "")
+    for placement in _B30S_PLACEMENTS:
+        roots, flat = _b30s_sibling_roots(placement, [_MSG], True)
+        assert _b28_verdict(roots, "PARENT", True)[0] == [], placement
+        assert _b30_codes(_b28_verdict([("PARENT", flat)], "PARENT", True)[0]) == {_READ_BEFORE_WRITE}, placement
+
+
+#: The lattice table's non-default witness for the writer set, added here so no earlier line moves.
+_NON_DEFAULT["document_property_writes"] = (
+    [("PARENT", _legs({"steps": [], "terminal": _call("WRITER")}, {"steps": [_MSG], "terminal": _STOP})),
+     ("WRITER", _B30S_WRITER)], "WRITER")

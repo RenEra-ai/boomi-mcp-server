@@ -264,6 +264,11 @@ def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
                 (canonical.get(item[0], item[0]),) + tuple(item[1:])
                 for item in row.cache_property_requirements
             ),
+            # #184 correction batch 30: a cache-less row (None) stays None.
+            "nonstrict_cached_reads": tuple(
+                (None if item[0] is None else canonical.get(item[0], item[0]), item[1])
+                for item in row.nonstrict_cached_reads
+            ),
         })
 
     return capabilities.model_copy(update={

@@ -970,6 +970,7 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         canonical_cache_refs,
     )
     from ..compiler.process_ir.semantic_validation.lineage import (
+        _keys_written_anywhere,
         _trusted_effects,
         proved_removals,
         walk_lineage,
@@ -1046,6 +1047,12 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         # walk — its own unwaited calls, and what every child it calls says of itself.
         "unwaited_cache_writes": tuple(walk.unwaited_cache_writes),
         "unwaited_writes_of_an_unknown_cache": walk.unwaited_writes_of_an_unknown_cache,
+        # Correction batch 30 sibling sweep: the document properties this process — or a process
+        # it calls — writes anywhere, read off the ONE writer set the in-process rule asks
+        # (`_keys_written_anywhere`), so a caller's "a writer exists that this read can never see"
+        # counts exactly the writers the flattened twin would.
+        "document_property_writes": tuple(sorted(
+            key[1] for key in _keys_written_anywhere(prepared, base) if key[0] == "ddp")),
     }
     # Amendment 1 rule 7: what every normal completion establishes, off the walk's meet
     # over normal exits. Execution-scoped keys the child itself writes: a document
@@ -1074,13 +1081,19 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
     facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
+    # Correction batch 30 (QA-184-s1-r29-01): what a non-strict read the child cannot fail itself
+    # owes a caller that writes the property — measured the same way.
+    facts["nonstrict_cached_reads"] = _caller_nonstrict_reads(prepared, base, walk)
     # Amendment 1 rule 8, "until stable": which of the caches those rows name a completion may
     # leave holding something stored during the run, off the walk's own continuation. None of
     # them, and a later run's uses retrieve only what the callers stored — the rows the call
-    # already proves, or nothing.
+    # already proves, or nothing. A non-strict row's cache counts too: a call whose process
+    # writes the property applies it as a cached-property requirement, so leaving it out would
+    # only ever make the claim stronger than the call it serves (fail-closed, correction batch 30).
     facts["required_caches_retain_nothing_it_stored"] = not (
         ({row[0] for row in facts["cache_requirements"]}
-         | {row[0] for row in facts["cache_property_requirements"]})
+         | {row[0] for row in facts["cache_property_requirements"]}
+         | {row[0] for row in facts["nonstrict_cached_reads"] if row[0] is not None})
         & set(walk.may_hold_at_exit)
     )
     if form != PASSTHROUGH:
@@ -1216,6 +1229,43 @@ def _caller_cached_properties(
     return tuple(sorted(rows, key=lambda row: (row[0], row[1], row[2] or "", row[3])))
 
 
+def _caller_nonstrict_reads(
+    prepared: Any, capabilities: Any, walk: Any
+) -> Tuple[Tuple[Optional[str], str], ...]:
+    """What a child's non-strict cached reads owe a caller that writes the property (#184, correction batch 30).
+
+    A non-strict read — a Decision operand with no default — tolerates absence, so a child that
+    writes the property nowhere is never refused for it; but the read fails wherever a writer of
+    the property exists that it can never see (`lineage._nonstrict_read_can_fail`), and a caller's
+    writer is one: the flattened twin holds it, and refuses the read (QA-184-s1-r29-01). The walk
+    records each such read with the caches a caller's documents could have carried the property
+    in (`LineageWalkV1.nonstrict_cached_reads`).
+
+    MEASURED as `_caller_cached_properties` measures a strict row: seeding a caller cohort that
+    guarantees the property in each named cache — beside every strict row's seed, which a caller
+    must satisfy anyway — and walking again. A read the seed clears is established exactly when
+    the caller's documents in that cache carry the property, so the row names the cache. A read
+    it does not clear stays unestablished whatever the callers store — a step between the
+    retrieve and the read discarded the documents' properties, or the child's own write to the
+    cache lacks the property — so the row names no cache: any caller writer fails it. Keyed by
+    the read's pointer and property, so a read that stays unestablished keeps the cache-less row
+    whatever caches it was recorded against (fail-closed).
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    candidates = sorted(set(walk.nonstrict_cached_reads), key=lambda row: (row[0], row[1] or "", row[2]))
+    if not candidates:
+        return ()
+    seeds = tuple(sorted(
+        {(cache, name) for _p, cache, name, _r, _b in walk.unestablished_cached_keys}
+        | {(cache, name) for _p, cache, name in candidates if cache is not None}))
+    after = walk_lineage(prepared, capabilities.model_copy(update={"caller_cache_cohorts": seeds}))
+    still = {(pointer, name) for pointer, _cache, name in after.nonstrict_cached_reads}
+    rows = {(None if cache is None or (pointer, name) in still else cache, name)
+            for pointer, cache, name in candidates}
+    return tuple(sorted(rows, key=lambda row: (row[0] is not None, row[0] or "", row[1])))
+
+
 def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     """The cache contents a CALLED child may be validated under (#184 amendment 1 rule 6).
 
@@ -1289,6 +1339,11 @@ _A_CYCLE_MEMBERS_CLAIMS: Dict[str, Any] = {
 _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "cache_requirements",
     "cache_property_requirements",
+    # Correction batch 30: one more requirement a call must discharge — LARGER is fail-closed.
+    "nonstrict_cached_reads",
+    # Correction batch 30 sibling sweep: a writer set read only to REFUSE a read (a writer exists
+    # that the read can never see) — never to establish one — so LARGER is fail-closed too.
+    "document_property_writes",
     "required_reads",
     "required_writers",
     "document_requirements",

@@ -912,7 +912,10 @@ def test_the_three_lattice_consumers_ask_three_different_questions():
     from boomi_mcp.compiler.process_ir.semantic_validation import lineage
 
     # the two INDEXES must count async writes — they ask existence/position
-    for fn in (lineage._leg_write_index, lineage._written_anywhere):
+    # (`_written_anywhere` reads the one writer set, `_keys_written_anywhere` — #184 correction
+    # batch 30 — so the source pins sit on the set.)
+    assert "_keys_written_anywhere(" in inspect.getsource(lineage._written_anywhere)
+    for fn in (lineage._leg_write_index, lineage._keys_written_anywhere):
         assert "effect.writes" in inspect.getsource(fn), fn.__name__
         assert "_establishes_downstream(" not in inspect.getsource(fn), fn.__name__
 
@@ -922,7 +925,7 @@ def test_the_three_lattice_consumers_ask_three_different_questions():
     # the derived guarantee: its path-independent half in both indexes that count it
     for fn in (lineage._leg_write_index, lineage._established_anywhere):
         assert "_awaited_guarantee(" in inspect.getsource(fn), fn.__name__
-    assert "_awaited_guarantee(" not in inspect.getsource(lineage._written_anywhere)
+    assert "_awaited_guarantee(" not in inspect.getsource(lineage._keys_written_anywhere)
     assert re.search(r"(?<![A-Za-z_])_child_guarantee\(", inspect.getsource(lineage._walk_lineage))
 
 

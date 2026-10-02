@@ -199,9 +199,11 @@ def _perturbations():
         ("lineage", "_leg_write_index"): lambda prepared, capabilities=None: {},
         ("lineage", "_written_in_a_later_leg"): lambda leg_writes, leg, key: False,
         ("lineage", "_written_anywhere"): lambda prepared, key, capabilities=None: False,
+        # Correction batch 30 sibling sweep: the one writer set, its called children's writes included.
+        ("lineage", "_keys_written_anywhere"): lambda prepared, capabilities=None: frozenset(),
         # --- lineage: the lattice's transfer and meet -----------------------------------
         ("lineage", "_State.with_write"): lambda self, key, proved=False: self,
-        ("lineage", "_State.with_content"): lambda self, cache_ref, identity: self,
+        ("lineage", "_State.with_content"): lambda self, cache_ref, identity, legacy_source=False: self,
         ("lineage", "_State.with_cohort"): lambda self, cache_ref, cohort, ours=False: self,
         ("lineage", "_State.cohorts_of"): lambda self, cache_ref: frozenset(),
         ("lineage", "_State.without_content"): lambda self, cache_ref: self,
@@ -211,6 +213,8 @@ def _perturbations():
         # `test_issue_184_child_state_transfer.py::test_a_foreign_cohort_and_the_meet_each_end_the_removal_proof`.
         ("lineage", "_State.with_sealed_cache"): lambda self, cache_ref: self,
         ("lineage", "_State.content_of"): lambda self, cache_ref: frozenset(),
+        # Correction batch 30: every retrieve keeps the legacy exemption again (QA-184-s1-r29-02).
+        ("lineage", "_State.holds_only_legacy_source_documents"): lambda self, cache_ref: True,
         ("lineage", "_State.establishes"): lambda self, key: False,
         ("lineage", "_State.entering_branch_leg"):
             lambda self: real_state(frozenset(), self.execution, self.content, self.cohorts),
@@ -237,6 +241,8 @@ def _perturbations():
             lambda child_ir, symbols, capabilities=None: {"entry_form": "unknown"},
         ("effects", "_caller_composed_paths"): lambda prepared, capabilities, walk: (),
         ("effects", "_caller_cached_properties"): lambda prepared, capabilities, walk: (),
+        # Correction batch 30: a child's non-strict cached reads owe its callers nothing again.
+        ("effects", "_caller_nonstrict_reads"): lambda prepared, capabilities, walk: (),
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
         ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None: {
             key: ((), (), (), None, "unknown", (), ()) for key, _ir in process_roots},

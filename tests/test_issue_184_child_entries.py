@@ -1190,6 +1190,17 @@ _FORWARDING_CASES = {
     # A No Data child binding its request path to X of the documents it retrieves from a
     # cache nothing in it fills (ARCH-184-r1-05).
     "cache_property_requirements": ("CACHE_CHILD", _doc(_read_cache("$ref:CACHE"), _BOUND_GET, _STOP)),
+    # #184 correction batch 30: a No Data child whose Decision reads X, with no default, off the
+    # documents it retrieves from a cache nothing in it fills, and which writes X nowhere.
+    "nonstrict_cached_reads": ("CACHE_CHILD", _legs({"steps": [_read_cache("$ref:CACHE")], "terminal": {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.X", "property_name": "X"},
+        "right": {"value_type": "static", "static_value": "a"},
+        "true_arm": {"steps": [_MSG], "terminal": _STOP}, "false_arm": {"steps": [], "terminal": _STOP}}},
+        {"steps": [_MSG], "terminal": _STOP})),
+    # #184 correction batch 30 sibling sweep: a child that writes X on documents of its own.
+    "document_property_writes": ("CACHE_CHILD", _legs({"steps": [_MSG, _DYNAMIC_X], "terminal": _STOP},
+                                                      {"steps": [_MSG], "terminal": _STOP})),
 }
 
 #: What a direct call demands of a child whose entry nothing derives: a consumption of the

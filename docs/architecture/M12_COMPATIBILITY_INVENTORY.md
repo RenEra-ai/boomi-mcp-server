@@ -3276,4 +3276,61 @@ are no longer the only carrier behind a Message: each is now a second carrier be
 marker's own row, and their witnesses assert both. No served text moved. Its new witnesses added
 packaged corpus inputs, and the census and the §11 rows did not move. Revisions after batch 29:
 `capability_revision` `sha256:657f74f0…` and `compiler_revision` `sha256:06c6a433…`; `schema_revision`
-stays `sha256:c9583e6b…`.
+stays `sha256:c9583e6b…`. **Correction batch 30 (QA-184-s1-r29-01, QA-184-s1-r29-02)** closed two divergences
+from the flattened twin, both pre-existing back to `815aa7b`. First, a called child's Decision on a
+document property was never judged against its callers. A non-strict read — a Decision operand with
+no default — tolerates absence but not a writer it can never see (`_nonstrict_read_can_fail`), and the
+read loop skipped such a read BEFORE the recorder whenever the child itself held no writer, so no
+cached-from, ride-on or origin row was recorded: a No Data child that retrieved its caller's cached
+documents and reached a Decision on X was admitted while the twin, whose process holds the caller's
+writer of X, refused `LINEAGE_PROPERTY_READ_BEFORE_WRITE` — behind a step that keeps the documents'
+properties when the caller stored X-less documents, and behind one that discards them (custom
+scripting, split, combine, a mixed data process) under any caller that writes X. The read now
+reaches the same recorder (`_classify_unmet_read`, non-strict mode: no finding and no unmet read) and
+records the caches a caller's documents could have carried X in — the cached-from and origin caches a
+strict read names — or one cache-less row. The child contract carries them as
+`ChildEntryContractV1.nonstrict_cached_reads`, `(cache ref or None, name)`, measured by
+`_caller_nonstrict_reads` as the strict rows are: a read a seeded caller cohort clears names the
+cache, one it does not clear names none. A call asks the in-process predicate itself of its OWN
+process: where it writes the property anywhere, the row is applied — a cached-property requirement of
+that cache, judged and carried up as a strict row, or a read that fails outright — and where it writes
+it nowhere the row passes on unchanged in kind, judged by the same retrieve on the child's behalf (one
+helper now judges every cached-property row at a call, strict or non-strict). The field is an
+OBLIGATION in the cycle fixpoint's classification (union-carried; larger is fail-closed), is
+canonicalized with the other cache-keyed facts and measured through two references, and its caches
+count toward `required_caches_retain_nothing_it_stored` (fail-closed). Defaulted operands and a child
+that writes X itself are unchanged. Second, the legacy exemption no longer crosses a cache retrieve of
+documents the legacy `source` did not produce: each content fact now records whether its write ran
+inside the legacy scope (a caller's seeded content records neither, since each call judges those
+documents against the consumer's stated requirement), and a retrieve keeps `legacy` only when every
+write of this walk reaching the cache stored the legacy source's own documents. The flattened twin of
+a legacy child that retrieves a first-class call's cached documents and feeds a declared-input call
+is now refused `PROFILE_MISMATCH` as its composition is; a legacy process that caches and retrieves
+its own source documents keeps the exemption, standalone and as a called child. As a consequence a
+legacy-dialect map that states no profile, standing directly behind a retrieve of a first-class
+call's documents (or of a cache only a caller fills), is now judged and refused `PROFILE_MISMATCH` in
+both the composition and its twin — the shape `retrieve → connector call → map` was already refused.
+No active golden and no matrix cell moved, and no corpus request changed admission; the batch 27–29
+legacy witnesses that stood behind such a map now also expect that caller-independent refusal. The Decision differential
+(Decision on X without a default, with one, and with a bound use in its true arm, behind every step
+kind the emission authority admits, both dialects, the re-caching and the never-re-caching child,
+three callers) and the legacy `ty`/`tyr` differential went from 164 diverging cells of 852 to none.
+No served text moved and `schema_revision` stays `sha256:c9583e6b…`. The batch's sibling sweep of the writer-existence predicate closed one more sibling and recorded
+two. A writer of the property in a SIBLING child — on an earlier or a later leg, called without
+waiting, or one call deeper — was invisible to the caller, whose `_written_anywhere` counted its own
+nodes only, so the Decision was admitted while the twin refused it; the one writer set
+(`_keys_written_anywhere`) now also counts what each called child exports as
+`ChildEntryContractV1.document_property_writes`, derived from that same set (an OBLIGATION-class field
+in the cycle fixpoint: a writer set read only to refuse a read is fail-closed when larger; a child
+nothing derives states no writes, as an opaque step states none). Recorded, not matched: a
+non-strict read straight off a child's entry documents, the caller writing X on another leg, which
+the twin refuses `DDP_SCOPE_INVALID` (a different document copy) while the only row a call can apply
+serves `READ_BEFORE_WRITE`; and a non-strict process-property read whose caller writes it on a later
+leg, which the twin refuses `BRANCH_ORDER_INVALID` by the execution-scope later-leg rule — both pinned
+by witnesses with their evidence. Counting a called child's writes also sharpens a caller's own refused read of a
+property that child writes from `LINEAGE_PROPERTY_READ_BEFORE_WRITE` to `LINEAGE_DDP_SCOPE_INVALID`
+(a writer on another document copy), the code its flattened twin serves; across the six corpora 3,122
+already-refused requests moved codes this way and none changed admission. Its new witnesses added
+packaged corpus inputs, and the #149 legacy-reachability inventory moved only in its revision values.
+Revisions after batch 30: `capability_revision` `sha256:78a44de8…` and `compiler_revision`
+`sha256:15927641…`.

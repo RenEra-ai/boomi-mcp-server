@@ -2365,21 +2365,35 @@ def test_a_change_inside_a_module_the_replay_imports_is_not_memoized():
     (`map_builder.MAP_BUILDERS`, measured in a cold process) produced a row no state ever made
     — stored, then served. `_settle` imports them before the key is taken, so the question is
     "did anything change" again; in a cold child process, the perturbed row must not be served.
+
+    The perturbation lands right after the first replay that REACHED the map builder (a
+    pass-through spy says when), so the stored row has unperturbed map verdicts and the served one
+    perturbed ones whatever order the packaged corpus holds. A fixed replay count (900) stopped
+    reaching one when correction batch 30's regenerated corpus moved its first map build to ~1,590.
     """
     producer = _producer()
     script = (
         "import json\n"
         "from boomi_mcp.authoring import revision_corpus as c\n"
+        "from boomi_mcp.categories.components.builders import map_builder\n"
         "records = c.load_corpus()\n"
         "real = c.replay\n"
-        "seen = []\n"
+        "kind = next(iter(map_builder.MAP_BUILDERS))\n"
+        "original = map_builder.MAP_BUILDERS[kind]\n"
+        "reached = []\n"
+        "class Passing:\n"
+        "    def __getattr__(self, name):\n"
+        "        reached.append(name)\n"
+        "        return getattr(original, name)\n"
+        "    def __call__(self, *args, **kwargs):\n"
+        "        reached.append('call')\n"
+        "        return original(*args, **kwargs)\n"
+        "map_builder.MAP_BUILDERS[kind] = Passing()\n"
         "def mutating(record):\n"
-        "    seen.append(record)\n"
-        "    if len(seen) == 900:\n"
-        "        from boomi_mcp.categories.components.builders import map_builder\n"
-        "        kind = next(iter(map_builder.MAP_BUILDERS))\n"
+        "    result = real(record)\n"
+        "    if reached and not isinstance(map_builder.MAP_BUILDERS[kind], type):\n"
         "        map_builder.MAP_BUILDERS[kind] = type('Replaced', (), {})\n"
-        "    return real(record)\n"
+        "    return result\n"
         "c.replay = mutating\n"
         "stored = c.corpus_verdict_row()\n"
         "c.replay = real\n"

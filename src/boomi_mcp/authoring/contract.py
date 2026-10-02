@@ -2980,6 +2980,16 @@ def _child_call_state_oracle():
                             {"steps": [message], "terminal": stop})),
         ],
     }
+    # #184 correction batch 30: a child's NON-strict read of X — a Decision operand with no
+    # default — on documents it retrieves through `ref`, applied at a caller that writes X on other
+    # documents and stores X-less ones in the cache through the first spelling.
+    alias_cases["nonstrict_cached_reads"] = lambda ref: [
+        ("parent", legs({"steps": [get_p1], "terminal": put()},
+                        {"steps": [get_p1, dynamic("X")], "terminal": stop},
+                        {"steps": [], "terminal": call("child")})),
+        ("child", legs({"steps": [read_cache(ref)], "terminal": tracked("dynamicdocument.X")},
+                       {"steps": [message], "terminal": stop})),
+    ]
     # The cohorts a caller stored land on the child of the cached-property chain, so that
     # chain answers for both facts; it is run once per fact so each has its own recorded
     # verdicts and neither rests on the other's.
@@ -3029,6 +3039,17 @@ def _child_call_state_oracle():
             ), ChildEntryContractV1(
                 process_ref="$ref:child", entry_form="scheduled", state_known=True,
                 cache_writes_known=True, unwaited_cache_writes=("$ref:" + ref,))
+        if field == "nonstrict_cached_reads":
+            # The caller writes X on other documents and stores X-less ones in the cache; the
+            # child states its non-strict read of X through ``ref``: only the identity rule lands
+            # the row on the cache this caller filled, and the call then refuses the read.
+            return legs(
+                {"steps": [get_p1], "terminal": put()},
+                {"steps": [get_p1, dynamic("X")], "terminal": stop},
+                {"steps": [], "terminal": call("child")},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled",
+                nonstrict_cached_reads=(("$ref:" + ref, "X"),))
         # `caller_cache_cohorts` states what a caller stored to the child that reads it.
         return doc(read_cache(), bound("X"), stop), None
 

@@ -101,8 +101,15 @@ CACHE = "cache"
 #: A key identifying one piece of state: its scope plus its name.
 StateKey = Tuple[str, str]
 
-#: ``(cache_ref, profile identity or None)``: one thing a document cache may hold.
-CacheContentFact = Tuple[str, Optional[Tuple[str, str]]]
+#: ``(cache_ref, profile identity or None, legacy source)``: one thing a document cache may
+#: hold. The third part is True when the write that stored it ran inside the named legacy
+#: exemption's scope — documents a legacy ``source`` endpoint last produced (`_advance_stream`'s
+#: ``legacy``) — and False for every other write this walk sees: a first-class producer's
+#: documents, a child's or a contract's possible write, an outside writer's. None marks a CALLER's
+#: seeded content: documents this walk cannot see, which every call judges against exactly the
+#: requirement the child's consumer stated, so they neither prove nor disprove the legacy source
+#: (correction batch 30, QA-184-s1-r29-02).
+CacheContentFact = Tuple[str, Optional[Tuple[str, str]], Optional[bool]]
 
 #: #184 amendment 3 §7. A writer TOKEN: the id of the authored property node that
 #: wrote a key, or ``UNKNOWN_WRITER`` when nothing validated establishes who wrote it
@@ -630,11 +637,18 @@ class _State:
         return _State(self.document, self.execution | {key}, self.content, self.cohorts,
                       self.sealed, (self.proved | {key}) if proved else self.proved)
 
-    def with_content(self, cache_ref: str, identity) -> "_State":
-        """This cache may now also hold documents of ``identity`` (None: unknown)."""
+    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool]) -> "_State":
+        """This cache may now also hold documents of ``identity`` (None: unknown).
+
+        ``legacy_source`` says whether the write stored documents a legacy ``source`` endpoint
+        last produced, or None for a caller's seeded content (`CacheContentFact`). Keyword-only
+        with no default, so a content channel added later states it rather than inheriting the
+        exemption by omission.
+        """
+        provenance = None if legacy_source is None else bool(legacy_source)
         return _State(
-            self.document, self.execution, self.content | {(cache_ref, identity)}, self.cohorts,
-            self.sealed, self.proved,
+            self.document, self.execution, self.content | {(cache_ref, identity, provenance)},
+            self.cohorts, self.sealed, self.proved,
         )
 
     def with_cohort(self, cache_ref: str, cohort: "_Cohort", ours: bool = False) -> "_State":
@@ -673,6 +687,19 @@ class _State:
 
     def content_of(self, cache_ref: str) -> "FrozenSet[Optional[Tuple[str, str]]]":
         return frozenset(fact[1] for fact in self.content if fact[0] == cache_ref)
+
+    def holds_only_legacy_source_documents(self, cache_ref: str) -> bool:
+        """Whether every write that may have stored documents in this cache stored documents a
+        legacy ``source`` endpoint last produced (#184, correction batch 30, QA-184-s1-r29-02).
+
+        Read off the content facts, which record that for each write. A caller's seeded content
+        is set aside: each call judges those documents against the very requirement the consumer
+        stated, so whether they were a legacy source's is the CALLER's question. False when no
+        write this walk sees reaches the cache: whatever a retrieve then hands on — a caller's
+        documents, an outside writer's — nothing here shows the legacy source produced it.
+        """
+        own = [fact for fact in self.content if fact[0] == cache_ref and fact[2] is not None]
+        return bool(own) and all(fact[2] for fact in own)
 
     def establishes(self, key: StateKey) -> bool:
         compartment = (
@@ -1379,7 +1406,8 @@ def _caller_cached_origin(key, stream, invalidated) -> Optional[str]:
     through the `CALLER_CACHE_WRITER` alternative instead.
 
     A PROPERTY question — a DDP key, asked for a binding, an ordinary read, a child's required
-    read or a declared read — so it reads the PROPERTY-channel marker, which survives exactly the
+    read, a declared read, or a non-strict read no writer here can fail (correction batch 30) —
+    so it reads the PROPERTY-channel marker, which survives exactly the
     steps whose documents keep their properties (`_handed_on`, the measured property authority).
     Until correction batch 29 it read `caller_cache`, the CONTENT marker every rebuild drops: past
     a Message, a map or a connector call the property still rode on the caller's documents, but
@@ -1419,6 +1447,11 @@ def _nonstrict_read_can_fail(
     * **DPP / cache** — execution-scoped. A fire-and-forget child may or may not
       have run, which is indistinguishable from absence, and absence is exactly
       what this reader tolerates. Only ESTABLISHING writes count.
+
+    Asked of the process the read is in AND, for a called child's non-strict cached read, of
+    each caller at its call (correction batch 30, QA-184-s1-r29-01): the child's contract carries
+    the read (`ChildEntryContractV1.nonstrict_cached_reads`), and the call asks THIS predicate of
+    its own process, which is the writer set the flattened twin's walk would ask it of.
     """
     if key[0] == DDP:
         return _written_anywhere(prepared, key, capabilities)
@@ -1903,6 +1936,17 @@ class LineageWalkV1(NamedTuple):
     #: caller's vocabulary, not by the child's: a caller reads this and takes its own observable
     #: caches instead, exactly as `_caches_a_call_may_write` does for an underivable call.
     unwaited_writes_of_an_unknown_cache: bool = False
+    #: #184 amendment 3 §7-§8 (correction batch 30, QA-184-s1-r29-01): ``(pointer, cache ref or
+    #: None, property name)`` for each NON-strict read of a document property — a Decision
+    #: operand with no default — on documents a retrieve handed on, unestablished there, in a
+    #: process that writes the property nowhere. Such a read tolerates absence, so it is no
+    #: finding here; but it fails wherever a writer of the property exists that it can never
+    #: see (`_nonstrict_read_can_fail`), and a CALLER's writer is one. The cache names the
+    #: documents a caller's writes may have supplied the property on (the same cached-from and
+    #: origin caches a strict read records); None says no caller's document can supply it, so any
+    #: caller writer makes the read fail. The child contract measures these rows as
+    #: `unestablished_cached_keys` are measured (`_caller_nonstrict_reads`).
+    nonstrict_cached_reads: Tuple[Tuple[str, Optional[str], str], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -1980,6 +2024,8 @@ def _walk_lineage(
     binding_cache_origins: List[Tuple[str, str]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.read_cache_origins` returns.
     read_cache_origins: List[Tuple[str, str, str]] = []
+    #: #184 correction batch 30: the rows `LineageWalkV1.nonstrict_cached_reads` returns.
+    nonstrict_cached_reads: List[Tuple[str, Optional[str], str]] = []
     #: #184 amendment 1 rules 7-8 (correction batch 21a round 4): caches a call that is NOT
     #: waited for may write, wherever it stands on the path. The lattice orders a call's
     #: possible writes where the call is authored, which is right for everything that reads
@@ -2123,7 +2169,7 @@ def _walk_lineage(
         )
 
     def _classify_unmet_read(node, semantic, key, leg, extra=(), invalidated=frozenset(), cached_from=None,
-                             rides_on=None, upward=True, origins=()) -> None:
+                             rides_on=None, upward=True, origins=(), nonstrict=False) -> None:
         """Report ONE unestablished read under the sharpest code that fits.
 
         Shared by both read paths. The refinements below are what make a
@@ -2163,8 +2209,26 @@ def _walk_lineage(
         ``upward`` False: no caller can discharge the read at all — a call retrieving on its
         child's behalf from a cache no caller's document can reach — so nothing is recorded
         beyond the finding.
+
+        ``nonstrict`` (correction batch 30, QA-184-s1-r29-01): a NON-strict read this process can
+        never fail — no writer of the key exists here (`_nonstrict_read_can_fail`) — reaches this
+        same recorder instead of being skipped. It is no finding and no unmet read: absence is
+        what it tolerates. But a writer it can never see fails it, and a CALLER's writer is one,
+        so a document property read on retrieved documents records what the callers must not
+        do: one row per cache their documents could have carried it in (``cached_from`` and
+        ``origins``, exactly the caches a strict read names), or one cache-less row where no
+        caller's document can reach the read — any caller writer then fails it. Asked only past
+        a triggered retrieve: the documents before one are this process's own or its entry's,
+        which the cached-property channel does not describe.
         """
         scope, _name = key
+        if nonstrict:
+            if scope == DDP and CACHE_TRANSFER_UNPROVED in invalidated:
+                named = tuple(dict.fromkeys(
+                    ([] if cached_from is None else [cached_from]) + list(origins)))
+                for cache_ref in named or (None,):
+                    nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
+            return
         # A read a typed contract vouches for an OUTSIDE writer of is not the
         # caller's obligation — an external system establishes it — so it is
         # reported as a named warning below and must not enter the required set
@@ -2419,7 +2483,7 @@ def _walk_lineage(
                     None, False))
         return True
 
-    def _owe_the_caches_behind(pointer, key, request_profile_ref, bound, writers) -> None:
+    def _owe_the_caches_behind(pointer, key, request_profile_ref, bound, writers, nonstrict=False) -> None:
         """What a PROVED use of a document property owes callers who share its cache (#184 amendment 3 §7-§8).
 
         One row per `CALLER_CACHE_WRITER` alternative the property carries: a caller of this
@@ -2438,11 +2502,17 @@ def _walk_lineage(
         DDP source — its own `current` value or another property, defaulted or not — records
         the same rows for each SOURCE from the alternatives it captured when it ran, at the
         binding it feeds (`_check_bound_key`).
+
+        ``nonstrict`` (correction batch 30): the use is a non-strict read a call passes on to its
+        own callers (`_judge_a_cached_property_row`), so each row is a non-strict one.
         """
         if key[0] != DDP:
             return
         for token in writers.get(key) or ():
             if isinstance(token, str) and token.startswith(CALLER_CACHE_WRITER):
+                if nonstrict:
+                    nonstrict_cached_reads.append((pointer, token[len(CALLER_CACHE_WRITER):], key[1]))
+                    continue
                 unestablished_cached_keys.append((
                     pointer, token[len(CALLER_CACHE_WRITER):], key[1],
                     request_profile_ref if bound else None, bound,
@@ -2567,6 +2637,13 @@ def _walk_lineage(
         Returns ``(state, stream, legacy)``; ``state`` changes only in its cache
         content. ``legacy`` is on while the reaching documents were last produced
         by a legacy ``source`` endpoint, and a first-class call turns it off again.
+        So does a cache retrieve whose cache may hold documents the legacy source did not
+        produce: the retrieved documents are whatever the writes reaching the cache stored,
+        and the content facts say, per write, whether that was the legacy source's documents
+        (`_State.holds_only_legacy_source_documents`). Until correction batch 30 a retrieve
+        handed ``legacy`` on unchanged, so a first-class call's cached documents kept the
+        exemption in one process while a called child's caller judged the same consumer's
+        requirement (QA-184-s1-r29-02).
         Together with ``_feeds_only_a_legacy_target`` it scopes the named legacy
         exemption. That dialect's maps and property writers were never
         profile-checked, and they keep the exemption rather than being judged
@@ -2777,7 +2854,7 @@ def _walk_lineage(
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
-                state.with_content(semantic.cache_ref, declared),
+                state.with_content(semantic.cache_ref, declared, legacy_source=legacy),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -2792,7 +2869,7 @@ def _walk_lineage(
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
             return (
-                state.with_content(semantic.cache_ref, identity),
+                state.with_content(semantic.cache_ref, identity, legacy_source=legacy),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -2806,7 +2883,7 @@ def _walk_lineage(
             if getattr(semantic, "external_writer", False):
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
-                state = state.with_content(cache_reads[0], None)
+                state = state.with_content(cache_reads[0], None, legacy_source=False)
             contents = state.content_of(cache_reads[0])
             # Whether a caller's documents may be among the ones retrieved, asked ONCE, here,
             # of the one authority. Both markers carry the same answer: a consumer records
@@ -2825,6 +2902,15 @@ def _walk_lineage(
                 for held, token in cohort.alternatives
                 if held == CACHE_TRANSFER_UNPROVED and token.startswith(CALLER_CACHE_WRITER)
             }))
+            # The named legacy exemption covers documents a legacy `source` last produced, and
+            # the retrieved documents are the ones the writes reaching this cache stored: the
+            # exemption crosses the retrieve only when every such write stored the legacy
+            # source's own documents. A first-class producer's documents, a child's or an
+            # outside writer's, or a caller's (no write of this walk reaches the cache) end it,
+            # so the consumer behind is judged exactly as a called child's caller judges the
+            # requirement it records (correction batch 30, QA-184-s1-r29-02). Never turned ON
+            # here: a path outside the scope stays outside it.
+            legacy = legacy and state.holds_only_legacy_source_documents(cache_reads[0])
             if len(contents) == 1 and None not in contents:
                 return state, _Stream(STREAM_KNOWN, next(iter(contents)), "cache", node,
                                       caller_cache=shared, retrieved_from=shared,
@@ -2902,8 +2988,73 @@ def _walk_lineage(
         holding this process's own documents alone (amendment 3 §7-§8).
         """
         for ref in _caches_a_call_may_write(cache_refs, contract):
-            state = state.with_content(ref, None).with_cohort(ref, UNKNOWN_COHORT)
+            state = state.with_content(ref, None, legacy_source=False).with_cohort(ref, UNKNOWN_COHORT)
         return state
+
+    def _judge_a_cached_property_row(node, semantic, state, leg, invalidated, cache_ref, name,
+                                     request_profile_ref, bound, nonstrict=False):
+        """ONE cached-property row of a called child, judged at the call (#184 amendment 3 §7-§8).
+
+        The call retrieves on the child's behalf, so the row is judged as the child's own retrieve
+        judges it: the stored cohorts meet, and a bound path must pass for every writer
+        alternative. ``nonstrict`` (correction batch 30) judges a non-strict row no writer here can
+        fail the same way and records every row it would owe as a non-strict one: the refusal is
+        not this call's to make, so a failed retrieve is passed on rather than reported.
+        """
+        external = capabilities.writes_cache_externally(cache_ref)
+        shared = _caller_documents_may_reach(state, cache_ref)
+        # This call retrieves on the child's behalf, so it is one more place documents come
+        # out of a cache: the ones this process re-cached there carry the caches they came
+        # out of first, and what the child needs of them is owed to those caches too
+        # (`_cohort_at_write`'s origin alternative). Read off the same cohorts the overlay
+        # below reads, so the call and an in-process use of the same documents name one set.
+        origins = tuple(sorted({
+            token[len(CALLER_CACHE_WRITER):]
+            for cohort in state.cohorts_of(cache_ref)
+            for held, token in cohort.alternatives
+            if held == CACHE_TRANSFER_UNPROVED and token.startswith(CALLER_CACHE_WRITER)
+        }))
+        if _call_stores_nothing_in(state, cache_ref, external):
+            proved = True
+        else:
+            retrieved, carried, _documents, _dropped, _count = _overlay_cache_read(
+                _RetrieveAtCall(cache_ref, external),
+                state, {}, frozenset(), invalidated, _Stream(STREAM_UNKNOWN),
+            )
+            if bound:
+                # The retrieve this call makes on the child's behalf IS where these
+                # documents come out of the cache, so the binding's own row is recorded
+                # inside the check, on whichever outcome it reaches.
+                proved = _check_bound_key(
+                    node, _InheritedBinding(name, request_profile_ref), retrieved, carried,
+                    "/process_ref", cached_from=cache_ref if shared else None, origins=origins,
+                    owes_the_retrieve_on_failure=True,
+                )
+            else:
+                proved = retrieved.establishes((DDP, name))
+                if proved:
+                    # The documents this process stored there may carry a value its OWN
+                    # caller stored in another cache before a re-cache: owed to that one.
+                    _owe_the_caches_behind(node.source_path, (DDP, name), None, False, carried,
+                                           nonstrict=nonstrict)
+                else:
+                    # Unshared, the refusal is this process's own defect: no caller's
+                    # state, entry documents or cached documents can discharge it.
+                    _classify_unmet_read(
+                        node, semantic, (DDP, name), leg,
+                        extra=(("effect_kind", "subprocess"),),
+                        invalidated=invalidated | {CACHE_TRANSFER_UNPROVED},
+                        cached_from=cache_ref if shared else None,
+                        upward=shared, origins=origins, nonstrict=nonstrict,
+                    )
+        if proved and _caller_owes_a_cached_property(cache_ref, name, capabilities, state):
+            if nonstrict:
+                nonstrict_cached_reads.append((node.source_path, cache_ref, name))
+            else:
+                unestablished_cached_keys.append((
+                    node.source_path + ("/process_ref" if bound else ""),
+                    cache_ref, name, request_profile_ref if bound else None, bound,
+                ))
 
     def _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream):
         """Everything ONE call owes its child's entry contract (#184 amendment 3 §8).
@@ -3016,57 +3167,41 @@ def _walk_lineage(
         # cache, re-cached what its caller stored ELSEWHERE and failed only for the want of
         # that other cache's seed charged the caller for the emptied cache too — while the
         # proved-row channel below, asked the same question, already stopped charging it.
-        for cache_ref, name, request_profile_ref, bound in contract.cache_property_requirements:
-            external = capabilities.writes_cache_externally(cache_ref)
-            shared = _caller_documents_may_reach(state, cache_ref)
-            # This call retrieves on the child's behalf, so it is one more place documents come
-            # out of a cache: the ones this process re-cached there carry the caches they came
-            # out of first, and what the child needs of them is owed to those caches too
-            # (`_cohort_at_write`'s origin alternative). Read off the same cohorts the overlay
-            # below reads, so the call and an in-process use of the same documents name one set.
-            origins = tuple(sorted({
-                token[len(CALLER_CACHE_WRITER):]
-                for cohort in state.cohorts_of(cache_ref)
-                for held, token in cohort.alternatives
-                if held == CACHE_TRANSFER_UNPROVED and token.startswith(CALLER_CACHE_WRITER)
-            }))
-            if _call_stores_nothing_in(state, cache_ref, external):
-                proved = True
-            else:
-                retrieved, carried, _documents, _dropped, _count = _overlay_cache_read(
-                    _RetrieveAtCall(cache_ref, external),
-                    state, {}, frozenset(), invalidated, _Stream(STREAM_UNKNOWN),
+        #
+        # Correction batch 30 (QA-184-s1-r29-01): a NON-strict row of the child — a Decision operand
+        # with no default, on documents it retrieved, that it writes nowhere — is decided HERE by
+        # the in-process rule itself, `_nonstrict_read_can_fail`, asked of THIS process: a read
+        # tolerates absence, not a writer it can never see. Where this process writes the property
+        # anywhere, the flattened twin holds that writer too, so the row is this call's
+        # cached-property requirement exactly as a strict one is (and travels up as one); a
+        # cache-less row — the documents' properties were discarded, or no caller's document can
+        # reach the read — fails outright, READ_BEFORE_WRITE as the twin serves it. Where nothing
+        # here writes it, the row passes on unchanged in kind, judged by the same retrieve on the
+        # child's behalf, to be decided by whichever caller holds a writer.
+        applied, passed_on = [], []
+        for cache_ref, name in contract.nonstrict_cached_reads:
+            if not _nonstrict_read_can_fail(prepared, (DDP, name), capabilities):
+                passed_on.append((cache_ref, name))
+            elif cache_ref is None:
+                _classify_unmet_read(
+                    node, semantic, (DDP, name), leg, extra=(("effect_kind", "subprocess"),),
+                    invalidated=invalidated | {CACHE_TRANSFER_UNPROVED}, upward=False,
                 )
-                if bound:
-                    # The retrieve this call makes on the child's behalf IS where these
-                    # documents come out of the cache, so the binding's own row is recorded
-                    # inside the check, on whichever outcome it reaches.
-                    proved = _check_bound_key(
-                        node, _InheritedBinding(name, request_profile_ref), retrieved, carried,
-                        "/process_ref", cached_from=cache_ref if shared else None, origins=origins,
-                        owes_the_retrieve_on_failure=True,
-                    )
-                else:
-                    proved = retrieved.establishes((DDP, name))
-                    if proved:
-                        # The documents this process stored there may carry a value its OWN
-                        # caller stored in another cache before a re-cache: owed to that one.
-                        _owe_the_caches_behind(node.source_path, (DDP, name), None, False, carried)
-                    else:
-                        # Unshared, the refusal is this process's own defect: no caller's
-                        # state, entry documents or cached documents can discharge it.
-                        _classify_unmet_read(
-                            node, semantic, (DDP, name), leg,
-                            extra=(("effect_kind", "subprocess"),),
-                            invalidated=invalidated | {CACHE_TRANSFER_UNPROVED},
-                            cached_from=cache_ref if shared else None,
-                            upward=shared, origins=origins,
-                        )
-            if proved and _caller_owes_a_cached_property(cache_ref, name, capabilities, state):
-                unestablished_cached_keys.append((
-                    node.source_path + ("/process_ref" if bound else ""),
-                    cache_ref, name, request_profile_ref if bound else None, bound,
-                ))
+            elif (cache_ref, name, None, False) not in contract.cache_property_requirements:
+                applied.append((cache_ref, name, None, False))
+        if applied:
+            # The effective contract of THIS call: the repeated-run question below asks it too.
+            contract = contract.model_copy(update={"cache_property_requirements": tuple(
+                contract.cache_property_requirements) + tuple(applied)})
+        for cache_ref, name, request_profile_ref, bound in contract.cache_property_requirements:
+            _judge_a_cached_property_row(node, semantic, state, leg, invalidated, cache_ref, name,
+                                         request_profile_ref, bound)
+        for cache_ref, name in passed_on:
+            if cache_ref is None:
+                nonstrict_cached_reads.append((node.source_path, None, name))
+                continue
+            _judge_a_cached_property_row(node, semantic, state, leg, invalidated, cache_ref, name,
+                                         None, False, nonstrict=True)
         if form == "scheduled" and stream.count != COUNT_ONE:
             unstable_caches = _repetition_unstable_caches(contract, cache_refs, semantic)
             causes = {cause for cause, _cache_ref in unstable_caches}
@@ -3183,9 +3318,22 @@ def _walk_lineage(
                 continue
             # A non-strict reader tolerates ABSENCE (the wire carries a defined
             # empty default) but not a writer that exists somewhere unreachable.
+            #
+            # Where no writer exists HERE, the read is no finding of this process — but a caller's
+            # writer is a writer it can never see, so it reaches the same recorder as every other
+            # read and records what the callers must not do (correction batch 30,
+            # QA-184-s1-r29-01). Skipping it before the recorder left a called child's Decision on
+            # a property its caller writes with no row at all: the composition was admitted while
+            # its flattened twin, whose process holds that writer, refused the read.
             if not strict and not _nonstrict_read_can_fail(
                 prepared, key, capabilities
             ):
+                _classify_unmet_read(
+                    node, semantic, key, leg, invalidated=invalidated,
+                    cached_from=_caller_cached_origin(key, stream, invalidated),
+                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins,
+                    nonstrict=True,
+                )
                 continue
             _classify_unmet_read(
                 node, semantic, key, leg, invalidated=invalidated,
@@ -3244,7 +3392,7 @@ def _walk_lineage(
             # time a later read runs, and this is a MAY set.
             for key in effect.writes:
                 if key[0] == CACHE:
-                    state = state.with_content(key[1], None)
+                    state = state.with_content(key[1], None, legacy_source=False)
                     # Not `ours`: documents this walk cannot see enter the cache here, so a
                     # removal before it no longer proves the cache holds this process's own.
                     state = state.with_cohort(key[1], UNKNOWN_COHORT)
@@ -3548,7 +3696,7 @@ def _walk_lineage(
     for cache_ref, name in capabilities.caller_cache_cohorts:
         cohort_names.setdefault(cache_ref, set()).add(name)
     for cache_ref, profile_ref in capabilities.caller_cache_contents:
-        entry_state = entry_state.with_content(cache_ref, _identity(profile_ref))
+        entry_state = entry_state.with_content(cache_ref, _identity(profile_ref), legacy_source=None)
         if _seeds_an_unknown_cohort(cache_ref, cohort_names):
             entry_state = entry_state.with_cohort(cache_ref, UNKNOWN_COHORT)
     for cache_ref in sorted(cohort_names):
@@ -3847,6 +3995,8 @@ def _walk_lineage(
         )),
         binding_cache_origins=tuple(sorted(set(binding_cache_origins))),
         read_cache_origins=tuple(sorted(set(read_cache_origins))),
+        nonstrict_cached_reads=tuple(sorted(
+            set(nonstrict_cached_reads), key=lambda row: (row[0], row[1] or "", row[2]))),
         # The same meet, over the same exits, asked of the proof rather than the
         # establishment — so a key survives only where EVERY normal completion made the
         # write, and where one completion's write sat behind a possibly-empty step it does
@@ -3981,27 +4131,51 @@ def _written_in_a_later_leg(
     )
 
 
+def _keys_written_anywhere(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> FrozenSet[StateKey]:
+    """Every key some node of this process — or a process it calls — writes, ignoring reachability.
+
+    THE writer set the "a writer exists that this read can never see" rule is asked of
+    (`_written_anywhere`), and the one a child contract exports as its document-property writes
+    (`ChildEntryContractV1.document_property_writes`), so a caller and its flattened twin count the
+    same writers by construction.
+
+    ANY write, async included: this asks whether an author wrote the key ANYWHERE, not whether it
+    establishes downstream state. Filtering here made a cross-copy DDP read validate silently — a
+    false NEGATIVE. A called child's document-property writes count too, waited for or not
+    (correction batch 30 sibling sweep): the flattened twin holds that child's writer in the same
+    process, so a non-strict read beside it can fail, and counting only this process's own nodes
+    admitted a Decision on a property a SIBLING child (or its grandchild) writes while the twin
+    refused it. A child nothing derives states no writes, exactly as an opaque map or script states
+    none here: only what a contract proves is counted.
+    """
+    written: Set[StateKey] = set()
+    for node in prepared.cfg.nodes:
+        written.update(_writes_of(node.semantic))
+        for effect in _trusted_effects(node.semantic, capabilities):
+            written.update((k[0], k[1]) for k in effect.writes)
+        if node.semantic.semantic_kind == "process_call":
+            contract = capabilities.child_entry_contract(node.semantic.process_ref)
+            if contract is not None:
+                written.update((DDP, name) for name in contract.document_property_writes)
+    return frozenset(written)
+
+
 def _written_anywhere(
     prepared: PreparedProcessValidationV1,
     key: StateKey,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> bool:
-    """Whether any node in the CFG writes this key, ignoring reachability.
+    """Whether any node in the CFG — or a process it calls — writes this key, ignoring reachability.
 
-    Used only to sharpen a DDP diagnostic from "never written" to "written on a
-    different document copy". It deliberately ignores paths: the question is
-    whether the author wrote it at all, not whether it reaches the read.
+    Sharpens a DDP diagnostic from "never written" to "written on a different document copy", and
+    decides whether a non-strict read can fail at all (`_nonstrict_read_can_fail`). It deliberately
+    ignores paths: the question is whether the author wrote it at all, not whether it reaches the
+    read. Read off `_keys_written_anywhere`, the one writer set.
     """
-    for node in prepared.cfg.nodes:
-        if key in _writes_of(node.semantic):
-            return True
-        # ANY write, async included: this asks whether an author wrote the key
-        # ANYWHERE, not whether it establishes downstream state. Filtering here
-        # made a cross-copy DDP read validate silently — a false NEGATIVE.
-        for effect in _trusted_effects(node.semantic, capabilities):
-            if key in [(k[0], k[1]) for k in effect.writes]:
-                return True
-    return False
+    return key in _keys_written_anywhere(prepared, capabilities)
 
 
 __all__ = ["LineageWalkV1", "collect_lineage_findings", "walk_lineage"]

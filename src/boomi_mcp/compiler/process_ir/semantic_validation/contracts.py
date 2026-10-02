@@ -497,8 +497,22 @@ class ChildEntryContractV1(_ValidationModel):
       document a caller's writes stored there must carry it (amendment 3 §7), and a bound
       request path additionally needs each of their writers to pass the binding checks at
       the call.
+    - ``nonstrict_cached_reads``: per NON-strict read of a document property — a Decision
+      operand with no default — on documents the child retrieved, in a child that writes the
+      property nowhere, ``(cache ref or None, property name)``. Such a read tolerates absence
+      but fails wherever a writer of the property exists that it can never see, the in-process
+      rule (correction batch 30). So a call whose OWN process writes the property anywhere
+      applies the row: with a cache ref it is a cached-property requirement of that cache, as
+      ``(cache ref, name, None, False)`` in the list above; with None — the documents' properties
+      were discarded, or no caller's document reaches the read — the read fails outright. A call
+      whose process writes it nowhere passes the row on to its own callers.
     - Neither lists a cache the child provably emptied and refilled only from its own
       writes before the use: no caller's document can reach the use there.
+    - ``document_property_writes``: the document properties the child — or a process it calls —
+      writes anywhere, its known writers only (`lineage._keys_written_anywhere`). Never an
+      establishment: a child's document properties do not land on its caller's sibling copies
+      (rule 7). Read only by the caller's "a writer exists that this read can never see" rule, for
+      which a larger set is the stricter answer (correction batch 30 sibling sweep).
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``guaranteed_state``: execution-scoped keys the child establishes on every normal
       completion, at a step its own documents provably reach — a subset of
@@ -520,8 +534,8 @@ class ChildEntryContractV1(_ValidationModel):
       unknowable cache writes are answered on the write side instead, as an unknown
       possibility that leaves the establishment alone.
     - ``required_caches_retain_nothing_it_stored``: True when no completion of the child
-      leaves anything stored during its run in a cache ``cache_requirements`` or
-      ``cache_property_requirements`` names — nothing was stored there, or a whole-cache
+      leaves anything stored during its run in a cache ``cache_requirements``,
+      ``cache_property_requirements`` or ``nonstrict_cached_reads`` names — nothing was stored there, or a whole-cache
       removal the walk proves ran took it all away with nothing stored after. A later No
       Data run then retrieves from those caches only what its callers stored, so a call
       that waits and aborts on error runs it once per document without the cache changing
@@ -556,6 +570,8 @@ class ChildEntryContractV1(_ValidationModel):
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
+    nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
+    document_property_writes: Tuple[str, ...] = ()
     mutated_state: Tuple[Tuple[str, str], ...] = ()
     guaranteed_state: Tuple[Tuple[str, str], ...] = ()
     removed_caches: Tuple[str, ...] = ()
