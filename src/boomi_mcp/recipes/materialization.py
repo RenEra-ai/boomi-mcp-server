@@ -148,7 +148,12 @@ def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optiona
     WSS builder emits it. ``(None, None)`` for anything that is not a listener
     operation, so no other symbol changes. The operation's connection is never
     touched: a listener has none.
+
+    A component whose write submits raw ``config.xml`` (``submits_raw_component_xml``) is
+    answered by the snapshot's reading of those bytes or not at all: the structured fields
+    beside the XML are never written (#184 wave review).
     """
+    from ..categories.components._shared import submits_raw_component_xml
     from ..categories.components.builders.connector_builder import (
         connector_family_of,
         wss_listener_inbound_facts,
@@ -158,6 +163,8 @@ def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optiona
     if identity is not None and identity.family == "wss":
         return identity.listener_input_type, identity.listener_request_profile
     config = component.config or {}
+    if submits_raw_component_xml(config):
+        return None, None
     if connector_family_of(config.get("connector_type")) != "wss":
         return None, None
     return wss_listener_inbound_facts(config)
@@ -199,11 +206,18 @@ def _profile_facts(
     ``written`` is apply's own answer (``apply_writes_component_config``): a
     ``reference_only`` create and a create apply reuses, because it names an existing id or matches one
     by name where the route resolved it, are discarded, and a ``reference_only`` UPDATE is written like any other update.
+
+    A written component whose config carries raw ``xml`` contributes nothing either (#184 wave
+    review): the write submits those bytes verbatim and never reads the structured fields
+    (``submits_raw_component_xml``, the predicate every write route asks), and no reader of
+    a submitted map, cache or operation document yields this plan's ``$ref:`` profile keys.
     """
+    from ..categories.components._shared import submits_raw_component_xml
+
     if not written:
         return None, None, None
     config = component.config or {}
-    if not isinstance(config, dict):
+    if not isinstance(config, dict) or submits_raw_component_xml(config):
         return None, None, None
     component_type = str(component.type or "").strip()
     if component_type == "transform.map":

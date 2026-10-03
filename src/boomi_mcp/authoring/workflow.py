@@ -1595,6 +1595,7 @@ def resolve_root_context(
     *,
     conflict_policy: str,
     snapshot: Any,
+    reused_roots: Any,
     declarations: Any = None,
     literal_indexes: Any = None,
 ) -> Any:
@@ -1610,6 +1611,11 @@ def resolve_root_context(
     derives every child entry contract (amendment 3 §8) and reports no finding. Each child's
     contract is derived against the symbols that child root is compiled with, projected with
     the route's own resolution snapshot, so its profile requirements resolve.
+
+    ``reused_roots`` is REQUIRED: the roots apply binds to an existing process instead of
+    writing (``canonical_roots_reused_at_apply``). Apply discards a reused root's submitted
+    body, so it contributes no derived contract and a call to it is a call to an unknown
+    child (#184 wave review).
     """
     from ..compiler.process_ir.connector_resolution import project_grants_for_root
     from .process_ir_effects import resolve_process_ir_effect_declarations
@@ -1626,11 +1632,18 @@ def resolve_root_context(
         symbols_for=lambda key, root: project_grants_for_root(
             root, symbols, process_root_ref=key, snapshot=snapshot
         ),
+        opaque_roots=frozenset(reused_roots),
     )
 
 
 def derive_root_capabilities(
-    process_roots: Any, symbols: Any, components: Any, *, conflict_policy: str, snapshot: Any
+    process_roots: Any,
+    symbols: Any,
+    components: Any,
+    *,
+    conflict_policy: str,
+    snapshot: Any,
+    reused_roots: Any,
 ) -> Dict[str, Any]:
     """``{root key: trusted context or None}`` for a route with no effect declarations.
 
@@ -1639,7 +1652,8 @@ def derive_root_capabilities(
     compile.
     """
     return resolve_root_context(
-        process_roots, symbols, components, conflict_policy=conflict_policy, snapshot=snapshot
+        process_roots, symbols, components, conflict_policy=conflict_policy, snapshot=snapshot,
+        reused_roots=reused_roots,
     ).capabilities_by_root
 
 
@@ -1794,7 +1808,10 @@ def _validate_processes(
     # arrives in the same failure set as every other refusal and is reported by
     # the handler that already collects them.
 
-    from ..categories.integration_builder import ComponentWriteConflictError
+    from ..categories.integration_builder import (
+        ComponentWriteConflictError,
+        canonical_roots_reused_at_apply,
+    )
     from ..compiler.process_ir.contracts import SymbolTableV1
 
     conflict_diagnostics: List[AuthoringDiagnosticV1] = []
@@ -1861,6 +1878,11 @@ def _validate_processes(
         normalized.integration_spec.components,
         conflict_policy=conflict_policy,
         snapshot=snapshot,
+        # #184 wave review: apply's own answer, over the binding this route resolved with the
+        # account, so a root apply reuses derives nothing for its callers here either.
+        reused_roots=canonical_roots_reused_at_apply(
+            normalized.integration_spec.processes, conflict_policy or "reuse", existing_ids=existing_ids
+        ),
         declarations=declarations if symbols is not None else None,
         # #179. The plan's own profile indexes. Without them the effect gate
         # asked the plan authority a question it answered "index unavailable",

@@ -370,7 +370,12 @@ def encode_call(kind: str, function: Callable, args: tuple, kwargs: dict) -> Dic
                            None) or encode_value(child)]
                 for ref, child in child_roots.items()
             ]
-        return {
+        # #184 correction batch 31: the roots apply reuses. Recorded only when there are any, so a
+        # call that names none keeps the record it always had.
+        opaque = arguments.get("opaque_roots") or frozenset()
+        if type(opaque) is not frozenset or any(type(key) is not str for key in opaque):
+            raise Unrecordable("opaque-roots-shape")
+        record = {
             "entry": kind,
             "process_roots": [
                 "list" if type(roots) is list else "tuple",
@@ -385,6 +390,9 @@ def encode_call(kind: str, function: Callable, args: tuple, kwargs: dict) -> Dic
             "literal_indexes": encode_value(arguments["literal_indexes"]),
             "symbols_for": None if arguments["symbols_for"] is None else {"$calls": None},
         }
+        if opaque:
+            record["opaque_roots"] = sorted(opaque)
+        return record
     if kind == "validate":
         return {
             "entry": kind,
@@ -688,6 +696,7 @@ def _rebuild(record: Mapping[str, Any]) -> Tuple[Callable, tuple]:
             decode_value(record["conflict_policy"]),
             decode_value(record["literal_indexes"]),
             symbols_for,
+            frozenset(record.get("opaque_roots", ())),
         )
     raise ValueError(kind)
 

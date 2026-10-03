@@ -575,3 +575,17 @@ def soft_delete_component(boomi_client: Boomi, component_id: str) -> Dict[str, A
         "component_id": component_id,
         "method": "metadata_delete",
     }
+
+
+def submits_raw_component_xml(config) -> bool:
+    """Whether a component write submits ``config["xml"]`` verbatim (#184 wave review).
+
+    THE raw-XML escape hatch, answered once. Every write route that honours it — the
+    integration builder's ``_execute_component`` arms and the connector create and update
+    routes — skips its structured builder when this is true and posts the caller's bytes
+    unchanged, so every structured field beside the XML describes something that will not
+    be written. A compiler fact read from those fields must ask this predicate first.
+    """
+    from collections.abc import Mapping
+
+    return isinstance(config, Mapping) and bool(config.get("xml"))

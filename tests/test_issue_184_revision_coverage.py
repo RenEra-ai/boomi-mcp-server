@@ -244,7 +244,8 @@ def _perturbations():
         # Correction batch 30: a child's non-strict cached reads owe its callers nothing again.
         ("effects", "_caller_nonstrict_reads"): lambda prepared, capabilities, walk: (),
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
-        ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None: {
+        ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None,
+        opaque=frozenset(): {
             key: ((), (), (), None, "unknown", (), ()) for key, _ir in process_roots},
         ("effects", "_binds"): lambda binding: False,
         ("effects", "_with_entry_contracts"): lambda capabilities, binding: capabilities,

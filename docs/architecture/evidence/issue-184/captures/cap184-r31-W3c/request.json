@@ -1,0 +1,187 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "intent_kind": "process_ir",
+    "integration_name": "_TEST_184S1_W3c_S118410030413",
+    "units": [
+      {
+        "envelope": {
+          "component_key": "root",
+          "name": "_TEST_184S1_W3c_root_S118410030413",
+          "action": "create",
+          "depends_on": [
+            "op_child",
+            "op_get1",
+            "op_get2"
+          ]
+        },
+        "process_ir": {
+          "version": "1",
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "kind": "branch",
+                "legs": [
+                  {
+                    "steps": [
+                      {
+                        "kind": "connector_call",
+                        "operation_ref": "$ref:op_get1"
+                      },
+                      {
+                        "kind": "set_ddp",
+                        "name": "DDP_S31X",
+                        "source_values": [
+                          {
+                            "value_type": "static",
+                            "value": "/__S31_184__/S118410030413/W3c/x/"
+                          },
+                          {
+                            "value_type": "dpp",
+                            "property_name": "seed_id",
+                            "default_value": ""
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "connector_call",
+                        "operation_ref": "$ref:op_get2"
+                      },
+                      {
+                        "kind": "connector_call",
+                        "operation_ref": "$ref:op_child",
+                        "path_binding": {
+                          "property_name": "DDP_S31X"
+                        }
+                      }
+                    ],
+                    "terminal": {
+                      "kind": "stop"
+                    }
+                  },
+                  {
+                    "steps": [
+                      {
+                        "kind": "message",
+                        "text": "S23 filler"
+                      }
+                    ],
+                    "terminal": {
+                      "kind": "stop"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "components": [
+      {
+        "key": "conn",
+        "type": "connector-settings",
+        "name": "Sandbox CDS Mock REST (no-auth)",
+        "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "action": "create",
+        "config": {
+          "connector_type": "rest",
+          "component_name": "Sandbox CDS Mock REST (no-auth)",
+          "base_url": "http://host.docker.internal:8081",
+          "auth": "NONE"
+        }
+      },
+      {
+        "key": "p_client",
+        "type": "profile.json",
+        "name": "_TEST_184S1_W3c_p_client_S118410030413",
+        "action": "create",
+        "config": {
+          "component_type": "profile.json",
+          "profile_type": "json.generated",
+          "component_name": "_TEST_184S1_W3c_p_client_S118410030413",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "key",
+                "kind": "simple",
+                "data_type": "character",
+                "required": false
+              }
+            ]
+          }
+        }
+      },
+      {
+        "key": "op_get1",
+        "type": "connector-action",
+        "name": "_TEST_184S1_W3c_op_get1_S118410030413",
+        "action": "create",
+        "depends_on": [
+          "conn",
+          "p_client"
+        ],
+        "config": {
+          "component_type": "connector-action",
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_184S1_W3c_op_get1_S118410030413",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a",
+          "return_application_errors": true,
+          "track_response": true,
+          "response_profile_id": "$ref:p_client",
+          "response_profile_type": "json"
+        }
+      },
+      {
+        "key": "op_get2",
+        "type": "connector-action",
+        "name": "_TEST_184S1_W3c_op_get2_S118410030413",
+        "action": "create",
+        "depends_on": [
+          "conn",
+          "p_client"
+        ],
+        "config": {
+          "component_type": "connector-action",
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_184S1_W3c_op_get2_S118410030413",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da",
+          "return_application_errors": true,
+          "track_response": true,
+          "response_profile_id": "$ref:p_client",
+          "response_profile_type": "json"
+        }
+      },
+      {
+        "key": "op_child",
+        "type": "connector-action",
+        "name": "_TEST_184S1_W3c_op_child_S118410030413",
+        "action": "create",
+        "depends_on": [
+          "conn"
+        ],
+        "config": {
+          "component_type": "connector-action",
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "_TEST_184S1_W3c_op_child_S118410030413",
+          "connection_ref_key": "conn",
+          "method": "GET",
+          "path": "/__S1_184__/S118410030413/W3c/child/static",
+          "return_application_errors": true,
+          "track_response": true
+        }
+      }
+    ],
+    "conflict_policy": "reuse"
+  }
+}

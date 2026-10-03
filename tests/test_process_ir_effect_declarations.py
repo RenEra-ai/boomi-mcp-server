@@ -2421,13 +2421,25 @@ def test_every_inert_reason_is_reachable_and_served():
         [("p", root)], declarations, _symbols(), [])
     assert resolution.inert == ("/effect_declarations/subprocess_effects/0",)
 
+    # `reused` is raised by the RESOLVER too (#184 wave review): the child IS authored in this
+    # request, and apply reuses an existing process for it, so its submitted body is not inspected.
+    child = _linear_child(5)
+    authored = resolve_process_ir_effect_declarations(
+        [("p", root), ("CHILD", child)], declarations, _symbols(), [],
+        child_roots={"$ref:CHILD": child})
+    assert "/effect_declarations/subprocess_effects/0" not in authored.inert
+    reused = resolve_process_ir_effect_declarations(
+        [("p", root), ("CHILD", child)], declarations, _symbols(), [],
+        child_roots={"$ref:CHILD": child}, opaque_roots=frozenset({"CHILD"}))
+    assert reused.inert == ("/effect_declarations/subprocess_effects/0",)
+
     # CONTROL: a child matching no reason derives, so "inert" is a property of
     # these cases and not of the derivation being broken.
     assert E.derive_subprocess_effect(_linear_child(5)).effect is not None
 
     # Every reason is served, and every served reason is one the code emits.
     served = dict(E.subprocess_inert_reasons())
-    emitted = set(witnesses) | {E.INERT_BARE_REFERENCE}
+    emitted = set(witnesses) | {E.INERT_BARE_REFERENCE, E.INERT_REUSED}
     assert set(served) == emitted, sorted(set(served) ^ emitted)
 
     from boomi_mcp.authoring.process_ir_projection import _SEMANTIC_RULES

@@ -530,8 +530,11 @@ def derive_map_effect(
     # THE RAW-XML ESCAPE HATCH. `integration_builder` treats a config carrying
     # `xml` as "bypasses the structured builder entirely" and emits those bytes
     # verbatim, so `map_type` and `function_mappings` describe something that will
-    # not run. The bytes themselves are not inspectable here, so opaque.
-    if config.get("xml"):
+    # not run. The bytes themselves are not inspectable here, so opaque. Asked of the
+    # write routes' own predicate, so the escape hatch is recognised exactly where it is taken.
+    from ..categories.components._shared import submits_raw_component_xml
+
+    if submits_raw_component_xml(config):
         return None
     # Would the PLAN build this map? One question to the plan's own authority,
     # which subsumes the route dispatch, all four route-class tables, and the
@@ -723,6 +726,9 @@ INSPECTABLE_CHILD_KINDS = frozenset({
 #: still left the served rule stale with every test green.
 INERT_BARE_REFERENCE = "bare_reference"
 INERT_UNINSPECTABLE_STEP = "uninspectable_step"
+#: #184 wave review: a child apply binds to an existing process instead of writing it. The
+#: resolver raises it (``opaque_roots``), so its witness is a resolution, like the bare reference.
+INERT_REUSED = "reused"
 # `walk_truncated` was withdrawn by #184 D12. The lineage walk has no depth bound
 # any more, so no child is inert merely for being long. A closed limit is
 # withdrawn rather than reworded, so the token and its served row are removed
@@ -793,6 +799,9 @@ def subprocess_inert_reasons() -> Tuple[Tuple[str, str], ...]:
         (INERT_UNINSPECTABLE_STEP,
          "it contains a step whose own state effect is knowable only from a "
          "contract — a map, a scripted data process, or a further call"),
+        (INERT_REUSED,
+         "apply reuses an existing process for it instead of writing it, so the "
+         "definition the request submits for it is not the one that runs"),
     )
 
 
@@ -1374,7 +1383,7 @@ _PERMISSIVE_FIELDS: Tuple[str, ...] = (
 )
 
 
-def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None) -> Dict[str, tuple]:
+def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None, opaque=frozenset()) -> Dict[str, tuple]:
     """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
@@ -1386,6 +1395,12 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
     request binds no row, so its admission treats the child as unknown. Only a root another
     root CALLS is validated under its callers' obligations; every call discharges them on
     its own.
+
+    ``opaque`` names the roots apply REUSES (#184 wave review). Apply discards a reused
+    root's submitted body and the stored process runs instead, so its derived facts describe
+    nothing that executes: a call to one binds no row, exactly like a call to a process this
+    request does not carry, and its callers' admission treats it as unknown. Its own facts
+    are still derived, so its own validation is unchanged.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ChildEntryContractV1,
@@ -1420,7 +1435,7 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
         return tuple(
             ChildEntryContractV1(process_ref=ref, **facts[child])
             for ref, child in sorted(calls[key].items())
-            if child in facts
+            if child in facts and child not in opaque
         )
 
     for key in ordered:
@@ -1552,7 +1567,7 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None)
                 child_entry_contracts=tuple(
                     ChildEntryContractV1(process_ref=ref, **previous[child])
                     for ref, child in sorted(calls[key].items())
-                    if child in previous
+                    if child in previous and child not in opaque
                 ),
                 **(base_for(key) if base_for else {})
             )
@@ -1656,6 +1671,7 @@ def resolve_process_ir_effect_declarations(
     conflict_policy: str = "reuse",
     literal_indexes: Optional[Mapping[str, Any]] = None,
     symbols_for: Optional[Any] = None,
+    opaque_roots: FrozenSet[str] = frozenset(),
 ) -> EffectResolutionV1:
     """Verify identity, derive content server-side, and build per-root context.
 
@@ -1664,6 +1680,8 @@ def resolve_process_ir_effect_declarations(
     contract, obligation or passthrough entry binds in it — which, for a request with
     no call and no passthrough root, is byte-identical to the pre-#154 path.
     ``symbols_for(key, root)`` returns the symbols a root is compiled against.
+    ``opaque_roots`` are the roots apply reuses rather than writes: neither a derived entry
+    contract nor a declared subprocess summary is taken from their submitted bodies.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ExternalWriterContractV1,
@@ -1678,7 +1696,7 @@ def resolve_process_ir_effect_declarations(
 
     symbols_for = symbols_for or (lambda _key, _root: symbols)
     if declarations is None:
-        entry_bindings = _entry_contract_bindings(process_roots, symbols, symbols_for)
+        entry_bindings = _entry_contract_bindings(process_roots, symbols, symbols_for, opaque=opaque_roots)
         return EffectResolutionV1(
             {
                 key: (
@@ -1866,7 +1884,7 @@ def resolve_process_ir_effect_declarations(
         }
 
     entry_bindings = _entry_contract_bindings(
-        process_roots, symbols, symbols_for, base_for=_declared_rows_for
+        process_roots, symbols, symbols_for, base_for=_declared_rows_for, opaque=opaque_roots
     )
 
     # --- subprocesses -----------------------------------------------------
@@ -1891,9 +1909,13 @@ def resolve_process_ir_effect_declarations(
             findings.append(EffectAuthorityFindingV1(_INVALID, pointer, "unresolved-or-wrong-type"))
             continue
         def _child_for(ref):
+            bare = ref[len("$ref:"):] if ref.startswith("$ref:") else ref
+            if bare in opaque_roots:
+                # A root apply reuses: its submitted body is not what runs, so it is a bare
+                # reference whatever this request carries for it (#184 wave review).
+                return None
             if ref in child_roots:
                 return child_roots[ref]
-            bare = ref[len("$ref:"):] if ref.startswith("$ref:") else ref
             return child_roots.get(bare)
 
         # Keep WHICH alias matched: `child_key` selects the child's own
@@ -1934,8 +1956,14 @@ def resolve_process_ir_effect_declarations(
                 row for root_key, row in writer_rows if root_key == child_key
             ),
         )
+        reused_child = any(
+            (spelling[len("$ref:"):] if spelling.startswith("$ref:") else spelling) in opaque_roots
+            for spelling in alias
+        )
         summary = (
-            derive_subprocess_effect(
+            ChildSummaryV1(None, INERT_REUSED)
+            if reused_child
+            else derive_subprocess_effect(
                 child,
                 capabilities=child_capabilities,
                 symbols=symbols_for(child_key, child) if symbols_for is not None else symbols,

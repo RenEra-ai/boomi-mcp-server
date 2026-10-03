@@ -1,0 +1,703 @@
+{
+  "_success": true,
+  "action": "compile",
+  "mutation_performed": false,
+  "authoring_result": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:c9583e6b971f3461f9dd6c78e0480cd5e2104c249089906154c0f93f4bd158dd",
+      "capability_revision": "sha256:78a44de8dd604b66189287bf8d3a78e38a15e88107970827d6bec178c99e057f",
+      "compiler_revision": "sha256:15927641310141f9c2c7dc5af629be30b1322ae38d252c020100c93ede72616e",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:c5e1c55b17301e5227bfc0ef98b66998c64557da3804a9ac64e88b0e11cf3792",
+      "plan_hash": "sha256:233b24e0619fcaf0948f22f7b478db2c20eef5561356cbf51e5d827aedabe430",
+      "compile_hash": "sha256:ed89e21a03987a532d68c8d0e2ece0bcebfd4cd0483fc142cce7bc407b7e73d1"
+    },
+    "mutation_performed": false,
+    "integration_spec_preview": {
+      "version": "1.0",
+      "name": "_TEST_184S1_W3b2_S118410030413",
+      "mode": "lift_shift",
+      "components": [
+        {
+          "key": "conn",
+          "type": "connector-settings",
+          "action": "create",
+          "name": "Sandbox CDS Mock REST (no-auth)",
+          "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+          "config": {
+            "connector_type": "rest",
+            "component_name": "Sandbox CDS Mock REST (no-auth)",
+            "base_url": "http://host.docker.internal:8081",
+            "auth": "NONE"
+          },
+          "depends_on": []
+        },
+        {
+          "key": "p_client",
+          "type": "profile.json",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_p_client_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "_TEST_184S1_W3b2_p_client_S118410030413",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {
+                  "name": "key",
+                  "kind": "simple",
+                  "data_type": "character",
+                  "required": false
+                }
+              ]
+            }
+          },
+          "depends_on": []
+        },
+        {
+          "key": "op_get1",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_op_get1_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W3b2_op_get1_S118410030413",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a",
+            "return_application_errors": true,
+            "track_response": true,
+            "response_profile_id": "$ref:p_client",
+            "response_profile_type": "json"
+          },
+          "depends_on": [
+            "conn",
+            "p_client"
+          ]
+        },
+        {
+          "key": "op_get2",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_op_get2_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W3b2_op_get2_S118410030413",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da",
+            "return_application_errors": true,
+            "track_response": true,
+            "response_profile_id": "$ref:p_client",
+            "response_profile_type": "json"
+          },
+          "depends_on": [
+            "conn",
+            "p_client"
+          ]
+        },
+        {
+          "key": "c1",
+          "type": "documentcache",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_c1_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "documentcache",
+            "component_name": "_TEST_184S1_W3b2_c1_S118410030413",
+            "profile_type": "profile.json",
+            "profile_id": "$ref:p_client",
+            "enforce_single_lucene": true,
+            "indexes": [
+              {
+                "index_id": 1,
+                "index_name": "by key",
+                "keys": [
+                  {
+                    "id": 1,
+                    "element_key": "3",
+                    "name": "key (Root/Object/key)"
+                  }
+                ]
+              }
+            ]
+          },
+          "depends_on": [
+            "p_client"
+          ]
+        },
+        {
+          "key": "p_a",
+          "type": "profile.json",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_p_a_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "_TEST_184S1_W3b2_p_a_S118410030413",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {
+                  "name": "a1",
+                  "kind": "simple",
+                  "data_type": "character",
+                  "required": false
+                }
+              ]
+            }
+          },
+          "depends_on": []
+        },
+        {
+          "key": "map",
+          "type": "transform.map",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_map_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "transform.map",
+            "map_type": "direct",
+            "component_name": "_TEST_184S1_W3b2_map_S118410030413",
+            "source_profile_id": "$ref:p_client",
+            "source_profile_type": "profile.json",
+            "target_profile_id": "$ref:p_a",
+            "target_profile_type": "profile.json",
+            "field_mappings": [
+              {
+                "source_path": "Root/key",
+                "target_path": "Root/a1"
+              }
+            ]
+          },
+          "depends_on": [
+            "p_client",
+            "p_a"
+          ]
+        },
+        {
+          "key": "op_bm",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W3b2_op_bm_S118410030413",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W3b2_op_bm_S118410030413",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/__S1_184__/S118410030413/W3b2/bm/static",
+            "return_application_errors": true,
+            "track_response": true,
+            "request_profile_id": "$ref:p_a",
+            "request_profile_type": "json"
+          },
+          "depends_on": [
+            "conn",
+            "p_a"
+          ]
+        }
+      ],
+      "processes": [],
+      "goals": [],
+      "endpoints": [],
+      "flows": [
+        {
+          "key": "transform",
+          "name": "_TEST_184S1_W3b2_map_S118410030413",
+          "source": "",
+          "target": null,
+          "operation": "transform",
+          "executable": false,
+          "source_schema": {
+            "format": "json",
+            "root_name": "Root",
+            "leaf_count": 1,
+            "leaves": [
+              {
+                "path": "Root/key",
+                "data_type": "character"
+              }
+            ]
+          },
+          "target_payload_profile": {
+            "format": "json",
+            "root_name": "Root",
+            "leaf_count": 1,
+            "leaves": [
+              {
+                "path": "Root/a1",
+                "data_type": "character"
+              }
+            ]
+          },
+          "target_write_profile": null,
+          "operations": [
+            {
+              "operation_type": "direct",
+              "target_path": "Root/a1",
+              "source_field": null,
+              "source_path": "Root/key",
+              "future_builder_issue": null,
+              "documentation_hint": null
+            }
+          ],
+          "source_profile_generation": {
+            "evidence_source": "generator",
+            "generation_mode": "profile_from_json_schema",
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "_TEST_184S1_W3b2_p_client_S118410030413",
+            "profile_config": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "required": false,
+                "data_type": null,
+                "children": [
+                  {
+                    "name": "key",
+                    "kind": "simple",
+                    "required": false,
+                    "data_type": "character",
+                    "children": null
+                  }
+                ]
+              }
+            },
+            "field_index_by_path": {
+              "Root": {
+                "path": "Root",
+                "name": "Root",
+                "mappable": false,
+                "profile_component_type": "profile.json",
+                "data_type": null,
+                "kind": "object",
+                "required": false,
+                "source": "json_schema"
+              },
+              "Root/key": {
+                "path": "Root/key",
+                "name": "key",
+                "mappable": true,
+                "profile_component_type": "profile.json",
+                "data_type": "character",
+                "kind": "simple",
+                "required": false,
+                "source": "json_schema"
+              }
+            },
+            "mappable_paths": [
+              "Root/key"
+            ]
+          },
+          "target_profile_generation": {
+            "evidence_source": "generator",
+            "generation_mode": "profile_from_json_schema",
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "_TEST_184S1_W3b2_p_a_S118410030413",
+            "profile_config": {
+              "format": "json",
+              "root": {
+                "name": "Root",
+                "kind": "object",
+                "required": false,
+                "data_type": null,
+                "children": [
+                  {
+                    "name": "a1",
+                    "kind": "simple",
+                    "required": false,
+                    "data_type": "character",
+                    "children": null
+                  }
+                ]
+              }
+            },
+            "field_index_by_path": {
+              "Root": {
+                "path": "Root",
+                "name": "Root",
+                "mappable": false,
+                "profile_component_type": "profile.json",
+                "data_type": null,
+                "kind": "object",
+                "required": false,
+                "source": "json_schema"
+              },
+              "Root/a1": {
+                "path": "Root/a1",
+                "name": "a1",
+                "mappable": true,
+                "profile_component_type": "profile.json",
+                "data_type": "character",
+                "kind": "simple",
+                "required": false,
+                "source": "json_schema"
+              }
+            },
+            "mappable_paths": [
+              "Root/a1"
+            ]
+          },
+          "direct_field_mappings": [
+            {
+              "route": "direct",
+              "source_path": "Root/key",
+              "target_path": "Root/a1",
+              "source_data_type": "character",
+              "target_data_type": "character"
+            }
+          ]
+        }
+      ],
+      "naming": {},
+      "folders": {},
+      "runtime": {},
+      "validation_rules": {},
+      "profile_indexes_by_component_id": null,
+      "pipeline": null,
+      "preview_kind": "canonical_units"
+    },
+    "recorded_intents": [],
+    "pipeline_stages": [],
+    "process_cfg": [
+      {
+        "component_key": "root",
+        "node_count": 11,
+        "edge_count": 10,
+        "terminal_kinds": [
+          "cache_put",
+          "stop"
+        ]
+      }
+    ],
+    "component_dependencies": [
+      {
+        "component_key": "c1",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "map",
+        "depends_on": "p_a"
+      },
+      {
+        "component_key": "map",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "op_bm",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_bm",
+        "depends_on": "p_a"
+      },
+      {
+        "component_key": "op_get1",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_get1",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "op_get2",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_get2",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "c1"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "map"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "op_bm"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "op_get1"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "op_get2"
+      }
+    ],
+    "topology_relations": [],
+    "resolved_references": [
+      {
+        "ref": "$ref:c1",
+        "component_type": "documentcache",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "version_marker": "3"
+      },
+      {
+        "ref": "$ref:map",
+        "component_type": "transform.map",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_bm",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:p_a",
+        "component_type": "profile.json",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:p_client",
+        "component_type": "profile.json",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:root",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "validation_report": {
+      "is_valid": true,
+      "error_count": 0,
+      "warning_count": 9,
+      "advisory_count": 0,
+      "codes": [
+        "LEGACY_PLAN_WARNING",
+        "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+      ]
+    },
+    "errors": [],
+    "warnings": [
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'c1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'conn' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'map' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_bm' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get2' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'p_a' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'p_client' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "/body/steps/0/legs/2/steps/1",
+        "subject_kind": "process",
+        "subject_id": "root",
+        "message": "a map, a script or a called subprocess has no typed effect contract, and a subprocess no derived ProcessIR that states every effect it has either, so its state effects are unknown",
+        "remediation": "The finding's effect_kind names which step this is: map, script or subprocess. For a map or a script, declare a typed effect contract for it, or set the state explicitly with a property step. For a subprocess, supply the called process's ProcessIR in this request, so the server derives every effect it has, or declare a typed subprocess summary for it. A declaration alone is not enough: its CONTENT must be backed by a server-side authority \u2014 inspection of the resolved map or child process, or a vetted script registry entry \u2014 and a declaration with no such backing is inert. A missing or inert declaration never establishes state.",
+        "cause_codes": [
+          "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"
+        ],
+        "node_identity": "/body/steps/0/legs/2/steps/1",
+        "evidence": [
+          {
+            "key": "effect_kind",
+            "value": "map"
+          }
+        ],
+        "authoring_contract_entry_ids": [
+          "diagnostic.process_ir_semantic_lineage_effect_unknown"
+        ]
+      }
+    ],
+    "capability_gaps": [],
+    "required_decisions": [],
+    "phase": "compile",
+    "artifact_fingerprints": [
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 9609,
+        "digest": "sha256:f3c2ece470547c88f06ca8932e41bd4751ff61daa97a13254a93270a8ace9b53"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 6143,
+        "digest": "sha256:cae496bb66c74ac99ee627f56f09a5c8d61d2233da554ee86a573c707da24a06"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 1285,
+        "digest": "sha256:7aa7d88ea86e4bae7aa81c48d9f6b41480d5830fbf695071015e0189ad87761a"
+      }
+    ],
+    "normalized_intent_digest": "sha256:3d665925e90cbbcb21edba54301d81a9582267d2bf15d871acdf88fc6534bd87"
+  },
+  "profile": "renera"
+}

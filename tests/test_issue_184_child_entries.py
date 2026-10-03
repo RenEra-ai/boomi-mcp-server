@@ -946,6 +946,7 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
     import collections
 
     from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
     from boomi_mcp.recipes import materialization
 
     payload = authoring_contract._compiler_revision_payload()
@@ -982,6 +983,11 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (integration_builder, "reused_keys_for_components",
          lambda components, conflict_policy="reuse", existing_ids=None: set()),
         (integration_builder, "planned_existing_ids", lambda planned: None),
+        # Correction batch 31 (wave review): the roots apply reuses, and the raw-XML predicate the
+        # symbol facts ask.
+        (integration_builder, "canonical_roots_reused_at_apply",
+         lambda processes, conflict_policy, existing_ids=None: frozenset()),
+        (_shared, "submits_raw_component_xml", lambda config: False),
     )
     for module, name, replacement in perturbations:
         with monkeypatch.context() as patched:

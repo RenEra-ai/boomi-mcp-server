@@ -537,7 +537,8 @@ class ProcessIRSubprocessEffectDeclarationV1(_AuthoringModel):
     CONTENT AUTHORITY: server-side inspection of the resolved child ProcessIR. A
     child that is a bare reference — resolvable as a component but with no
     authored root in this request — cannot be inspected, so such a declaration is
-    INERT rather than trusted.
+    INERT rather than trusted. So is one about a child apply binds to an existing
+    process instead of writing it: the existing process runs, not the submitted root.
     """
 
     process_ref: NonEmptyString

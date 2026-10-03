@@ -1702,6 +1702,7 @@ def _component_identity_behaviour_oracle():
     from ..categories.integration_builder import (
         ComponentWriteConflictError,
         apply_writes_component_config,
+        canonical_roots_reused_at_apply,
         component_writes_existing,
         planned_existing_ids,
     )
@@ -1867,8 +1868,65 @@ def _component_identity_behaviour_oracle():
         "beside_writer": bound(by_name),
         "writerless": bound([component for component in by_name if component.key != "stored_update"]),
     }
+    # #184 wave review (correction batch 31). A raw-XML component states no structured profile fact:
+    # its write submits the XML and never reads them. And a canonical root apply REUSES contributes no
+    # derived contract: a waited, abort-on-error call to it proves nothing its submitted body writes.
+    raw_xml = [spec("p1", "profile.json"), spec("p2", "profile.json")] + [
+        spec(key, component_type, xml="<x/>", **config)
+        for key, component_type, config in (
+            ("xml_map", "transform.map", {"source_profile_id": "$ref:p1", "target_profile_id": "$ref:p2"}),
+            ("xml_cache", "documentcache", {"profile_id": "$ref:p1"}),
+            ("xml_rest", "connector-action", {"request_profile_id": "$ref:p1", "response_profile_id": "$ref:p2"}),
+            ("xml_db", "connector-action", {"write_profile_id": "$ref:p1", "read_profile_id": "$ref:p2"}),
+        )
+    ]
+    raw_xml_facts = sorted(
+        [symbol.ref, symbol.input_profile_ref or "", symbol.output_profile_ref or "", symbol.cache_profile_ref or ""]
+        for symbol in build_symbol_table(raw_xml, conflict_policy="reuse").symbols
+        if symbol.ref.startswith("$ref:xml_")
+    )
+    from ..compiler.process_ir.contracts import SymbolTableV1
+    from ..models.process_component import ProcessAuthoringUnitV1, ProcessComponentEnvelopeV1
+
+    sets_k = {"kind": "set_dpp", "name": "K", "source_values": [{"value_type": "static", "value": "v"}]}
+    child_doc = {"version": "1", "body": {"kind": "sequence", "steps": [{
+        "kind": "decision", "comparison": "equals", "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "a"},
+        "true_arm": {"steps": [sets_k], "terminal": stop}, "false_arm": {"steps": [sets_k], "terminal": stop}}]}}
+    parent_doc = {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+        {"steps": [], "terminal": {"kind": "process_call", "process_ref": "$ref:child", "wait": True,
+                                   "abort_on_error": True}},
+        {"steps": [{"kind": "set_dpp", "name": "OUT", "source_values": [
+            {"value_type": "dpp", "property_name": "K"}]}], "terminal": stop}]}]}}
+    call_roots = [("parent", model.parse_process_ir_v1(parent_doc)), ("child", model.parse_process_ir_v1(child_doc))]
+    call_symbols = SymbolTableV1(symbols=tuple(build_symbol_table(
+        [], process_keys=["parent", "child"], conflict_policy="reuse").symbols))
+
+    def unit(key, document, **envelope):
+        return ProcessAuthoringUnitV1(
+            envelope=ProcessComponentEnvelopeV1(component_key=key, name=key, action="create", **envelope),
+            process_ir=model.parse_process_ir_v1(document))
+
+    bindings = {
+        "new": ({}, None),
+        "declared_id": ({"component_id": "0b31a0b3-1a0b-31a0-b31a-0b31a0b31a0b"}, None),
+        "name_match": ({}, {"child": "0b31a0b3-1a0b-31a0-b31a-0b31a0b31a0b"}),
+        "name_unmatched": ({"component_id": "0b31a0b3-1a0b-31a0-b31a-0b31a0b31a0b"}, {"child": None}),
+    }
+    reused_roots = {}
+    for policy in ("clone", "reuse"):
+        for name, (envelope, existing) in sorted(bindings.items()):
+            reused = canonical_roots_reused_at_apply(
+                [unit("parent", parent_doc), unit("child", child_doc, **envelope)], policy, existing_ids=existing)
+            resolved = resolve_process_ir_effect_declarations(
+                call_roots, None, call_symbols, [], child_roots={"$ref:" + key: ir for key, ir in call_roots},
+                conflict_policy=policy, opaque_roots=reused)
+            context = resolved.capabilities_by_root.get("parent")
+            report = (validate_process_ir(call_roots[0][1], call_symbols, capabilities=context)
+                      if context is not None else validate_process_ir(call_roots[0][1], call_symbols))
+            reused_roots[policy + ":" + name] = [sorted(reused), sorted([item.code, item.path] for item in report.errors)]
     verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources,
-                "named_bindings": named_bindings}
+                "named_bindings": named_bindings, "raw_xml_facts": raw_xml_facts, "reused_roots": reused_roots}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as

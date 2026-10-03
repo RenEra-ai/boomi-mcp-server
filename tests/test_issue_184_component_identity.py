@@ -15,8 +15,10 @@ The binding authority is the builder's own (`reused_keys_for_components`, the on
 from __future__ import annotations
 
 import ast
+import copy
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,9 +29,19 @@ for _p in (str(_ROOT), str(_ROOT / "src"), str(_HERE)):
         sys.path.insert(0, _p)
 
 from boomi_mcp.authoring import process_ir_effects  # noqa: E402
+from boomi_mcp.authoring.process_ir_effects import (  # noqa: E402
+    INERT_REUSED,
+    derive_subprocess_effect,
+    resolve_process_ir_effect_declarations,
+    subprocess_inert_reasons,
+)
 from boomi_mcp.authoring.workflow import plan_authoring_request_v1  # noqa: E402
+from boomi_mcp.categories import integration_builder  # noqa: E402
+from boomi_mcp.categories.components import _shared  # noqa: E402
 from boomi_mcp.categories.integration_builder import (  # noqa: E402
     ComponentWriteConflictError,
+    build_integration_action,
+    canonical_roots_reused_at_apply,
     declared_bindings_for_components,
 )
 from boomi_mcp.compiler.process_ir.contracts import component_identity  # noqa: E402
@@ -39,10 +51,39 @@ from boomi_mcp.compiler.process_ir.semantic_validation.context import (  # noqa:
 from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import (  # noqa: E402
     validate_process_ir,
 )
-from boomi_mcp.models.authoring_workflow import AuthoringRequestV1  # noqa: E402
+from boomi_mcp.errors import (  # noqa: E402
+    PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE,
+    PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+)
+from boomi_mcp.models.authoring_workflow import (  # noqa: E402
+    AuthoringRequestV1,
+    ProcessIRStateEffectDeclarationV1,
+    ProcessIRStateReferenceV1,
+    ProcessIRSubprocessEffectDeclarationV1,
+)
 from boomi_mcp.models.integration_models import IntegrationComponentSpec  # noqa: E402
 from boomi_mcp.models.process_ir import parse_process_ir_v1  # noqa: E402
 from boomi_mcp.recipes.materialization import build_symbol_table  # noqa: E402
+
+# The #158 deployment suite's two autouse fixtures, imported so they apply here too: the build
+# registry is restored after each test, and the metadata pager is stubbed, because unstubbed
+# over a MagicMock client it never terminates (the wave-review witnesses at the end of this
+# module drive the public dispatcher).
+from test_issue_158_listener_deployment import (  # noqa: E402,F401
+    _PROFILE,
+    _ApplyBoundary,
+    _no_live_metadata_queries,
+    _registry_restored,
+    _request,
+    _typed_build,
+    _unit,
+)
+from test_issue_184_child_entries import _symbols  # noqa: E402
+from test_issue_184_child_state_transfer import (  # noqa: E402
+    _SETS_K,
+    _WAITS_AND_ABORTS,
+    _call_then_read,
+)
 
 _MISMATCH = "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"
 _WRITER_MISSING = "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
@@ -1908,3 +1949,434 @@ def test_every_identity_decision_of_the_plan_route_moves_the_compiler_revision()
     # Non-vacuity: the derivation sees the reading batch 10 added, and the perturbation parse sees its rows.
     assert {"planned_existing_ids", "reused_keys_for_components"} <= decisions, decisions
     assert len(perturbed) >= 8, perturbed
+
+
+# ---------------------------------------------------------------------------
+# #184 wave-level integration review (correction batch 31): two P2 findings
+# ---------------------------------------------------------------------------
+# #184 wave-level integration review (``--base cbab28f`` up to ``c894120``): two P2 findings.
+#
+# A. ``Exclude reused process bodies from child-contract derivation``. Under
+#    ``conflict_policy='reuse'`` a canonical root that names an existing process, by id or by
+#    an exact name match, is BOUND, and ``_execute_canonical_process`` returns before its
+#    submitted body is compiled. The shared resolver still derived that body's entry
+#    contract, so a waited, abort-on-error call to a reused child whose submitted body sets
+#    process property ``K`` proved ``K`` for a later Branch leg the stored child need not
+#    establish. A reused root now contributes no derived contract, asked of apply's own
+#    predicate (``_will_reuse_at_apply``, through ``canonical_roots_reused_at_apply``), and a
+#    call to it is a call to an unknown child. The #154 declaration channel had the same hole
+#    (pre-existing at ``cbab28f``): a declared subprocess summary is inert for a reused child.
+#
+# B. ``Ignore structured profile facts when raw XML is authoritative``. A component whose
+#    config carries ``xml`` is written verbatim by every write route and its structured
+#    fields are never read, yet ``_profile_facts`` published them as compiler facts. A map
+#    whose submitted XML names other profiles compiled because its ignored
+#    ``source_profile_id``/``target_profile_id`` matched the calls around it. The facts now
+#    come from ``submits_raw_component_xml``, the one predicate every write route asks, and
+#    a raw-XML component states no profile.
+#
+# The expected verdicts are the review's own statement of each defect and the strict
+# outcome a call to a child nothing derives already receives (`cap184-dpp-both-ways`'s
+# ``no_abort`` row, `PROPERTY_READ_BEFORE_WRITE` at the later leg), and the map pair check's
+# own rule that an absent map profile is a mismatch (``_check_map_pair``). Never this
+# implementation's output.
+
+_READ_BEFORE_WRITE = PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE
+#: The later Branch leg's read of K (`_call_then_read`'s second leg).
+_LATER_READ = "/body/steps/0/legs/1/steps/0"
+_EXISTING = "0b31a0b3-1a0b-31a0-b31a-0b31a0b31a0b"
+
+
+def _renamed(document, old, new):
+    import json
+
+    return json.loads(json.dumps(document).replace("$ref:" + old, "$ref:" + new))
+
+
+#: The review's parent: a waited, abort-on-error call to `child`, then a sibling leg reading K.
+_PARENT = _renamed(_call_then_read(**_WAITS_AND_ABORTS), "WRITER", "child")
+#: The child whose SUBMITTED body sets K on every path.
+_CHILD = _SETS_K
+
+
+def _by_name(_client, participant, *_args, **_kwargs):
+    """The account read apply binds a name by: the child's name matches one existing process."""
+    if getattr(participant, "name", None) == "B31 child":
+        return [{"component_id": _EXISTING, "name": "B31 child", "folder_name": "f"}]
+    return []
+
+
+def _nothing(*_args, **_kwargs):
+    return []
+
+
+#: ``(envelope fields, account read, conflict_policy)`` for each way apply binds the child.
+_REUSED = {
+    "by_declared_id": ({"component_id": _EXISTING}, _nothing, "reuse"),
+    "by_name_match": ({}, _by_name, "reuse"),
+}
+#: Controls: apply WRITES the submitted child, so its contract is the executed one.
+_WRITTEN = {
+    "new_component": ({}, _nothing, "reuse"),
+    "clone_of_a_declared_id": ({"component_id": _EXISTING}, _nothing, "clone"),
+}
+
+
+def _raw_spec(child_extra):
+    return {"name": "B31 wave review", "components": [], "processes": [
+        _unit(_PARENT, ("child",), key="root", name="B31 root").model_dump(mode="json"),
+        _unit(_CHILD, (), key="child", name="B31 child", **child_extra).model_dump(mode="json")]}
+
+
+def _raw_apply(child_extra, existing, policy):
+    boundary = _ApplyBoundary(root_ids=("b31-child-cid", "b31-root-cid"))
+    spec = _raw_spec(child_extra)
+    with boundary.installed(existing):
+        planned = build_integration_action(MagicMock(), _PROFILE, "plan", config={
+            "integration_spec": copy.deepcopy(spec), "conflict_policy": policy})
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy(spec), "conflict_policy": policy, "dry_run": False})
+    return planned, applied, boundary
+
+
+def _typed_request(child_extra, policy, declarations=None):
+    request = _request([_unit(_PARENT, ("child",), key="root", name="B31 root"),
+                        _unit(_CHILD, (), key="child", name="B31 child", **child_extra)], [],
+                       conflict_policy=policy)
+    raw = request.model_dump(mode="json")
+    if declarations is not None:
+        raw["effect_declarations"] = declarations
+    return request, raw
+
+
+def _typed_plan(child_extra, existing, policy, declarations=None):
+    _request_model, raw = _typed_request(child_extra, policy, declarations)
+    with _ApplyBoundary().installed(existing):
+        return build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+
+
+def _wr_plan_errors(planned):
+    return sorted((code, error["path"]) for error in planned["authoring_result"]["errors"]
+                  for code in error.get("cause_codes") or ())
+
+
+# ---------------------------------------------------------------------------
+# A: a reused child's submitted body derives nothing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("binding", sorted(_REUSED))
+def test_the_raw_route_derives_no_contract_from_a_reused_childs_submitted_body(binding):
+    """The review's repro: a raw apply bound the child and admitted the later read of K on
+    the strength of a body it discarded. It is refused before any write now, as a call to a
+    child nothing derives is."""
+    child_extra, existing, policy = _REUSED[binding]
+    planned, applied, boundary = _raw_apply(child_extra, existing, policy)
+    steps = {step["key"]: step["planned_action"] for step in planned["steps"]}
+    assert steps == {"child": "reuse", "root": "create"}, steps
+    assert applied["_success"] is False, applied
+    assert (applied["error_code"], applied["failed_step"]) == (_READ_BEFORE_WRITE, "root"), applied
+    assert "Offending path: {0}.".format(_LATER_READ) in applied["hint"], applied["hint"]
+    assert boundary.created == [] and boundary.executed == {}, (boundary.created, boundary.executed)
+
+
+@pytest.mark.parametrize("binding", sorted(_REUSED))
+def test_the_typed_route_derives_no_contract_from_a_reused_childs_submitted_body(binding):
+    child_extra, existing, policy = _REUSED[binding]
+    planned = _typed_plan(child_extra, existing, policy)
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is False
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _wr_plan_errors(planned), _wr_plan_errors(planned)
+
+
+@pytest.mark.parametrize("binding", sorted(_WRITTEN))
+def test_a_child_apply_writes_keeps_its_derived_contract_on_both_routes(binding):
+    """Controls: a new child and a clone are WRITTEN, so the body that sets K is the one
+    that runs, and the later read stays admitted (`cap184-dpp-both-ways`)."""
+    child_extra, existing, policy = _WRITTEN[binding]
+    _planned, applied, boundary = _raw_apply(child_extra, existing, policy)
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert boundary.created == ["b31-child-cid", "b31-root-cid"], boundary.created
+    request, _raw = _typed_request(child_extra, policy)
+    _typed_build(request, _ApplyBoundary(root_ids=("b31-child-cid", "b31-root-cid")), existing=existing)
+
+
+def test_the_reuse_answer_is_apply_s_own_predicate(monkeypatch):
+    """`canonical_roots_reused_at_apply` asks `_will_reuse_at_apply`, the predicate
+    `_execute_canonical_process`'s reuse branch asks. One mutation of it flips BOTH: the
+    derivation stops treating the child as reused and apply writes the child, so the
+    request's verdict and what apply executes cannot come apart."""
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    spec = IntegrationSpecV1(**_raw_spec({"component_id": _EXISTING}))
+    assert canonical_roots_reused_at_apply(spec.processes, "reuse") == {"child"}
+    assert canonical_roots_reused_at_apply(spec.processes, "clone") == frozenset()
+    # Apply's binding answers the keys it carries, including an answer that binds nothing.
+    assert canonical_roots_reused_at_apply(spec.processes, "reuse", existing_ids={"child": None}) == frozenset()
+    by_name = IntegrationSpecV1(**_raw_spec({}))
+    assert canonical_roots_reused_at_apply(by_name.processes, "reuse") == frozenset()
+    assert canonical_roots_reused_at_apply(by_name.processes, "reuse", existing_ids={"child": _EXISTING}) == {"child"}
+
+    # With the predicate answering "never reused", apply no longer binds the child: it goes
+    # on to WRITE the existing component the child names (an update, which this boundary's
+    # non-process readback then refuses AT the child), and the derivation no longer refuses the
+    # request before the first write.
+    monkeypatch.setattr(integration_builder, "_will_reuse_at_apply", lambda **_kwargs: False)
+    planned, applied, _boundary = _raw_apply({"component_id": _EXISTING}, _nothing, "reuse")
+    assert {step["key"]: step["planned_action"] for step in planned["steps"]}["child"] == "reuse"
+    assert applied["_success"] is False and applied["failed_step"] == "child", applied
+    assert applied["error_code"] != _READ_BEFORE_WRITE, applied
+
+
+def _without_the_reuse_answer(monkeypatch):
+    """The source mutant: the derivation's reuse answer emptied, apply left alone."""
+    monkeypatch.setattr(integration_builder, "canonical_roots_reused_at_apply",
+                        lambda *_args, **_kwargs: frozenset())
+    return _REUSED["by_declared_id"]
+
+
+def test_the_opaque_reused_root_is_load_bearing_on_the_raw_route(monkeypatch):
+    """Non-vacuity: with the mutant the review's request applies again — so the refusal above
+    is the reused root's opacity and nothing else."""
+    child_extra, existing, policy = _without_the_reuse_answer(monkeypatch)
+    _planned, applied, boundary = _raw_apply(child_extra, existing, policy)
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert boundary.created == ["b31-child-cid"], boundary.created  # the root only; the child is bound
+
+
+def test_the_opaque_reused_root_is_load_bearing_on_the_typed_route(monkeypatch):
+    child_extra, existing, policy = _without_the_reuse_answer(monkeypatch)
+    planned = _typed_plan(child_extra, existing, policy)
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(planned)
+
+
+def _parsed_roots():
+    """The same request in the child-entries symbol table's keys: PARENT calls WRITER."""
+    return [("PARENT", parse_process_ir_v1(_call_then_read(**_WAITS_AND_ABORTS))),
+            ("WRITER", parse_process_ir_v1(_CHILD))]
+
+
+def test_the_resolver_binds_no_row_for_an_opaque_child_and_keeps_its_own_facts():
+    roots = _parsed_roots()
+    child_roots = {"$ref:" + key: ir for key, ir in roots}
+    derived = resolve_process_ir_effect_declarations(roots, None, _symbols(), [], child_roots=child_roots)
+    assert derived.capabilities_by_root["PARENT"].child_entry_contract("$ref:WRITER").guaranteed_state == (
+        ("dpp", "K"),)
+    opaque = resolve_process_ir_effect_declarations(
+        roots, None, _symbols(), [], child_roots=child_roots, opaque_roots=frozenset({"WRITER"}))
+    parent = opaque.capabilities_by_root["PARENT"]
+    assert parent is None or parent.child_entry_contract("$ref:WRITER") is None, parent
+    # The reused root's own context is what it was: only its callers stop reading it.
+    assert opaque.capabilities_by_root["WRITER"] == derived.capabilities_by_root["WRITER"]
+
+
+def _declared_child_summary():
+    reads, writes, replay_safe = derive_subprocess_effect(parse_process_ir_v1(_CHILD)).effect
+    return ProcessIREffectDeclarationsV1(subprocess_effects=(ProcessIRSubprocessEffectDeclarationV1(
+        process_ref="$ref:WRITER", effect=ProcessIRStateEffectDeclarationV1(
+            reads=tuple(ProcessIRStateReferenceV1(scope=s, name=n) for s, n in reads),
+            writes=tuple(ProcessIRStateReferenceV1(scope=s, name=n) for s, n in writes),
+            replay_safe=replay_safe)),))
+
+
+def test_a_declared_summary_of_a_reused_child_is_inert_and_its_reason_is_served():
+    """The #154 channel's sibling, pre-existing at `cbab28f`: a matching declaration bound a
+    summary derived from the reused child's submitted body. It is inert for the served
+    reason, and binds for a written child (control)."""
+    roots = _parsed_roots()
+    child_roots = {"$ref:" + key: ir for key, ir in roots}
+    declarations = _declared_child_summary()
+    written = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), [], child_roots=child_roots)
+    assert written.inert == () and written.capabilities_by_root["PARENT"].subprocess_summaries, written
+    reused = resolve_process_ir_effect_declarations(
+        roots, declarations, _symbols(), [], child_roots=child_roots, opaque_roots=frozenset({"WRITER"}))
+    assert reused.inert == ("/effect_declarations/subprocess_effects/0",), reused
+    assert reused.capabilities_by_root["PARENT"].subprocess_summaries == ()
+    assert INERT_REUSED in dict(subprocess_inert_reasons())
+
+
+@pytest.mark.parametrize("binding", sorted(_REUSED))
+def test_the_typed_route_refuses_a_declared_summary_of_a_reused_child(binding):
+    child_extra, existing, policy = _REUSED[binding]
+    declarations = _declared_child_summary().model_dump(mode="json")
+    declarations["subprocess_effects"][0]["process_ref"] = "$ref:child"
+    admitted = _typed_plan({}, _nothing, "reuse", declarations=declarations)
+    assert admitted["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(admitted)
+    refused = _typed_plan(child_extra, existing, policy, declarations=declarations)
+    assert (_READ_BEFORE_WRITE, _LATER_READ) in _wr_plan_errors(refused), _wr_plan_errors(refused)
+
+
+# ---------------------------------------------------------------------------
+# B: a raw-XML component states no structured profile fact
+# ---------------------------------------------------------------------------
+
+
+def _component(key, component_type, **config):
+    return IntegrationComponentSpec(key=key, type=component_type, config=config)
+
+
+_XML = "<bns:Component xmlns:bns='http://api.platform.boomi.com/' type='x'/>"
+#: ``(type, config)`` for every component `_profile_facts` reads, and the facts it states.
+_FACT_SOURCES = {
+    "map": ("transform.map", {"source_profile_id": "$ref:p1", "target_profile_id": "$ref:p2"},
+            ("$ref:p1", "$ref:p2", None)),
+    "cache": ("documentcache", {"profile_id": "$ref:p1"}, (None, None, "$ref:p1")),
+    "rest_operation": ("connector-action", {"request_profile_id": "$ref:p1", "response_profile_id": "$ref:p2"},
+                       ("$ref:p1", "$ref:p2", None)),
+    "database_operation": ("connector-action", {"write_profile_id": "$ref:p1", "read_profile_id": "$ref:p2"},
+                           ("$ref:p1", "$ref:p2", None)),
+}
+
+
+def _facts(component_type, config):
+    table = build_symbol_table([_component("p1", "profile.json"), _component("p2", "profile.json"),
+                                _component("c", component_type, **config)])
+    symbol = {item.ref: item for item in table.symbols}["$ref:c"]
+    return symbol.input_profile_ref, symbol.output_profile_ref, symbol.cache_profile_ref
+
+
+@pytest.mark.parametrize("source", sorted(_FACT_SOURCES))
+def test_a_raw_xml_component_states_no_profile_fact(source):
+    component_type, config, stated = _FACT_SOURCES[source]
+    assert _facts(component_type, config) == stated  # control: structured, the builder reads them
+    assert _facts(component_type, dict(config, xml=_XML)) == (None, None, None)
+
+
+def test_a_raw_xml_listener_operation_states_no_inbound_fact_without_the_snapshot():
+    """The sibling the listener facts carried: without a snapshot reading of the submitted
+    bytes, the structured fields beside the XML stated the inbound contract."""
+    config = {"connector_type": "wss", "operation_mode": "listen", "input_type": "singlejson",
+              "request_profile": "$ref:p1"}
+    def listener(**extra):
+        symbol = {item.ref: item for item in build_symbol_table(
+            [_component("op", "connector-action", **dict(config, **extra))]).symbols}["$ref:op"]
+        return symbol.input_document_type, symbol.input_profile_ref
+    assert listener() == ("singlejson", "$ref:p1")
+    assert listener(xml=_XML) == (None, None)
+
+
+_MAP_XML = (
+    '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+    'xmlns:bns="http://api.platform.boomi.com/" type="transform.map" name="m">'
+    '<bns:encryptedValues/><bns:description></bns:description><bns:object>'
+    '<Map xmlns="" fromProfile="aaaaaaaa-0000-0000-0000-000000000001" '
+    'toProfile="aaaaaaaa-0000-0000-0000-000000000002"><Mappings/></Map>'
+    '</bns:object></bns:Component>')
+
+
+def _plan_profile(key, field):
+    return {"key": key, "type": "profile.json", "name": key, "action": "create", "config": {
+        "component_type": "profile.json", "profile_type": "json.generated", "component_name": key,
+        "root": {"name": "Root", "kind": "object", "children": [
+            {"name": field, "kind": "simple", "data_type": "character", "required": False}]}}}
+
+
+def _wr_map_components(map_arm):
+    config = {"component_type": "transform.map", "component_name": "m",
+              "source_profile_id": "$ref:p_client", "source_profile_type": "profile.json",
+              "target_profile_id": "$ref:p_a", "target_profile_type": "profile.json"}
+    if map_arm == "structured":
+        config.update(map_type="direct", field_mappings=[{"source_path": "Root/key", "target_path": "Root/a1"}])
+    else:
+        config.update(xml=_MAP_XML)
+    return [
+        {"key": "conn", "type": "connector-settings", "name": "Sandbox CDS Mock REST (no-auth)",
+         "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc", "action": "create",
+         "config": {"connector_type": "rest", "component_name": "Sandbox CDS Mock REST (no-auth)",
+                    "base_url": "http://host.docker.internal:8081", "auth": "NONE"}},
+        _plan_profile("p_client", "key"),
+        _plan_profile("p_a", "a1"),
+        {"key": "op_get", "type": "connector-action", "name": "op_get", "action": "create",
+         "depends_on": ["conn", "p_client"], "config": {
+             "component_type": "connector-action", "connector_type": "rest", "operation_mode": "execute",
+             "component_name": "op_get", "connection_ref_key": "conn", "method": "GET",
+             "path": "/admin/cdscm/api/v1/clients/1", "return_application_errors": True,
+             "track_response": True, "response_profile_id": "$ref:p_client", "response_profile_type": "json"}},
+        {"key": "m", "type": "transform.map", "name": "m", "action": "create",
+         "depends_on": ["p_client", "p_a"], "config": config},
+    ]
+
+
+#: A call hands on its response profile, then the map: compared with the stream it reads.
+_MAP_DOC = {"version": "1", "body": {"kind": "sequence", "steps": [
+    {"kind": "connector_call", "operation_ref": "$ref:op_get"},
+    {"kind": "map_ref", "map_ref": "$ref:m"},
+    {"kind": "stop"}]}}
+_MAP_PATH = "/body/steps/1/map_ref"
+
+
+def _map_unit(map_arm):
+    return {"envelope": {"component_key": "root", "name": "B31 map root", "action": "create",
+                         "depends_on": [spec["key"] for spec in _wr_map_components(map_arm)]},
+            "process_ir": _MAP_DOC}
+
+
+def _raw_map_apply(map_arm):
+    boundary = _ApplyBoundary(root_ids=("b31-root-cid",))
+    spec = {"name": "B31 raw map", "components": _wr_map_components(map_arm), "processes": [_map_unit(map_arm)]}
+    with boundary.installed():
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy(spec), "dry_run": False})
+    return applied, boundary
+
+
+def _typed_map_plan(map_arm):
+    raw = {"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "B31 map", "units": [_map_unit(map_arm)],
+        "components": _wr_map_components(map_arm), "conflict_policy": "reuse"}}
+    with _ApplyBoundary().installed():
+        return build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+
+
+def test_a_raw_xml_map_is_judged_without_the_profiles_its_write_ignores():
+    """The review's repro, both routes: the map's submitted XML names other profiles while
+    its ignored structured fields match the call before it. With no profile stated the map
+    pair check refuses it, the rule for a map whose profile is absent."""
+    applied, boundary = _raw_map_apply("xml")
+    assert applied["_success"] is False, applied
+    assert applied["error_code"] == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, applied
+    assert "Offending path: {0}.".format(_MAP_PATH) in applied["hint"], applied["hint"]
+    assert boundary.created == [] and boundary.executed == {}, (boundary.created, boundary.executed)
+    planned = _typed_map_plan("xml")
+    assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, _MAP_PATH) in _wr_plan_errors(planned), _wr_plan_errors(planned)
+
+
+def test_a_structured_map_keeps_its_profile_facts_on_both_routes():
+    applied, boundary = _raw_map_apply("structured")
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert "xml" not in boundary.executed["m"]
+    planned = _typed_map_plan("structured")
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(planned)
+
+
+def test_the_raw_xml_map_refusal_is_the_predicate(monkeypatch):
+    """Non-vacuity: with the predicate answering False the facts are read off the ignored
+    fields again and the review's request applies, submitting the conflicting XML."""
+    monkeypatch.setattr(_shared, "submits_raw_component_xml", lambda _config: False)
+    applied, boundary = _raw_map_apply("xml")
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert boundary.executed["m"]["xml"] == _MAP_XML
+
+
+@pytest.mark.parametrize("xml", [None, "", "<x/>", "  "], ids=["absent", "empty", "document", "blank"])
+@pytest.mark.parametrize("component_type", ["transform.map", "documentcache"])
+def test_the_write_route_and_the_facts_ask_one_predicate(component_type, xml):
+    """Bidirectional pin: `_execute_component` submits the caller's bytes exactly when
+    `submits_raw_component_xml` says so, and exactly then the component states no fact."""
+    config = dict(_FACT_SOURCES["map" if component_type == "transform.map" else "cache"][1])
+    if xml is not None:
+        config["xml"] = xml
+    submitted = []
+    built = []
+
+    def create(_client, _profile, payload, **_kwargs):
+        (submitted if payload.get("xml") == config.get("xml") and config.get("xml") else built).append(payload)
+        return {"_success": True, "component_id": "x"}
+
+    comp = IntegrationComponentSpec(key="c", type=component_type, name="c", action="create", config=config)
+    with patch.object(integration_builder, "create_component", side_effect=create):
+        integration_builder._execute_component(MagicMock(), _PROFILE, comp, dict(config))
+    raw = _shared.submits_raw_component_xml(config)
+    assert bool(submitted) is raw, (submitted, built)
+    stated = _facts(component_type, config)
+    assert (stated == (None, None, None)) is raw, stated

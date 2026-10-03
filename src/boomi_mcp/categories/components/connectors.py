@@ -34,6 +34,7 @@ from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
     paginate_metadata, _create_component_raw, _extract_api_error_msg,
     ComponentGetDeadlineExceeded, component_get_deadline_envelope,
+    submits_raw_component_xml,
 )
 from .builders.connector_builder import (
     BuilderValidationError,
@@ -385,7 +386,7 @@ def create_connector(
     folder_id = folder_id or config.get("folder_id")
     try:
         # Path 1: raw XML
-        if config.get('xml'):
+        if submits_raw_component_xml(config):
             result = _create_component_raw(boomi_client, config['xml'], folder_id=folder_id)
             return {
                 "_success": True,
@@ -563,7 +564,7 @@ def update_connector(
     """
     try:
         # Path 1: raw XML replacement
-        if config.get('xml'):
+        if submits_raw_component_xml(config):
             boomi_client.component.update_component_raw(component_id, config['xml'])
             return {
                 "_success": True,

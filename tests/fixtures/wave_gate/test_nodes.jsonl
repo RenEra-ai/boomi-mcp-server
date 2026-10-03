@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14356, "minimum_collected": 14356, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14385, "minimum_collected": 14385, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14454,3 +14454,32 @@
 {"kind": "test", "id": "pytest-014453", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_direct_read_off_a_childs_entry_documents_is_recorded_not_matched", "state": "active"}
 {"kind": "test", "id": "pytest-014454", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_non_strict_process_property_read_is_recorded_not_matched", "state": "active"}
 {"kind": "test", "id": "pytest-014455", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_childrens_writes_left_out_of_the_writer_set_re_admits_the_sibling_reader", "state": "active"}
+{"kind": "test", "id": "pytest-014456", "node_id": "tests/test_issue_184_component_identity.py::test_the_raw_route_derives_no_contract_from_a_reused_childs_submitted_body[by_declared_id]", "state": "active"}
+{"kind": "test", "id": "pytest-014457", "node_id": "tests/test_issue_184_component_identity.py::test_the_raw_route_derives_no_contract_from_a_reused_childs_submitted_body[by_name_match]", "state": "active"}
+{"kind": "test", "id": "pytest-014458", "node_id": "tests/test_issue_184_component_identity.py::test_the_typed_route_derives_no_contract_from_a_reused_childs_submitted_body[by_declared_id]", "state": "active"}
+{"kind": "test", "id": "pytest-014459", "node_id": "tests/test_issue_184_component_identity.py::test_the_typed_route_derives_no_contract_from_a_reused_childs_submitted_body[by_name_match]", "state": "active"}
+{"kind": "test", "id": "pytest-014460", "node_id": "tests/test_issue_184_component_identity.py::test_a_child_apply_writes_keeps_its_derived_contract_on_both_routes[clone_of_a_declared_id]", "state": "active"}
+{"kind": "test", "id": "pytest-014461", "node_id": "tests/test_issue_184_component_identity.py::test_a_child_apply_writes_keeps_its_derived_contract_on_both_routes[new_component]", "state": "active"}
+{"kind": "test", "id": "pytest-014462", "node_id": "tests/test_issue_184_component_identity.py::test_the_reuse_answer_is_apply_s_own_predicate", "state": "active"}
+{"kind": "test", "id": "pytest-014463", "node_id": "tests/test_issue_184_component_identity.py::test_the_opaque_reused_root_is_load_bearing_on_the_raw_route", "state": "active"}
+{"kind": "test", "id": "pytest-014464", "node_id": "tests/test_issue_184_component_identity.py::test_the_opaque_reused_root_is_load_bearing_on_the_typed_route", "state": "active"}
+{"kind": "test", "id": "pytest-014465", "node_id": "tests/test_issue_184_component_identity.py::test_the_resolver_binds_no_row_for_an_opaque_child_and_keeps_its_own_facts", "state": "active"}
+{"kind": "test", "id": "pytest-014466", "node_id": "tests/test_issue_184_component_identity.py::test_a_declared_summary_of_a_reused_child_is_inert_and_its_reason_is_served", "state": "active"}
+{"kind": "test", "id": "pytest-014467", "node_id": "tests/test_issue_184_component_identity.py::test_the_typed_route_refuses_a_declared_summary_of_a_reused_child[by_declared_id]", "state": "active"}
+{"kind": "test", "id": "pytest-014468", "node_id": "tests/test_issue_184_component_identity.py::test_the_typed_route_refuses_a_declared_summary_of_a_reused_child[by_name_match]", "state": "active"}
+{"kind": "test", "id": "pytest-014469", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_component_states_no_profile_fact[cache]", "state": "active"}
+{"kind": "test", "id": "pytest-014470", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_component_states_no_profile_fact[database_operation]", "state": "active"}
+{"kind": "test", "id": "pytest-014471", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_component_states_no_profile_fact[map]", "state": "active"}
+{"kind": "test", "id": "pytest-014472", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_component_states_no_profile_fact[rest_operation]", "state": "active"}
+{"kind": "test", "id": "pytest-014473", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_listener_operation_states_no_inbound_fact_without_the_snapshot", "state": "active"}
+{"kind": "test", "id": "pytest-014474", "node_id": "tests/test_issue_184_component_identity.py::test_a_raw_xml_map_is_judged_without_the_profiles_its_write_ignores", "state": "active"}
+{"kind": "test", "id": "pytest-014475", "node_id": "tests/test_issue_184_component_identity.py::test_a_structured_map_keeps_its_profile_facts_on_both_routes", "state": "active"}
+{"kind": "test", "id": "pytest-014476", "node_id": "tests/test_issue_184_component_identity.py::test_the_raw_xml_map_refusal_is_the_predicate", "state": "active"}
+{"kind": "test", "id": "pytest-014477", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[transform.map-absent]", "state": "active"}
+{"kind": "test", "id": "pytest-014478", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[transform.map-empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014479", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[transform.map-document]", "state": "active"}
+{"kind": "test", "id": "pytest-014480", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[transform.map-blank]", "state": "active"}
+{"kind": "test", "id": "pytest-014481", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[documentcache-absent]", "state": "active"}
+{"kind": "test", "id": "pytest-014482", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[documentcache-empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014483", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[documentcache-document]", "state": "active"}
+{"kind": "test", "id": "pytest-014484", "node_id": "tests/test_issue_184_component_identity.py::test_the_write_route_and_the_facts_ask_one_predicate[documentcache-blank]", "state": "active"}

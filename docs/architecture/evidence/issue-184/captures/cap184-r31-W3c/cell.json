@@ -1,0 +1,125 @@
+{
+  "key": "W3c",
+  "raw": false,
+  "stamp_start": {
+    "head": "c894120d77cd205305032a8fb755e6ea5f537bbc",
+    "tracked_dirty": false,
+    "code_sha256": "d17d994e43e7123d",
+    "tree": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/dd0795df-3353-44ce-87ff-9a2c0b40e60a/scratchpad/q184r31/tree_c894120"
+  },
+  "nonce": "S118410030413",
+  "utc": "2026-10-03T05:08:32.243476+00:00",
+  "compile_ok": true,
+  "compile_hash": "sha256:915e356e6f93e7e620fe15823c49a94fa673084d0b503ec16db0e9de6eddd2d7",
+  "apply_ok": true,
+  "apply_error": [
+    null,
+    "None"
+  ],
+  "created": [
+    [
+      "op_child",
+      "3f406f24-4454-4292-87af-eda815cdf861",
+      "connector-action",
+      "_TEST_184S1_W3c_op_child_S118410030413"
+    ],
+    [
+      "p_client",
+      "21a7def0-2bac-4fd9-819f-7662af3933b1",
+      "profile.json",
+      "_TEST_184S1_W3c_p_client_S118410030413"
+    ],
+    [
+      "op_get1",
+      "d0c70781-2b81-40f9-a3a2-1a862828d8a2",
+      "connector-action",
+      "_TEST_184S1_W3c_op_get1_S118410030413"
+    ],
+    [
+      "op_get2",
+      "76542633-572c-48d5-9634-196ef9c98238",
+      "connector-action",
+      "_TEST_184S1_W3c_op_get2_S118410030413"
+    ],
+    [
+      "root",
+      "cb920e5c-cc96-45ae-96c0-75993811639a",
+      "process",
+      "_TEST_184S1_W3c_root_S118410030413"
+    ],
+    [
+      "root",
+      "cb920e5c-cc96-45ae-96c0-75993811639a",
+      "process",
+      null
+    ]
+  ],
+  "roots": {
+    "root": "cb920e5c-cc96-45ae-96c0-75993811639a"
+  },
+  "parent_root": "cb920e5c-cc96-45ae-96c0-75993811639a",
+  "deploy": {
+    "package_id": "ca48a722-ef7d-465c-a78a-10c0961df6d4",
+    "deployment_id": "69074c38-1f78-4034-8ecd-2424a67e896f",
+    "ok": true
+  },
+  "execution_id": "execution-223ff680-cecd-454c-b09d-4c92758506c2-2026.10.03",
+  "record": [
+    {
+      "@type": "ExecutionRecord",
+      "executionId": "execution-223ff680-cecd-454c-b09d-4c92758506c2-2026.10.03",
+      "account": "trainingglebbochkarov-16926N",
+      "executionTime": "2026-10-03T05:12:47Z",
+      "status": "COMPLETE",
+      "executionType": "exec_manual",
+      "processName": "_TEST_184S1_W3c_root_S118410030413",
+      "processId": "cb920e5c-cc96-45ae-96c0-75993811639a",
+      "atomName": "renera-local-atom",
+      "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "inboundDocumentCount": 1,
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 3,
+      "executionDuration": [
+        "Long",
+        55
+      ],
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "outboundDocumentSize": [
+        "Long",
+        579
+      ],
+      "recordedDate": "2026-10-03T05:12:47Z"
+    }
+  ],
+  "mock": [
+    "INFO:     172.19.0.1:64236 - \"GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:64248 - \"GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:64258 - \"GET /__S31_184__/S118410030413/W3c/x/seg-S118410030413 HTTP/1.1\" 404 Not Found"
+  ],
+  "wire": [
+    [
+      "GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1",
+      ""
+    ],
+    [
+      "GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1",
+      "{\"name\":\"QA Created\",\"clientId\":\"QA_clients_925814E6D8\",\"key\":\"1bdb1503-2807-4771-b1b7-8689be8f8e0a\",\"createdOn\":\"2026-05-22T21:51:28.494Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-05-22T21:51:28."
+    ],
+    [
+      "GET /__S31_184__/S118410030413/W3c/x/seg-S118410030413 HTTP/1.1",
+      "{\"name\":\"Lookup\",\"clientId\":\"QA_clients_658C21E07C\",\"key\":\"97ef6619-0f72-41bf-9b29-dba25de5f9da\",\"createdOn\":\"2026-05-22T21:51:28.511Z\",\"createdBy\":\"integration\",\"modifiedOn\":\"2026-05-22T21:51:28.511Z"
+    ]
+  ],
+  "log_excerpt": "2026-10-03T05:12:47Z\tINFO\tinitializing...\t\tExecuting Process _TEST_184S1_W3c_root_S118410030413\n2026-10-03T05:12:47Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-10-03T05:12:47Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-10-03T05:12:47Z\tINFO\tStart\tNoData\tShape executed successfully in 2 ms.\n2026-10-03T05:12:47Z\tINFO\tBranch\t\tExecuting Branch Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tBranch\t\tShape executed successfully in 0 ms.\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_get1_S118410030413\tExecuting Connector Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_get1_S118410030413\tShape executed successfully in 5 ms.\n2026-10-03T05:12:47Z\tINFO\tDocument Properties\t\tExecuting Set Properties Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tDocument Properties\t\tShape executed successfully in 0 ms.\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_get2_S118410030413\tExecuting Connector Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_get2_S118410030413\tShape executed successfully in 5 ms.\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_child_S118410030413\tExecuting Connector Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3c_op_child_S118410030413\tShape executed successfully in 5 ms.\n2026-10-03T05:12:47Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 2 ms.\n2026-10-03T05:12:47Z\tINFO\tMessage\t\tExecuting Message Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tMessage\t\tShape executed successfully in 5 ms.\n2026-10-03T05:12:47Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 1 document(s).\n2026-10-03T05:12:47Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-10-03T05:12:47Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n",
+  "child_records": [],
+  "undeploy": true,
+  "stamp_end": {
+    "head": "c894120d77cd205305032a8fb755e6ea5f537bbc",
+    "tracked_dirty": false,
+    "code_sha256": "d17d994e43e7123d",
+    "tree": "/private/tmp/claude-501/-Users-gleb-Documents-Projects-Renera-boomi-mcp-server/dd0795df-3353-44ce-87ff-9a2c0b40e60a/scratchpad/q184r31/tree_c894120"
+  }
+}

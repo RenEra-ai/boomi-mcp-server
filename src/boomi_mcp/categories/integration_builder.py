@@ -15,7 +15,7 @@ import ipaddress
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -147,6 +147,7 @@ from .components._shared import (
     component_get_xml,
     paginate_metadata,
     smart_merge_would_change,
+    submits_raw_component_xml,
     with_folder_id,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
@@ -3951,7 +3952,7 @@ def _execute_component(
         #    base_url, oauth2 block, method/path) → invoke the builder
         #    to produce desired XML, then read-merge-write via
         #    _apply_structured_update so unknown live XML survives.
-        if not payload.get("xml") and not _is_connector_metadata_only_update(payload):
+        if not submits_raw_component_xml(payload) and not _is_connector_metadata_only_update(payload):
             builder_instance = None
             if comp.type == "connector-settings":
                 builder_instance = get_connector_builder(connector_type or "")
@@ -4073,7 +4074,7 @@ def _execute_component(
     # TransformFunctionWrapperBuilder. End users do not typically author
     # these directly — they're materialized by _synthesize_script_function_wrappers
     # — but the apply path handles them like any other in-spec component.
-    if comp.type == "transform.function" and not payload.get("xml"):
+    if comp.type == "transform.function" and not submits_raw_component_xml(payload):
         wrapper_cls = get_transform_function_wrapper_builder(comp.type)
         if wrapper_cls is None:
             return {
@@ -4119,7 +4120,7 @@ def _execute_component(
     # Issue #41: structured script.mapping routes through ScriptMappingBuilder.
     # Raw-XML bypass preserved — when payload['xml'] is set, the build()
     # call is skipped and the raw XML is used verbatim by create_component.
-    if comp.type == "script.mapping" and not payload.get("xml"):
+    if comp.type == "script.mapping" and not submits_raw_component_xml(payload):
         builder_class = get_script_mapping_builder(comp.type)
         if builder_class is None:
             return {
@@ -4165,7 +4166,7 @@ def _execute_component(
     # ProcessPropertyBuilder (mirrors the script.mapping branch above).
     # Raw-XML bypass preserved — when payload['xml'] is set, the build()
     # call is skipped and the raw XML is used verbatim by create_component.
-    if comp.type == "processproperty" and not payload.get("xml"):
+    if comp.type == "processproperty" and not submits_raw_component_xml(payload):
         builder_class = get_process_property_builder(comp.type)
         if builder_class is None:
             return {
@@ -4209,7 +4210,7 @@ def _execute_component(
 
     # Issue #122 M11.3: structured documentcache routes through
     # DocumentCacheBuilder (mirrors the processproperty branch above).
-    if comp.type == "documentcache" and not payload.get("xml"):
+    if comp.type == "documentcache" and not submits_raw_component_xml(payload):
         builder_class = get_document_cache_builder(comp.type)
         if builder_class is None:
             return {
@@ -4256,7 +4257,7 @@ def _execute_component(
     # Route '$ref:KEY' process tokens were already resolved to component ids
     # by _resolve_dependency_tokens — depends_on ordering guarantees the
     # referenced processes applied first.
-    if comp.type == "webservice" and not payload.get("xml"):
+    if comp.type == "webservice" and not submits_raw_component_xml(payload):
         builder_class = get_api_service_builder(comp.type)
         if builder_class is None:
             return {
@@ -4312,7 +4313,7 @@ def _execute_component(
     if (
         comp.type == "profile.db"
         and comp.action == "update"
-        and not payload.get("xml")
+        and not submits_raw_component_xml(payload)
         and not _is_metadata_only_update(payload)
     ):
         profile_type = _safe_lower(payload.get("profile_type"))
@@ -4358,7 +4359,7 @@ def _execute_component(
     # profile-builder registry. Raw-XML bypass is preserved — when
     # payload['xml'] is set, the build() call is skipped and the raw XML
     # is used verbatim by create_component / update_component.
-    if comp.type in ("profile.json", "profile.xml") and not payload.get("xml"):
+    if comp.type in ("profile.json", "profile.xml") and not submits_raw_component_xml(payload):
         profile_type = _safe_lower(payload.get("profile_type"))
         builder_instance = get_profile_builder(comp.type, profile_type)
         if builder_instance is None:
@@ -4409,7 +4410,7 @@ def _execute_component(
     # UUIDs by _resolve_dependency_tokens — but to find the in-spec profile
     # component for index computation, we need the ORIGINAL comp.config
     # (where $ref:KEY is still a $ref:KEY string).
-    if comp.type == "transform.map" and not payload.get("xml"):
+    if comp.type == "transform.map" and not submits_raw_component_xml(payload):
         map_type = (payload.get("map_type") or "").lower()
         map_builder_instance = get_map_builder(comp.type, map_type)
         if map_builder_instance is None:
@@ -6264,6 +6265,36 @@ def _keys_reused_at_apply(*, spec=None, existing_ids, conflict_policy, component
         ):
             reused.add(key)
     return reused
+
+
+def canonical_roots_reused_at_apply(processes, conflict_policy, existing_ids=None) -> FrozenSet[str]:
+    """Every canonical process root apply REUSES rather than writes (#184 wave review).
+
+    A reused root's submitted body is discarded: ``_execute_canonical_process`` returns the
+    bound component before it compiles anything, so whatever that body establishes says
+    nothing about the process that runs. Answered by ``_will_reuse_at_apply``, the predicate
+    that branch asks, over the binding it is handed: ``existing_ids`` is apply's binding of
+    every step, keyed by spec key, so a root bound by name counts where the route resolved it
+    with the account. A key it does not carry is answered from the envelope's declared id.
+    """
+    reused = set()
+    for unit in processes or ():
+        envelope = getattr(unit, "envelope", None)
+        key = getattr(envelope, "component_key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        if existing_ids is not None and key in existing_ids:
+            bound = canonical_component_id(existing_ids[key])
+        else:
+            bound = canonical_component_id(getattr(envelope, "component_id", None))
+        if _will_reuse_at_apply(
+            declared_action=getattr(envelope, "action", None),
+            existing_component_id=bound,
+            reference_only=False,
+            conflict_policy=conflict_policy,
+        ):
+            reused.add(key)
+    return frozenset(reused)
 
 
 def _authored_step_will_reuse(
@@ -8732,6 +8763,11 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution, exist
         spec.components,
         conflict_policy=conflict_policy,
         snapshot=resolution,
+        # #184 wave review: a root apply reuses executes its STORED body, so the body this
+        # request submits for it derives nothing its callers may rely on.
+        reused_roots=canonical_roots_reused_at_apply(
+            spec.processes, conflict_policy, existing_ids=existing_ids
+        ),
     )
     return build_materialization_plan(
         envelope=unit.envelope,
@@ -9036,7 +9072,14 @@ def _execute_canonical_process(
     # already fingerprinted under the original name. Deciding here means the
     # plan describes what will actually be built (Codex round 1).
     target_id = canonical_component_id(envelope.component_id) or existing_id
-    if envelope.action == "create" and existing_id and conflict_policy == "reuse":
+    # The one predicate (`_will_reuse_at_apply`), which `canonical_roots_reused_at_apply`
+    # asks too, so the derivation that treats a reused root as opaque is this branch's answer.
+    if _will_reuse_at_apply(
+        declared_action=envelope.action,
+        existing_component_id=existing_id,
+        reference_only=False,
+        conflict_policy=conflict_policy,
+    ):
         # No mutation happens, so no mutation attestation is recorded — an
         # attestation for a write that never occurred would be a false entry.
         return {

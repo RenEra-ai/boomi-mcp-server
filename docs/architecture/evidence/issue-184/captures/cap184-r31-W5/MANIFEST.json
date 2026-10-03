@@ -1,0 +1,59 @@
+{
+ "scenario": "W5: a called No Data child's Decision on cached DDP X (caller stages X=true/X=false in c1; child retrieves c1, Decision track dynamicdocument.X equals the true literal)",
+ "issue": 184,
+ "round": "r31",
+ "tree": "c894120d77cd205305032a8fb755e6ea5f537bbc",
+ "account_id": "trainingglebbochkarov-16926N",
+ "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+ "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+ "nonce": "S118410030413",
+ "execution_id": "execution-9c1b2a4b-1d1c-4cf1-ab25-2517dd9b4e0c-2026.10.03",
+ "captured_utc": "2026-10-03T05:19:56.850242+00:00",
+ "record_status": [
+  "COMPLETE"
+ ],
+ "wire_request_lines": [
+  "GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1",
+  "GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1",
+  "GET /__S1_184__/S118410030413/W5/true/static HTTP/1.1",
+  "GET /__S1_184__/S118410030413/W5/false/static HTTP/1.1"
+ ],
+ "fixture_provenance": "served get_schema_template ProcessIRV1/AuthoringRequestV1 at c894120 + platform REST GET on cds-mock (reused conn 2fe488e4 v3) + direct map with stated profiles; no implementation output used as a fixture",
+ "files": {
+  "apply.json": {
+   "bytes": 15271,
+   "sha256": "dec15cf5e663499f8bf218924a4b7912da69fcf7cea0712351a84a8463ad518c",
+   "email_hits": 0
+  },
+  "cell.json": {
+   "bytes": 7234,
+   "sha256": "999cc3197167f50209ca7fdea3b6d415d3703a679a2ce455c4542948d9df993f",
+   "email_hits": 0
+  },
+  "child.stored.xml": {
+   "bytes": 4429,
+   "sha256": "6d2906542e2c6ab53898e80480157cdd6110c4f08643f0d7ae168fcad7c9b8f9",
+   "email_hits": 0
+  },
+  "compile.json": {
+   "bytes": 17418,
+   "sha256": "fe4168d00dd380ea40bec1977108d838bc3c78689d6ae0082d91090b202810c5",
+   "email_hits": 0
+  },
+  "request.json": {
+   "bytes": 9779,
+   "sha256": "6dbabb24bd500dadfc9fc3f6e2b731b3f90169948a19d949211d7dc30b5a3d3e",
+   "email_hits": 0
+  },
+  "root.stored.xml": {
+   "bytes": 4814,
+   "sha256": "96214b8bf94894c6a15f45db98aee8260bb6d55cb0dd6ddcc321e2fd855096af",
+   "email_hits": 0
+  },
+  "run.json": {
+   "bytes": 5877,
+   "sha256": "efc3943e459498faa3e716da58e1e87e83db9816751cb7e6b3328f7b76dcfca7",
+   "email_hits": 0
+  }
+ }
+}

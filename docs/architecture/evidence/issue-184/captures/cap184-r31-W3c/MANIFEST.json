@@ -1,0 +1,53 @@
+{
+ "scenario": "W3c: a connector call keeps the DDP X of the document it received (set X -> GET K2 -> GET path_binding X)",
+ "issue": 184,
+ "round": "r31",
+ "tree": "c894120d77cd205305032a8fb755e6ea5f537bbc",
+ "account_id": "trainingglebbochkarov-16926N",
+ "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+ "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+ "nonce": "S118410030413",
+ "execution_id": "execution-223ff680-cecd-454c-b09d-4c92758506c2-2026.10.03",
+ "captured_utc": "2026-10-03T05:19:55.972858+00:00",
+ "record_status": [
+  "COMPLETE"
+ ],
+ "wire_request_lines": [
+  "GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1",
+  "GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1",
+  "GET /__S31_184__/S118410030413/W3c/x/seg-S118410030413 HTTP/1.1"
+ ],
+ "fixture_provenance": "served get_schema_template ProcessIRV1/AuthoringRequestV1 at c894120 + platform REST GET on cds-mock (reused conn 2fe488e4 v3) + direct map with stated profiles; no implementation output used as a fixture",
+ "files": {
+  "apply.json": {
+   "bytes": 9846,
+   "sha256": "aecbb01ae04f4f0855bd7656b632c2b6851cb277ba4479406904b2f2a1c8225b",
+   "email_hits": 0
+  },
+  "cell.json": {
+   "bytes": 6672,
+   "sha256": "9665d018de5bb9f95db516ab3d513407f52a30637ec357042a0b9ee82ae06356",
+   "email_hits": 0
+  },
+  "compile.json": {
+   "bytes": 12267,
+   "sha256": "b835e49196f2477a790498e9ff2c2e29a05b4f2c590550e8e326af3ac3955758",
+   "email_hits": 0
+  },
+  "request.json": {
+   "bytes": 5764,
+   "sha256": "739db7ce5d1a09e0dd57e3f0afd8583a255dccfc1600719eb336c440c4361712",
+   "email_hits": 0
+  },
+  "root.stored.xml": {
+   "bytes": 4818,
+   "sha256": "471ac49c2ef80eb6708e05c1956fd955ce967d9b82b3d09f3506494851fcd62d",
+   "email_hits": 0
+  },
+  "run.json": {
+   "bytes": 5858,
+   "sha256": "95f256ffb1d7f9c8bb14f7f6af7138231f7a7582f971cda62c3613f15baf72af",
+   "email_hits": 0
+  }
+ }
+}
