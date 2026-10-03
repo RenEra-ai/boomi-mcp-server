@@ -3310,12 +3310,20 @@ its own source documents keeps the exemption, standalone and as a called child. 
 legacy-dialect map that states no profile, standing directly behind a retrieve of a first-class
 call's documents (or of a cache only a caller fills), is now judged and refused `PROFILE_MISMATCH` in
 both the composition and its twin — the shape `retrieve → connector call → map` was already refused.
-No active golden and no matrix cell moved, and no corpus request changed admission; the batch 27–29
-legacy witnesses that stood behind such a map now also expect that caller-independent refusal. The Decision differential
+No active golden and no matrix cell moved, and no request in the six blast corpora changed admission;
+the packaged behaviour corpus, which holds legacy-dialect inputs the blast corpora do not, has 41 inputs
+that moved from admitted to refused `PROFILE_MISMATCH` under this rule, each a legacy `cache_get` then
+`map_ref` whose cache a first-class call, a re-cache or nothing in the walk filled (QA round r30's
+observation O-3); the batch 27–29 legacy witnesses that stood behind such a map now also expect that
+caller-independent refusal. The Decision differential
 (Decision on X without a default, with one, and with a bound use in its true arm, behind every step
 kind the emission authority admits, both dialects, the re-caching and the never-re-caching child,
 three callers) and the legacy `ty`/`tyr` differential went from 164 diverging cells of 852 to none.
-No served text moved and `schema_revision` stays `sha256:c9583e6b…`. The batch's sibling sweep of the writer-existence predicate closed one more sibling and recorded
+No served text moved and `schema_revision` stays `sha256:c9583e6b…`, but served values beyond the
+revisions do: a calling root's materialization-plan material embeds its child entry contracts, so the
+two new fields move that plan's served `artifact_fingerprints[]` length and digest, and through them
+the compile hash, by exactly their canonical bytes — as any later contract field will (QA round r30's
+observation O-1). The batch's sibling sweep of the writer-existence predicate closed one more sibling and recorded
 two. A writer of the property in a SIBLING child — on an earlier or a later leg, called without
 waiting, or one call deeper — was invisible to the caller, whose `_written_anywhere` counted its own
 nodes only, so the Decision was admitted while the twin refused it; the one writer set
@@ -3327,10 +3335,13 @@ non-strict read straight off a child's entry documents, the caller writing X on 
 the twin refuses `DDP_SCOPE_INVALID` (a different document copy) while the only row a call can apply
 serves `READ_BEFORE_WRITE`; and a non-strict process-property read whose caller writes it on a later
 leg, which the twin refuses `BRANCH_ORDER_INVALID` by the execution-scope later-leg rule — both pinned
-by witnesses with their evidence. Counting a called child's writes also sharpens a caller's own refused read of a
+by witnesses with their evidence and deferred to #186, sequenced after this issue and before #159. Counting a called child's writes also sharpens a caller's own refused read of a
 property that child writes from `LINEAGE_PROPERTY_READ_BEFORE_WRITE` to `LINEAGE_DDP_SCOPE_INVALID`
 (a writer on another document copy), the code its flattened twin serves; across the six corpora 3,122
-already-refused requests moved codes this way and none changed admission. Its new witnesses added
+already-refused requests moved codes this way and none changed admission. The same writer set does
+change admission for a caller's own NON-strict read of a property a child it calls writes: that
+Decision was admitted and is now refused `LINEAGE_DDP_SCOPE_INVALID`, as its twin is (QA round r30's
+observation O-2). Its new witnesses added
 packaged corpus inputs, and the #149 legacy-reachability inventory moved only in its revision values.
 Revisions after batch 30: `capability_revision` `sha256:78a44de8…` and `compiler_revision`
 `sha256:15927641…`.
