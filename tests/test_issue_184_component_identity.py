@@ -2380,3 +2380,992 @@ def test_the_write_route_and_the_facts_ask_one_predicate(component_type, xml):
     assert bool(submitted) is raw, (submitted, built)
     stated = _facts(component_type, config)
     assert (stated == (None, None, None)) is raw, stated
+
+
+# ---------------------------------------------------------------------------
+# #184 wave-level integration review, evaluation 3 (correction batch 32)
+# ---------------------------------------------------------------------------
+# The wave review over ``cbab28f..c4a711e`` found two more instances of the class batch 31
+# fixed (``reuse-decided-off-the-apply-predicate``): a fact derived from a canonical root's
+# SUBMITTED body where the process that runs is a different one.
+#
+# C. ``CDX-184-w3-01 Include canonical roots in the component write-conflict check``. Two
+#    roots updating one existing process both write it; apply writes them in its order and
+#    the LAST write is the stored process, byte for byte (measured below). A parent calling
+#    the first writer was admitted on that writer's discarded body. The roots now join the
+#    write-conflict check: two specs, roots or components, naming one existing component one
+#    of them writes are refused (`INTEGRATION_COMPONENT_WRITE_CONFLICT`), as supporting specs are.
+# D. ``CDX-184-w3-02 Withhold standalone-entry facts for reused process bodies``. A typed build
+#    compiles a plan for a root apply reuses, and its standalone-entry record described the
+#    submitted body (``derived: true``), so `orchestrate_deploy` permitted a direct run of a
+#    stored process that may need K. A root whose submitted body does not run is recorded
+#    ``derived: False, submitted_body_runs: False``; a submitted passthrough body is refused as
+#    unrecorded in both runs, any other is judged in the real run by the STORED start.
+# E. The sibling the sweep found: a call a reused root MAKES seeded its callee's entry state,
+#    so a written passthrough child reading K was admitted on a discarded caller's call.
+#
+# One authority answers all three, `canonical_roots_not_run_as_submitted`; the source sweep
+# at the end pins every consumer to it. Expected verdicts are the review's statements, the
+# component conflict's served code and text, the strict outcome of a child no call reaches
+# (the request without the caller), and live-captured stored processes (`cap184-dpp-both-ways`,
+# executed green at the pre-#184 branch point). Never this implementation's output.
+
+import json  # noqa: E402
+
+from boomi_mcp.categories.deployment import orchestration  # noqa: E402
+from boomi_mcp.errors import INTEGRATION_COMPONENT_WRITE_CONFLICT  # noqa: E402
+from boomi_mcp.models.process_component import (  # noqa: E402
+    ProcessAuthoringUnitV1,
+    ProcessComponentEnvelopeV1,
+)
+from boomi_mcp.recipes import materialization  # noqa: E402
+from test_issue_158_listener_deployment import (  # noqa: E402
+    _AccountSurface,
+    _cause_codes,
+    _deploy,
+    _error_codes,
+)
+
+_ENTRY_CONTEXT = "PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED"
+_CAPTURES = _ROOT / "docs" / "architecture" / "evidence" / "issue-184" / "captures" / "cap184-dpp-both-ways"
+
+
+def _captured_stored(name):
+    """A live-captured STORED process, its two redacted attribute values made parseable again."""
+    text = (_CAPTURES / "components" / (name + ".stored.xml")).read_text(encoding="utf-8")
+    assert text.count('="<redacted>"') == 2, name
+    return text.replace('="<redacted>"', '="redacted"')
+
+
+#: Live-captured STORED processes (`cap184-dpp-both-ways`, executed green at `cbab28f`): one
+#: starting as Data Passthrough, one as No Data.
+_STORED_PASSTHROUGH = _captured_stored("ch_dpp_pt")
+_STORED_NO_DATA = _captured_stored("ch_dpp_nd")
+_W3_X = "0b32a0b3-2a0b-32a0-b32a-0b32a0b32a0b"
+_W3_Y = "0b32a0b3-2a0b-32a0-b32a-0b32a0b3ffff"
+#: The review's OTHER: the same shape as WRITER, setting Z instead of K.
+_SETS_Z = json.loads(json.dumps(_SETS_K).replace('"name": "K"', '"name": "Z"'))
+_W3_PARENT = _renamed(_call_then_read(**_WAITS_AND_ABORTS), "WRITER", "writer")
+
+
+def _w3_unit(document, depends_on, *, key, name, action="create", **envelope):
+    return ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(
+            component_key=key, name=name, action=action, depends_on=tuple(depends_on), **envelope),
+        process_ir=parse_process_ir_v1(document))
+
+
+def _w3_units(other_id):
+    """The review's request: WRITER updates X, OTHER updates ``other_id`` after it, PARENT calls WRITER."""
+    units = [_w3_unit(_W3_PARENT, ("writer",), key="root", name="B32 root"),
+             _w3_unit(_SETS_K, (), key="writer", name="B32 writer", action="update", component_id=_W3_X)]
+    if other_id is not None:
+        units.append(_w3_unit(_SETS_Z, ("writer",), key="other", name="B32 other", action="update",
+                              component_id=other_id))
+    return units
+
+
+def _w3_client(boundary):
+    """The update push, recorded into the boundary's account."""
+    client = MagicMock()
+    pushed = []
+
+    def push(component_id, xml):
+        pushed.append(component_id)
+        boundary.stored[component_id] = xml
+
+    client.component.update_component_raw.side_effect = push
+    return client, pushed
+
+
+def _w3_raw_apply(units):
+    boundary = _ApplyBoundary(root_ids=("b32-root-cid",), stored={_W3_X: _STORED_NO_DATA, _W3_Y: _STORED_NO_DATA})
+    client, pushed = _w3_client(boundary)
+    spec = {"name": "B32 raw", "components": [], "processes": [unit.model_dump(mode="json") for unit in units]}
+    with boundary.installed(_nothing):
+        applied = build_integration_action(client, _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy(spec), "dry_run": False})
+    return applied, boundary, pushed
+
+
+def _w3_typed_plan(units):
+    raw = _request(units, []).model_dump(mode="json")
+    with _ApplyBoundary().installed(_nothing):
+        return build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+
+
+def _conflict_rows(planned):
+    return sorted((error["code"], error.get("subject_id")) for error in planned["authoring_result"]["errors"]
+                  if error["code"] == INTEGRATION_COMPONENT_WRITE_CONFLICT)
+
+
+# ---------------------------------------------------------------------------
+# C: canonical roots in the write-conflict check
+# ---------------------------------------------------------------------------
+
+
+def test_two_roots_writing_one_process_are_refused_before_any_write_on_both_routes():
+    """The review's repro: at `c4a711e` both routes admitted it and apply pushed X twice."""
+    applied, boundary, pushed = _w3_raw_apply(_w3_units(_W3_X))
+    assert applied["_success"] is False, applied
+    assert applied["error_code"] == INTEGRATION_COMPONENT_WRITE_CONFLICT, applied
+    # The supporting specs' served text, naming the two roots.
+    assert applied["error"] == ("component specs other, writer name an existing component that one of "
+                                "them writes; name it through the writing spec only"), applied["error"]
+    assert pushed == [] and boundary.created == [], (pushed, boundary.created)
+    planned = _w3_typed_plan(_w3_units(_W3_X))
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is False
+    assert _conflict_rows(planned) == [(INTEGRATION_COMPONENT_WRITE_CONFLICT, "other"),
+                                       (INTEGRATION_COMPONENT_WRITE_CONFLICT, "writer")], _conflict_rows(planned)
+
+
+@pytest.mark.parametrize("other_id", [None, _W3_Y], ids=["written_once", "two_processes"])
+def test_a_root_written_once_keeps_its_contract(other_id):
+    """Controls: one root writing X, and two roots writing two processes, apply as before and the
+    caller's later read of K stays admitted on WRITER's contract."""
+    applied, boundary, pushed = _w3_raw_apply(_w3_units(other_id))
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert pushed == [_W3_X] + ([other_id] if other_id else []), pushed
+    planned = _w3_typed_plan(_w3_units(other_id))
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _conflict_rows(planned)
+
+
+def _without_roots_in_the_conflict_check(monkeypatch):
+    """The source mutant: `build_symbol_table` checks the supporting specs only, as at `c4a711e`."""
+    source = Path(materialization.__file__).read_text(encoding="utf-8")
+    old = "list(components) + list(canonical_root_participants(processes))"
+    assert source.count(old) == 1
+    namespace = {"__name__": materialization.__name__, "__package__": materialization.__package__,
+                 "__file__": materialization.__file__}
+    exec(compile(source.replace(old, "list(components)"), materialization.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(materialization, "build_symbol_table", namespace["build_symbol_table"])
+
+
+def test_apply_s_last_write_is_the_process_that_runs(monkeypatch):
+    """The measurement the refusal rests on, and the fix's non-vacuity. Without the roots in
+    the conflict question (the symbol table's check and the authority's) the review's request
+    applies again, X is pushed twice, and what X stores is the LATER writer's body byte for
+    byte — the same bytes a request carrying only OTHER stores. So WRITER's contract, which
+    admitted the caller's read of K, described a discarded body."""
+    monkeypatch.setattr(integration_builder, "canonical_root_participants", lambda processes: ())
+    applied, boundary, pushed = _w3_raw_apply(_w3_units(_W3_X))
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    assert pushed == [_W3_X, _W3_X], pushed
+    assert list(applied["results"])[:2] == ["writer", "other"], list(applied["results"])
+    alone, _alone_boundary, _ = _w3_raw_apply([
+        _w3_unit(_SETS_Z, (), key="other", name="B32 other", action="update", component_id=_W3_X)])
+    assert alone["_success"] is True
+    assert boundary.stored[_W3_X] == _alone_boundary.stored[_W3_X]
+    assert "process.Z" in boundary.stored[_W3_X] and "process.K" not in boundary.stored[_W3_X]
+    planned = _w3_typed_plan(_w3_units(_W3_X))
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True
+
+
+def test_the_authority_alone_keeps_the_review_s_request_out(monkeypatch):
+    """Each half refuses on its own. With only the symbol table's root check removed (the
+    source mutant), the authority still answers both writers as roots whose submitted body does
+    not run, so the parent's later read of K is refused as a call to an unknown child would be."""
+    _without_roots_in_the_conflict_check(monkeypatch)
+    applied, boundary, pushed = _w3_raw_apply(_w3_units(_W3_X))
+    assert (applied["_success"], applied["error_code"], applied["failed_step"]) == (
+        False, _READ_BEFORE_WRITE, "root"), applied
+    assert pushed == [] and boundary.created == [], (pushed, boundary.created)
+
+
+@pytest.mark.parametrize("participant", ["reference_only_component", "reused_root"])
+def test_a_root_update_beside_another_spec_naming_its_process_is_one_conflict(participant):
+    """A root and a supporting spec are one namespace: a reference-only process component, or a
+    root apply reuses, naming the process another root updates, is refused as two components are."""
+    units = _w3_units(None)
+    components = []
+    if participant == "reference_only_component":
+        components = [IntegrationComponentSpec(key="named", type="process", name="B32 named", action="create",
+                                               config={"reference_only": True, "component_id": _W3_X})]
+    else:
+        units.append(_w3_unit(_SETS_Z, (), key="named", name="B32 named", component_id=_W3_X))
+    with pytest.raises(ComponentWriteConflictError) as refused:
+        build_symbol_table(components, process_keys=[unit.envelope.component_key for unit in units],
+                           processes=units, conflict_policy="reuse")
+    assert refused.value.keys == ("named", "writer"), refused.value.keys
+    assert refused.value.code == INTEGRATION_COMPONENT_WRITE_CONFLICT
+
+
+# ---------------------------------------------------------------------------
+# D: a reused root records no standalone-entry contract
+# ---------------------------------------------------------------------------
+
+#: The review's body: ``[passthrough, message, stop]``.
+_W3_PASSTHROUGH = {"version": "1", "body": {"kind": "sequence", "steps": [
+    {"kind": "passthrough", "label": "Receive"}, {"kind": "message", "text": "m"}, {"kind": "stop"}]}}
+_W3_STANDALONE = "B32 standalone"
+_W3_SCHEDULE = {"mode": "scheduled", "cron": "0 * * * *", "enabled": True, "max_retry": 0}
+
+
+def _w3_named_existing(_client, participant, *_args, **_kwargs):
+    if getattr(participant, "name", None) == _W3_STANDALONE:
+        return [{"component_id": _W3_X, "name": _W3_STANDALONE, "folder_name": "f"}]
+    return []
+
+
+_W3_REUSED = {"by_declared_id": ({"component_id": _W3_X}, _nothing), "by_name_match": ({}, _w3_named_existing)}
+
+
+def _w3_standalone_build(route, envelope, existing, document=_W3_PASSTHROUGH):
+    unit = _unit(document, (), key="root", name=_W3_STANDALONE, **envelope)
+    if route == "typed":
+        applied, _boundary = _typed_build(_request([unit], []), _ApplyBoundary(root_ids=("b32-root",)),
+                                          existing=existing)
+        return applied, integration_builder._BUILD_REGISTRY[applied["build_id"]]["authoring"]
+    spec = {"name": "B32 raw", "components": [], "processes": [unit.model_dump(mode="json")]}
+    with _ApplyBoundary(root_ids=("b32-root",)).installed(existing):
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy(spec), "dry_run": False})
+    assert applied["_success"] is True, applied
+    return applied, integration_builder._BUILD_REGISTRY[applied["build_id"]]
+
+
+def _requirements(result):
+    return [(error["code"], error.get("details", {}).get("requirements")) for error in result.get("errors") or ()]
+
+
+_UNRECORDED = [(_ENTRY_CONTEXT, ["entry_contract_not_recorded"])]
+
+
+@pytest.mark.parametrize("route", ["typed", "raw"])
+@pytest.mark.parametrize("binding", sorted(_W3_REUSED))
+def test_a_reused_root_records_no_standalone_contract_and_its_direct_run_is_refused(binding, route):
+    """The review's repro (typed): the record said `derived: true` with no required property,
+    and a direct test run and a schedule were permitted. The raw route already refused it at
+    `c894120`, because its pre-write pass compiles no reused root; it records the same now."""
+    envelope, existing = _W3_REUSED[binding]
+    applied, holder = _w3_standalone_build(route, envelope, existing)
+    assert applied["results"]["root"]["status"] == "reused"
+    assert holder["standalone_entry"] == {"root": {"derived": False, "submitted_body_runs": False}}
+    build_id = applied["build_id"]
+    assert _requirements(_deploy(build_id, dry_run=True, run_test=True)) == _UNRECORDED
+    assert _requirements(_deploy(build_id, dry_run=True, schedule_override=_W3_SCHEDULE)) == _UNRECORDED
+    # A reused root nothing runs directly is deployed as before: nothing reads its facts.
+    assert _error_codes(_deploy(build_id, dry_run=True)) == []
+
+
+@pytest.mark.parametrize("route", ["typed", "raw"])
+def test_a_written_passthrough_root_keeps_its_recorded_contract(route):
+    applied, holder = _w3_standalone_build(route, {}, _nothing)
+    assert applied["results"]["root"]["status"] == "created"
+    assert holder["standalone_entry"]["root"]["derived"] is True
+    assert _error_codes(_deploy(applied["build_id"], dry_run=True, run_test=True)) == []
+
+
+def test_the_reused_root_s_record_is_load_bearing(monkeypatch):
+    """Source mutant: `_standalone_entry_records_of` ignores the authority's roots, as at
+    `c4a711e`. The typed reused build records `derived: true` again and the direct run is permitted."""
+    source = Path(integration_builder.__file__).read_text(encoding="utf-8")
+    old = "    for key in sorted(opaque_roots):\n        records[key] = dict(_NOT_RUN_AS_SUBMITTED_RECORD)\n"
+    assert source.count(old) == 1
+    namespace = dict(vars(integration_builder))
+    exec(compile(source.replace(old, ""), integration_builder.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(integration_builder, "_standalone_entry_records_of", namespace["_standalone_entry_records_of"])
+    envelope, existing = _W3_REUSED["by_declared_id"]
+    applied, holder = _w3_standalone_build("typed", envelope, existing)
+    assert holder["standalone_entry"]["root"]["derived"] is True
+    assert _error_codes(_deploy(applied["build_id"], dry_run=True, run_test=True)) == []
+
+
+def _w3_real_run_of_a_reused_no_data_root(stored, monkeypatch):
+    """A typed build reusing X for a root whose SUBMITTED body is No Data (`_SETS_Z`), run for real
+    with a test run against an account storing ``stored`` at X (``None``: unreadable)."""
+    envelope, existing = _W3_REUSED["by_declared_id"]
+    applied, _holder = _w3_standalone_build("typed", envelope, existing, document=_SETS_Z)
+    build_id = applied["build_id"]
+    # The dry run reads nothing and plans.
+    assert _error_codes(_deploy(build_id, dry_run=True, run_test=True)) == []
+    surface = _AccountSurface(stored={_W3_X: stored} if stored is not None else {}).install(monkeypatch)
+    monkeypatch.setattr(orchestration, "execute_process_action",
+                        lambda **_kwargs: {"_success": False, "error": "not run in this witness"})
+    return _deploy(build_id, dry_run=False, run_test=True), surface
+
+
+@pytest.mark.parametrize("stored", [_STORED_PASSTHROUGH, None], ids=["stored_passthrough", "unreadable"])
+def test_a_reused_root_whose_stored_start_is_passthrough_or_unknown_is_refused_before_package(stored, monkeypatch):
+    """The submitted body of a reused root is not passthrough, so the recorded ProcessIR does
+    not decide how the stored process enters. The real run reads the stored start before
+    anything is packaged and refuses a passthrough or unreadable one."""
+    real, surface = _w3_real_run_of_a_reused_no_data_root(stored, monkeypatch)
+    assert surface.reads[:1] == [_W3_X], surface.reads
+    assert _requirements(real) == _UNRECORDED, real
+    assert surface.package_boundary == [], surface.package_boundary
+
+
+def test_a_reused_root_whose_stored_start_is_no_data_proceeds_to_package(monkeypatch):
+    real, surface = _w3_real_run_of_a_reused_no_data_root(_STORED_NO_DATA, monkeypatch)
+    assert surface.reads[:1] == [_W3_X], surface.reads
+    assert _ENTRY_CONTEXT not in _error_codes(real), real
+    assert surface.package_boundary, real
+
+
+def test_the_stored_start_reading_is_load_bearing(monkeypatch):
+    """Source mutant: the stored-start check never finds a passthrough start."""
+    envelope, existing = _W3_REUSED["by_declared_id"]
+    applied, _holder = _w3_standalone_build("typed", envelope, existing, document=_SETS_Z)
+    surface = _AccountSurface(stored={_W3_X: _STORED_PASSTHROUGH}).install(monkeypatch)
+    monkeypatch.setattr(orchestration, "execute_process_action",
+                        lambda **_kwargs: {"_success": False, "error": "not run in this witness"})
+    # Executed AFTER the account surface is installed, so the mutant reads the faked account.
+    source = Path(orchestration.__file__).read_text(encoding="utf-8")
+    old = 'shape.find("./configuration/passthroughaction") is not None'
+    assert source.count(old) == 1
+    namespace = dict(vars(orchestration))
+    exec(compile(source.replace(old, "False"), orchestration.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(orchestration, "_unrun_root_stored_entry_refusal",
+                        namespace["_unrun_root_stored_entry_refusal"])
+    namespace["component_get_xml"] = orchestration.component_get_xml
+    real = _deploy(applied["build_id"], dry_run=False, run_test=True)
+    assert _ENTRY_CONTEXT not in _error_codes(real) and surface.package_boundary, real
+
+
+# ---------------------------------------------------------------------------
+# E: a call a reused root makes discharges nothing
+# ---------------------------------------------------------------------------
+
+_W3_READS_K = {"kind": "set_dpp", "name": "OUT", "source_values": [{"value_type": "dpp", "property_name": "K"}]}
+_W3_SET_K = {"kind": "set_dpp", "name": "K", "source_values": [{"value_type": "static", "value": "v"}]}
+#: A passthrough child that reads K at entry, on both arms: K is required of its caller.
+_W3_READER = {"version": "1", "body": {"kind": "sequence", "steps": [
+    {"kind": "passthrough", "label": "Receive"}, {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"}, "right": {"value_type": "static", "static_value": "a"},
+        "true_arm": {"steps": [_W3_READS_K], "terminal": {"kind": "stop"}},
+        "false_arm": {"steps": [_W3_READS_K], "terminal": {"kind": "stop"}}}]}}
+#: Its caller sets K and then calls it, waited and abort-on-error.
+_W3_CALLER = {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+    {"steps": [_W3_SET_K], "terminal": {"kind": "process_call", "process_ref": "$ref:child", "wait": True,
+                                        "abort_on_error": True}},
+    {"steps": [_W3_SET_K], "terminal": {"kind": "stop"}}]}]}}
+_W3_CHILD_READS = sorted((_READ_BEFORE_WRITE, "/body/steps/1/{0}_arm/steps/0".format(arm)) for arm in ("false", "true"))
+
+
+def _w3_caller_units(caller):
+    units = [_unit(_W3_READER, (), key="child", name="B32 child")]
+    if caller is not None:
+        units.insert(0, _unit(_W3_CALLER, ("child",), key="root", name="B32 root", **caller))
+    return units
+
+
+def _w3_child_errors(caller):
+    raw = _request(_w3_caller_units(caller), []).model_dump(mode="json")
+    with _ApplyBoundary().installed(_nothing):
+        planned = build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+    return sorted((code, error["path"]) for error in planned["authoring_result"]["errors"]
+                  if error.get("subject_id") == "child" for code in error.get("cause_codes") or ())
+
+
+def _w3_raw_caller_apply(caller):
+    spec = {"name": "B32 raw", "components": [],
+            "processes": [unit.model_dump(mode="json") for unit in _w3_caller_units(caller)]}
+    boundary = _ApplyBoundary(root_ids=("b32-child-cid", "b32-root-cid"))
+    with boundary.installed(_nothing):
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy(spec), "dry_run": False})
+    return applied, boundary
+
+
+def test_a_reused_caller_s_call_seeds_nothing_in_its_callee():
+    """At `c4a711e` the child was admitted beside a reused caller, on that caller's discarded
+    call; without the caller it is refused. It is refused beside a reused caller now too."""
+    assert _w3_child_errors(None) == _W3_CHILD_READS
+    assert _w3_child_errors({}) == []  # control: a written caller's call discharges K
+    assert _w3_child_errors({"component_id": _W3_X}) == _W3_CHILD_READS
+    applied, boundary = _w3_raw_caller_apply({"component_id": _W3_X})
+    assert (applied["_success"], applied["error_code"], applied["failed_step"]) == (
+        False, _READ_BEFORE_WRITE, "child"), applied
+    assert boundary.created == [], boundary.created
+    written, _boundary = _w3_raw_caller_apply({})
+    assert written["_success"] is True, (written.get("error_code"), written.get("hint"))
+
+
+def _with_effects_source(monkeypatch, name, old, new):
+    """Rebind one resolver function to a copy of its module's source with one edit."""
+    source = Path(process_ir_effects.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == 1, old
+    namespace = dict(vars(process_ir_effects))
+    exec(compile(source.replace(old, new), process_ir_effects.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(process_ir_effects, name, namespace[name])
+
+
+def test_the_opaque_caller_filter_is_load_bearing(monkeypatch):
+    _with_effects_source(monkeypatch, "_entry_contract_bindings",
+                         "        if caller not in opaque\n", "")
+    assert _w3_child_errors({"component_id": _W3_X}) == []
+
+
+def test_a_declared_summary_bound_only_in_a_reused_caller_seeds_nothing():
+    """The #154 channel's half of E: the child's entry state was seeded from a declaration bound
+    in an opaque caller alone. Measured at the resolver, with a written caller as the control."""
+    roots = [("PARENT", parse_process_ir_v1(_renamed(_W3_CALLER, "child", "CHILD"))),
+             ("CHILD", parse_process_ir_v1(_W3_READER))]
+    reads, writes, replay_safe = derive_subprocess_effect(roots[1][1]).effect
+    declarations = ProcessIREffectDeclarationsV1(subprocess_effects=(ProcessIRSubprocessEffectDeclarationV1(
+        process_ref="$ref:CHILD", effect=ProcessIRStateEffectDeclarationV1(
+            reads=tuple(ProcessIRStateReferenceV1(scope=s, name=n) for s, n in reads),
+            writes=tuple(ProcessIRStateReferenceV1(scope=s, name=n) for s, n in writes),
+            replay_safe=replay_safe)),))
+    child_roots = {"$ref:" + key: ir for key, ir in roots}
+
+    def child_seed(opaque):
+        # Through the module, so the source mutant below replaces what this reads.
+        resolved = process_ir_effects.resolve_process_ir_effect_declarations(
+            roots, declarations, _symbols(), [], child_roots=child_roots, opaque_roots=frozenset(opaque))
+        return resolved.capabilities_by_root["CHILD"].established_at_entry
+
+    assert ("dpp", "K") in child_seed(())
+    assert ("dpp", "K") not in child_seed({"PARENT"})
+
+
+def test_the_declared_seed_filter_is_load_bearing(monkeypatch):
+    _with_effects_source(
+        monkeypatch, "resolve_process_ir_effect_declarations",
+        "if derived[0] and any(key not in opaque_roots for key, _spelling in bound):", "if derived[0]:")
+    with pytest.raises(AssertionError):
+        test_a_declared_summary_bound_only_in_a_reused_caller_seeds_nothing()
+
+
+# ---------------------------------------------------------------------------
+# The authority, and every consumer of a fact derived from a submitted body
+# ---------------------------------------------------------------------------
+
+
+def test_the_authority_is_apply_s_reuse_answer_and_its_write_conflicts():
+    from boomi_mcp.categories.integration_builder import canonical_roots_not_run_as_submitted
+
+    reused = [_w3_unit(_SETS_K, (), key="child", name="c", component_id=_W3_X)]
+    assert canonical_roots_not_run_as_submitted(reused, "reuse") == {"child"}
+    assert canonical_roots_not_run_as_submitted(reused, "clone") == frozenset()
+    assert canonical_roots_not_run_as_submitted(reused, "reuse", existing_ids={"child": None}) == frozenset()
+    named = [_w3_unit(_SETS_K, (), key="child", name="c")]
+    assert canonical_roots_not_run_as_submitted(named, "reuse", existing_ids={"child": _W3_X}) == {"child"}
+    # The conflict half, for a consumer reached without a symbol table: both roots writing X.
+    assert canonical_roots_not_run_as_submitted(_w3_units(_W3_X), "reuse") == {"other", "writer"}
+    assert canonical_roots_not_run_as_submitted(_w3_units(_W3_Y), "reuse") == frozenset()
+    # A written root beside a supporting spec writing its process.
+    beside = [IntegrationComponentSpec(key="spec", type="process", name="s", action="update", component_id=_W3_X)]
+    assert canonical_roots_not_run_as_submitted(_w3_units(None), "reuse", components=beside) == {"writer"}
+
+
+#: Each function that takes the roots whose submitted body does not run, and its keyword.
+_W3_SINKS = {
+    "resolve_process_ir_effect_declarations": "opaque_roots",
+    "resolve_root_context": "opaque_roots",
+    "derive_root_capabilities": "opaque_roots",
+    "_entry_contract_bindings": "opaque",
+    "_standalone_entry_records_of": "opaque_roots",
+    "_standalone_entry_records": "opaque_roots",
+    "_authoring_build_provenance": "opaque_roots",
+}
+_W3_AUTHORITY = "canonical_roots_not_run_as_submitted"
+#: What a fact derived from a root's submitted body is read through: the trusted context the
+#: resolver builds (and the keywords that construct one), a plan's recorded context, and the
+#: build's standalone-entry record.
+_W3_FACT_NAMES = {"effect_capabilities", "entry_contract", "child_entry_contracts", "child_entry_contract",
+                  "subprocess_summaries", "capabilities_by_root"}
+_W3_RECORD_KEYS = {"standalone_entry", "submitted_body_runs"}
+
+#: EVERY site in `src/boomi_mcp` that reads, constructs, records or routes such a fact, and why it
+#: is sound. Derived from the source by `_w3_consumer_sites`; a site missing here fails the sweep.
+_W3_DISPOSITIONS = {
+    # -- the authority and the routes that hand it over
+    ("categories/integration_builder.py", "canonical_roots_not_run_as_submitted"):
+        "THE authority: apply's reuse predicate plus the write conflicts over components and roots",
+    ("categories/integration_builder.py", "_build_canonical_plan"):
+        "raw route: derives every root's context with the authority's roots opaque",
+    ("authoring/workflow.py", "_validate_processes"):
+        "typed plan and compile: derives every root's context with the authority's roots opaque",
+    ("authoring/workflow.py", "resolve_root_context"): "forwards its required opaque_roots to the resolver",
+    ("authoring/workflow.py", "derive_root_capabilities"): "forwards its required opaque_roots",
+    ("categories/integration_builder.py", "_finalize_apply_success"):
+        "records each build's standalone entries with the authority's roots, over apply's own binding",
+    ("categories/integration_builder.py", "_authoring_build_provenance"):
+        "forwards its required opaque_roots to the typed record",
+    ("categories/integration_builder.py", "_standalone_entry_records"): "forwards its required opaque_roots",
+    ("categories/integration_builder.py", "<module>"):
+        "the not-run record, `derived: False, submitted_body_runs: False`",
+    # -- the resolver, which builds every trusted context
+    ("authoring/process_ir_effects.py", "resolve_process_ir_effect_declarations"):
+        "forwards opaque_roots; an opaque child's declared summary is inert; an opaque caller seeds nothing",
+    ("authoring/process_ir_effects.py", "_entry_contract_bindings"):
+        "no row for a call to an opaque root; no seed from a call an opaque root makes",
+    ("authoring/process_ir_effects.py", "_with_entry_contracts"): "assembles the bindings above, unchanged",
+    ("authoring/process_ir_effects.py", "derive_child_entry_facts"):
+        "a root's OWN facts from the rows it is handed (opaque children excluded upstream)",
+    ("authoring/process_ir_effects.py", "EffectResolutionV1.__init__"): "the resolver's result container",
+    # -- the compiler, which reads only the context it is handed
+    ("compiler/process_ir/semantic_validation/context.py", "canonical_cache_capabilities"):
+        "re-spells a handed context's cache refs; derives nothing",
+    ("compiler/process_ir/semantic_validation/contracts.py", "ProcessIRValidationCapabilitiesV1.child_entry_contract"):
+        "lookup in a handed context",
+    ("compiler/process_ir/semantic_validation/contracts.py", "ProcessIRValidationCapabilitiesV1.subprocess_effect"):
+        "lookup in a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_established_anywhere"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_keys_written_anywhere"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_leg_write_index"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_opaque_reason"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage._advance_stream"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage._discharge_child_contract"):
+        "reads a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage._transfer"): "reads a handed context",
+    ("compiler/process_ir/semantic_validation/pipeline.py", "_collect_capability_findings"):
+        "checks a handed context's rows bind; derives nothing",
+    # -- plans: what compile certified, never a claim about a reused root's stored process
+    ("authoring/workflow.py", "plan_authoring_request_v1"): "carries the context `_validate_processes` built",
+    ("authoring/workflow.py", "compile_authoring_request_v1"):
+        "compiles each root under it; a reused root's plan fingerprints its submitted artifact, never executed",
+    ("authoring/process_materialization.py", "build_materialization_plan"): "records the context in the plan",
+    ("categories/components/canonical_process_apply.py", "materialize_canonical_process_xml"):
+        "recompiles a plan apply WRITES: `_execute_canonical_process` returns before it for a reused root, "
+        "and a conflicting root is refused before any write",
+    # -- deployment, which reads only what apply recorded
+    ("categories/deployment/orchestration.py", "_recorded_standalone_entries"): "reads the record apply wrote",
+    ("categories/deployment/orchestration.py", "_standalone_entry_refusal"):
+        "an unrecorded (`derived: False`) passthrough root is refused in both runs",
+    ("categories/deployment/orchestration.py", "_recorded_unrun_root"):
+        "reads `submitted_body_runs: False`, so a reused root's entry is read from the stored process",
+    # -- revision oracles over fixed fixtures, and the recipe engine
+    ("authoring/contract.py", "_component_identity_behaviour_oracle"):
+        "revision oracle: its reused and opaque-caller verdicts route through the authority",
+    ("authoring/contract.py", "_cache_content_consumer_oracle"): "revision oracle: a fixed context",
+    ("authoring/contract.py", "_child_call_state_oracle"): "revision oracle: fixed envelope-less roots",
+    ("authoring/contract.py", "_child_call_state_oracle.verdicts_of"): "revision oracle: fixed envelope-less roots",
+    ("authoring/contract.py", "_child_entry_behaviour_oracle"): "revision oracle: fixed envelope-less roots",
+    ("authoring/contract.py", "_child_forwarding_behaviour_oracle"): "revision oracle: fixed envelope-less roots",
+    ("recipes/engine.py", "_compile_processes"):
+        "recipe roots carry no envelope and the engine touches no account: apply binds none of them from "
+        "this request, so the authority's answer is empty; apply derives again through the authority",
+}
+#: The sink calls that pass no authority answer, and why (a subset of the sites above).
+_W3_UNROUTED = {
+    ("authoring/contract.py", "_component_identity_behaviour_oracle"),
+    ("authoring/contract.py", "_child_call_state_oracle.verdicts_of"),
+    ("authoring/contract.py", "_child_entry_behaviour_oracle"),
+    ("authoring/contract.py", "_child_forwarding_behaviour_oracle"),
+    ("recipes/engine.py", "_compile_processes"),
+}
+
+
+def _w3_consumer_sites(sources):
+    """``(sites, routing)`` from ``{relative path: source text}``.
+
+    ``sites`` maps each ``(path, qualified function)`` to what it touches; ``routing`` lists,
+    per sink call, where its roots come from: the authority, a parameter its enclosing sink
+    forwards, or neither.
+    """
+    sites, routing = {}, []
+
+    def name_of(func):
+        return func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+
+    def calls_authority(node):
+        return isinstance(node, ast.Call) and name_of(node.func) == _W3_AUTHORITY
+
+    for path, text in sorted(sources.items()):
+        def visit(node, scope, function):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                scope = scope + (node.name,)
+                if not isinstance(node, ast.ClassDef):
+                    function = node
+            where = (path, ".".join(scope) or "<module>")
+            hit = None
+            if isinstance(node, ast.Attribute) and node.attr in _W3_FACT_NAMES:
+                hit = "reads " + node.attr
+            elif isinstance(node, ast.keyword) and node.arg in _W3_FACT_NAMES:
+                hit = "constructs " + node.arg
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _W3_RECORD_KEYS:
+                hit = "record " + node.value
+            elif isinstance(node, ast.Call) and name_of(node.func) in set(_W3_SINKS) | {
+                    # the authority, the reuse predicate only it may read, and the deploy record's reader
+                    _W3_AUTHORITY, "canonical_roots_reused_at_apply", "_recorded_standalone_entries"}:
+                hit = "calls " + name_of(node.func)
+                sink = name_of(node.func)
+                if sink in _W3_SINKS:
+                    value = next((kw.value for kw in node.keywords if kw.arg == _W3_SINKS[sink]), None)
+                    if isinstance(value, ast.Call) and name_of(value.func) == "frozenset" and value.args:
+                        value = value.args[0]
+                    params = {arg.arg for arg in function.args.args + function.args.kwonlyargs} if function else set()
+                    assigned = {
+                        target.id
+                        for inner in ast.walk(function) if function and isinstance(inner, ast.Assign)
+                        and calls_authority(inner.value)
+                        for target in inner.targets if isinstance(target, ast.Name)
+                    } if function else set()
+                    if value is None:
+                        verdict = "absent"
+                    elif calls_authority(value) or (isinstance(value, ast.Name) and value.id in assigned):
+                        verdict = "authority"
+                    elif isinstance(value, ast.Name) and value.id in params and function.name in _W3_SINKS:
+                        verdict = "forwarded"
+                    else:
+                        verdict = "other"
+                    routing.append((where, sink, verdict))
+            if hit:
+                sites.setdefault(where, set()).add(hit)
+            for child in ast.iter_child_nodes(node):
+                visit(child, scope, function)
+
+        visit(ast.parse(text), (), None)
+    return sites, routing
+
+
+def _w3_sources():
+    src = Path(integration_builder.__file__).resolve().parents[1]
+    return {str(path.relative_to(src)): path.read_text(encoding="utf-8") for path in sorted(src.rglob("*.py"))}
+
+
+def _w3_violations(sources):
+    sites, routing = _w3_consumer_sites(sources)
+    unexplained = sorted(set(sites) - set(_W3_DISPOSITIONS))
+    stale = sorted(set(_W3_DISPOSITIONS) - set(sites))
+    unrouted = sorted({(where, sink, verdict) for where, sink, verdict in routing
+                       if verdict not in ("authority", "forwarded") and where not in _W3_UNROUTED})
+    return unexplained, stale, unrouted
+
+
+def test_every_consumer_of_a_submitted_body_fact_reads_it_through_the_authority():
+    """The enumeration, derived from the source: every site that reads, builds, records or routes a
+    fact derived from a canonical root's submitted body has a disposition, and every call handing
+    roots to a consumer hands the authority's answer, forwards its own, or is a named exception."""
+    sites, routing = _w3_consumer_sites(_w3_sources())
+    assert _w3_violations(_w3_sources()) == ([], [], [])
+    # Non-vacuity: the derivation sees the routes this batch fixed and the deploy reader.
+    assert {(where[1], verdict) for where, _sink, verdict in routing} >= {
+        ("_build_canonical_plan", "authority"), ("_validate_processes", "authority"),
+        ("_finalize_apply_success", "authority"), ("resolve_root_context", "forwarded")}
+    assert ("categories/deployment/orchestration.py", "_recorded_unrun_root") in sites
+
+
+@pytest.mark.parametrize("path, old, new, expected", [
+    pytest.param(  # a route hands over a set of its own instead of the authority's answer
+        "categories/integration_builder.py",
+        "        opaque_roots=canonical_roots_not_run_as_submitted(\n            spec.processes, conflict_policy,",
+        "        opaque_roots=canonical_roots_reused_at_apply(\n            spec.processes, conflict_policy,",
+        "unrouted", id="route_bypasses_the_authority"),
+    pytest.param(  # a route stops handing roots over at all
+        "authoring/workflow.py",
+        "        opaque_roots=frozenset(opaque_roots),\n",
+        "", "unrouted", id="forwarding_dropped"),
+    pytest.param(  # a new reader of a recorded context
+        "categories/deployment/orchestration.py",
+        "def _recorded_unrun_root(",
+        "def _a_new_reader(plan):\n    return plan.effect_capabilities\n\n\ndef _recorded_unrun_root(",
+        "unexplained", id="new_consumer"),
+])
+def test_the_consumer_sweep_refuses_a_bypass(path, old, new, expected):
+    sources = _w3_sources()
+    assert sources[path].count(old) == 1, old
+    sources[path] = sources[path].replace(old, new)
+    unexplained, _stale, unrouted = _w3_violations(sources)
+    assert {"unexplained": unexplained, "unrouted": unrouted}[expected], (unexplained, unrouted)
+
+
+# ---------------------------------------------------------------------------
+# QA round r32 (QA-184-w-r32-02): a raw-XML component's profile is UNKNOWN, not absent
+# ---------------------------------------------------------------------------
+# Batch 31 made a component submitted as raw ``config.xml`` state no profile, and the
+# cache-write check runs only where the cache states one, so a `cache_put` into a raw-XML
+# cache was admitted with no check at `c4a711e` (refused at `c894120`, where the ignored
+# structured fields happened to disagree; admitted there too where they agreed). The symbol
+# now carries the distinction from the one predicate (`ComponentSymbolV1.profiles_unknown`,
+# set by `_profile_facts` from `submits_raw_component_xml`), and every profile consumer
+# treats an unknown profile as one that matches nothing, the rule a map with an absent
+# profile already gets. A structured cache declaring no profile is absent, not unknown, and
+# keeps its verdict. Expected verdicts: QA's own (`PROFILE_MISMATCH` at the write's
+# `/cache_ref`, as at `c894120`), and the map's absent-profile rule; never this
+# implementation's output.
+
+from test_issue_184_child_state_transfer import _lineage_with_source  # noqa: E402
+
+from boomi_mcp.compiler.process_ir.diagnostics import compiler_diagnostic_specs  # noqa: E402
+from boomi_mcp.errors import ERROR_TAXONOMY  # noqa: E402
+
+_R32_XML = "<bns:Component xmlns:bns='http://api.platform.boomi.com/' type='documentcache'/>"
+#: QA's shape: GET (response p_client), map p_client -> p_a, Branch [cache_put | set_ddp -> stop].
+_R32_WRITE = {"version": "1", "body": {"kind": "sequence", "steps": [
+    {"kind": "connector_call", "operation_ref": "$ref:op_get"}, {"kind": "map_ref", "map_ref": "$ref:m"},
+    {"kind": "branch", "legs": [
+        {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:cache"}},
+        {"steps": [{"kind": "set_ddp", "name": "DDP_R32_LEG", "source_values": [
+            {"value_type": "static", "value": "x"}]}], "terminal": {"kind": "stop"}}]}]}}
+_R32_WRITE_PATH = "/body/steps/2/legs/0/terminal/cache_ref"
+
+
+def _r32_raw(spec):
+    spec = copy.deepcopy(spec)
+    spec["config"]["xml"] = _R32_XML
+    return spec
+
+
+def _r32_without_profile(spec):
+    spec = copy.deepcopy(spec)
+    del spec["config"]["profile_id"]
+    return spec
+
+
+#: The cache the map's p_a documents are written into, per arm.
+_R32_CACHES = {
+    "raw_xml_mismatching_fields": _r32_raw(_cache("cache", "p_client", "key", "new")),  # QA's request
+    "raw_xml_matching_fields": _r32_raw(_cache("cache", "p_a", "a1", "new")),
+    "structured_matching": _cache("cache", "p_a", "a1", "new"),
+    "structured_without_profile": _r32_without_profile(_cache("cache", "p_a", "a1", "new")),
+}
+
+
+def _r32_both_routes(document, components):
+    unit = {"envelope": {"component_key": "root", "name": "R32 root", "action": "create",
+                         "depends_on": [spec["key"] for spec in components]}, "process_ir": document}
+    raw = {"contract_version": "2", "intent": {"intent_kind": "process_ir", "integration_name": "R32",
+                                               "units": [unit], "components": components, "conflict_policy": "reuse"}}
+    with _ApplyBoundary().installed(_nothing):
+        planned = build_integration_action(MagicMock(), _PROFILE, "plan", config={"authoring_request": raw})
+    boundary = _ApplyBoundary(root_ids=("r32-root-cid",))
+    with boundary.installed(_nothing):
+        applied = build_integration_action(MagicMock(), _PROFILE, "apply", config={
+            "integration_spec": copy.deepcopy({"name": "R32", "components": components, "processes": [unit]}),
+            "dry_run": False})
+    return planned, applied, boundary
+
+
+def _r32_write(arm):
+    return _r32_both_routes(_R32_WRITE, _wr_map_components("structured") + [_R32_CACHES[arm]])
+
+
+@pytest.mark.parametrize("arm", ["raw_xml_mismatching_fields", "raw_xml_matching_fields"])
+def test_a_write_into_a_raw_xml_cache_is_refused_on_both_routes(arm):
+    """QA's repro (`mismatching`) and its fail-open twin at the parent (`matching`): both routes
+    admitted both at `c4a711e`. Refused before any write, at the write."""
+    planned, applied, boundary = _r32_write(arm)
+    assert _wr_plan_errors(planned) == [(_MISMATCH, _R32_WRITE_PATH)], _wr_plan_errors(planned)
+    assert (applied["_success"], applied["error_code"]) == (False, _MISMATCH), applied
+    assert "Offending path: {0}.".format(_R32_WRITE_PATH) in applied["hint"], applied["hint"]
+    assert boundary.created == [] and boundary.executed == {}, (boundary.created, boundary.executed)
+
+
+def test_a_structured_cache_keeps_its_verdicts():
+    """Controls. A matching structured cache is admitted on both routes; one declaring no profile
+    is absent, not unknown: no profile check at the write, and its verdict is the one it had at
+    `c4a711e` (the builder's own lint refuses it, the stream proof says nothing)."""
+    planned, applied, _boundary = _r32_write("structured_matching")
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(planned)
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+    planned, applied, _boundary = _r32_write("structured_without_profile")
+    assert _wr_plan_errors(planned) == [("DOCUMENT_CACHE_PROFILE_REQUIRED", "/components/cache"),
+                                        ("error_generated_profile_validation", "/components/cache")]
+    assert applied["_success"] is False and applied.get("error_code") != _MISMATCH, applied
+
+
+def _r32_symbol(component_type, **config):
+    table = build_symbol_table([_component("p1", "profile.json"), _component("c", component_type, **config)])
+    return {item.ref: item for item in table.symbols}["$ref:c"]
+
+
+@pytest.mark.parametrize("source", sorted(_FACT_SOURCES))
+def test_a_raw_xml_component_s_profiles_are_unknown_not_absent(source):
+    """The fact model: from the one predicate, a raw-XML map, cache or operation states its
+    profiles UNKNOWN; the same structured component, or one declaring nothing, does not."""
+    component_type, config, _stated = _FACT_SOURCES[source]
+    assert _r32_symbol(component_type, **dict(config, xml=_XML)).profiles_unknown is True
+    assert _r32_symbol(component_type, **config).profiles_unknown is None
+    assert _r32_symbol(component_type).profiles_unknown is None
+    # A component apply does not write states nothing, unknown or not: its stored bytes are not in hand.
+    reused = IntegrationComponentSpec(key="c", type=component_type, component_id=_CACHE_ID,
+                                      config=dict(config, xml=_XML, reference_only=True))
+    table = build_symbol_table([_component("p1", "profile.json"), _component("p2", "profile.json"), reused])
+    assert {item.ref: item for item in table.symbols}["$ref:c"].profiles_unknown is None
+
+
+def test_a_raw_xml_listener_operation_s_inbound_profile_is_unknown():
+    config = {"connector_type": "wss", "operation_mode": "listen", "input_type": "singlejson",
+              "request_profile": "$ref:p1"}
+    assert _r32_symbol("connector-action", **config).profiles_unknown is None
+    raw = _r32_symbol("connector-action", **dict(config, xml=_XML))
+    assert (raw.profiles_unknown, raw.input_profile_ref, raw.input_document_type) == (True, None, None)
+
+
+# The read: p2 documents staged in a cache and read back into a PATCH (the cache-content rule's own
+# fixtures, `test_the_typed_route_judges_cache_content_at_every_typed_consumer`).
+_R32_CONN = {"key": "conn", "type": "connector-settings", "name": "Sandbox CDS Mock REST (no-auth)",
+             "action": "create", "config": {"connector_type": "rest", "component_name": "Sandbox CDS Mock REST (no-auth)",
+                                            "base_url": "http://host.docker.internal:8081", "auth": "NONE"}}
+_R32_READ = {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+    {"steps": [{"kind": "connector_call", "operation_ref": "$ref:op_get"}, {"kind": "map_ref", "map_ref": "$ref:m12"}],
+     "terminal": {"kind": "cache_put", "cache_ref": "$ref:c"}},
+    {"steps": [{"kind": "cache_get", "cache_ref": "$ref:c"}, {"kind": "connector_call", "operation_ref": "$ref:op_patch"}],
+     "terminal": {"kind": "stop"}}]}]}}
+_R32_PATCH_PATH = "/body/steps/0/legs/1/steps/1/operation_ref"
+_R32_PUT_PATH = "/body/steps/0/legs/0/terminal/cache_ref"
+_R32_READ_ARMS = {
+    # (cache, PATCH, refusals)
+    "structured": (_cache("c", "p2", "other", "new"), _rest_operation("op_patch", "PATCH", request="p2"), []),
+    "patch_declares_another": (_cache("c", "p2", "other", "new"), _rest_operation("op_patch", "PATCH", request="p1"),
+                               [(_MISMATCH, _R32_PATCH_PATH)]),
+    "patch_declares_none": (_cache("c", "p2", "other", "new"), _rest_operation("op_patch", "PATCH"), []),
+    "patch_raw_xml": (_cache("c", "p2", "other", "new"), _r32_raw(_rest_operation("op_patch", "PATCH", request="p2")),
+                      [(_MISMATCH, _R32_PATCH_PATH)]),
+    "cache_raw_xml": (_r32_raw(_cache("c", "p2", "other", "new")), _rest_operation("op_patch", "PATCH", request="p2"),
+                      [(_MISMATCH, _R32_PUT_PATH)]),
+}
+
+
+def _r32_read(arm):
+    cache, patch, _refusals = _R32_READ_ARMS[arm]
+    return _r32_both_routes(_R32_READ, [
+        _R32_CONN, _profile("p1", "key"), _profile("p2", "other"), _rest_operation("op_get", "GET", response="p1"),
+        patch, _map("m12", "p1", "p2", "key", "other"), cache])
+
+
+@pytest.mark.parametrize("arm", sorted(arm for arm, (_c, _p, refusals) in _R32_READ_ARMS.items() if refusals))
+def test_a_cache_read_fed_to_a_typed_consumer_fails_closed_on_an_unknown_profile(arm):
+    """A raw-XML PATCH reading cached documents is refused at its own operation, as one declaring
+    another profile is (the raw-XML arms were admitted at `c4a711e`); a raw-XML cache read back
+    into a declared PATCH is refused at the write that filled it."""
+    _cache_spec, _patch, refusals = _R32_READ_ARMS[arm]
+    planned, applied, boundary = _r32_read(arm)
+    assert _wr_plan_errors(planned) == refusals, _wr_plan_errors(planned)
+    assert (applied["_success"], applied["error_code"]) == (False, _MISMATCH), applied
+    assert "Offending path: {0}.".format(refusals[0][1]) in applied["hint"], applied["hint"]
+    assert boundary.created == [], boundary.created
+
+
+@pytest.mark.parametrize("arm", sorted(arm for arm, (_c, _p, refusals) in _R32_READ_ARMS.items() if not refusals))
+def test_a_cache_read_fed_to_a_structured_consumer_keeps_its_verdict(arm):
+    """Controls: a structured matching PATCH, and one declaring no input, which states nothing to
+    compare (D2), are admitted on both routes."""
+    planned, applied, _boundary = _r32_read(arm)
+    assert _wr_plan_errors(planned) == [], _wr_plan_errors(planned)
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+
+
+# Source mutants, one per consumer this batch changed and one at the producer.
+
+
+def test_the_unknown_cache_write_check_is_load_bearing(monkeypatch):
+    _lineage_with_source(monkeypatch, "(semantic.cache_ref in unknown_caches or any(\n                _identity(declared_ref)",
+                         "(False or any(\n                _identity(declared_ref)")
+    planned, applied, _boundary = _r32_write("raw_xml_mismatching_fields")
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(planned)
+    assert applied["_success"] is True, (applied.get("error_code"), applied.get("hint"))
+
+
+def test_the_unknown_input_judgement_is_load_bearing(monkeypatch):
+    _lineage_with_source(monkeypatch, "if checked and (binding.input_profile_ref is not None or input_unknown):",
+                         "if checked and binding.input_profile_ref is not None:")
+    planned, _applied, _boundary = _r32_read("patch_raw_xml")
+    assert _wr_plan_errors(planned) == [], _wr_plan_errors(planned)
+
+
+def test_the_unknown_fact_is_load_bearing(monkeypatch):
+    """Producer mutant: `_profile_facts` reports a raw-XML component as stating nothing, as at
+    `c4a711e`. Both refusals vanish."""
+    source = Path(materialization.__file__).read_text(encoding="utf-8")
+    old = "unknown=component_type in _PROFILE_STATING_TYPES"
+    assert source.count(old) == 1
+    namespace = {"__name__": materialization.__name__, "__package__": materialization.__package__,
+                 "__file__": materialization.__file__}
+    exec(compile(source.replace(old, "unknown=False"), materialization.__file__, "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(materialization, "build_symbol_table", namespace["build_symbol_table"])
+    planned, _applied, _boundary = _r32_write("raw_xml_mismatching_fields")
+    assert planned["authoring_result"]["validation_report"]["is_valid"] is True, _wr_plan_errors(planned)
+    planned, _applied, _boundary = _r32_read("patch_raw_xml")
+    assert _wr_plan_errors(planned) == [], _wr_plan_errors(planned)
+
+
+def test_the_served_mismatch_text_names_the_raw_xml_cause():
+    """QA O5: the code's served remediation and summary say a raw-XML component states no profile,
+    so a profile-checked step beside it is refused. Unconditional: a finding does not carry its cause."""
+    served = next(row for row in compiler_diagnostic_specs() if row["code"] == _MISMATCH)
+    assert "submitted as raw config.xml states no profile" in served["remediation"], served["remediation"]
+    assert "raw config.xml" in served["message"] and "raw config.xml" in ERROR_TAXONOMY[_MISMATCH].summary
+
+
+#: EVERY site in `src/boomi_mcp` that reads, sets or routes a component's profile fact, and how an
+#: UNKNOWN profile reaches it. Derived from the source by `_r32_profile_sites`.
+_R32_DISPOSITIONS = {
+    ("recipes/materialization.py", "build_symbol_table"):
+        "producer: sets `profiles_unknown` from `_profile_facts`, which asks `submits_raw_component_xml`",
+    ("compiler/process_ir/semantic_validation/context.py", "canonical_cache_profiles"):
+        "declared cache profiles; an unknown one is carried by `canonical_unknown_profile_caches`",
+    ("compiler/process_ir/semantic_validation/context.py", "canonical_unknown_profile_caches"):
+        "the caches whose profile is unknown, by canonical ref, read through `profiles_unknown`",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage"):
+        "reads both cache readings; the proof's stand-down skips refs only a declared profile can carry",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage._advance_stream"):
+        "cache write (both branches) and connector input read the unknown fact; a map and a listener "
+        "fail closed on the absent ref an unknown component carries; an unknown output is an unknown stream",
+    ("compiler/process_ir/connector_resolution.py", "_check_map_pair"):
+        "an absent map or call profile is a mismatch, so an unknown one is too",
+    ("compiler/process_ir/connector_resolution.py", "resolve_connector_call_bindings"):
+        "copies the operation's refs onto the binding; the unknown fact is read off the operation symbol",
+    ("compiler/process_ir/connector_resolution.py", "validate_connector_call_semantics"):
+        "checks a DECLARED ref names a profile; an unknown component declares none, and equality is lineage's",
+    ("compiler/process_ir/connector_resolution.py", "validate_listener_entry"):
+        "a profile_bound listener needs a resolvable request profile; an unknown one is refused",
+    ("compiler/process_ir/contracts.py", "profiles_unknown"): "THE reading of the fact",
+    ("authoring/contract.py", "_component_identity_behaviour_oracle"):
+        "revision oracle: the raw-XML symbol facts, unknown flag included, and each consumer beside an unknown profile",
+    ("authoring/contract.py", "_component_identity_behaviour_oracle.bound"): "revision oracle: fixed fixtures",
+    ("authoring/contract.py", "_component_identity_behaviour_oracle.unknown_symbols"):
+        "revision oracle: the unknown-profile fixtures",
+    ("authoring/contract.py", "_cache_content_consumer_oracle"): "revision oracle: fixed declared fixtures",
+    ("authoring/contract.py", "_child_call_state_oracle"): "revision oracle: fixed declared fixtures",
+    ("authoring/contract.py", "_child_entry_behaviour_oracle"): "revision oracle: fixed declared fixtures",
+    ("authoring/contract.py", "_child_forwarding_behaviour_oracle"): "revision oracle: fixed declared fixtures",
+    ("authoring/contract.py", "_listener_inbound_behaviour_oracle"): "revision oracle: fixed declared fixtures",
+}
+_R32_PROFILE_FACTS = {"input_profile_ref", "output_profile_ref", "cache_profile_ref", "profiles_unknown"}
+_R32_PROFILE_CALLS = {"canonical_cache_profiles", "canonical_unknown_profile_caches", "profiles_unknown",
+                      "_profile_facts", "_listener_inbound_facts"}
+
+
+def _r32_profile_sites(sources):
+    """``{(path, qualified function): touches}`` for every attribute read, ``getattr`` by name,
+    keyword or call that reaches a component's profile fact."""
+    sites = {}
+    for path, text in sorted(sources.items()):
+        def visit(node, scope):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                scope = scope + (node.name,)
+            hit = None
+            if isinstance(node, ast.Attribute) and node.attr in _R32_PROFILE_FACTS:
+                hit = "reads " + node.attr
+            elif isinstance(node, ast.keyword) and node.arg in _R32_PROFILE_FACTS:
+                hit = "sets " + node.arg
+            elif isinstance(node, ast.Call):
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+                if name in _R32_PROFILE_CALLS:
+                    hit = "calls " + name
+                elif name == "getattr" and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) \
+                        and node.args[1].value in _R32_PROFILE_FACTS:
+                    hit = "reads " + node.args[1].value
+            if hit:
+                sites.setdefault((path, ".".join(scope) or "<module>"), set()).add(hit)
+            for child in ast.iter_child_nodes(node):
+                visit(child, scope)
+
+        visit(ast.parse(text), ())
+    return sites
+
+
+def test_every_profile_consumer_has_an_unknown_disposition():
+    """The enumeration, from the source: every site touching a component's profile fact is one this
+    pin knows and says how an UNKNOWN profile reaches it, in both directions."""
+    sites = _r32_profile_sites(_w3_sources())
+    assert sorted(set(sites) - set(_R32_DISPOSITIONS)) == [] and sorted(set(_R32_DISPOSITIONS) - set(sites)) == []
+    # Non-vacuity: the consumers this batch changed read the fact.
+    assert "calls profiles_unknown" in sites[("compiler/process_ir/semantic_validation/lineage.py",
+                                             "_walk_lineage._advance_stream")]
+    assert "sets profiles_unknown" in sites[("recipes/materialization.py", "build_symbol_table")]
+
+
+def test_the_profile_sweep_refuses_a_new_consumer():
+    sources = _w3_sources()
+    path = "compiler/process_ir/semantic_validation/context.py"
+    sources[path] += "\n\ndef _a_new_reader(symbol):\n    return getattr(symbol, 'cache_profile_ref', None)\n"
+    assert set(_r32_profile_sites(sources)) - set(_R32_DISPOSITIONS) == {(path, "_a_new_reader")}

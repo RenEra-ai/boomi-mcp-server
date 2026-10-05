@@ -531,7 +531,7 @@ def test_a_passthrough_root_records_what_a_direct_run_would_lack():
         "root": SimpleNamespace(execution_profile="passthrough", effect_capabilities=capabilities),
         "other": SimpleNamespace(execution_profile="scheduled", effect_capabilities=None),
     })
-    assert _standalone_entry_records(bundle) == {"root": {
+    assert _standalone_entry_records(bundle, opaque_roots=frozenset()) == {"root": {
         "derived": True, "consumes_caller_documents": True, "caller_composed_paths": 1,
         "caller_document_properties": 0, "caller_cache_contents": 1,
         "dynamic_process_properties": ["K"],
@@ -988,6 +988,11 @@ def test_the_revision_moves_with_component_identity_and_forwarding_behaviour(mon
         (integration_builder, "canonical_roots_reused_at_apply",
          lambda processes, conflict_policy, existing_ids=None: frozenset()),
         (_shared, "submits_raw_component_xml", lambda config: False),
+        # Correction batch 32 (wave review evaluation 3): the canonical roots in the write-conflict
+        # check, and the one authority for the roots whose submitted body is not the process that runs.
+        (integration_builder, "canonical_root_participants", lambda processes: ()),
+        (integration_builder, "canonical_roots_not_run_as_submitted",
+         lambda processes, conflict_policy, existing_ids=None, components=(): frozenset()),
     )
     for module, name, replacement in perturbations:
         with monkeypatch.context() as patched:

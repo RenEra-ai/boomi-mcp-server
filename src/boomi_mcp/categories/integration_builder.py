@@ -6297,6 +6297,86 @@ def canonical_roots_reused_at_apply(processes, conflict_policy, existing_ids=Non
     return frozenset(reused)
 
 
+class _CanonicalRootParticipant(NamedTuple):
+    """A canonical process root, in the shape the component-binding readers take (#184 batch 32).
+
+    ``resolve_planner_binding``, ``_bound_existing_id``, ``apply_writes_component_config`` and
+    ``component_writes_existing`` read ``key``, ``type``, ``action``, ``component_id``, ``name``
+    and ``config``. A root carries no config, so it is never ``reference_only`` and a
+    ``process`` update is never a metadata-only bind: exactly ``_execute_canonical_process``,
+    which reuses a create through ``_will_reuse_at_apply`` and writes every update.
+    """
+
+    key: str
+    type: str
+    action: Optional[str]
+    component_id: Optional[str]
+    name: Optional[str]
+    config: Dict[str, Any]
+
+
+def canonical_root_participants(processes) -> Tuple["_CanonicalRootParticipant", ...]:
+    """Each canonical root of ``processes`` as a participant of the component write-conflict check.
+
+    A root that UPDATES an existing process writes it; a create apply reuses names it. Either
+    way it names that component exactly as a supporting spec does, so two specs, roots or
+    components, naming one written component are one conflict (CDX-184-w3-01).
+    """
+    participants = []
+    for unit in processes or ():
+        envelope = getattr(unit, "envelope", None)
+        key = getattr(envelope, "component_key", None)
+        if not (isinstance(key, str) and key):
+            continue
+        participants.append(_CanonicalRootParticipant(
+            key=key,
+            type="process",
+            action=getattr(envelope, "action", None),
+            component_id=getattr(envelope, "component_id", None),
+            name=getattr(envelope, "name", None),
+            config={},
+        ))
+    return tuple(participants)
+
+
+def canonical_roots_not_run_as_submitted(
+    processes, conflict_policy, *, existing_ids=None, components=()
+) -> FrozenSet[str]:
+    """THE canonical roots whose SUBMITTED body is not the process that runs (#184 batch 32).
+
+    The one authority every consumer of a fact derived from a root's submitted ProcessIR
+    asks — a caller's child contract, a callee's caller-supplied entry state, a declared
+    subprocess summary, a recorded standalone-entry requirement. Read off apply's own
+    decisions, over the binding it is handed (``existing_ids``, apply's binding of every spec):
+
+    - a root apply REUSES (``canonical_roots_reused_at_apply``, the predicate
+      ``_execute_canonical_process`` asks): apply returns the bound component before it
+      compiles anything, and the stored process runs;
+    - a root naming an existing component that another spec of the same request also names
+      while one of them writes it (``component_write_conflicts`` over the components and the
+      canonical roots): apply writes each in its own order and the last write is what runs
+      (measured, correction batch 32). The symbol table refuses such a request before any
+      derivation, so this half answers only a consumer reached without one.
+
+    A consumer of a root in this set gets "unknown": no row, no seed, no summary, an
+    unrecorded entry. Its own validation is unchanged: what it would establish describes
+    nothing that executes, never something the request is refused for.
+    """
+    roots = canonical_root_participants(processes)
+    keys = {participant.key for participant in roots}
+    shared = {
+        key
+        for spec_keys in component_write_conflicts(
+            list(components or ()) + list(roots), conflict_policy, existing_ids=existing_ids
+        ).values()
+        for key in spec_keys
+        if key in keys
+    }
+    return frozenset(
+        canonical_roots_reused_at_apply(processes, conflict_policy, existing_ids=existing_ids) | shared
+    )
+
+
 def _authored_step_will_reuse(
     steps: List[Dict[str, Any]],
     authored_key: Optional[str],
@@ -8724,6 +8804,8 @@ def _build_canonical_symbols(*, spec, resolution, conflict_policy, existing_ids)
     return build_symbol_table(
         list(spec.components),
         process_keys=[u.envelope.component_key for u in (spec.processes or ())],
+        # #184 correction batch 32: the roots join the write-conflict check (CDX-184-w3-01).
+        processes=spec.processes,
         connector_metadata=declared,
         connector_resolution_snapshot=snapshot,
         # #184: which bindings apply keeps decides component identity, and apply's own binding of
@@ -8763,10 +8845,10 @@ def _build_canonical_plan(*, spec, unit, conflict_policy: str, resolution, exist
         spec.components,
         conflict_policy=conflict_policy,
         snapshot=resolution,
-        # #184 wave review: a root apply reuses executes its STORED body, so the body this
-        # request submits for it derives nothing its callers may rely on.
-        reused_roots=canonical_roots_reused_at_apply(
-            spec.processes, conflict_policy, existing_ids=existing_ids
+        # #184 wave review: a root whose submitted body is not the process that runs (apply
+        # reuses it, or another spec writes its component) derives nothing anyone may rely on.
+        opaque_roots=canonical_roots_not_run_as_submitted(
+            spec.processes, conflict_policy, existing_ids=existing_ids, components=spec.components
         ),
     )
     return build_materialization_plan(
@@ -11373,6 +11455,11 @@ def _finalize_apply_success(
             boomi_client, authoring_bundle, results,
             process_mutations=process_mutations,
             process_readbacks=process_readbacks,
+            # #184 correction batch 32 (CDX-184-w3-02): apply's own answer, over its own binding.
+            opaque_roots=canonical_roots_not_run_as_submitted(
+                getattr(spec, "processes", ()), planned.get("conflict_policy") or "reuse",
+                existing_ids=planned_existing_ids(planned), components=getattr(spec, "components", ()),
+            ),
         )
     else:
         # #184 amendment 1 §3 (build recording): a RAW build that built a passthrough
@@ -11380,7 +11467,14 @@ def _finalize_apply_success(
         # pre-write pass compiled, so orchestration can judge a test run or a schedule of it.
         # Only such a build records it, so a legacy record keeps exactly its five keys. No
         # plans records nothing, which orchestration reads as unrecorded and refuses.
-        standalone = _standalone_entry_records_of(precompiled_plans or {})
+        standalone = _standalone_entry_records_of(
+            precompiled_plans or {},
+            # #184 correction batch 32 (CDX-184-w3-02): apply's own answer, over its own binding.
+            opaque_roots=canonical_roots_not_run_as_submitted(
+                getattr(spec, "processes", ()), planned.get("conflict_policy") or "reuse",
+                existing_ids=planned_existing_ids(planned), components=getattr(spec, "components", ()),
+            ),
+        )
         if standalone:
             build_record["standalone_entry"] = standalone
     _BUILD_REGISTRY[build_id] = build_record
@@ -11471,7 +11565,7 @@ def _live_component_digest(boomi_client: Boomi, component_id: str) -> Optional[s
 
 def _authoring_build_provenance(
     boomi_client: Boomi, bundle, results: Dict[str, Any],
-    process_mutations=(), process_readbacks=(),
+    process_mutations=(), process_readbacks=(), *, opaque_roots,
 ) -> Dict[str, Any]:
     """Record what a typed apply produced, for verify to compare against later."""
     from ..models.authoring_workflow import AuthoringBuildProvenanceV1
@@ -11517,18 +11611,26 @@ def _authoring_build_provenance(
     }
     # #184 amendment 3 §8: recorded only when the build has a passthrough root, so
     # every other typed build keeps exactly its keys.
-    standalone = _standalone_entry_records(bundle)
+    standalone = _standalone_entry_records(bundle, opaque_roots=opaque_roots)
     if standalone:
         record["standalone_entry"] = standalone
     return record
 
 
-def _standalone_entry_records(bundle) -> Dict[str, Any]:
+def _standalone_entry_records(bundle, *, opaque_roots) -> Dict[str, Any]:
     """What each passthrough root of a TYPED build requires of a caller, per process key."""
-    return _standalone_entry_records_of(getattr(bundle, "materialization_plans", None) or {})
+    return _standalone_entry_records_of(
+        getattr(bundle, "materialization_plans", None) or {}, opaque_roots=opaque_roots
+    )
 
 
-def _standalone_entry_records_of(plans) -> Dict[str, Any]:
+#: The record of a root whose submitted body is not the process that runs (#184 correction
+#: batch 32). Orchestration reads ``derived: False`` as an unrecorded entry contract, and
+#: ``submitted_body_runs: False`` as an entry FORM the recorded ProcessIR does not decide.
+_NOT_RUN_AS_SUBMITTED_RECORD = {"derived": False, "submitted_body_runs": False}
+
+
+def _standalone_entry_records_of(plans, *, opaque_roots) -> Dict[str, Any]:
     """What each passthrough root requires of a caller, per process key (#184 amendment 3 §8).
 
     Read off the entry contract its plan was compiled under: a typed build's stored plans or
@@ -11537,9 +11639,19 @@ def _standalone_entry_records_of(plans) -> Dict[str, Any]:
     `cap184-passthrough-standalone`), so deployment orchestration refuses a direct test
     run or schedule of one that needs a caller, before anything is mutated. Counts and
     closed flags, plus the dynamic process property names a test run could supply.
+
+    ``opaque_roots`` is REQUIRED: the roots whose submitted body is not the process that runs
+    (``canonical_roots_not_run_as_submitted``). A typed build still compiles a plan for a root
+    apply reuses, and that plan's contract describes the body apply discarded, so such a root
+    records only that nothing is recorded, whatever form its submitted body has
+    (CDX-184-w3-02).
     """
     records: Dict[str, Any] = {}
+    for key in sorted(opaque_roots):
+        records[key] = dict(_NOT_RUN_AS_SUBMITTED_RECORD)
     for key in sorted(plans):
+        if key in records:
+            continue
         plan = plans[key]
         if getattr(plan, "execution_profile", None) != "passthrough":
             continue

@@ -82,6 +82,7 @@ from .context import (
     canonical_cache_capabilities,
     canonical_cache_profiles,
     canonical_cache_refs,
+    canonical_unknown_profile_caches,
 )
 from .findings import finding
 
@@ -2070,6 +2071,10 @@ def _walk_lineage(
 
     #: #184: every profile a cache component's references declare, by canonical ref.
     cache_profiles = canonical_cache_profiles(prepared.symbols)
+    #: QA-184-w-r32-02: the caches whose profile is UNKNOWN (a raw-XML component). An
+    #: unknown profile matches nothing, so a write into one is never proved.
+    unknown_caches = canonical_unknown_profile_caches(prepared.symbols)
+    from ..contracts import profiles_unknown
     # #184: the stream-profile proof needs each call's resolved binding. When a
     # binding does not resolve, connector resolution already reports that defect
     # in the flow phase, and a profile verdict built on a guessed binding would
@@ -2749,6 +2754,9 @@ def _walk_lineage(
 
         if kind == "connector_call":
             binding = bindings[node.node_id]
+            # QA-184-w-r32-02: a raw-XML operation's profiles are UNKNOWN. Its input is judged
+            # wherever a declared one would be, and an unknown one satisfies nothing.
+            input_unknown = profiles_unknown(index.get(binding.operation_ref))
             # A map's target must be what the call it feeds declares it accepts. The
             # mismatch is reported at the map, which is where #140 always reported it.
             # Direct call-to-call equality stays unchecked (D4): connector request and
@@ -2761,6 +2769,7 @@ def _walk_lineage(
             if (
                 binding.capability.accepts_input == "documents_required"
                 or binding.input_profile_ref is not None
+                or input_unknown
             ):
                 # The call consumes the documents: on a caller's documents it requires
                 # its declared input profile of them, and an undeclared one states
@@ -2778,7 +2787,7 @@ def _walk_lineage(
             # boundary already applies the same obligation to the same content at its
             # call (ARCH-184-r1-02). Reported at the call's own operation, the base plan's
             # pointer for a typed call; an undeclared input states nothing to compare (D2).
-            if checked and binding.input_profile_ref is not None:
+            if checked and (binding.input_profile_ref is not None or input_unknown):
                 if cache_content_judgement(stream, _identity(binding.input_profile_ref)) is False:
                     mismatch(node, "/operation_ref")
             # A first-class call's output is what flows on, so whatever a legacy
@@ -2843,14 +2852,16 @@ def _walk_lineage(
             # the child requires of them, and an undeclared cache states nothing.
             declared_refs = cache_profiles.get(semantic.cache_ref, ())
             identities = {_identity(ref) for ref in declared_refs}
+            unknown = semantic.cache_ref in unknown_caches
             # Declarations that disagree state no single profile the child requires, and
-            # the staged documents are checked against each of them.
-            declared_ref = declared_refs[0] if len(identities) == 1 else None
+            # the staged documents are checked against each of them. An UNKNOWN profile
+            # (QA-184-w-r32-02) states none either, and contradicts any the caller proves.
+            declared_ref = declared_refs[0] if len(identities) == 1 and not unknown else None
             declared = _identity(declared_ref) if declared_ref is not None else None
             _requires(stream, declared, declared_ref)
-            if checked and stream.identity is not None and any(
+            if checked and stream.identity is not None and (unknown or any(
                 identity is not None and identity != stream.identity for identity in identities
-            ):
+            )):
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
@@ -2861,10 +2872,12 @@ def _walk_lineage(
 
         if kind == "cache_put":
             identity = stream.identity if stream.state == STREAM_KNOWN else None
-            if checked and identity is not None and any(
+            # An UNKNOWN cache profile (QA-184-w-r32-02) matches nothing: the documents are
+            # checked against it exactly as against a declared profile, and never prove it.
+            if checked and identity is not None and (semantic.cache_ref in unknown_caches or any(
                 _identity(declared_ref) != identity
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ())
-            ):
+            )):
                 mismatch(node, "/cache_ref")
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.

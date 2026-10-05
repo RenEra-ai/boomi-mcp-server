@@ -333,7 +333,10 @@ _REMEDIATION = {
         "or of documents whose profile nothing states, and a read that authors "
         "external_writer, satisfy none of them. An operation's profile "
         "reference must name a profile component. A component named only by reference "
-        "states no profile of its own, so declare the configuration apply writes into it."
+        "states no profile of its own, so declare the configuration apply writes into it. "
+        "A map, document cache or operation submitted as raw config.xml states no profile "
+        "either: its profile is unknown and matches none, so a profile-checked step beside "
+        "it is refused; author it through its structured profile fields instead."
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "Order the calls so every document consumer follows a call that produces "
@@ -533,8 +536,8 @@ _MESSAGES = {
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "the documents reaching a map, a cache write, a profile source, a connector call's "
         "declared input or a process call carry a profile other than the one it requires "
-        "or one nothing states, or an operation's profile reference names no profile "
-        "component"
+        "or one nothing states, or one a component submitted as raw config.xml leaves "
+        "unknown, or an operation's profile reference names no profile component"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "a connector call's document cardinality is impossible at its position"

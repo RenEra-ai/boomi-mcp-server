@@ -20,7 +20,7 @@ contribution snapshot. It refuses pickling for the same reason.
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from ..errors import RECIPE_CONTRIBUTION_INVALID
 from ..models.integration_models import IntegrationComponentSpec
@@ -139,7 +139,7 @@ def _requires_path_binding(snapshot, component_key):
     return None
 
 
-def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optional[str]]:
+def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optional[str], bool]:
     """``(input type, request profile)`` of a WSS listener OPERATION (#158).
 
     From the resolution snapshot when it resolved this component — the account's
@@ -152,6 +152,10 @@ def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optiona
     A component whose write submits raw ``config.xml`` (``submits_raw_component_xml``) is
     answered by the snapshot's reading of those bytes or not at all: the structured fields
     beside the XML are never written (#184 wave review).
+
+    The third value says whether the snapshot answered (#184, QA-184-w-r32-02): a raw-XML
+    operation the snapshot read states what those bytes state, so its profiles are not
+    unknown to the listener.
     """
     from ..categories.components._shared import submits_raw_component_xml
     from ..categories.components.builders.connector_builder import (
@@ -161,13 +165,13 @@ def _listener_inbound_facts(component, snapshot) -> Tuple[Optional[str], Optiona
 
     identity = snapshot.lookup(component.key) if snapshot is not None else None
     if identity is not None and identity.family == "wss":
-        return identity.listener_input_type, identity.listener_request_profile
+        return identity.listener_input_type, identity.listener_request_profile, True
     config = component.config or {}
     if submits_raw_component_xml(config):
-        return None, None
+        return None, None, False
     if connector_family_of(config.get("connector_type")) != "wss":
-        return None, None
-    return wss_listener_inbound_facts(config)
+        return None, None, False
+    return wss_listener_inbound_facts(config) + (False,)
 
 
 def _plan_profile_ref(value, plan_keys) -> Optional[str]:
@@ -188,10 +192,22 @@ def _plan_profile_ref(value, plan_keys) -> Optional[str]:
     return f"{_REF_PREFIX}{key}" if key and key in plan_keys else None
 
 
-def _profile_facts(
-    component, plan_keys, written=True
-) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """``(input profile, output profile, cache profile)`` refs a component declares (#184).
+class _ProfileFacts(NamedTuple):
+    """What a component states about its profiles (#184)."""
+
+    input_profile: Optional[str]
+    output_profile: Optional[str]
+    cache_profile: Optional[str]
+    #: QA-184-w-r32-02: the profiles are UNKNOWN, not absent — see ``_profile_facts``.
+    unknown: bool = False
+
+
+#: The component types whose structured config states a profile ``_profile_facts`` reads.
+_PROFILE_STATING_TYPES = frozenset({"transform.map", "documentcache", "connector-action"})
+
+
+def _profile_facts(component, plan_keys, written=True) -> _ProfileFacts:
+    """``(input profile, output profile, cache profile, unknown)`` a component declares (#184).
 
     Read from the component's own structured config, with the field names its builder
     consumes:
@@ -211,23 +227,29 @@ def _profile_facts(
     review): the write submits those bytes verbatim and never reads the structured fields
     (``submits_raw_component_xml``, the predicate every write route asks), and no reader of
     a submitted map, cache or operation document yields this plan's ``$ref:`` profile keys.
+    Its profiles are UNKNOWN rather than absent (QA-184-w-r32-02): the bytes name a profile
+    that no plan reference states, so ``unknown`` is set and every consumer fails closed on
+    it. A structured component declaring no profile is absent, not unknown, and keeps its
+    verdicts.
     """
     from ..categories.components._shared import submits_raw_component_xml
 
     if not written:
-        return None, None, None
+        return _ProfileFacts(None, None, None)
     config = component.config or {}
-    if not isinstance(config, dict) or submits_raw_component_xml(config):
-        return None, None, None
+    if not isinstance(config, dict):
+        return _ProfileFacts(None, None, None)
     component_type = str(component.type or "").strip()
+    if submits_raw_component_xml(config):
+        return _ProfileFacts(None, None, None, unknown=component_type in _PROFILE_STATING_TYPES)
     if component_type == "transform.map":
-        return (
+        return _ProfileFacts(
             _plan_profile_ref(config.get("source_profile_id"), plan_keys),
             _plan_profile_ref(config.get("target_profile_id"), plan_keys),
             None,
         )
     if component_type == "documentcache":
-        return None, None, _plan_profile_ref(config.get("profile_id"), plan_keys)
+        return _ProfileFacts(None, None, _plan_profile_ref(config.get("profile_id"), plan_keys))
     if component_type == "connector-action":
         inbound = (
             config.get("request_profile_id")
@@ -239,8 +261,8 @@ def _profile_facts(
             if "response_profile_id" in config
             else config.get("read_profile_id")
         )
-        return _plan_profile_ref(inbound, plan_keys), _plan_profile_ref(outbound, plan_keys), None
-    return None, None, None
+        return _ProfileFacts(_plan_profile_ref(inbound, plan_keys), _plan_profile_ref(outbound, plan_keys), None)
+    return _ProfileFacts(None, None, None)
 
 
 def build_symbol_table(
@@ -252,6 +274,7 @@ def build_symbol_table(
     connector_resolution_snapshot=None,
     conflict_policy: str = "reuse",
     existing_ids: Optional[Mapping[str, Optional[str]]] = None,
+    processes: Sequence[Any] = (),
 ):
     """Project components into the compiler's ``SymbolTableV1``.
 
@@ -304,6 +327,14 @@ def build_symbol_table(
     it only a declared id binds,
     which is all a route that touches no account can know (the recipe engine, archetype composition); such
     a request is bound again at apply, before any write (QA-184-s1-r10-01).
+
+    ``processes`` are the canonical roots' authoring units, where the caller has them (#184 correction
+    batch 32, CDX-184-w3-01). A root that updates an existing process writes it and a create apply reuses
+    names it, exactly as a supporting spec does, so the roots join the write-conflict check: two specs,
+    roots or components, naming one existing component one of them writes are refused. Apply writes each
+    in its own order and the last write is the process that runs (measured), so every fact derived from
+    another's submitted body would describe a discarded one. Only the conflict reads them; ``process_keys``
+    still names the roots' symbols.
     """
     from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
 
@@ -316,13 +347,18 @@ def build_symbol_table(
     from ..categories.integration_builder import (
         ComponentWriteConflictError,
         apply_writes_component_config,
+        canonical_root_participants,
         component_write_conflicts,
         declared_bindings_for_components,
     )
 
     # An existing component the request writes may be named by that one spec only, so no
-    # symbol is ever described by another spec's configuration (Stage-2 review round r8).
-    conflicts = component_write_conflicts(components, conflict_policy, existing_ids=existing_ids)
+    # symbol is ever described by another spec's configuration (Stage-2 review round r8), and
+    # no root's derived contract by a body another write replaces (correction batch 32).
+    conflicts = component_write_conflicts(
+        list(components) + list(canonical_root_participants(processes)), conflict_policy,
+        existing_ids=existing_ids,
+    )
     if conflicts:
         raise ComponentWriteConflictError(conflicts)
 
@@ -367,14 +403,14 @@ def build_symbol_table(
         # #158: a listener operation's inbound facts, for the requested inbound
         # contract. Carried on the symbol the listener entry resolves; `None` for
         # every other component.
-        listener_input_type, listener_request_profile = _listener_inbound_facts(
+        listener_input_type, listener_request_profile, snapshot_answered = _listener_inbound_facts(
             component, connector_resolution_snapshot
         )
         # #184: the profile facts the canonical stream-profile proof reads — which
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        input_profile_fact, output_profile_fact, cache_profile_fact = _profile_facts(
+        facts = _profile_facts(
             component, plan_keys,
             written=apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids),
         )
@@ -388,9 +424,12 @@ def build_symbol_table(
                 connection_ref=(
                     f"{_REF_PREFIX}{connection_ref_key}" if connection_ref_key else None
                 ),
-                input_profile_ref=listener_request_profile or input_profile_fact,
-                output_profile_ref=output_profile_fact,
-                cache_profile_ref=cache_profile_fact,
+                input_profile_ref=listener_request_profile or facts.input_profile,
+                output_profile_ref=facts.output_profile,
+                cache_profile_ref=facts.cache_profile,
+                # QA-184-w-r32-02: a raw-XML component's profiles are UNKNOWN, unless the
+                # resolution snapshot read the listener's submitted bytes.
+                profiles_unknown=True if facts.unknown and not snapshot_answered else None,
                 bound_component_id=bindings.get(component.key),
                 input_document_type=listener_input_type,
                 # Tri-state, and absent unless a snapshot actually resolved it: a

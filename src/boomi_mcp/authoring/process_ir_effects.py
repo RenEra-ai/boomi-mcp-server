@@ -1396,11 +1396,14 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
     root CALLS is validated under its callers' obligations; every call discharges them on
     its own.
 
-    ``opaque`` names the roots apply REUSES (#184 wave review). Apply discards a reused
-    root's submitted body and the stored process runs instead, so its derived facts describe
-    nothing that executes: a call to one binds no row, exactly like a call to a process this
-    request does not carry, and its callers' admission treats it as unknown. Its own facts
-    are still derived, so its own validation is unchanged.
+    ``opaque`` names the roots whose submitted body is not the process that runs (#184 wave
+    review; ``canonical_roots_not_run_as_submitted``): apply reuses the stored process, or
+    another spec writes its component. Its derived facts describe nothing that executes, in
+    BOTH directions. A call TO one binds no row, exactly like a call to a process this request
+    does not carry, and its callers' admission treats it as unknown. A call it MAKES is not one
+    that runs either, so it discharges nothing: a root only opaque roots call is not "called"
+    and gets none of the entry state a caller would establish (correction batch 32). Its own
+    facts are still derived, so its own validation is unchanged.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ChildEntryContractV1,
@@ -1611,7 +1614,15 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
             facts[key] = derived
         if all(previous[key] == facts[key] for key in unordered):
             break
-    called = {child for targets in calls.values() for child in targets.values() if child is not None}
+    # Only a call that RUNS seeds its callee: a root whose submitted body does not run makes no
+    # call that discharges anything (#184 correction batch 32).
+    called = {
+        child
+        for caller, targets in calls.items()
+        if caller not in opaque
+        for child in targets.values()
+        if child is not None
+    }
     bindings: Dict[str, tuple] = {}
     for key in roots:
         own = facts[key]
@@ -1680,8 +1691,10 @@ def resolve_process_ir_effect_declarations(
     contract, obligation or passthrough entry binds in it — which, for a request with
     no call and no passthrough root, is byte-identical to the pre-#154 path.
     ``symbols_for(key, root)`` returns the symbols a root is compiled against.
-    ``opaque_roots`` are the roots apply reuses rather than writes: neither a derived entry
-    contract nor a declared subprocess summary is taken from their submitted bodies.
+    ``opaque_roots`` are the roots whose submitted body is not the process that runs
+    (``canonical_roots_not_run_as_submitted``): neither a derived entry contract nor a declared
+    subprocess summary is taken from their submitted bodies, and no call they make seeds the
+    entry state of the process it calls.
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ExternalWriterContractV1,
@@ -1991,7 +2004,9 @@ def resolve_process_ir_effect_declarations(
         # contradiction that made the channel unusable: a child with a genuine
         # required read reported read-before-write against itself, so no request
         # carrying a non-empty required-reads summary could ever plan.
-        if derived[0]:
+        # Only a caller whose body RUNS establishes the child's entry state: a declaration bound
+        # in opaque callers alone describes calls nothing executes (#184 correction batch 32).
+        if derived[0] and any(key not in opaque_roots for key, _spelling in bound):
             # #184 amendment 3 §8: a No Data child receives no caller documents, so its
             # document-property reads are its own defects, never a caller's obligation.
             passthrough = child_key in entry_bindings and entry_bindings[child_key][4] == "passthrough"

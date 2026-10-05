@@ -206,6 +206,24 @@ def canonical_cache_profiles(symbols: SymbolTableV1) -> Mapping[str, tuple]:
     return {ref: tuple(sorted(refs)) for ref, refs in declared.items()}
 
 
+def canonical_unknown_profile_caches(symbols: SymbolTableV1) -> frozenset:
+    """The caches, by canonical ref, whose profile is UNKNOWN rather than absent (#184).
+
+    QA-184-w-r32-02. A reference whose component is submitted as raw ``config.xml``
+    states a profile no plan reference names (``contracts.profiles_unknown``). It is a fact
+    of the COMPONENT, so any reference stating it makes the component's profile unknown,
+    beside whatever another reference declares.
+    """
+    from ..contracts import profiles_unknown
+
+    canonical = canonical_cache_refs(symbols)
+    return frozenset(
+        canonical.get(symbol.ref, symbol.ref)
+        for symbol in symbols.symbols
+        if getattr(symbol, "component_type", None) == "documentcache" and profiles_unknown(symbol)
+    )
+
+
 def canonical_cache_cfg(cfg: SemanticCfgV1, canonical: Mapping[str, str]) -> SemanticCfgV1:
     """``cfg`` with every node's ``cache_ref`` in its canonical spelling.
 

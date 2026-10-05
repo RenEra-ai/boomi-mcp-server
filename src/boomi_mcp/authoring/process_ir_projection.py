@@ -712,7 +712,10 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "must compose them before the call, and it must be called with wait=true. "
             "Run directly, as a test run or on a schedule, a passthrough process "
             "starts as No Data instead, so a direct run of one that requires what only "
-            "a caller supplies is refused before anything is deployed.",
+            "a caller supplies is refused before anything is deployed. So is a direct "
+            "run of a process apply reuses instead of writing, when the ProcessIR "
+            "submitted for it or the stored process starts as Data Passthrough: what it "
+            "requires of a caller is not recorded.",
             "A No Data child, a process with no explicit entry, runs once per arriving "
             "document, each run on one empty document of its own: the parent's "
             "documents and their document properties never reach it. Where more than "
@@ -740,7 +743,8 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "helps. A process apply binds to an existing process instead of writing it — "
             "conflict_policy='reuse' with an existing id or a matching name — is one the "
             "request cannot derive: the existing process runs, not the ProcessIR submitted "
-            "for it. A child that reads the cache before writing it has no such way out: it "
+            "for it, so the calls that ProcessIR makes establish nothing in the processes "
+            "they call either. A child that reads the cache before writing it has no such way out: it "
             "needs the cache established before its own write, and an earlier run may have "
             "emptied it. It is "
             "refused too when it reads state first and its own state effects are unknown, "

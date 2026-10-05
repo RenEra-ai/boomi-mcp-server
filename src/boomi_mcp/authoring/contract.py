@@ -1702,7 +1702,7 @@ def _component_identity_behaviour_oracle():
     from ..categories.integration_builder import (
         ComponentWriteConflictError,
         apply_writes_component_config,
-        canonical_roots_reused_at_apply,
+        canonical_roots_not_run_as_submitted,
         component_writes_existing,
         planned_existing_ids,
     )
@@ -1881,10 +1881,46 @@ def _component_identity_behaviour_oracle():
         )
     ]
     raw_xml_facts = sorted(
-        [symbol.ref, symbol.input_profile_ref or "", symbol.output_profile_ref or "", symbol.cache_profile_ref or ""]
+        [symbol.ref, symbol.input_profile_ref or "", symbol.output_profile_ref or "", symbol.cache_profile_ref or "",
+         # QA-184-w-r32-02: a raw-XML component's profiles are UNKNOWN, not absent.
+         str(symbol.profiles_unknown)]
         for symbol in build_symbol_table(raw_xml, conflict_policy="reuse").symbols
         if symbol.ref.startswith("$ref:xml_")
     )
+    # QA-184-w-r32-02. Each profile consumer next to a component whose profile is unknown, beside
+    # the same component declaring a matching profile and declaring none: an unknown profile
+    # matches nothing, so a write into such a cache and a read fed to such an operation fail closed.
+    from ..compiler.process_ir import connector_capabilities
+    from ..compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1 as _Table
+
+    def unknown_symbols(cache, patch):
+        rest = connector_capabilities.REST_FAMILY
+        return _Table(symbols=(
+            ComponentSymbolV1(ref="$ref:rconn", component_id="RCONN", component_type="connector-settings",
+                              connector_type=rest),
+            ComponentSymbolV1(ref="$ref:get", component_id="GET", component_type="connector-action",
+                              connector_type=rest, action_type="GET", connection_ref="$ref:rconn",
+                              output_profile_ref="$ref:p1"),
+            ComponentSymbolV1(ref="$ref:patch", component_id="PATCH", component_type="connector-action",
+                              connector_type=rest, action_type="PATCH", connection_ref="$ref:rconn", **patch),
+            ComponentSymbolV1(ref="$ref:cache", component_id="CACHE", component_type="documentcache", **cache),
+            ComponentSymbolV1(ref="$ref:p1", component_id="P1", component_type="profile.json"),
+        ))
+
+    stated = {"declared": {"cache_profile_ref": "$ref:p1"}, "absent": {}, "unknown": {"profiles_unknown": True}}
+    stated_input = {"declared": {"input_profile_ref": "$ref:p1"}, "absent": {}, "unknown": {"profiles_unknown": True}}
+    unknown_ir = model.parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [
+            {"steps": [{"kind": "connector_call", "operation_ref": "$ref:get"}],
+             "terminal": {"kind": "cache_put", "cache_ref": "$ref:cache"}},
+            {"steps": [{"kind": "cache_get", "cache_ref": "$ref:cache"},
+                       {"kind": "connector_call", "operation_ref": "$ref:patch"}], "terminal": stop}]}]}})
+    unknown_profiles = {
+        "cache:" + cache_name + "+patch:" + patch_name: sorted(
+            [item.code, item.path]
+            for item in validate_process_ir(unknown_ir, unknown_symbols(stated[cache_name], stated_input[patch_name])).errors)
+        for cache_name in sorted(stated) for patch_name in sorted(stated_input)
+    }
     from ..compiler.process_ir.contracts import SymbolTableV1
     from ..models.process_component import ProcessAuthoringUnitV1, ProcessComponentEnvelopeV1
 
@@ -1916,7 +1952,7 @@ def _component_identity_behaviour_oracle():
     reused_roots = {}
     for policy in ("clone", "reuse"):
         for name, (envelope, existing) in sorted(bindings.items()):
-            reused = canonical_roots_reused_at_apply(
+            reused = canonical_roots_not_run_as_submitted(
                 [unit("parent", parent_doc), unit("child", child_doc, **envelope)], policy, existing_ids=existing)
             resolved = resolve_process_ir_effect_declarations(
                 call_roots, None, call_symbols, [], child_roots={"$ref:" + key: ir for key, ir in call_roots},
@@ -1925,8 +1961,73 @@ def _component_identity_behaviour_oracle():
             report = (validate_process_ir(call_roots[0][1], call_symbols, capabilities=context)
                       if context is not None else validate_process_ir(call_roots[0][1], call_symbols))
             reused_roots[policy + ":" + name] = [sorted(reused), sorted([item.code, item.path] for item in report.errors)]
+    # #184 correction batch 32 (CDX-184-w3-01). The canonical roots join the write-conflict check:
+    # per pair of participants naming one existing process and per policy, the symbol table's
+    # verdict and the roots whose submitted body is not the process that runs.
+    shared_id = "0b32a0b3-2a0b-32a0-b32a-0b32a0b32a0b"
+    participants = {
+        "root_update": ("unit", {"action": "update", "component_id": shared_id}),
+        "root_create_by_id": ("unit", {"component_id": shared_id}),
+        "component_update": ("spec", {"action": "update", "component_id": shared_id}),
+        "component_reference_only": ("spec", {"component_id": shared_id, "reference_only": True}),
+    }
+
+    def participant(key, kind):
+        form, fields = participants[kind]
+        if form == "unit":
+            envelope = dict(fields)
+            action = envelope.pop("action", "create")
+            return ProcessAuthoringUnitV1(
+                envelope=ProcessComponentEnvelopeV1(component_key=key, name=key, action=action, **envelope),
+                process_ir=model.parse_process_ir_v1(child_doc))
+        config = dict(fields)
+        return spec(key, "process", action=config.pop("action", "create"),
+                    component_id=config.pop("component_id"), **config)
+
+    root_writes = {}
+    for policy in ("clone", "reuse"):
+        for first in sorted(participants):
+            for second in sorted(participants):
+                if second < first:
+                    continue
+                pair = [participant("a", first), participant("b", second)]
+                units = [item for item in pair if isinstance(item, ProcessAuthoringUnitV1)]
+                specs = [item for item in pair if not isinstance(item, ProcessAuthoringUnitV1)]
+                try:
+                    build_symbol_table(specs, process_keys=[item.envelope.component_key for item in units],
+                                       processes=units, conflict_policy=policy)
+                    table = "admitted"
+                except ComponentWriteConflictError as conflict:
+                    table = [conflict.code, list(conflict.keys)]
+                root_writes[policy + ":" + first + "+" + second] = [
+                    table, sorted(canonical_roots_not_run_as_submitted(units, policy, components=specs))]
+    # A call an opaque root MAKES discharges nothing: a passthrough child that reads K at entry is
+    # validated as uncalled when its only caller's submitted body does not run.
+    reads_k = {"kind": "set_dpp", "name": "OUT", "source_values": [{"value_type": "dpp", "property_name": "K"}]}
+    reader_doc = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "passthrough", "label": "Receive"}, {
+            "kind": "decision", "comparison": "equals", "left": {"value_type": "static", "static_value": "a"},
+            "right": {"value_type": "static", "static_value": "a"},
+            "true_arm": {"steps": [reads_k], "terminal": stop}, "false_arm": {"steps": [reads_k], "terminal": stop}}]}}
+    caller_doc = {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": [
+        {"steps": [sets_k], "terminal": {"kind": "process_call", "process_ref": "$ref:child", "wait": True,
+                                          "abort_on_error": True}},
+        {"steps": [sets_k], "terminal": stop}]}]}}
+    caller_roots = [("parent", model.parse_process_ir_v1(caller_doc)), ("child", model.parse_process_ir_v1(reader_doc))]
+    opaque_callers = {}
+    for name, envelope in (("written", {}), ("reused", {"component_id": shared_id})):
+        opaque = canonical_roots_not_run_as_submitted(
+            [unit("parent", caller_doc, **envelope), unit("child", reader_doc)], "reuse")
+        resolved = resolve_process_ir_effect_declarations(
+            caller_roots, None, call_symbols, [], child_roots={"$ref:" + key: ir for key, ir in caller_roots},
+            opaque_roots=opaque)
+        context = resolved.capabilities_by_root.get("child")
+        report = (validate_process_ir(caller_roots[1][1], call_symbols, capabilities=context)
+                  if context is not None else validate_process_ir(caller_roots[1][1], call_symbols))
+        opaque_callers[name] = [sorted(opaque), sorted([item.code, item.path] for item in report.errors)]
     verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources,
-                "named_bindings": named_bindings, "raw_xml_facts": raw_xml_facts, "reused_roots": reused_roots}
+                "named_bindings": named_bindings, "raw_xml_facts": raw_xml_facts, "reused_roots": reused_roots,
+                "root_writes": root_writes, "opaque_callers": opaque_callers, "unknown_profiles": unknown_profiles}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as

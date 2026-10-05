@@ -947,6 +947,13 @@ def _standalone_entry_refusal(
     test run or a schedule works. The requirements are the ones recorded with the
     build, typed or raw; a test run may supply dynamic process properties, a schedule supplies
     none. Package and deployment without either stay available.
+
+    A root whose submitted body is not the process that runs (apply reused the stored one) is
+    recorded as ``derived: False, submitted_body_runs: False`` (correction batch 32,
+    CDX-184-w3-02), so a passthrough one is refused here as unrecorded, in both runs. Its
+    recorded ProcessIR does not decide the stored process's entry either: one whose submitted
+    body is not passthrough is judged by ``_unrun_root_stored_entry_refusal`` in the real run,
+    from the stored start.
     """
     from ...authoring.process_entry import PASSTHROUGH, RecordedEntryUnreadable
 
@@ -1005,6 +1012,73 @@ def _standalone_entry_refusal(
                 "requirements": unmet,
             },
         )
+    return None
+
+
+def _recorded_unrun_root(build_id: str, target: ResolvedBuildTarget) -> bool:
+    """Did the build record the target as a root whose submitted body does not run (#184 batch 32)?
+
+    Read off the standalone-entry record apply wrote through
+    ``canonical_roots_not_run_as_submitted``, never re-derived here: the binding that decided it
+    was apply's own.
+    """
+    entry = integration_builder._BUILD_REGISTRY.get(build_id)
+    record = _recorded_standalone_entries(entry if isinstance(entry, dict) else {}).get(target.process_key)
+    return isinstance(record, dict) and record.get("submitted_body_runs") is False
+
+
+def _unrun_root_stored_entry_refusal(
+    boomi_client: Any,
+    build_id: str,
+    target: ResolvedBuildTarget,
+    *,
+    run_test: bool,
+    normalized_schedule: Optional[Dict[str, Any]],
+) -> Optional[OrchestrateDeployError]:
+    """Refuse a direct run of a reused root whose STORED process starts as Data Passthrough (#184 batch 32).
+
+    The build recorded the root as one whose submitted body does not run, so its recorded
+    ProcessIR says nothing about how the stored process enters, and nothing about what it
+    needs from a caller. A submitted passthrough body is refused by ``_standalone_entry_refusal``
+    in both runs; for any other submitted body the stored start is read here, real run only (a
+    dry run reads nothing), as #158 confirms a reused listener's. A stored passthrough start, a
+    start that cannot be read, or a process with no start is refused before anything is
+    packaged: fails CLOSED, with the unrecorded-contract requirement.
+    """
+    scheduled = bool(normalized_schedule) and (
+        normalized_schedule.get("mode") in _SCHEDULE_SCHEDULED_MODES
+    )
+    if not (run_test or scheduled) or not _recorded_unrun_root(build_id, target):
+        return None
+    field = "run_test" if run_test else "schedule_override"
+
+    def _refuse(reason: str) -> OrchestrateDeployError:
+        return _error(
+            PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED,
+            (
+                f"Build '{build_id}' reused an existing process for '{target.process_key}' "
+                f"instead of writing it, and {reason}, so what it needs from a caller is not "
+                "recorded. Nothing was deployed. Run it through its caller, or deploy it "
+                "without run_test and without a schedule."
+            ),
+            field=field,
+            details={
+                "build_id": build_id,
+                "process_key": target.process_key,
+                "requirements": ["entry_contract_not_recorded"],
+            },
+        )
+
+    try:
+        read = component_get_xml(boomi_client, target.process_component_id)
+        root_xml = ET.fromstring(read["xml"])
+    except Exception:
+        return _refuse("that process could not be read back to confirm how it starts")
+    starts = [shape for shape in root_xml.iter("shape") if shape.get("shapetype") == "start"]
+    if not starts:
+        return _refuse("that process has no start shape to confirm how it starts")
+    if any(shape.find("./configuration/passthroughaction") is not None for shape in starts):
+        return _refuse("that process starts as Data Passthrough")
     return None
 
 
@@ -5519,6 +5593,16 @@ def orchestrate_deploy_action(
     listener_refusal: Optional[OrchestrateDeployError] = None
     if listener_meta is not None and (target.process_status or "") == "reused":
         listener_refusal = _reused_listener_entry_mismatch(boomi_client, build_id, target)
+    elif listener_meta is None:
+        # #184 correction batch 32 (CDX-184-w3-02): a reused root's stored start decides
+        # whether a direct run needs a caller; a listener's is confirmed just above.
+        listener_refusal = _unrun_root_stored_entry_refusal(
+            boomi_client,
+            build_id,
+            target,
+            run_test=bool(run_test),
+            normalized_schedule=normalized_schedule,
+        )
     if (
         listener_refusal is None
         and listener_meta is not None

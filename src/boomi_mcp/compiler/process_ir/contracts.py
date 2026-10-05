@@ -224,6 +224,15 @@ class ComponentSymbolV1(_CompilerModel):
     #: about the content. A ref like the other profile refs, with the profile
     #: symbol's own ``component_type`` as the profile kind.
     cache_profile_ref: Optional[str] = None
+    #: #184 (QA-184-w-r32-02). The profiles this component states are UNKNOWN, not absent:
+    #: its write submits raw ``config.xml`` verbatim (``submits_raw_component_xml``), so the
+    #: profile it carries is whatever those bytes name, and no plan ``$ref`` states it. A
+    #: structured component that declares no profile leaves this ``False`` and keeps its own
+    #: verdicts. Every profile consumer reads it through :func:`profiles_unknown` and treats
+    #: an unknown profile as one that matches nothing — the rule a map with an absent profile
+    #: already gets — so it fails closed instead of skipping a check it cannot make. ``True`` or
+    #: ``None``, like every optional fact here: ``None`` means no producer said so.
+    profiles_unknown: Optional[bool] = None
     #: #184. The existing component this reference binds to when the component plan
     #: DECLARES that binding: a reuse by id, a ``reference_only`` id, or an update of a
     #: named id. A placeholder-backed table gives every reference its own
@@ -258,6 +267,17 @@ class ComponentSymbolV1(_CompilerModel):
                 "surrounding whitespace"
             )
         return value
+
+
+def profiles_unknown(symbol) -> bool:
+    """Whether ``symbol``'s profiles are UNKNOWN rather than absent (#184, QA-184-w-r32-02).
+
+    The one reading of :attr:`ComponentSymbolV1.profiles_unknown` every profile consumer
+    asks: a cache write and its staged requirement, a connector call's declared input, a
+    map, a listener. ``False`` for a missing symbol: an unresolved reference has its own
+    refusal.
+    """
+    return bool(getattr(symbol, "profiles_unknown", False)) if symbol is not None else False
 
 
 def component_identity(symbol) -> Optional[str]:

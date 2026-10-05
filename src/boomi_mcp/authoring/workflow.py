@@ -1595,7 +1595,7 @@ def resolve_root_context(
     *,
     conflict_policy: str,
     snapshot: Any,
-    reused_roots: Any,
+    opaque_roots: Any,
     declarations: Any = None,
     literal_indexes: Any = None,
 ) -> Any:
@@ -1612,10 +1612,10 @@ def resolve_root_context(
     contract is derived against the symbols that child root is compiled with, projected with
     the route's own resolution snapshot, so its profile requirements resolve.
 
-    ``reused_roots`` is REQUIRED: the roots apply binds to an existing process instead of
-    writing (``canonical_roots_reused_at_apply``). Apply discards a reused root's submitted
-    body, so it contributes no derived contract and a call to it is a call to an unknown
-    child (#184 wave review).
+    ``opaque_roots`` is REQUIRED: the roots whose submitted body is not the process that runs
+    (``canonical_roots_not_run_as_submitted``: apply reuses it, or another spec writes its
+    component). It contributes no derived contract, a call to it is a call to an unknown child,
+    and a call it makes seeds nothing in its callee (#184 wave review, correction batch 32).
     """
     from ..compiler.process_ir.connector_resolution import project_grants_for_root
     from .process_ir_effects import resolve_process_ir_effect_declarations
@@ -1632,7 +1632,7 @@ def resolve_root_context(
         symbols_for=lambda key, root: project_grants_for_root(
             root, symbols, process_root_ref=key, snapshot=snapshot
         ),
-        opaque_roots=frozenset(reused_roots),
+        opaque_roots=frozenset(opaque_roots),
     )
 
 
@@ -1643,7 +1643,7 @@ def derive_root_capabilities(
     *,
     conflict_policy: str,
     snapshot: Any,
-    reused_roots: Any,
+    opaque_roots: Any,
 ) -> Dict[str, Any]:
     """``{root key: trusted context or None}`` for a route with no effect declarations.
 
@@ -1653,7 +1653,7 @@ def derive_root_capabilities(
     """
     return resolve_root_context(
         process_roots, symbols, components, conflict_policy=conflict_policy, snapshot=snapshot,
-        reused_roots=reused_roots,
+        opaque_roots=opaque_roots,
     ).capabilities_by_root
 
 
@@ -1810,7 +1810,7 @@ def _validate_processes(
 
     from ..categories.integration_builder import (
         ComponentWriteConflictError,
-        canonical_roots_reused_at_apply,
+        canonical_roots_not_run_as_submitted,
     )
     from ..compiler.process_ir.contracts import SymbolTableV1
 
@@ -1825,6 +1825,8 @@ def _validate_processes(
                 unit.envelope.component_key
                 for unit in normalized.integration_spec.processes
             ],
+            # #184 correction batch 32: the roots join the write-conflict check (CDX-184-w3-01).
+            processes=normalized.integration_spec.processes,
             connector_metadata=normalized.connector_metadata,
             connector_resolution_snapshot=snapshot,
             # #184: which declared bindings apply keeps decides component identity.
@@ -1879,9 +1881,10 @@ def _validate_processes(
         conflict_policy=conflict_policy,
         snapshot=snapshot,
         # #184 wave review: apply's own answer, over the binding this route resolved with the
-        # account, so a root apply reuses derives nothing for its callers here either.
-        reused_roots=canonical_roots_reused_at_apply(
-            normalized.integration_spec.processes, conflict_policy or "reuse", existing_ids=existing_ids
+        # account, so a root whose submitted body does not run derives nothing here either.
+        opaque_roots=canonical_roots_not_run_as_submitted(
+            normalized.integration_spec.processes, conflict_policy or "reuse", existing_ids=existing_ids,
+            components=normalized.integration_spec.components,
         ),
         declarations=declarations if symbols is not None else None,
         # #179. The plan's own profile indexes. Without them the effect gate

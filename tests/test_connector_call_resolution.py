@@ -150,6 +150,10 @@ def test_component_symbol_optional_field_set_is_pinned():
         # declares that binding. Component identity compares through it, and the symbol
         # builder fills it from the plan's declared bindings, never the compiler.
         "bound_component_id",
+        # #184 (QA-184-w-r32-02). A component submitted as raw config.xml states its profiles
+        # UNKNOWN rather than absent; every profile consumer fails closed on it. The symbol
+        # builder sets it from `submits_raw_component_xml`, never the compiler.
+        "profiles_unknown",
     }
     # Every optional field must actually default, or a pre-#140 caller's symbol
     # construction would break.
