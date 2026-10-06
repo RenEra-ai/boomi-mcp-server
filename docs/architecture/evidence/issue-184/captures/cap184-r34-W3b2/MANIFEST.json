@@ -1,0 +1,54 @@
+{
+ "scenario": "W3b: a map hands on the cached DDP X it received (retrieve c1 -> map p_client->p_a -> GET path_binding X)",
+ "issue": 184,
+ "round": "r34",
+ "tree": "e22b8fa46db594bf6845e97a03444ad760c2f181",
+ "account_id": "trainingglebbochkarov-16926N",
+ "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+ "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+ "nonce": "S118410050726",
+ "execution_id": "execution-20346892-3131-40b2-a5d3-0b734d65b496-2026.10.05",
+ "captured_utc": "2026-10-05T08:27:23.554212+00:00",
+ "record_status": [
+  "COMPLETE"
+ ],
+ "wire_request_lines": [
+  "GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1",
+  "GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1",
+  "GET /__S31_184__/S118410050726/W3b2/k1/seg-S118410050726 HTTP/1.1",
+  "GET /__S31_184__/S118410050726/W3b2/k2/seg-S118410050726 HTTP/1.1"
+ ],
+ "fixture_provenance": "served get_schema_template ProcessIRV1/AuthoringRequestV1 at e22b8fa + platform REST GET on cds-mock (reused conn 2fe488e4 v3) + direct map with stated profiles; no implementation output used as a fixture",
+ "files": {
+  "apply.json": {
+   "bytes": 12800,
+   "sha256": "30d1865bdb9f879635ac1605eba93464d01c8aff759626f03878ef30c213f3ca",
+   "email_hits": 0
+  },
+  "cell.json": {
+   "bytes": 7309,
+   "sha256": "8f7094ef36905a63e858df2d26b450e7c96f233e62ca080dedf9d564e187df89",
+   "email_hits": 0
+  },
+  "compile.json": {
+   "bytes": 24344,
+   "sha256": "c654b1dbad65006126f8518e3ce7f8b629b4a3b86811b05082494be4c26532a2",
+   "email_hits": 0
+  },
+  "request.json": {
+   "bytes": 9099,
+   "sha256": "2fe4b0e3569ba1afae81f867a24735e3333063246af403eb6717127271f4f938",
+   "email_hits": 0
+  },
+  "root.stored.xml": {
+   "bytes": 6452,
+   "sha256": "9cc0aac79b84b7049310011aa5fc455d6c957bf00afcac2fd62aba06bfc0fd22",
+   "email_hits": 0
+  },
+  "run.json": {
+   "bytes": 6037,
+   "sha256": "454a73ca128db75e900eec35b668ad9d834c2b4e0b3add4c57113555fd2723fc",
+   "email_hits": 0
+  }
+ }
+}

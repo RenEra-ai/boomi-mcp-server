@@ -1,0 +1,87 @@
+{
+  "tag": "live34/head/W3b2",
+  "process_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+  "started_utc": "2026-10-05T08:12:52.465197+00:00",
+  "execute": {
+    "_success": true,
+    "request_id": "executionrecord-543b7cd2-34ff-48de-b379-5919e70284cc",
+    "process_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+    "environment_id": "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9",
+    "atom_id": "a40a3313-1537-47c4-91c7-573a703537c7",
+    "dynamic_properties": {
+      "seed_id": "seg-S118410050726"
+    },
+    "execution_result": {
+      "poll_status": "COMPLETED",
+      "elapsed_seconds": 18.2,
+      "poll_count": 9,
+      "execution_id": "execution-20346892-3131-40b2-a5d3-0b734d65b496-2026.10.05",
+      "status": "COMPLETE",
+      "process_name": "_TEST_184S1_W3b2_root_S118410050726",
+      "atom_name": "renera-local-atom",
+      "execution_time": "2026-10-05T08:12:59Z",
+      "execution_duration": 116,
+      "inbound_document_count": 1,
+      "outbound_document_count": 4,
+      "inbound_error_document_count": 0,
+      "error": null
+    },
+    "execution_id": "execution-20346892-3131-40b2-a5d3-0b734d65b496-2026.10.05"
+  },
+  "execution_id": "execution-20346892-3131-40b2-a5d3-0b734d65b496-2026.10.05",
+  "record": [
+    {
+      "@type": "ExecutionRecord",
+      "executionId": "execution-20346892-3131-40b2-a5d3-0b734d65b496-2026.10.05",
+      "account": "trainingglebbochkarov-16926N",
+      "executionTime": "2026-10-05T08:12:59Z",
+      "status": "COMPLETE",
+      "executionType": "exec_manual",
+      "processName": "_TEST_184S1_W3b2_root_S118410050726",
+      "processId": "02650b2b-c414-4b13-94ee-e64762f3890c",
+      "atomName": "renera-local-atom",
+      "atomId": "a40a3313-1537-47c4-91c7-573a703537c7",
+      "inboundDocumentCount": 1,
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 4,
+      "executionDuration": [
+        "Long",
+        116
+      ],
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "outboundDocumentSize": [
+        "Long",
+        696
+      ],
+      "recordedDate": "2026-10-05T08:12:59Z"
+    }
+  ],
+  "log": "2026-10-05T08:12:59Z\tINFO\tinitializing...\t\tExecuting Process _TEST_184S1_W3b2_root_S118410050726\n2026-10-05T08:12:59Z\tINFO\tStart\tNoData\tExecuting Start Shape\n2026-10-05T08:12:59Z\tINFO\tStart\tNoData\t1 document(s) found for processing.\n2026-10-05T08:12:59Z\tINFO\tStart\tNoData\tShape executed successfully in 4 ms.\n2026-10-05T08:12:59Z\tINFO\tBranch\t\tExecuting Branch Shape with 1 document(s).\n2026-10-05T08:12:59Z\tINFO\tBranch\t\tShape executed successfully in 0 ms.\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_get1_S118410050726\tExecuting Connector Shape with 1 document(s).\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_get1_S118410050726\tShape executed successfully in 6 ms.\n2026-10-05T08:12:59Z\tINFO\tDocument Properties\t\tExecuting Set Properties Shape with 1 document(s).\n2026-10-05T08:12:59Z\tINFO\tDocument Properties\t\tShape executed successfully in 1 ms.\n2026-10-05T08:12:59Z\tINFO\tDocument Cache Load\t\tShape executed successfully in 12 ms.\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_get2_S118410050726\tExecuting Connector Shape with 1 document(s).\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_get2_S118410050726\tShape executed successfully in 7 ms.\n2026-10-05T08:12:59Z\tINFO\tDocument Properties\t\tExecuting Set Properties Shape with 1 document(s).\n2026-10-05T08:12:59Z\tINFO\tDocument Properties\t\tShape executed successfully in 1 ms.\n2026-10-05T08:12:59Z\tINFO\tDocument Cache Load\t\tShape executed successfully in 9 ms.\n2026-10-05T08:12:59Z\tINFO\tDocument Cache Retrieve\t\tShape executed successfully in 4 ms.\n2026-10-05T08:12:59Z\tINFO\tMap\t_TEST_184S1_W3b2_map_S118410050726\tExecuting Map with 2 document(s).\n2026-10-05T08:12:59Z\tINFO\tMap\t_TEST_184S1_W3b2_map_S118410050726\tShape executed successfully in 2 ms.\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_bm_S118410050726\tExecuting Connector Shape with 2 document(s).\n2026-10-05T08:12:59Z\tINFO\tConnector\tSandbox CDS Mock REST (no-auth): officialboomi-X3979C-rest-prod Connector; _TEST_184S1_W3b2_op_bm_S118410050726\tShape executed successfully in 9 ms.\n2026-10-05T08:12:59Z\tINFO\tStop\tcontinuing process\tExecuting Stop Shape with 2 document(s).\n2026-10-05T08:12:59Z\tINFO\tStop\tcontinuing process\tShape executed successfully in 0 ms.\n2026-10-05T08:12:59Z\tINFO\tcleanup...\t\tProcess execution completed normally.\n",
+  "mock": [
+    "INFO:     172.19.0.1:59430 - \"GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:59436 - \"GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1\" 200 OK",
+    "INFO:     172.19.0.1:59452 - \"GET /__S31_184__/S118410050726/W3b2/k1/seg-S118410050726 HTTP/1.1\" 404 Not Found",
+    "INFO:     172.19.0.1:59452 - \"GET /__S31_184__/S118410050726/W3b2/k2/seg-S118410050726 HTTP/1.1\" 404 Not Found"
+  ],
+  "wire": [
+    {
+      "start_line": "GET /admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a HTTP/1.1",
+      "body": ""
+    },
+    {
+      "start_line": "GET /admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da HTTP/1.1",
+      "body": ""
+    },
+    {
+      "start_line": "GET /__S31_184__/S118410050726/W3b2/k1/seg-S118410050726 HTTP/1.1",
+      "body": "{\r\n  \"a1\" : \"1bdb1503-2807-4771-b1b7-8689be8f8e0a\"\r\n}"
+    },
+    {
+      "start_line": "GET /__S31_184__/S118410050726/W3b2/k2/seg-S118410050726 HTTP/1.1",
+      "body": "{\r\n  \"a1\" : \"97ef6619-0f72-41bf-9b29-dba25de5f9da\"\r\n}"
+    }
+  ]
+}

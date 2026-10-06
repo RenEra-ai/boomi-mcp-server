@@ -1,0 +1,308 @@
+{
+  "_success": true,
+  "build_id": "a3a6100f-d7e9-4b35-8b27-e888b9bf3cea",
+  "message": "Applied integration '_TEST_184S1_W3b2_S118410050726' with 9 steps.",
+  "execution_order": [
+    "conn",
+    "p_a",
+    "op_bm",
+    "p_client",
+    "c1",
+    "map",
+    "op_get1",
+    "op_get2",
+    "root"
+  ],
+  "results": {
+    "conn": {
+      "status": "reused",
+      "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+      "type": "connector-settings",
+      "name": "Sandbox CDS Mock REST (no-auth)"
+    },
+    "p_a": {
+      "status": "created",
+      "component_id": "c5bf5625-aba6-446b-92ec-413362660a8a",
+      "type": "profile.json",
+      "name": "_TEST_184S1_W3b2_p_a_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_184S1_W3b2_p_a_S118410050726'",
+        "component_id": "c5bf5625-aba6-446b-92ec-413362660a8a",
+        "name": "_TEST_184S1_W3b2_p_a_S118410050726",
+        "type": "profile.json",
+        "profile": "renera"
+      }
+    },
+    "op_bm": {
+      "status": "created",
+      "component_id": "75f02a57-8890-40cf-a148-2d0c0b329a36",
+      "type": "connector-action",
+      "name": "_TEST_184S1_W3b2_op_bm_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_184S1_W3b2_op_bm_S118410050726'",
+        "component_id": "75f02a57-8890-40cf-a148-2d0c0b329a36",
+        "name": "_TEST_184S1_W3b2_op_bm_S118410050726",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "p_client": {
+      "status": "created",
+      "component_id": "ca6ab013-89d1-4398-a95c-e5f19e27b3fb",
+      "type": "profile.json",
+      "name": "_TEST_184S1_W3b2_p_client_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_184S1_W3b2_p_client_S118410050726'",
+        "component_id": "ca6ab013-89d1-4398-a95c-e5f19e27b3fb",
+        "name": "_TEST_184S1_W3b2_p_client_S118410050726",
+        "type": "profile.json",
+        "profile": "renera"
+      }
+    },
+    "c1": {
+      "status": "created",
+      "component_id": "021284c1-ef5d-45b1-9e8d-6899b19823ac",
+      "type": "documentcache",
+      "name": "_TEST_184S1_W3b2_c1_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_184S1_W3b2_c1_S118410050726'",
+        "component_id": "021284c1-ef5d-45b1-9e8d-6899b19823ac",
+        "name": "_TEST_184S1_W3b2_c1_S118410050726",
+        "type": "documentcache",
+        "profile": "renera"
+      }
+    },
+    "map": {
+      "status": "created",
+      "component_id": "d7245b15-1c35-45e9-9513-3426dfb14493",
+      "type": "transform.map",
+      "name": "_TEST_184S1_W3b2_map_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_184S1_W3b2_map_S118410050726'",
+        "component_id": "d7245b15-1c35-45e9-9513-3426dfb14493",
+        "name": "_TEST_184S1_W3b2_map_S118410050726",
+        "type": "transform.map",
+        "profile": "renera"
+      }
+    },
+    "op_get1": {
+      "status": "created",
+      "component_id": "17768e49-cdb7-4481-9c07-c986b45fce65",
+      "type": "connector-action",
+      "name": "_TEST_184S1_W3b2_op_get1_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_184S1_W3b2_op_get1_S118410050726'",
+        "component_id": "17768e49-cdb7-4481-9c07-c986b45fce65",
+        "name": "_TEST_184S1_W3b2_op_get1_S118410050726",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "op_get2": {
+      "status": "created",
+      "component_id": "e49689df-620b-4e59-ae44-7d1c5d7fc204",
+      "type": "connector-action",
+      "name": "_TEST_184S1_W3b2_op_get2_S118410050726",
+      "result": {
+        "_success": true,
+        "message": "Created officialboomi-X3979C-rest-prod execute operation '_TEST_184S1_W3b2_op_get2_S118410050726'",
+        "component_id": "e49689df-620b-4e59-ae44-7d1c5d7fc204",
+        "name": "_TEST_184S1_W3b2_op_get2_S118410050726",
+        "type": "connector-action",
+        "sub_type": "officialboomi-X3979C-rest-prod",
+        "profile": "renera"
+      }
+    },
+    "root": {
+      "type": "process",
+      "name": "_TEST_184S1_W3b2_root_S118410050726",
+      "requested_name": "_TEST_184S1_W3b2_root_S118410050726",
+      "applied_name_verified": true,
+      "status": "created",
+      "component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+      "result": {
+        "_success": true,
+        "message": "Created component '_TEST_184S1_W3b2_root_S118410050726'",
+        "component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+        "name": "_TEST_184S1_W3b2_root_S118410050726",
+        "type": "process",
+        "profile": "renera"
+      },
+      "_success": true
+    }
+  },
+  "process_mutations": [
+    {
+      "component_key": "root",
+      "plan_fingerprint": "sha256:52ddb3567073e20807828cb7fea273a51fdbc192a2b56fed5d43fe8afa471c93",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "action": "create",
+      "target_component_id": null,
+      "result_component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+      "resolved_placement": {
+        "folder_name": null,
+        "folder_id": null
+      },
+      "submitted_xml_digest": "sha256:8ea018fa5cbee4f7c084724515db385de53c3e9f629709a180fc3d005dfb9c3b",
+      "replay_evidence_bindings": []
+    }
+  ],
+  "process_readbacks": [
+    {
+      "component_key": "root",
+      "component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+      "digest": "sha256:e75ff61dd14b17138016f709ac383d3c6709b489db0fc25f8ad6107e27edd933"
+    }
+  ],
+  "mutation_performed": true,
+  "authoring_provenance": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670",
+      "capability_revision": "sha256:381792b12cb6ce44ec85984780eb847e06f652d13da5948ebc17b33091099ac9",
+      "compiler_revision": "sha256:c5072c8eeca693d6638d2d8967184935347345d2bb7ebdcb09a8374387c4d3ec",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:c87783dfb02a875d43ee9d6714150621092c520ad56fd79321481f391a096eb1",
+      "plan_hash": "sha256:9a5ea3a00aece8d50338758b427cde54acf5b79d4f148f0739d05acd89c32537",
+      "compile_hash": "sha256:94a911a425347062de609d7aaaf88ab636868eff96a7deef5914f1714e368022"
+    },
+    "artifact_fingerprints": [
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 9609,
+        "digest": "sha256:52ddb3567073e20807828cb7fea273a51fdbc192a2b56fed5d43fe8afa471c93"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 6143,
+        "digest": "sha256:12a7099ae1260cc82e8b1ba1ef663a2a0d2748fae8b24c9372fac39dd7dc7219"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 1285,
+        "digest": "sha256:42c4e192e65ed113db3248effaf67ab5992658e1c3bdcec10e677eff92e966dc"
+      }
+    ],
+    "resolved_references": [
+      {
+        "ref": "$ref:c1",
+        "component_type": "documentcache",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "version_marker": "3"
+      },
+      {
+        "ref": "$ref:map",
+        "component_type": "transform.map",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_bm",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:p_a",
+        "component_type": "profile.json",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:p_client",
+        "component_type": "profile.json",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:root",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "live_comparison": null,
+    "process_mutations": [
+      {
+        "component_key": "root",
+        "plan_fingerprint": "sha256:52ddb3567073e20807828cb7fea273a51fdbc192a2b56fed5d43fe8afa471c93",
+        "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+        "action": "create",
+        "target_component_id": null,
+        "result_component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+        "resolved_placement": {
+          "folder_name": null,
+          "folder_id": null
+        },
+        "submitted_xml_digest": "sha256:8ea018fa5cbee4f7c084724515db385de53c3e9f629709a180fc3d005dfb9c3b",
+        "replay_evidence_bindings": []
+      }
+    ],
+    "process_readbacks": [
+      {
+        "component_key": "root",
+        "component_id": "02650b2b-c414-4b13-94ee-e64762f3890c",
+        "digest": "sha256:e75ff61dd14b17138016f709ac383d3c6709b489db0fc25f8ad6107e27edd933"
+      }
+    ],
+    "recorded_intents": []
+  },
+  "warnings": [
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'conn' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'p_client' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get2' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'c1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'p_a' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'map' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+    "[FOLDER_REQUIRED_ON_CREATE] Component 'op_bm' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized."
+  ],
+  "action": "apply",
+  "mutation_status": "performed",
+  "profile": "renera"
+}

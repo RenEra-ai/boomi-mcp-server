@@ -1,0 +1,513 @@
+{
+  "_success": true,
+  "action": "compile",
+  "mutation_performed": false,
+  "authoring_result": {
+    "contract_version": "2",
+    "revision_binding": {
+      "contract_version": "2",
+      "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670",
+      "capability_revision": "sha256:381792b12cb6ce44ec85984780eb847e06f652d13da5948ebc17b33091099ac9",
+      "compiler_revision": "sha256:c5072c8eeca693d6638d2d8967184935347345d2bb7ebdcb09a8374387c4d3ec",
+      "account_scope_hash": "sha256:6954b1d6f63195b7adf853c3552fbba26f389b0cd2384a370e2379f224f4e2d8",
+      "semantic_hash": "sha256:54a20ca49b6f9a13b8d01455a6fc0b5c03e45b42542c0ee42a009e2cfb4930e8",
+      "plan_hash": "sha256:a608879308fa1d65ecd073bb8e957b90972fc467a333f257e3437fc0593c2491",
+      "compile_hash": "sha256:db55a0c33d5048a42994added2f8f6e9f9dd92b303299dcf31f49833e174afa8"
+    },
+    "mutation_performed": false,
+    "integration_spec_preview": {
+      "version": "1.0",
+      "name": "_TEST_184S1_W5_S118410050726",
+      "mode": "lift_shift",
+      "components": [
+        {
+          "key": "conn",
+          "type": "connector-settings",
+          "action": "create",
+          "name": "Sandbox CDS Mock REST (no-auth)",
+          "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+          "config": {
+            "connector_type": "rest",
+            "component_name": "Sandbox CDS Mock REST (no-auth)",
+            "base_url": "http://host.docker.internal:8081",
+            "auth": "NONE"
+          },
+          "depends_on": []
+        },
+        {
+          "key": "p_client",
+          "type": "profile.json",
+          "action": "create",
+          "name": "_TEST_184S1_W5_p_client_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "_TEST_184S1_W5_p_client_S118410050726",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {
+                  "name": "key",
+                  "kind": "simple",
+                  "data_type": "character",
+                  "required": false
+                }
+              ]
+            }
+          },
+          "depends_on": []
+        },
+        {
+          "key": "op_get1",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W5_op_get1_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W5_op_get1_S118410050726",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/cdscm/api/v1/clients/1bdb1503-2807-4771-b1b7-8689be8f8e0a",
+            "return_application_errors": true,
+            "track_response": true,
+            "response_profile_id": "$ref:p_client",
+            "response_profile_type": "json"
+          },
+          "depends_on": [
+            "conn",
+            "p_client"
+          ]
+        },
+        {
+          "key": "op_get2",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W5_op_get2_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W5_op_get2_S118410050726",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/admin/cdscm/api/v1/clients/97ef6619-0f72-41bf-9b29-dba25de5f9da",
+            "return_application_errors": true,
+            "track_response": true,
+            "response_profile_id": "$ref:p_client",
+            "response_profile_type": "json"
+          },
+          "depends_on": [
+            "conn",
+            "p_client"
+          ]
+        },
+        {
+          "key": "c1",
+          "type": "documentcache",
+          "action": "create",
+          "name": "_TEST_184S1_W5_c1_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "documentcache",
+            "component_name": "_TEST_184S1_W5_c1_S118410050726",
+            "profile_type": "profile.json",
+            "profile_id": "$ref:p_client",
+            "enforce_single_lucene": true,
+            "indexes": [
+              {
+                "index_id": 1,
+                "index_name": "by key",
+                "keys": [
+                  {
+                    "id": 1,
+                    "element_key": "3",
+                    "name": "key (Root/Object/key)"
+                  }
+                ]
+              }
+            ]
+          },
+          "depends_on": [
+            "p_client"
+          ]
+        },
+        {
+          "key": "op_true",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W5_op_true_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W5_op_true_S118410050726",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/__S1_184__/S118410050726/W5/true/static",
+            "return_application_errors": true,
+            "track_response": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        },
+        {
+          "key": "op_false",
+          "type": "connector-action",
+          "action": "create",
+          "name": "_TEST_184S1_W5_op_false_S118410050726",
+          "component_id": null,
+          "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "_TEST_184S1_W5_op_false_S118410050726",
+            "connection_ref_key": "conn",
+            "method": "GET",
+            "path": "/__S1_184__/S118410050726/W5/false/static",
+            "return_application_errors": true,
+            "track_response": true
+          },
+          "depends_on": [
+            "conn"
+          ]
+        }
+      ],
+      "processes": [],
+      "goals": [],
+      "endpoints": [],
+      "flows": [],
+      "naming": {},
+      "folders": {},
+      "runtime": {},
+      "validation_rules": {},
+      "profile_indexes_by_component_id": null,
+      "pipeline": null,
+      "preview_kind": "canonical_units"
+    },
+    "recorded_intents": [],
+    "pipeline_stages": [],
+    "process_cfg": [
+      {
+        "component_key": "child",
+        "node_count": 9,
+        "edge_count": 8,
+        "terminal_kinds": [
+          "stop"
+        ]
+      },
+      {
+        "component_key": "root",
+        "node_count": 8,
+        "edge_count": 7,
+        "terminal_kinds": [
+          "cache_put",
+          "process_call"
+        ]
+      }
+    ],
+    "component_dependencies": [
+      {
+        "component_key": "c1",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "child",
+        "depends_on": "c1"
+      },
+      {
+        "component_key": "child",
+        "depends_on": "op_false"
+      },
+      {
+        "component_key": "child",
+        "depends_on": "op_true"
+      },
+      {
+        "component_key": "op_false",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_get1",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_get1",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "op_get2",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "op_get2",
+        "depends_on": "p_client"
+      },
+      {
+        "component_key": "op_true",
+        "depends_on": "conn"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "c1"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "child"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "op_get1"
+      },
+      {
+        "component_key": "root",
+        "depends_on": "op_get2"
+      }
+    ],
+    "topology_relations": [],
+    "resolved_references": [
+      {
+        "ref": "$ref:c1",
+        "component_type": "documentcache",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:child",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:conn",
+        "component_type": "connector-settings",
+        "resolved": true,
+        "component_id": "2fe488e4-3169-4529-9515-d854570c8ffc",
+        "version_marker": "3"
+      },
+      {
+        "ref": "$ref:op_false",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get1",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_get2",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:op_true",
+        "component_type": "connector-action",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:p_client",
+        "component_type": "profile.json",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      },
+      {
+        "ref": "$ref:root",
+        "component_type": "process",
+        "resolved": true,
+        "component_id": null,
+        "version_marker": null
+      }
+    ],
+    "validation_report": {
+      "is_valid": true,
+      "error_count": 0,
+      "warning_count": 7,
+      "advisory_count": 0,
+      "codes": [
+        "LEGACY_PLAN_WARNING"
+      ]
+    },
+    "errors": [],
+    "warnings": [
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'c1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'conn' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_false' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get1' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_get2' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'op_true' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      },
+      {
+        "code": "AUTHORING_COMPILE_BLOCKED",
+        "severity": "warning",
+        "path": "",
+        "subject_kind": "component_plan",
+        "subject_id": "",
+        "message": "[FOLDER_REQUIRED_ON_CREATE] Component 'p_client' is created with no folder_id or folder_name, so this request does not place it: it lands wherever its create route defaults, which is the account root for every route that submits a component document. Set a resolved folder so components are organized.",
+        "remediation": "Review the component-plan lint before applying.",
+        "cause_codes": [
+          "LEGACY_PLAN_WARNING"
+        ],
+        "node_identity": "",
+        "evidence": [],
+        "authoring_contract_entry_ids": []
+      }
+    ],
+    "capability_gaps": [],
+    "required_decisions": [],
+    "phase": "compile",
+    "artifact_fingerprints": [
+      {
+        "component_key": "child",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 7624,
+        "digest": "sha256:23d11a7335ea82fd8e24401f590210d49f022b079bd5bf541dbb26988ede2a85"
+      },
+      {
+        "component_key": "child",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 4741,
+        "digest": "sha256:6078a7397b76e41021936373129cd1c0475c7c923d52722c525839cb3ea263a6"
+      },
+      {
+        "component_key": "child",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 926,
+        "digest": "sha256:c291dcfa16ee9c40e127e65d3b5b33945046c8e599b4f575cf7a4f24894b651f"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_component_materialization_plan",
+        "artifact_version": "1",
+        "byte_length": 8029,
+        "digest": "sha256:c64c82b35dbf8295c268470ab402e332304335faba758bf48209ae333935271b"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_emission_plan",
+        "artifact_version": "1",
+        "byte_length": 4472,
+        "digest": "sha256:e17d8fad8e71e32a7ea0f977ddcb1decb28a12a8fd211be50f07e669267615fe"
+      },
+      {
+        "component_key": "root",
+        "component_type": "process",
+        "artifact_kind": "process_ir_normalized",
+        "artifact_version": "1",
+        "byte_length": 899,
+        "digest": "sha256:3dea2b1f606677a5f1bec0362b2cda88d65a4498d8b99289d33fcaad16dddf6c"
+      }
+    ],
+    "normalized_intent_digest": "sha256:ea4d2cc04c1124cf71a95843b5bdb5d8b7fc52f5be5ff9fcc4b6b4be2d31a0b7"
+  },
+  "profile": "renera"
+}
