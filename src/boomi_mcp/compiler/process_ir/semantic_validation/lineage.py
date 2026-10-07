@@ -2804,17 +2804,22 @@ def _walk_lineage(
             # child whose entry cannot be derived, record an unknown requirement of this
             # stream too, so a forwarder hands its caller its child's unknown.
             contract = capabilities.child_entry_contract(semantic.process_ref)
+            # The documents as they ARRIVE at the call: a stated requirement below narrows a caller's
+            # documents to the profile it names, but the child's Branch hands every leg the arriving
+            # documents, so a requirement stated on another leg proves nothing to this one (#186,
+            # CDX-186-r1-01).
+            arriving = stream
             if checked:
                 for ref in _handed_document_requirements(contract, semantic.wait):
                     if ref is None:
                         _requires(stream, None, None)
                         continue
                     if ref == UNKNOWN_PROFILE_REQUIREMENT:
-                        # #186: refused where THESE documents' profile is proved, as the twin's Add
-                        # to Cache is; passed on unchanged where a caller's documents arrive, and
+                        # #186: refused where the ARRIVING documents' profile is proved, as the twin's
+                        # Add to Cache is; passed on unchanged where a caller's documents arrive, and
                         # never a narrowing of the stream — it states no profile.
-                        _requires(stream, None, ref)
-                        if stream.identity is not None and stream.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
+                        _requires(arriving, None, ref)
+                        if arriving.identity is not None and arriving.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
                             mismatch(node, "/process_ref")
                         continue
                     required = _identity(ref)

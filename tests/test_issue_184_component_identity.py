@@ -3654,3 +3654,28 @@ def test_the_unknown_requirement_spelled_as_none_re_admits_the_caller(monkeypatc
     # Only the hand-off refusal an unstated consumption draws is left: the profile refusal is gone.
     assert [code for code, _path in _b186_codes(roots, "PARENT", symbols)] == [
         "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"]
+
+
+def test_the_unknown_requirement_is_judged_against_the_arriving_documents_in_either_leg_order():
+    """CDX-186-r1-01. A passthrough child whose one leg maps the caller's documents (requiring P1) and whose
+    other leg stages them into an UNKNOWN cache exports both requirements. A caller handing documents whose
+    profile nothing proves is admitted whichever leg comes first, as the child and the flattened twin are:
+    the twin's Branch hands every leg the arriving documents, so the map's requirement on one leg proves no
+    profile to the cache write on the other. Before the fix the map's leg, listed first, narrowed the stream
+    the token was then judged against, and the caller was refused in one order only."""
+    symbols = _b186_unknown_cache_symbols()
+    entry, stop = {"kind": "passthrough", "label": "Receive"}, {"kind": "stop"}
+    message, put = {"kind": "message", "text": "m"}, {"kind": "cache_put", "cache_ref": "$ref:CACHE"}
+    maps = {"steps": [{"kind": "map_ref", "map_ref": "$ref:M12"}], "terminal": stop}
+    stages = {"steps": [], "terminal": put}
+
+    def root(*steps):
+        return {"version": "1", "body": {"kind": "sequence", "steps": list(steps)}}
+
+    call = {"kind": "process_call", "process_ref": "$ref:CHILD", "wait": True, "abort_on_error": True}
+    parent = root(entry, {"kind": "branch", "legs": [{"steps": [], "terminal": call}, {"steps": [message], "terminal": stop}]})
+    for legs in ([maps, stages], [stages, maps]):
+        roots = [("PARENT", parent), ("CHILD", root(entry, {"kind": "branch", "legs": legs}))]
+        twin = root(entry, {"kind": "branch", "legs": legs + [{"steps": [message], "terminal": stop}]})
+        assert _b186_codes(roots, "PARENT", symbols) == [] == _b186_codes(roots, "CHILD", symbols), legs
+        assert _b186_codes([("PARENT", twin)], "PARENT", symbols) == [], legs
