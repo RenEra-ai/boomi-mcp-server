@@ -1386,3 +1386,32 @@ def test_the_unstated_consumer_rule_is_load_bearing(monkeypatch):
     monkeypatch.setattr(process_ir_effects, "_caller_cache_seeds", voided_by_an_unstated_consumer)
     assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/steps/1/operation_ref") in _errors(
         roots, "CACHE_CHILD")
+
+
+# ---------------------------------------------------------------------------
+# #186: the forwarding cases of the new requirement fields, added here so no earlier line moves
+# ---------------------------------------------------------------------------
+def _decides_on(property_id):
+    """A child whose first leg ends in a Decision on ``property_id`` with no default."""
+    return _legs({"steps": [_MSG], "terminal": {
+        "kind": "decision", "comparison": "equals",
+        "left": {"value_type": "track", "property_id": property_id, "property_name": property_id.split(".", 1)[1]},
+        "right": {"value_type": "static", "static_value": "a"},
+        "true_arm": {"steps": [_MSG], "terminal": _STOP}, "false_arm": {"steps": [], "terminal": _STOP}}},
+        {"steps": [_MSG], "terminal": _STOP})
+
+
+_FORWARDING_CASES.update({
+    # SELF-184-73: a non-strict read of X off the child's own entry documents, X written nowhere.
+    "nonstrict_document_reads": ("CACHE_CHILD", _decides_on("dynamicdocument.X")),
+    # SELF-184-74: a non-strict read of a process property the child establishes nowhere.
+    "nonstrict_process_reads": ("CACHE_CHILD", _decides_on("process.K")),
+    # SELF-184-74's sibling sweep: the child's execution-state writers, conditional ones included.
+    "execution_state_writes": ("CACHE_CHILD", _legs({"steps": [_SET_K], "terminal": _STOP},
+                                                     {"steps": [_MSG], "terminal": _STOP})),
+    "establishing_execution_state_writes": ("CACHE_CHILD", _legs({"steps": [_SET_K], "terminal": _STOP},
+                                                                  {"steps": [_MSG], "terminal": _STOP})),
+    # A strict read of K in the first leg, K written on the second: its leg order crosses.
+    "required_read_leg_orders": ("CACHE_CHILD", _legs({"steps": [{"kind": "set_dpp", "name": "OUT", "source_values": [
+        {"value_type": "dpp", "property_name": "K"}]}], "terminal": _STOP}, {"steps": [_SET_K], "terminal": _STOP})),
+})

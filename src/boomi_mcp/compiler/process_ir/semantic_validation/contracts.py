@@ -482,7 +482,16 @@ class ChildEntryContractV1(_ValidationModel):
       passthrough child's own None. Refs, not resolved ids, so the contract survives
       placeholder-to-real-id conversion; each call resolves them against its own symbols.
     - ``required_reads``: state keys the child reads before establishing them. A No
-      Data child's document properties are not among them: they cannot arrive.
+      Data child's document properties are not among them: they cannot arrive. A passthrough
+      child's document property is among them only where seeding it on the entry documents
+      clears one of its unestablished reads (#186): a read no arriving property can reach stays
+      the child's own defect, judged on the child's own walk.
+    - ``required_read_leg_orders``: per execution-scoped key in ``required_reads``,
+      ``(scope, name, later-leg writer)`` for each leg order its unestablished reads were found
+      in (#186): True where a writer of the key sits on a later Branch leg than the read, inside
+      the child or a process between it and the read. A call that does not establish the key
+      reports the same code the flattened twin's walk does there — a Branch-order error for a
+      True row, a read before write for a False one.
     - ``required_writers``: document properties a passthrough child's bound request
       path composes from the caller's documents, with the request profile ref the
       binding names. The caller's writer must pass the binding checks at the call.
@@ -513,6 +522,32 @@ class ChildEntryContractV1(_ValidationModel):
       establishment: a child's document properties do not land on its caller's sibling copies
       (rule 7). Read only by the caller's "a writer exists that this read can never see" rule, for
       which a larger set is the stricter answer (correction batch 30 sibling sweep).
+    - ``nonstrict_document_reads``: per NON-strict read of a document property on documents no
+      retrieve handed on, in a child that writes the property nowhere, ``(property name,
+      relation)`` (#186). The relation says what the documents a call hands over do for the read:
+      ``inherits`` — a property they carry reaches it; ``drops`` — a step between the entry and the
+      read discards it; ``fresh`` — they never reach it (a No Data child starts from its own empty
+      document). A call whose process writes the property anywhere judges the read exactly as the
+      flattened twin's walk judges it there: discharged where the property is established on the
+      handed documents and inherited, a read before write where it was carried and dropped, and a
+      different-document-copy scope error otherwise. A call whose process writes it nowhere passes
+      the row on to its own callers.
+    - ``nonstrict_process_reads``: per NON-strict read of a process property the child cannot fail
+      itself — no establishing writer of it exists there — ``(property name, later-leg writer)``
+      (#186). The flag records that a writer of the property sits on a later Branch leg than the
+      read, inside the child or a process between it and the call. A call whose process
+      establishes the property anywhere, and does not establish it before the call, judges the
+      read as the flattened twin does: a Branch-order error when a writer sits on a later leg (the
+      flag, or a later leg of the caller's own Branch), else a read before write.
+    - ``execution_state_writes``: the execution-scoped keys — process properties and document
+      caches — the child, or a process it calls, writes anywhere, conditional and asynchronous
+      writers included, its known writers only (the execution part of
+      `lineage._keys_written_anywhere`). Read only to LOCATE a writer for the caller's later-leg
+      rule; never an establishment (#186).
+    - ``establishing_execution_state_writes``: the subset an execution-scoped read can be failed
+      by — writers that establish downstream, a call the child does not wait for excluded,
+      transitively (`lineage._keys_established_anywhere`). Read only by the caller's "an
+      establishing writer exists" rule, for which a larger set is the stricter answer (#186).
     - ``mutated_state``: execution-scoped keys the child may write or remove.
     - ``guaranteed_state``: execution-scoped keys the child establishes on every normal
       completion, at a step its own documents provably reach — a subset of
@@ -567,11 +602,16 @@ class ChildEntryContractV1(_ValidationModel):
     entry_form: Literal["passthrough", "scheduled", "unknown"]
     document_requirements: Tuple[Optional[str], ...] = ()
     required_reads: Tuple[Tuple[str, str], ...] = ()
+    required_read_leg_orders: Tuple[Tuple[str, str, bool], ...] = ()
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
+    nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...] = ()
+    nonstrict_process_reads: Tuple[Tuple[str, bool], ...] = ()
     document_property_writes: Tuple[str, ...] = ()
+    execution_state_writes: Tuple[Tuple[str, str], ...] = ()
+    establishing_execution_state_writes: Tuple[Tuple[str, str], ...] = ()
     mutated_state: Tuple[Tuple[str, str], ...] = ()
     guaranteed_state: Tuple[Tuple[str, str], ...] = ()
     removed_caches: Tuple[str, ...] = ()

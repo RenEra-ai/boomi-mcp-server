@@ -148,6 +148,13 @@ CALLER_WRITER = "caller-writer"
 #: property NOTHING here writes still has those caches to name (correction batch 21a round 3).
 #: Node ids are ``n<k>``, so no token collides with one.
 CALLER_CACHE_WRITER = "caller-cache:"
+#: #186: the requirement a passthrough child states for documents it stages into a document cache
+#: whose profile is UNKNOWN (`contracts.profiles_unknown`). Not None — None is a consumption nothing
+#: states, which every call skips — and not a profile ref: it resolves to no profile, so documents a
+#: caller proves to carry any profile contradict it, exactly as the flattened twin's Add to Cache
+#: refuses a proved profile into that cache. Documents whose profile nothing proves satisfy it, as
+#: they satisfy the twin.
+UNKNOWN_PROFILE_REQUIREMENT = "urn:boomi:unknown-profile"
 
 
 class _InheritedBinding(NamedTuple):
@@ -1469,21 +1476,40 @@ def _established_anywhere(
     Differs from `_written_anywhere` in excluding a fire-and-forget
     `process_call`'s declared writes — it may still be running, so it proves
     nothing to a reader — and in counting what a derived child contract guarantees
-    a call that waits and aborts on error (#184 amendment 1 rule 7).
+    a call that waits and aborts on error (#184 amendment 1 rule 7). Read off
+    `_keys_established_anywhere`, the one establishing-writer set.
     """
+    return key in _keys_established_anywhere(prepared, capabilities)
+
+
+def _keys_established_anywhere(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> FrozenSet[StateKey]:
+    """Every key some node of this process — or a process it waits for — writes in a way that can ESTABLISH it.
+
+    THE writer set the execution-scoped "an establishing writer exists" rule is asked of
+    (`_established_anywhere`), and the one a child contract exports as its establishing
+    execution-state writes (`ChildEntryContractV1.establishing_execution_state_writes`), so a
+    caller and its flattened twin count the same writers by construction (#186). A waited call to
+    a derived child counts the child's own establishing execution-state writes, conditional ones
+    included — the twin holds those writers as its own nodes, which count wherever they stand —
+    and what the child guarantees a call that also aborts on error. A call nobody waits for counts
+    nothing: it may still be running.
+    """
+    established: Set[StateKey] = set()
     for node in prepared.cfg.nodes:
-        if key in _writes_of(node.semantic):
-            return True
+        established.update(_writes_of(node.semantic))
         if not _establishes_downstream(node.semantic):
             continue
         for effect in _trusted_effects(node.semantic, capabilities):
-            if key in [(k[0], k[1]) for k in effect.writes]:
-                return True
-        if node.semantic.semantic_kind == "process_call" and key in _awaited_guarantee(
-            node.semantic, capabilities.child_entry_contract(node.semantic.process_ref)
-        ):
-            return True
-    return False
+            established.update((k[0], k[1]) for k in effect.writes)
+        if node.semantic.semantic_kind == "process_call":
+            contract = capabilities.child_entry_contract(node.semantic.process_ref)
+            established.update(_awaited_guarantee(node.semantic, contract))
+            if contract is not None:
+                established.update((key[0], key[1]) for key in contract.establishing_execution_state_writes)
+    return frozenset(established)
 
 
 def _opaque_reason(
@@ -1948,6 +1974,27 @@ class LineageWalkV1(NamedTuple):
     #: caller writer makes the read fail. The child contract measures these rows as
     #: `unestablished_cached_keys` are measured (`_caller_nonstrict_reads`).
     nonstrict_cached_reads: Tuple[Tuple[str, Optional[str], str], ...] = ()
+    #: #186: ``(pointer, property name, relation)`` for each NON-strict read of a document
+    #: property on documents no retrieve handed on, unestablished there, in a process that writes
+    #: the property nowhere — the entry-document twin of `nonstrict_cached_reads`. The relation is
+    #: what the walk saw of the documents' own properties: ``entry`` — nothing on the path
+    #: discarded one the documents carried; ``drops`` — a step on the path discarded the property
+    #: the documents carried (only an entry seed can put one there in a process that writes it
+    #: nowhere) or a called child's row says it does; ``fresh`` — a called No Data child read it
+    #: off its own empty document. The child contract measures ``entry`` rows against an entry
+    #: seed (`_caller_entry_document_reads`).
+    nonstrict_document_reads: Tuple[Tuple[str, str, str], ...] = ()
+    #: #186: ``(pointer, property name, later-leg writer)`` for each NON-strict read of a process
+    #: property unestablished there, in a process with no establishing writer of it — itself, or a
+    #: called child's row passed on. The flag is the in-process later-leg rule's answer at the
+    #: read (`_written_in_a_later_leg`), OR the passed-on row's own flag.
+    nonstrict_process_reads: Tuple[Tuple[str, str, bool], ...] = ()
+    #: #186: ``(pointer, scope, name, later-leg writer)`` for each read recorded in
+    #: `unestablished_reads` — the same set, with the site and the in-process later-leg rule's
+    #: answer there. A child contract measures its document-property entry requirements against an
+    #: entry seed by pointer (`_entry_repairable_reads`), and exports the leg order of its
+    #: execution-scoped ones (`ChildEntryContractV1.required_read_leg_orders`).
+    unestablished_read_sites: Tuple[Tuple[str, str, str, bool], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -2027,6 +2074,12 @@ def _walk_lineage(
     read_cache_origins: List[Tuple[str, str, str]] = []
     #: #184 correction batch 30: the rows `LineageWalkV1.nonstrict_cached_reads` returns.
     nonstrict_cached_reads: List[Tuple[str, Optional[str], str]] = []
+    #: #186: the rows `LineageWalkV1.nonstrict_document_reads` returns.
+    nonstrict_document_reads: List[Tuple[str, str, str]] = []
+    #: #186: the rows `LineageWalkV1.nonstrict_process_reads` returns.
+    nonstrict_process_reads: List[Tuple[str, str, bool]] = []
+    #: #186: the rows `LineageWalkV1.unestablished_read_sites` returns.
+    unestablished_read_sites: List[Tuple[str, str, str, bool]] = []
     #: #184 amendment 1 rules 7-8 (correction batch 21a round 4): caches a call that is NOT
     #: waited for may write, wherever it stands on the path. The lattice orders a call's
     #: possible writes where the call is authored, which is right for everything that reads
@@ -2174,7 +2227,8 @@ def _walk_lineage(
         )
 
     def _classify_unmet_read(node, semantic, key, leg, extra=(), invalidated=frozenset(), cached_from=None,
-                             rides_on=None, upward=True, origins=(), nonstrict=False) -> None:
+                             rides_on=None, upward=True, origins=(), nonstrict=False, relation=None,
+                             later_leg=False) -> None:
         """Report ONE unestablished read under the sharpest code that fits.
 
         Shared by both read paths. The refinements below are what make a
@@ -2222,17 +2276,46 @@ def _walk_lineage(
         so a document property read on retrieved documents records what the callers must not
         do: one row per cache their documents could have carried it in (``cached_from`` and
         ``origins``, exactly the caches a strict read names), or one cache-less row where no
-        caller's document can reach the read — any caller writer then fails it. Asked only past
-        a triggered retrieve: the documents before one are this process's own or its entry's,
-        which the cached-property channel does not describe.
+        caller's document can reach the read — any caller writer then fails it. Past a triggered
+        retrieve only: the documents before one are this process's own or its entry's, which the
+        cached-property channel does not describe.
+
+        Before a retrieve (#186, SELF-184-73) the same non-strict DOCUMENT read records its
+        entry-document row instead (`LineageWalkV1.nonstrict_document_reads`), and a non-strict
+        PROCESS-property read records its leg-ordered row (`LineageWalkV1.nonstrict_process_reads`,
+        SELF-184-74): the two in-process rules a caller's writer can trip — the
+        different-document-copy rule below and the later-leg rule — and neither is a row the
+        cached-property channel can carry. ``relation`` is the row kind of a called child's
+        document read passed on at the call (None for a read of this process, or an ``inherits``
+        row, which reads the documents here exactly as an own read does); ``later_leg`` is a
+        passed-on process read's own flag, and decides the code below as the in-process later-leg
+        rule does.
         """
         scope, _name = key
         if nonstrict:
-            if scope == DDP and CACHE_TRANSFER_UNPROVED in invalidated:
-                named = tuple(dict.fromkeys(
-                    ([] if cached_from is None else [cached_from]) + list(origins)))
-                for cache_ref in named or (None,):
-                    nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
+            if scope == DDP:
+                if relation == "fresh":
+                    # The child's own empty document: nothing on this path ever reaches it.
+                    nonstrict_document_reads.append((node.source_path, key[1], "fresh"))
+                elif relation == "drops":
+                    if CACHE_TRANSFER_UNPROVED in invalidated:
+                        # The retrieved documents' properties are discarded before the read, so
+                        # no caller's document can supply it: the cache-less row, which any
+                        # caller writer fails as a read before write — the twin's code there.
+                        nonstrict_cached_reads.append((node.source_path, None, key[1]))
+                    else:
+                        nonstrict_document_reads.append((node.source_path, key[1], "drops"))
+                elif CACHE_TRANSFER_UNPROVED in invalidated:
+                    named = tuple(dict.fromkeys(
+                        ([] if cached_from is None else [cached_from]) + list(origins)))
+                    for cache_ref in named or (None,):
+                        nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
+                else:
+                    nonstrict_document_reads.append(
+                        (node.source_path, key[1], "drops" if key in invalidated else "entry"))
+            elif scope == DPP:
+                nonstrict_process_reads.append(
+                    (node.source_path, key[1], bool(later_leg or _written_in_a_later_leg(leg_writes, leg, key))))
             return
         # A read a typed contract vouches for an OUTSIDE writer of is not the
         # caller's obligation — an external system establishes it — so it is
@@ -2260,13 +2343,17 @@ def _walk_lineage(
         # read — every caller of one that re-cached what it read into a cache it had provably
         # emptied was refused, while the flattened graph ran (correction batch 21a round 2).
         of_retrieved_documents = scope == DDP and CACHE_TRANSFER_UNPROVED in invalidated
+        later = scope != DDP and bool(later_leg or _written_in_a_later_leg(leg_writes, leg, key))
         if cached_from is not None:
             # No caller state or document discharges it, only what a caller stored in
             # that cache, so it is recorded as the cache's requirement instead.
             unestablished_cached_keys.append((node.source_path, cached_from, key[1], None, False))
         elif not externally_satisfied and upward and not of_retrieved_documents:
             unmet.append(key)
-        if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
+            # #186: where, and in which leg order — what a caller's entry seed is measured
+            # against, and the later-leg answer a caller's own report of it must give.
+            unestablished_read_sites.append((node.source_path, scope, key[1], later))
+        if later:
             # The write exists, in a LATER leg of the same Branch. Legs run
             # in order, so it has not happened yet. Saying "read before
             # write" here would send the author looking for a missing write
@@ -2722,6 +2809,14 @@ def _walk_lineage(
                     if ref is None:
                         _requires(stream, None, None)
                         continue
+                    if ref == UNKNOWN_PROFILE_REQUIREMENT:
+                        # #186: refused where THESE documents' profile is proved, as the twin's Add
+                        # to Cache is; passed on unchanged where a caller's documents arrive, and
+                        # never a narrowing of the stream — it states no profile.
+                        _requires(stream, None, ref)
+                        if stream.identity is not None and stream.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
+                            mismatch(node, "/process_ref")
+                        continue
                     required = _identity(ref)
                     _requires(stream, required, ref)
                     if stream.state == STREAM_CALLER_ENTRY:
@@ -2858,7 +2953,9 @@ def _walk_lineage(
             # (QA-184-w-r32-02) states none either, and contradicts any the caller proves.
             declared_ref = declared_refs[0] if len(identities) == 1 and not unknown else None
             declared = _identity(declared_ref) if declared_ref is not None else None
-            _requires(stream, declared, declared_ref)
+            # #186: an UNKNOWN cache states a requirement every proved profile contradicts — None
+            # would be skipped by every call, admitting a caller the twin refuses.
+            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else declared_ref)
             if checked and stream.identity is not None and (unknown or any(
                 identity is not None and identity != stream.identity for identity in identities
             )):
@@ -3092,6 +3189,7 @@ def _walk_lineage(
         elif predecessor is not None and (
             not process_call_prefix_admitted(context, predecessor, form, semantic.wait)
             or None in contract.document_requirements
+            or UNKNOWN_PROFILE_REQUIREMENT in contract.document_requirements
         ):
             # Native work before a call is a verified hand-off: admitted only for an
             # attested evidence key, into a child that states everything it consumes.
@@ -3111,17 +3209,81 @@ def _walk_lineage(
                     rides_on=None if stream is None else stream.retrieved_from,
                     origins=() if stream is None else stream.retrieved_origins,
                 )
+        # #186: the leg order each execution-scoped requirement was found in, so the call reports
+        # the code the flattened twin's walk reports at the read: a later-leg writer the child or a
+        # process between it and the read holds is a Branch-order error there, whoever calls.
+        orders: Dict[StateKey, Set[bool]] = {}
+        for scope_, name_, later_ in contract.required_read_leg_orders:
+            orders.setdefault((scope_, name_), set()).add(bool(later_))
         for raw in contract.required_reads:
             key = (raw[0], raw[1])
             if state.establishes(key):
                 # Proved on documents that may carry a caller's cached value: still owed.
                 _owe_the_caches_behind(node.source_path, key, None, False, writers)
                 continue
-            _classify_unmet_read(
-                node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
-                invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
-                rides_on=stream.retrieved_from, origins=stream.retrieved_origins,
-            )
+            for later_ in sorted(orders.get(key, {False})):
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                    invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
+                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins, later_leg=later_,
+                )
+        # #186 (SELF-184-73): the child's NON-strict reads of a document property off documents no
+        # retrieve handed on, which it cannot fail itself, judged HERE by the in-process rule asked
+        # of THIS process (`_nonstrict_read_can_fail`) — the writer set the flattened twin's walk
+        # asks it of. The relation says which documents the twin's read sees:
+        #   - ``inherits``: the ones handed over, so the read is judged exactly as a read at the call;
+        #   - ``drops``: those, after a step discarded what they carried — a read before write when
+        #     the property is established on them, else what invalidation this path already holds;
+        #   - ``fresh``: a No Data child's own empty document, which nothing here reaches — a
+        #     different-document-copy scope error wherever a writer exists.
+        # Where nothing here writes the property the row passes on, in kind, to this process's
+        # callers. A scheduled child's rows are all ``fresh`` by derivation; the override keeps a
+        # call into one from reading the handed documents whatever a row says.
+        for name, relation in contract.nonstrict_document_reads:
+            key = (DDP, name)
+            relation = "fresh" if form == "scheduled" else relation
+            can_fail = _nonstrict_read_can_fail(prepared, key, capabilities)
+            if relation == "inherits":
+                if state.establishes(key):
+                    if can_fail:
+                        _owe_the_caches_behind(node.source_path, key, None, False, writers)
+                    continue
+                # Read off the handed documents as an own read at the call is: past a retrieve its
+                # passed-on form is the cached-property row a retrieved read records.
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),) if can_fail else (),
+                    invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
+                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins,
+                    nonstrict=not can_fail,
+                )
+            elif not can_fail:
+                _classify_unmet_read(node, semantic, key, leg, invalidated=invalidated, nonstrict=True,
+                                     relation=relation)
+            elif relation == "drops":
+                # Only a property the handed documents carried can be dropped; one they never
+                # carried keeps whatever this path already says of it.
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                    invalidated=invalidated | ({key} if state.establishes(key) else frozenset()),
+                )
+            else:
+                _classify_unmet_read(node, semantic, key, leg, extra=(("effect_kind", "subprocess"),))
+        # #186 (SELF-184-74): the child's NON-strict reads of a process property it cannot fail
+        # itself. Established before the call, the twin's read is satisfied; otherwise a call whose
+        # process ESTABLISHES the property anywhere fails it as the twin does — a Branch-order error
+        # where a writer sits on a later leg (the row's own flag, or a later leg of this process's
+        # Branch than the one holding the call), else a read before write. Nothing establishing it
+        # here: the row passes on with the combined flag.
+        for name, child_later_leg in contract.nonstrict_process_reads:
+            key = (DPP, name)
+            if state.establishes(key):
+                continue
+            if _nonstrict_read_can_fail(prepared, key, capabilities):
+                _classify_unmet_read(node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                                     invalidated=invalidated, later_leg=child_later_leg)
+            else:
+                _classify_unmet_read(node, semantic, key, leg, invalidated=invalidated, nonstrict=True,
+                                     later_leg=child_later_leg)
         if profile_proof:
             # A cache the child reads holds what THIS execution stored there (capture
             # `cap184-shared-cache`), so the profile the child's consumers need must be
@@ -4010,6 +4172,9 @@ def _walk_lineage(
         read_cache_origins=tuple(sorted(set(read_cache_origins))),
         nonstrict_cached_reads=tuple(sorted(
             set(nonstrict_cached_reads), key=lambda row: (row[0], row[1] or "", row[2]))),
+        nonstrict_document_reads=tuple(sorted(set(nonstrict_document_reads))),
+        nonstrict_process_reads=tuple(sorted(set(nonstrict_process_reads))),
+        unestablished_read_sites=tuple(sorted(set(unestablished_read_sites))),
         # The same meet, over the same exits, asked of the proof rather than the
         # establishment — so a key survives only where EVERY normal completion made the
         # write, and where one completion's write sat behind a possibly-empty step it does
@@ -4122,8 +4287,13 @@ def _leg_write_index(
             # #184 amendment 1 rule 7: what a derived child contract guarantees is a
             # write in the leg holding the call, asked without a path like the rest.
             if inner.semantic.semantic_kind == "process_call":
-                written.update(_awaited_guarantee(
-                    inner.semantic, capabilities.child_entry_contract(inner.semantic.process_ref)))
+                contract = capabilities.child_entry_contract(inner.semantic.process_ref)
+                written.update(_awaited_guarantee(inner.semantic, contract))
+                # #186: and every execution-state write the child — or a process it calls — makes
+                # anywhere, conditional or unwaited: the twin holds those writers in this leg, and
+                # this index LOCATES a write, it establishes nothing.
+                if contract is not None:
+                    written.update((key[0], key[1]) for key in contract.execution_state_writes)
         index[leg] = frozenset(written)
     return index
 
@@ -4173,6 +4343,12 @@ def _keys_written_anywhere(
             contract = capabilities.child_entry_contract(node.semantic.process_ref)
             if contract is not None:
                 written.update((DDP, name) for name in contract.document_property_writes)
+        # #186: its execution-state writes too, so the contract's `execution_state_writes` is read
+        # off this one set, transitively.
+        if node.semantic.semantic_kind == "process_call":
+            contract = capabilities.child_entry_contract(node.semantic.process_ref)
+            if contract is not None:
+                written.update((key[0], key[1]) for key in contract.execution_state_writes)
     return frozenset(written)
 
 

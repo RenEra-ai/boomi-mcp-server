@@ -201,6 +201,8 @@ def _perturbations():
         ("lineage", "_written_anywhere"): lambda prepared, key, capabilities=None: False,
         # Correction batch 30 sibling sweep: the one writer set, its called children's writes included.
         ("lineage", "_keys_written_anywhere"): lambda prepared, capabilities=None: frozenset(),
+        # #186: no establishing writer anywhere, so no execution-scoped non-strict read can fail.
+        ("lineage", "_keys_established_anywhere"): lambda prepared, capabilities=None: frozenset(),
         # --- lineage: the lattice's transfer and meet -----------------------------------
         ("lineage", "_State.with_write"): lambda self, key, proved=False: self,
         ("lineage", "_State.with_content"): lambda self, cache_ref, identity, legacy_source=False: self,
@@ -243,6 +245,9 @@ def _perturbations():
         ("effects", "_caller_cached_properties"): lambda prepared, capabilities, walk: (),
         # Correction batch 30: a child's non-strict cached reads owe its callers nothing again.
         ("effects", "_caller_nonstrict_reads"): lambda prepared, capabilities, walk: (),
+        # #186: the entry-document rows dropped, and the entry-repair filter reverted.
+        ("effects", "_caller_entry_document_reads"): lambda prepared, capabilities, walk, passthrough: (),
+        ("effects", "_entry_repairable_reads"): lambda prepared, capabilities, walk, reads: reads,
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
         ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None,
         opaque=frozenset(): {

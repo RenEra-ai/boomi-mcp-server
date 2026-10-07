@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14431, "minimum_collected": 14431, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14463, "minimum_collected": 14463, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14451,8 +14451,8 @@
 {"kind": "test", "id": "pytest-014450", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_writer_in_a_sibling_child_fails_the_decision_as_its_twin_does[legacy]", "state": "active"}
 {"kind": "test", "id": "pytest-014451", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_writer_in_a_sibling_child_fails_the_decision_as_its_twin_does[typed]", "state": "active"}
 {"kind": "test", "id": "pytest-014452", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_writer_set_a_child_exports_is_the_one_the_in_process_rule_reads", "state": "active"}
-{"kind": "test", "id": "pytest-014453", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_direct_read_off_a_childs_entry_documents_is_recorded_not_matched", "state": "active"}
-{"kind": "test", "id": "pytest-014454", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_non_strict_process_property_read_is_recorded_not_matched", "state": "active"}
+{"kind": "test", "id": "pytest-014453", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_direct_read_off_a_childs_entry_documents_is_recorded_not_matched", "state": "tombstone"}
+{"kind": "test", "id": "pytest-014454", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_non_strict_process_property_read_is_recorded_not_matched", "state": "tombstone"}
 {"kind": "test", "id": "pytest-014455", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_childrens_writes_left_out_of_the_writer_set_re_admits_the_sibling_reader", "state": "active"}
 {"kind": "test", "id": "pytest-014456", "node_id": "tests/test_issue_184_component_identity.py::test_the_raw_route_derives_no_contract_from_a_reused_childs_submitted_body[by_declared_id]", "state": "active"}
 {"kind": "test", "id": "pytest-014457", "node_id": "tests/test_issue_184_component_identity.py::test_the_raw_route_derives_no_contract_from_a_reused_childs_submitted_body[by_name_match]", "state": "active"}
@@ -14529,3 +14529,37 @@
 {"kind": "test", "id": "pytest-014528", "node_id": "tests/test_issue_184_component_identity.py::test_the_served_mismatch_text_names_the_raw_xml_cause", "state": "active"}
 {"kind": "test", "id": "pytest-014529", "node_id": "tests/test_issue_184_component_identity.py::test_every_profile_consumer_has_an_unknown_disposition", "state": "active"}
 {"kind": "test", "id": "pytest-014530", "node_id": "tests/test_issue_184_component_identity.py::test_the_profile_sweep_refuses_a_new_consumer", "state": "active"}
+{"kind": "test", "id": "pytest-014531", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10425]", "state": "active"}
+{"kind": "test", "id": "pytest-014532", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10440]", "state": "active"}
+{"kind": "test", "id": "pytest-014533", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10455]", "state": "active"}
+{"kind": "test", "id": "pytest-014534", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10469]", "state": "active"}
+{"kind": "test", "id": "pytest-014535", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10480]", "state": "active"}
+{"kind": "test", "id": "pytest-014536", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10498]", "state": "active"}
+{"kind": "test", "id": "pytest-014537", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10506]", "state": "active"}
+{"kind": "test", "id": "pytest-014538", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_direct_read_off_a_childs_entry_documents_earns_its_twins_scope_error", "state": "active"}
+{"kind": "test", "id": "pytest-014539", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_non_strict_process_property_read_earns_its_twins_branch_order_error", "state": "active"}
+{"kind": "test", "id": "pytest-014540", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_property_read_across_a_call_earns_its_flattened_twins_codes[ddp]", "state": "active"}
+{"kind": "test", "id": "pytest-014541", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_property_read_across_a_call_earns_its_flattened_twins_codes[dpp]", "state": "active"}
+{"kind": "test", "id": "pytest-014542", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_reader_one_call_deeper_earns_its_twins_lineage_codes[ddp]", "state": "active"}
+{"kind": "test", "id": "pytest-014543", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_reader_one_call_deeper_earns_its_twins_lineage_codes[dpp]", "state": "active"}
+{"kind": "test", "id": "pytest-014544", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_no_data_child_reads_its_own_empty_document_whatever_its_caller_handed", "state": "active"}
+{"kind": "test", "id": "pytest-014545", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_inherited_property_a_script_drops_is_a_read_before_write_and_one_never_carried_is_a_scope_error", "state": "active"}
+{"kind": "test", "id": "pytest-014546", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_entry_document_row_left_unrecorded_re_admits_the_reader", "state": "active"}
+{"kind": "test", "id": "pytest-014547", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_fresh_row_judged_as_the_cache_less_row_serves_the_wrong_code", "state": "active"}
+{"kind": "test", "id": "pytest-014548", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_process_property_row_left_unrecorded_re_admits_the_reader", "state": "active"}
+{"kind": "test", "id": "pytest-014549", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_sibling_childs_establishing_writer_left_uncounted_re_admits_the_reader", "state": "active"}
+{"kind": "test", "id": "pytest-014550", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_sibling_childs_writer_left_out_of_its_leg_serves_the_wrong_code", "state": "active"}
+{"kind": "test", "id": "pytest-014551", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_passed_on_later_leg_order_dropped_serves_the_wrong_code", "state": "active"}
+{"kind": "test", "id": "pytest-014552", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_passed_on_row_flag_ignored_serves_the_wrong_code", "state": "active"}
+{"kind": "test", "id": "pytest-014553", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_entry_requirement_no_seed_repairs_exported_anyway_adds_a_code_the_twin_lacks", "state": "active"}
+{"kind": "test", "id": "pytest-014554", "node_id": "tests/test_issue_184_component_identity.py::test_the_profile_sweep_sees_the_stored_profile_producer", "state": "active"}
+{"kind": "test", "id": "pytest-014555", "node_id": "tests/test_issue_184_component_identity.py::test_the_stored_cache_reader_classifies_known_absent_and_unknown", "state": "active"}
+{"kind": "test", "id": "pytest-014556", "node_id": "tests/test_issue_184_component_identity.py::test_an_unwritten_cache_is_read_once_per_component_whatever_its_aliases", "state": "active"}
+{"kind": "test", "id": "pytest-014557", "node_id": "tests/test_issue_184_component_identity.py::test_a_write_into_an_unwritten_cache_is_judged_against_its_stored_profile_on_every_route[create_by_id]", "state": "active"}
+{"kind": "test", "id": "pytest-014558", "node_id": "tests/test_issue_184_component_identity.py::test_a_write_into_an_unwritten_cache_is_judged_against_its_stored_profile_on_every_route[reference_only]", "state": "active"}
+{"kind": "test", "id": "pytest-014559", "node_id": "tests/test_issue_184_component_identity.py::test_a_write_into_an_unwritten_cache_is_judged_against_its_stored_profile_on_every_route[by_name]", "state": "active"}
+{"kind": "test", "id": "pytest-014560", "node_id": "tests/test_issue_184_component_identity.py::test_with_no_account_an_unwritten_cache_states_no_profile_as_its_served_rule_says", "state": "active"}
+{"kind": "test", "id": "pytest-014561", "node_id": "tests/test_issue_184_component_identity.py::test_the_stored_profile_selection_is_load_bearing", "state": "active"}
+{"kind": "test", "id": "pytest-014562", "node_id": "tests/test_issue_184_component_identity.py::test_documents_a_caller_proves_staged_into_an_unknown_cache_are_refused_at_the_call", "state": "active"}
+{"kind": "test", "id": "pytest-014563", "node_id": "tests/test_issue_184_component_identity.py::test_the_unknown_requirement_spelled_as_none_re_admits_the_caller", "state": "active"}
+{"kind": "test", "id": "pytest-014564", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_cache_a_later_leg_child_may_write_is_a_branch_order_error_as_in_its_twin", "state": "active"}

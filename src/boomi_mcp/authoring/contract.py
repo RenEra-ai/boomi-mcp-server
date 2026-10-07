@@ -2025,9 +2025,40 @@ def _component_identity_behaviour_oracle():
         report = (validate_process_ir(caller_roots[1][1], call_symbols, capabilities=context)
                   if context is not None else validate_process_ir(caller_roots[1][1], call_symbols))
         opaque_callers[name] = [sorted(opaque), sorted([item.code, item.path] for item in report.errors)]
+    # #186 (SELF-184-78): what a cache apply does NOT write declares — the account's stored profile, read by a
+    # route that holds the account. Frozen readings stand in for the account: a known stored profile, an
+    # unprofiled cache, an unreadable one, and a route that read nothing (no account), each with the facts
+    # the symbol table states for the unwritten caches and the internal profile symbol a known one mints.
+    from .connector_resolution_snapshot import StoredDocumentCacheProfileV1, TrustedConnectorResolutionSnapshotV1
+
+    def stored(state, **profile):
+        readings = tuple(StoredDocumentCacheProfileV1(component_key=key, profile_state=state, **profile)
+                         for key in ("named_create", "named_reference"))
+        return TrustedConnectorResolutionSnapshotV1(cache_profiles=readings, cache_profiles_read=True)
+
+    stored_snapshots = {
+        "known": stored("known", profile_component_id="11111111-2222-4333-8444-555555555555",
+                        profile_component_type="profile.json"),
+        "absent": stored("absent"),
+        "unknown": stored("unknown"),
+        "read_nothing": TrustedConnectorResolutionSnapshotV1(),
+        "read_failed": TrustedConnectorResolutionSnapshotV1(cache_profiles_read=True),
+    }
+    writerless = [component for component in by_name if component.key != "stored_update"]
+    stored_profiles = {
+        name: sorted(
+            [symbol.ref, symbol.component_type, symbol.bound_component_id or "", symbol.cache_profile_ref or "",
+             str(symbol.profiles_unknown)]
+            for symbol in build_symbol_table(
+                writerless, conflict_policy="reuse", existing_ids=account, connector_resolution_snapshot=snapshot,
+                connector_metadata=_connector_metadata_from_components(writerless)).symbols
+            if symbol.component_type == "documentcache" or symbol.ref.startswith("urn:"))
+        for name, snapshot in sorted(stored_snapshots.items())
+    }
     verdicts = {"write_matrix": write_matrix, "guid_spellings": guid_spellings, "fact_sources": fact_sources,
                 "named_bindings": named_bindings, "raw_xml_facts": raw_xml_facts, "reused_roots": reused_roots,
-                "root_writes": root_writes, "opaque_callers": opaque_callers, "unknown_profiles": unknown_profiles}
+                "root_writes": root_writes, "opaque_callers": opaque_callers, "unknown_profiles": unknown_profiles,
+                "stored_profiles": stored_profiles}
     for policy in ("clone", "reuse"):
         symbols = build_symbol_table(components, conflict_policy=policy)
         # Each root is validated under the context the effect resolver builds for it, as
@@ -3149,6 +3180,25 @@ def _child_call_state_oracle():
         ("child", legs({"steps": [read_cache(ref)], "terminal": tracked("dynamicdocument.X")},
                        {"steps": [message], "terminal": stop})),
     ]
+    # #186: a child reading the cache through `ref` before a later leg of its own fills it through
+    # the other spelling. Only the identity rule makes the two one cache, so only it records the read's
+    # later-leg order, and the caller — which writes the cache nowhere — then reports the Branch-order
+    # code the flattened twin reports at the read.
+    alias_cases["required_read_leg_orders"] = lambda ref: [
+        ("parent", legs({"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                        {"steps": [message], "terminal": stop})),
+        ("child", legs({"steps": [read_cache(ref), message], "terminal": stop},
+                       {"steps": [get_p1], "terminal": put()})),
+    ]
+    # #186: a caller reading the cache on its first leg while a child it calls on a later leg may write it
+    # through `ref`, behind a call that may return nothing — a writer no guarantee carries. Only the
+    # identity rule puts that write on the cache the caller reads, which then serves the Branch-order code.
+    alias_cases["execution_state_writes"] = lambda ref: [
+        ("parent", legs({"steps": [read_cache(), message], "terminal": stop},
+                        {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)})),
+        ("child", legs({"steps": [get_p1], "terminal": put(ref)}, {"steps": [message], "terminal": stop})),
+    ]
+    alias_cases["establishing_execution_state_writes"] = alias_cases["execution_state_writes"]
     # The cohorts a caller stored land on the child of the cached-property chain, so that
     # chain answers for both facts; it is run once per fact so each has its own recorded
     # verdicts and neither rests on the other's.
@@ -3209,6 +3259,23 @@ def _child_call_state_oracle():
             ), ChildEntryContractV1(
                 process_ref="$ref:child", entry_form="scheduled",
                 nonstrict_cached_reads=(("$ref:" + ref, "X"),))
+        if field in ("execution_state_writes", "establishing_execution_state_writes"):
+            # The child states a write of the cache through ``ref``; only the identity rule lands it on
+            # the cache this caller reads on an earlier leg, which is then a Branch-order error.
+            return legs(
+                {"steps": [read_cache(), message], "terminal": stop},
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+            ), ChildEntryContractV1(process_ref="$ref:child", entry_form="scheduled", **{field: (cache_key,)})
+        if field == "required_read_leg_orders":
+            # The child states a read of the cache through ``ref`` found before a later-leg writer;
+            # only the identity rule matches that order to the requirement this caller cannot
+            # discharge, which then reports the Branch-order code rather than a missing writer.
+            return legs(
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+                {"steps": [message], "terminal": stop},
+            ), ChildEntryContractV1(
+                process_ref="$ref:child", entry_form="scheduled", required_reads=(cache_key,),
+                required_read_leg_orders=(cache_key + (True,),))
         # `caller_cache_cohorts` states what a caller stored to the child that reads it.
         return doc(read_cache(), bound("X"), stop), None
 

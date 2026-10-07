@@ -1,0 +1,62 @@
+== adversarial
+       2 SPELLINGS DIFFER (base False, work False)
+     578 refused both, codes moved
+      64 request codes unchanged (moved between roots/paths)
+    3008 requests
+    3008 rows-moved
+    2366 verdicts-identical
+     642 verdicts-moved
+== removed
+     293 SPELLINGS DIFFER (base False, work False)
+    1147 parse-refused
+     561 refused both, codes moved
+       1 refused both, codes moved (work==twin)
+     138 request codes unchanged (moved between roots/paths)
+    4500 requests
+      33 rows-identical
+    3320 rows-moved
+    2653 verdicts-identical
+     700 verdicts-moved
+== guarantee
+    2703 SPELLINGS DIFFER (base False, work False)
+    2104 parse-refused
+     742 refused both, codes moved
+      68 request codes unchanged (moved between roots/paths)
+    6200 requests
+    4096 rows-moved
+    3286 verdicts-identical
+     810 verdicts-moved
+== stress
+     672 parse-refused
+    3840 refused both, codes moved
+    8640 requests
+    7968 rows-moved
+    4128 verdicts-identical
+    3840 verdicts-moved
+== sweep
+    6038 SPELLINGS DIFFER (base False, work False)
+    4172 refused both, codes moved
+     305 request codes unchanged (moved between roots/paths)
+   47096 requests
+   47096 rows-moved
+   42619 verdicts-identical
+    4477 verdicts-moved
+== other
+   20000 SPELLINGS DIFFER (base False, work False)
+    7902 refused both, codes moved
+    2196 request codes unchanged (moved between roots/paths)
+   20000 requests
+   20000 rows-moved
+    9902 verdicts-identical
+   10098 verdicts-moved
+== TOTAL
+   29036 SPELLINGS DIFFER (base False, work False)
+    3923 parse-refused
+   17795 refused both, codes moved
+       1 refused both, codes moved (work==twin)
+    2771 request codes unchanged (moved between roots/paths)
+   89444 requests
+      33 rows-identical
+   85488 rows-moved
+   64954 verdicts-identical
+   20567 verdicts-moved

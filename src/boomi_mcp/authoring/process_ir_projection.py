@@ -539,7 +539,14 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
         "summary": (
             "Stores the arriving documents in a document cache. " + _CACHE_EMISSION_SUMMARY
         ),
-        _ORDERING: (),
+        _ORDERING: (
+            "Documents whose profile is proved must carry the profile the cache declares. A cache "
+            "the request writes declares the profile its configuration names; a cache apply reuses "
+            "or names only by reference declares the one its stored component holds, read from the "
+            "account by the typed plan, compile and apply before any write. A stored profile that "
+            "could not be read is unknown and matches no proved profile; a route with no account "
+            "reads none, so there the cache declares no profile and apply judges it.",
+        ),
         _DOCS: ("required", "consumed", "all_documents"),
         _RELATED: ("state_visibility.cache",),
         _STAGES: ("author", "repair"),
@@ -755,9 +762,17 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "establishment only: a later run finds it set, with whatever value an earlier "
             "run left.",
             "Both forms share the calling execution's process properties and document "
-            "caches, so state a child reads before writing it must be established "
+            "caches, so state a child reads strictly before writing it must be established "
             "before the call, and what a child may put in a cache is unknown to later "
-            "reads. A document cache is shared with every caller and Add to Cache "
+            "reads. A Decision operand with no default tolerates absence, but a document-property "
+            "read fails where a writer of the property exists on documents that cannot reach it, "
+            "and a process-property read fails where an establishing writer exists but its value is "
+            "unavailable, including a write in a later leg of the same Branch. Each inspectable call checks "
+            "these conditional reads of its child against its own writers, wherever in the child "
+            "and in the processes the child calls they sit, and passes them on through a call whose "
+            "process writes the property nowhere. No Data starts each run with its own empty "
+            "document, so a document property its caller wrote never reaches it; Data Passthrough "
+            "receives the arriving document group. A document cache is shared with every caller and Add to Cache "
             "appends, so what a child retrieves includes whatever its callers stored in "
             "that cache, beside anything the child stored there itself. Wherever that may "
             "be so, each call checks its own writes to that cache against what the child "

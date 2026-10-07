@@ -332,8 +332,14 @@ _REMEDIATION = {
         "profile every cache write reaching the read stored: writes of different profiles "
         "or of documents whose profile nothing states, and a read that authors "
         "external_writer, satisfy none of them. An operation's profile "
-        "reference must name a profile component. A component named only by reference "
+        "reference must name a profile component. A map or operation named only by reference "
         "states no profile of its own, so declare the configuration apply writes into it. "
+        "A document cache apply reuses or names only by reference declares the profile its "
+        "stored component holds, read from the account on every route that holds one — the "
+        "typed plan, compile and apply — before any write; a stored cache proved unprofiled "
+        "declares none, and one whose stored profile could not be read has an unknown "
+        "profile. A route with no account reads none and states that limit: such a cache "
+        "declares no profile there, and apply judges its stored profile before any write. "
         "A map, document cache or operation submitted as raw config.xml states no profile "
         "either: its profile is unknown and matches none, so a profile-checked step beside "
         "it is refused; author it through its structured profile fields instead."
@@ -536,8 +542,9 @@ _MESSAGES = {
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "the documents reaching a map, a cache write, a profile source, a connector call's "
         "declared input or a process call carry a profile other than the one it requires "
-        "or one nothing states, or one a component submitted as raw config.xml leaves "
-        "unknown, or an operation's profile reference names no profile component"
+        "or one nothing states, or one a component submitted as raw config.xml or a reused "
+        "document cache whose stored profile could not be read leaves unknown, or an "
+        "operation's profile reference names no profile component"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
         "a connector call's document cardinality is impossible at its position"
