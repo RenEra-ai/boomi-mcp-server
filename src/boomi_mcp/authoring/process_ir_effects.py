@@ -1311,9 +1311,10 @@ def _caller_cache_write_requirements(prepared: Any, capabilities: Any, walk: Any
     the callers only not to contradict it. But the child may go on to USE what it restaged: a later retrieve of
     the target feeding a map needs the profile, which the twin proves from the caller's write. MEASURED, as
     every other row here is: seed the caller's content of the source cache with the target's declared profile
-    and walk again. Where the child's own verdicts move, the child relies on that profile, so the row is a
-    content requirement of the callers — exact, and seeded into the child's validation like any other
-    (CDX-186-r4-01). Where nothing moves, it stays a write requirement. The unknown-profile requirement names
+    and walk again. Where the seed clears one of the child's own refusals, the child relies on that profile,
+    so the row is a content requirement of the callers — exact, and seeded into the child's validation like
+    any other (CDX-186-r4-01). Otherwise it stays a write requirement, including where the seed only ADDS a
+    refusal (CDX-186-r5-01). The unknown-profile requirement names
     no profile a seed could state, so it is never relied on.
     """
     from ..compiler.process_ir.semantic_validation.lineage import UNKNOWN_PROFILE_REQUIREMENT, walk_lineage
@@ -1328,7 +1329,10 @@ def _caller_cache_write_requirements(prepared: Any, capabilities: Any, walk: Any
             continue
         seeded = capabilities.model_copy(update={"caller_cache_contents": tuple(sorted(
             set(capabilities.caller_cache_contents) | {(cache_ref, profile_ref)}))})
-        if {(item.code, item.path) for item in walk_lineage(prepared, seeded).findings} != unseeded:
+        # Reliance is a REPAIR: the seed clears one of the child's own refusals. A refusal the seed adds — a
+        # second write into a target declaring another profile now contradicted by it — is no evidence the
+        # child relies on this profile, only that the seed is wrong for that write (CDX-186-r5-01).
+        if unseeded - {(item.code, item.path) for item in walk_lineage(prepared, seeded).findings}:
             relied_on.add((cache_ref, profile_ref))
     return tuple(row for row in rows if row not in relied_on), tuple(sorted(relied_on))
 

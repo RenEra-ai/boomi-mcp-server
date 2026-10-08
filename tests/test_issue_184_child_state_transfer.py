@@ -10805,3 +10805,28 @@ def test_a_relied_on_write_requirement_left_proved_only_refuses_the_childs_map(m
                         lambda prepared, capabilities, walk: (tuple(sorted(set(walk.cache_write_requirement_refs))), ()))
     roots, _twin = _b186_restage_then_map_roots(True)
     assert _b28_verdict(roots, "CACHE_CHILD", True)[0] != []
+
+
+def test_a_seed_that_only_adds_a_refusal_promotes_nothing():
+    """CDX-186-r5-01. A child restaging its caller's cached documents into two targets declaring P1 and P2: seeding the
+    source with either profile only ADDS a refusal at the other write, repairing nothing, so neither write requirement
+    is promoted to an exact content requirement. A caller staging documents whose profile nothing states is admitted,
+    as the twin is; one staging P1 is refused against the P2 target, as the twin is."""
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    module = sys.modules[__name__]
+    saved = module._symbols
+    module._symbols = lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1")
+    try:
+        for source, expected in (("$ref:GET", set()), ("$ref:GETP1", {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})):
+            stage = {"steps": [{"kind": "connector_call", "operation_ref": source}], "terminal": put("$ref:CACHE")}
+            child = _legs({"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE2")},
+                          {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE_P2")}, {"steps": [_MSG], "terminal": _STOP})
+            parent = _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+            twin = _legs(stage, *child["body"]["steps"][-1]["legs"])
+            assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, source
+            assert _b186_composed([("PARENT", parent), ("CACHE_CHILD", child)]) == expected, source
+    finally:
+        module._symbols = saved
