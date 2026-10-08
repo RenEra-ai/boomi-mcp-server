@@ -696,13 +696,15 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: for a passthrough root. Recorded with the build so a direct test run or a
     #: schedule, which starts the process as No Data, is refused before any mutation.
     entry_contract: Optional[ChildEntryContractV1] = None
-    #: #186 (architect evaluation 2): True for a root another root in the same request CALLS.
+    #: #186 (architect evaluation 2): True for a root another root in the same request CALLS, outside
+    #: every call cycle and reaching none (CDX-186-r7-01: a cycle member defers to nobody that judges).
     #: A cache write of documents it retrieved from a cache its callers' documents may share is
     #: then judged at each call, against what that caller stored there beside this process's own
     #: documents, and not here: a caller's documents can leave nothing proved, and the twin's
     #: write refuses only a proved profile. False — a top-level process — judges it here.
     called_by_a_root: bool = False
-    #: #186 (ARCH-186-e1-04, architect evaluation 2): for a CALLED passthrough root, the
+    #: #186 (ARCH-186-e1-04, architect evaluation 2): for a CALLED passthrough root outside every call
+    #: cycle and reaching none (as `called_by_a_root`), the
     #: ``(pointer, property name)`` of each read of a document property off its entry documents
     #: whose flattened-twin code depends on whether the caller's documents carried the property:
     #: measured on its own walk, an entry seed that reaches the read discarded changes the code

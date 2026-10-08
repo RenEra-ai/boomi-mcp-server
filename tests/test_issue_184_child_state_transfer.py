@@ -11124,3 +11124,41 @@ def test_a_restaged_write_equals_its_twin_over_every_content_a_caller_and_the_ch
     finally:
         module._symbols = saved
     assert cells == 96 and diverging == [], diverging
+
+
+def _b186_cycle_roots(target):
+    """CDX-186-r7-01: WRITER stages P1 documents in CACHE and calls CACHE_CHILD, which restages CACHE into ``target``
+    and calls WRITER back on another leg — a call cycle, so neither root is one nothing calls."""
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    stage = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")}
+    return [("WRITER", _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})),
+            ("CACHE_CHILD", _legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}], "terminal": put(target)},
+                                  {"steps": [], "terminal": _call("WRITER", wait=True, abort_on_error=True)}))]
+
+
+def test_a_call_cycle_judges_the_restaged_write_it_cannot_defer(monkeypatch):
+    """CDX-186-r7-01. In a call cycle every member is called, and a member leaving the write to its callers passed it
+    round the cycle unjudged: the P1 documents restaged into the P2 cache were admitted. Only a root outside every
+    cycle defers, so the cycle refuses PROFILE_MISMATCH at WRITER's call (and at the call back, which runs the same
+    write again); restaged into the P1 cache it is admitted."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    roots = _b186_cycle_roots("$ref:CACHE_P2")
+    assert _b28_verdict(roots, "WRITER", True)[0] == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _b186_composed(roots) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert _b186_composed(_b186_cycle_roots("$ref:CACHE2")) == set()
+
+
+def test_a_cycle_member_deferring_to_its_callers_admits_the_cycle(monkeypatch):
+    """Mutant: every called root defers, cycle members included — the cycle is admitted."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    path = Path(process_ir_effects.__file__)
+    source = path.read_text(encoding="utf-8")
+    old = "    defers = {key for key in called if key in ordered}\n"
+    assert source.count(old) == 1
+    namespace = {"__name__": process_ir_effects.__name__, "__package__": process_ir_effects.__package__,
+                 "__file__": str(path)}
+    exec(compile(source.replace(old, "    defers = set(called)\n"), str(path), "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(process_ir_effects, "_entry_contract_bindings", namespace["_entry_contract_bindings"])
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    assert _b186_composed(_b186_cycle_roots("$ref:CACHE_P2")) == set()

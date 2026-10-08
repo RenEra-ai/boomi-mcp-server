@@ -1852,6 +1852,11 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
         for child in targets.values()
         if child is not None
     }
+    # #186 (CDX-186-r7-01): a root may leave a judgment to its callers only where every chain of callers
+    # above it ends at a root that makes it. Callers of an ORDERED root form no cycle, so every chain ends at a
+    # root nothing calls or at an unordered one — a call-cycle member, or a process that reaches one — and
+    # neither defers. A cycle member deferring to the others passed the obligation round the cycle forever.
+    defers = {key for key in called if key in ordered}
     bindings: Dict[str, tuple] = {}
     for key in roots:
         own = facts[key]
@@ -1873,13 +1878,13 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
             })) if is_called else (),
             # #186 (architect evaluation 2): a called root whose contract leaves a cache write of
             # retrieved documents to its callers does not judge that write itself.
-            is_called and bool(own.get("cache_write_requirements")),
+            key in defers and bool(own.get("cache_write_requirements")),
             # #186 (ARCH-186-e1-04): a called root's reads whose code each caller decides — the sites of the
             # rows its contract states, measured on the same walk over the same context it was derived from.
             caller_judged_read_sites(
                 roots[key], symbols_for(key, roots[key]),
                 ProcessIRValidationCapabilitiesV1(child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})))
-            if is_called and own.get("entry_form") == "passthrough" else (),
+            if key in defers and own.get("entry_form") == "passthrough" else (),
         )
     return bindings
 
