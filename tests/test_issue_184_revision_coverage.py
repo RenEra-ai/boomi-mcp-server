@@ -251,10 +251,13 @@ def _perturbations():
         # #186: a write requirement never promoted, however the child relies on it.
         ("effects", "_caller_cache_write_requirements"):
             lambda prepared, capabilities, walk: (tuple(sorted(set(walk.cache_write_requirement_refs))), ()),
+        # #186 (ARCH-186-e1-04): no read is left to each caller's judgment.
+        ("effects", "_caller_judged_entry_reads"): lambda prepared, capabilities, walk: (),
+        ("effects", "caller_judged_read_sites"): lambda child_ir, symbols, capabilities=None: (),
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
         ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None,
         opaque=frozenset(): {
-            key: ((), (), (), None, "unknown", (), ()) for key, _ir in process_roots},
+            key: ((), (), (), None, "unknown", (), (), False, ()) for key, _ir in process_roots},
         ("effects", "_binds"): lambda binding: False,
         ("effects", "_with_entry_contracts"): lambda capabilities, binding: capabilities,
         ("effects", "_aliases"): lambda symbols, ref: frozenset({ref}),

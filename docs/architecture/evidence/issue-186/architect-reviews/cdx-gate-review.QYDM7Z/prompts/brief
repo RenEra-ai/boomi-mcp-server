@@ -1,0 +1,14 @@
+You are the ARCHITECT re-reviewing the IMPLEMENTATION of your own design plan for GitHub issue #186 (boomi-mcp-server) — EVALUATION 2, scoped to the CORRECTION DELTA since your evaluation 1. Read-only: do NOT edit files and do NOT call any MCP tools.
+
+Evaluation 1 reviewed `46100b7..518bac3` and raised ARCH-186-e1-01..08. Review now `git diff 518bac3..HEAD` (HEAD = the tip of `codex/issue-186`) — the batched corrections and their validations — judging (a) whether each of your eight findings is genuinely resolved, and (b) whether the corrections introduced new defects. Do not re-review unchanged code from evaluation 1 except where a correction depends on it.
+
+The dispositions and evidence are in `docs/architecture/ISSUE_186_AUDIT_LEDGER.md` (finding rows ARCH-186-e1-01..08, CDX-186-r3-01, CDX-186-r4-01, CDX-186-r5-01; the "Gate results" table; the loop-3 checkpoint). Read them first. In short:
+- e1-01: a child's cache write of documents retrieved from a caller-filled cache now records the target cache's declared (or UNKNOWN) profile in its own channel, `cache_write_requirements` (refused at a call only where the caller's stored content carries a PROVED other profile — the twin's rule for a write); a write requirement the child RELIES on (seeding it repairs one of the child's own refusals) is promoted to an exact `cache_requirements` row (`process_ir_effects._caller_cache_write_requirements`). Commit reviews r3/r4/r5 each found a P2 in this mechanism; each is fixed and measured.
+- e1-02: an account-backed but unjudged name binding makes a name-reusable cache's profile UNKNOWN (`binding_unjudged`).
+- e1-03: a stored profile id must pass `is_boomi_component_id`.
+- e1-04: REFUTED as a defect with the residual recorded (a called child's code depends on what each caller hands over; per-root validation cannot be per-caller). Evaluate that reasoning on its merits.
+- e1-05: each conditional document observation carries its origin; seed measurement keys by pointer, name and origin.
+- e1-06/07: added same-document, forwarding-over-every-step-kind, inherited-write route, same-id/other-type and typed-apply revalidation witnesses.
+- e1-08: live QA r3/r4 repeated item 3 on stored caches proven operable by executions (COMPLETE) before capture.
+
+Report format: start with `Reviewed files:`; then each finding as `[P0|P1|P2|P3] title — file:line` with a concrete failing scenario (inputs → wrong verdict vs the flattened twin or the plan) and the expected fix; state explicitly, for each of e1-01..08, RESOLVED or NOT RESOLVED. Do not report prose/style. END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.

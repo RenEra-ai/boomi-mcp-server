@@ -406,6 +406,12 @@ in-process rule against its own writers, exactly as the flattened twin's walk wo
 | a No Data child's own empty document, `fresh` | any writer of the property in the caller | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` |
 | a process property | an establishing writer in the caller (waited children's included, conditional ones too) when the property is not established before the call | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` when a writer sits on a later Branch leg — of the caller's Branch, or inside the child or a process between — else `…_PROPERTY_READ_BEFORE_WRITE` |
 
+A Data Passthrough child's read whose code the arriving documents decide — a step between its entry
+and the read drops what they carried, while a writer of its own sits on another document copy — is a
+`drops` row too, judged at each call and not by the child, which is validated once and cannot serve a
+code that differs per caller: `…_PROPERTY_READ_BEFORE_WRITE` where the caller's documents carried the
+property, `…_DDP_SCOPE_INVALID` where they did not (ARCH-186-e1-04).
+
 A call whose process writes the property nowhere passes the read on, in kind, to its own callers. A
 strict requirement passes on its leg order the same way (`required_read_leg_orders`), and a Data
 Passthrough child asks its callers for a document property only where seeding it on the entry
@@ -420,6 +426,17 @@ profile other than the documents' is `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at t
 stored cache proved unprofiled (`profileType="profile.none"`) declares none; one whose stored profile
 could not be read is unknown and matches no proved profile. A route with no account reads none and
 states that limit: the cache declares no profile there, and apply judges it.
+
+A child's Add to Cache of documents it retrieved from a cache its callers' documents may share is
+judged at each call by the retrieve's own proof rule over everything the retrieve hands on: what that
+caller stored in the cache AND what the child's own writes stored there before the retrieve. It is
+refused (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the call's `/process_ref`) only where the two
+together prove one profile other than the target's — any proved profile, for a target of unknown
+profile; a mixture of profiles, or one beside documents nothing proves, proves none and is admitted,
+as the flattened twin's write is. A called process leaves the judgment to its own callers wherever
+theirs may be in the cache too. Where the child goes on to USE what it restaged (a later retrieve
+of the target feeding a typed consumer), and only a proved profile repairs that use, the callers
+must have stored exactly that profile.
 
 ## 4. Alias normalization (private codec)
 

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14487, "minimum_collected": 14487, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14502, "minimum_collected": 14502, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14587,3 +14587,18 @@
 {"kind": "test", "id": "pytest-014586", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_child_relying_on_what_it_restaged_asks_its_caller_for_that_profile", "state": "active"}
 {"kind": "test", "id": "pytest-014587", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_relied_on_write_requirement_left_proved_only_refuses_the_childs_map", "state": "active"}
 {"kind": "test", "id": "pytest-014588", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_seed_that_only_adds_a_refusal_promotes_nothing", "state": "active"}
+{"kind": "test", "id": "pytest-014589", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10976]", "state": "active"}
+{"kind": "test", "id": "pytest-014590", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10988]", "state": "active"}
+{"kind": "test", "id": "pytest-014591", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11006]", "state": "active"}
+{"kind": "test", "id": "pytest-014592", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11082]", "state": "active"}
+{"kind": "test", "id": "pytest-014593", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_reader_behind_a_forwarder_earns_its_twins_complete_verdict_in_both_dialects", "state": "active"}
+{"kind": "test", "id": "pytest-014594", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_restaged_write_is_judged_on_everything_the_retrieve_hands_on", "state": "active"}
+{"kind": "test", "id": "pytest-014595", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_callers_content_judged_alone_re_refuses_a_mixture", "state": "active"}
+{"kind": "test", "id": "pytest-014596", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_mixture_refused_as_any_proved_profile_re_refuses_what_the_twin_admits", "state": "active"}
+{"kind": "test", "id": "pytest-014597", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_child_judging_its_own_restaged_write_refuses_what_its_caller_unproves", "state": "active"}
+{"kind": "test", "id": "pytest-014598", "node_id": "tests/test_issue_184_child_state_transfer.py::test_reliance_measured_against_no_seed_promotes_a_seed_that_only_unproves", "state": "active"}
+{"kind": "test", "id": "pytest-014599", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_read_whose_code_each_caller_decides_is_judged_at_each_call", "state": "active"}
+{"kind": "test", "id": "pytest-014600", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_child_reporting_a_caller_decided_read_itself_serves_both_codes", "state": "active"}
+{"kind": "test", "id": "pytest-014601", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_restaged_write_equals_its_twin_over_every_content_a_caller_and_the_child_can_store", "state": "active"}
+{"kind": "test", "id": "pytest-014602", "node_id": "tests/test_issue_184_component_identity.py::test_a_passthrough_child_writing_its_callers_documents_into_a_stored_cache_is_judged_at_the_call[child]", "state": "active"}
+{"kind": "test", "id": "pytest-014603", "node_id": "tests/test_issue_184_component_identity.py::test_a_passthrough_child_writing_its_callers_documents_into_a_stored_cache_is_judged_at_the_call[grandchild]", "state": "active"}

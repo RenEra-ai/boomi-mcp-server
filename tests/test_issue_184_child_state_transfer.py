@@ -9286,10 +9286,10 @@ def test_every_read_of_a_stream_marker_answers_its_own_channels_question():
         ("_discharge_child_contract", "retrieved_origins"): "property",
         ("_transfer", "retrieved_from"): "property",
         ("_transfer", "retrieved_origins"): "property",
-        ("_requires", "caller_cache"): "content", ("_advance_stream", "caller_cache"): "content",  # #186: a cache write
+        ("_requires", "caller_cache"): "content", ("_advance_stream", "caller_cache"): "content", ("_advance_stream", "retrieved_own"): "content",  # #186: a cache write
     }, classified
     # The content marker lands in the one profile-requirement list; the property markers never do.
-    assert landing[("_requires", "caller_cache")] == {"cache_requirement_refs"} and landing[("_advance_stream", "caller_cache")] == {"cache_write_requirement_refs"}
+    assert landing[("_requires", "caller_cache")] == {"cache_requirement_refs"} and landing[("_advance_stream", "caller_cache")] == landing[("_advance_stream", "retrieved_own")] == {"cache_write_requirement_refs"}
     assert all("cache_requirement_refs" not in lists for key, lists in landing.items() if key[1] != "caller_cache")
 
 
@@ -10512,16 +10512,16 @@ def test_a_passed_on_row_flag_ignored_serves_the_wrong_code(monkeypatch):
 
 
 def test_an_entry_requirement_no_seed_repairs_exported_anyway_adds_a_code_the_twin_lacks(monkeypatch):
-    """The entry-repair filter (`_entry_repairable_reads`): a middle that fails its child's dropped read
-    must not ask its caller for the property, or the middle validated under that seed adds a read before
-    write beside the twin's scope error."""
+    """The entry-repair filter (`_entry_repairable_reads`): a middle that fails a read of its No Data child's own
+    document must not ask its caller for the property — no arriving document reaches that read — or the caller is
+    charged the middle's own scope error a second time at its call. (Since evaluation 2 the code set no longer moves:
+    a dropped read whose code the caller decides is judged at each call, ARCH-186-e1-04.)"""
     from boomi_mcp.authoring import process_ir_effects
-
-    roots, twin = _b186_deep("ddp", "passthrough", "passthrough", (), (_B30_SCRIPT,), "middle_elsewhere")
-    expected = {code for code in _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) if "LINEAGE" in code}
-    assert expected == {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID} == _b186_lineage_codes(roots)
+    roots, twin = _b186_deep("ddp", "passthrough", "no_data", (), (), "middle_elsewhere")
+    assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID}
+    assert _b28_verdict(roots, "PARENT", True)[0] == [] and _b186_lineage_codes(roots) == {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID}
     monkeypatch.setattr(process_ir_effects, "_entry_repairable_reads", lambda prepared, capabilities, walk, reads: reads)
-    assert _b186_lineage_codes(roots) == {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID, _READ_BEFORE_WRITE}
+    assert _b28_verdict(roots, "PARENT", True)[0] == [(PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID, "/body/steps/0/legs/1/terminal")]
 
 
 def test_a_cache_a_later_leg_child_may_write_is_a_branch_order_error_as_in_its_twin():
@@ -10591,7 +10591,7 @@ def test_the_target_cache_left_out_of_its_consumers_re_admits_the_caller(monkeyp
     _lineage_with_source(
         monkeypatch,
         "                for declared_ref in cache_profiles.get(semantic.cache_ref, ()):\n"
-        "                    cache_write_requirement_refs.append((stream.caller_cache, declared_ref))\n",
+        "                    cache_write_requirement_refs.append(\n                        (stream.caller_cache, declared_ref, _ref_naming(_proved_profile(stream.retrieved_own))))\n",
         "                pass\n")
     assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
     assert _b186_composed(roots) == set()
@@ -10830,3 +10830,297 @@ def test_a_seed_that_only_adds_a_refusal_promotes_nothing():
             assert _b186_composed([("PARENT", parent), ("CACHE_CHILD", child)]) == expected, source
     finally:
         module._symbols = saved
+
+
+def _b186_deep_faithful(item, mform, rform, msteps, rsteps, placement, typed):
+    """`_b186_deep` in either dialect, its twin made faithful: a legacy No Data root starts with its `source`, which the
+    flattened process starts with too; and a No Data reader starts from its own empty document, so the steps the
+    middle runs before calling it are their own earlier leg of the twin, never a prefix of the reader's legs."""
+    roots, twin = _b186_deep(item, mform, rform, msteps, rsteps, placement)
+    reader_legs = dict(roots)["CACHE_CHILD"]["body"]["steps"][-1]["legs"]
+    if rform == "no_data" and msteps:
+        cut, legs, placed = len(msteps), [], False
+        for leg in twin["body"]["steps"][-1]["legs"]:
+            if list(leg["steps"][:cut]) == list(msteps) and any(
+                    list(leg["steps"][cut:]) == list(rl["steps"]) and leg["terminal"] == rl["terminal"] for rl in reader_legs):
+                if not placed:
+                    legs += [{"steps": list(msteps), "terminal": _STOP}] + [dict(rl) for rl in reader_legs]
+                    placed = True
+                continue
+            legs.append(leg)
+        twin = _doc({"kind": "branch", "legs": legs})
+    if not typed:
+        forms = {"WRITER": mform, "CACHE_CHILD": rform}
+        roots = [(key, _doc(_B27_SOURCE, *document["body"]["steps"]) if forms.get(key) == "no_data" else document)
+                 for key, document in roots]
+        if "no_data" in (mform, rform):
+            twin = _doc(_B27_SOURCE, *twin["body"]["steps"])
+    return roots, twin
+
+
+def test_a_reader_behind_a_forwarder_earns_its_twins_complete_verdict_in_both_dialects():
+    """ARCH-186-e1-06 (architect evaluation 2): the forwarding neighbours over the step universe, COMPLETE verdicts, the
+    legacy dialect built with its `source` roots, the twin faithful to a No Data reader's own document. Every cell is
+    exact or in one recorded class, each pinned by count with its ACTUAL refusal, none counted as a match:
+
+    - ``placement``: the composition's only extra code is the call-placement capability refusal a step before a call
+      draws (`_B186_PLACEMENT`) — no faithful twin, having no call, can share it;
+    - ``profile_proof``: lineage codes equal, both refused, and they differ only in the profile proof a passthrough
+      consumer makes against the caller's documents (`_B186_PROFILE_PROOF_CODES`) — that part identical at `e22b8fa`;
+    - ``retrieve``: a retrieve between, both refused — #184's cached-document channel, identical at `e22b8fa`;
+    - ``no_faithful_twin``: a legacy No Data reader under a passthrough middle whose map consumes the caller's
+      documents — the reader's `source` must head the flattened process and so feeds the middle's map, which the
+      composition's caller never does; refused by the placement rule and the map's profile proof, as at `e22b8fa`.
+
+    No cell's lineage codes differ outside ``retrieve``, and no cell is admitted on one side and refused on the other
+    but for the placement refusal."""
+    import collections
+
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    kinds = [("none", [])] + [(cell, steps) for kind in _b28_kinds_that_can_be_between()
+                              for cell, steps, _terminal in _b30_between(kind, _b30_decision()) if steps]
+    lineage_codes = lambda codes: {code for code in codes if "LINEAGE" in code}  # noqa: E731
+    classes, other = collections.Counter(), []
+    for typed in (True, False):
+        for item in ("ddp", "dpp"):
+            for mform in ("no_data", "passthrough"):
+                for rform in ("no_data", "passthrough"):
+                    for (mname, msteps), (rname, rsteps) in [(m, ("none", [])) for m in kinds] + [(("none", []), r) for r in kinds[1:]]:
+                        for placement in ("none", "earlier", "later", "middle_elsewhere", "middle_later"):
+                            try:
+                                roots, twin = _b186_deep_faithful(item, mform, rform, msteps, rsteps, placement, typed)
+                                expected = _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", typed)[0])
+                                composed = set()
+                                for key, _document in roots:
+                                    composed |= _b30_codes(_b28_verdict(roots, key, typed)[0])
+                            except ProcessIRValidationError:
+                                continue
+                            cell = (typed, item, mform, rform, mname, rname, placement, sorted(composed), sorted(expected))
+                            if composed == expected:
+                                classes["exact"] += 1
+                            elif composed - expected == {_B186_PLACEMENT} and expected <= composed:
+                                classes["placement"] += 1
+                            elif mname in _B186_RETRIEVES or rname in _B186_RETRIEVES:
+                                classes["retrieve"] += 1
+                                if not (composed and expected):
+                                    other.append(cell)
+                            elif lineage_codes(composed) == lineage_codes(expected) and composed and expected \
+                                    and composed ^ expected <= _B186_PROFILE_PROOF_CODES | {_B186_PLACEMENT}:
+                                classes["profile_proof"] += 1
+                            elif not typed and (mform, rform, mname) == ("passthrough", "no_data", "map_ref") \
+                                    and composed == {_B186_PLACEMENT, "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH"} | lineage_codes(expected):
+                                classes["no_faithful_twin"] += 1
+                            else:
+                                other.append(cell)
+    assert other == [], other[:10]
+    assert classes == {"exact": 988, "placement": 310, "profile_proof": 66, "retrieve": 72, "no_faithful_twin": 4}, classes
+
+
+# --- #186 architect evaluation 2 ---------------------------------------------------------------------------
+def _b186_restage_cells():
+    """``{label: (roots, twin)}`` for the restage shapes of architect evaluation 2: PARENT stages documents in CACHE
+    on its first leg (``stage`` legs) and calls a No Data child whose own legs (``own``) run before a leg retrieving
+    CACHE into CACHE2 (declaring P1) or CACHE_P2; the twin holds the child's legs in PARENT's Branch."""
+    from test_issue_184_child_entries import _MAP
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    p1 = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")}
+    p2 = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, _MAP], "terminal": put("$ref:CACHE")}
+    none = {"steps": [_GET], "terminal": put("$ref:CACHE")}
+    into_p1 = {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE2")}
+    into_p2 = {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE_P2")}
+    shapes = {
+        # label: (caller stages, child's own legs, expected code set — the twin's)
+        "mixed_p1_p2_into_p1": ([p1, p2], [into_p1], set()),
+        "p2_into_p1": ([p2], [into_p1], {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}),
+        "p1_beside_unprofiled_own_into_p2": ([p1], [none, into_p2], set()),
+        "p1_into_p2": ([p1], [into_p2], {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}),
+        "unprofiled_beside_own_p1_into_p2": ([none], [p1, into_p2], set()),
+        "p2_beside_own_p1_into_p2": ([p2], [p1, into_p2], set()),
+        "p1_beside_own_p1_into_p2": ([p1], [p1, into_p2], {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}),
+        "nothing_beside_own_p1_into_p2": ([{"steps": [_MSG], "terminal": _STOP}], [p1, into_p2],
+                                          {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}),
+    }
+    cells = {}
+    for label, (stage, own, expected) in shapes.items():
+        child = _legs(*own, {"steps": [_MSG], "terminal": _STOP})
+        parent = _legs(*stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+        cells[label] = ([("PARENT", parent), ("CACHE_CHILD", child)], _legs(*stage, *child["body"]["steps"][-1]["legs"]),
+                        expected)
+    return cells
+
+
+def _b186_restage_verdicts(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    return {label: (_b186_composed(roots), _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]), expected)
+            for label, (roots, twin, expected) in _b186_restage_cells().items()}
+
+
+def test_a_restaged_write_is_judged_on_everything_the_retrieve_hands_on(monkeypatch):
+    """Architect evaluation 2, findings 1 and 2. A child's cache write of documents it retrieved from a cache its
+    caller fills is refused, as the twin's write is, only where what the caller stored there AND what the child's own
+    writes stored before the retrieve together hold one proved profile other than the target's: a caller's P1 and P2
+    together, or a caller's P1 beside the child's own unprofiled documents, or the caller's unprofiled documents
+    beside the child's own P1, leave nothing proved and are admitted; one proved profile alone is refused — including
+    the child's own P1 where the caller stores nothing. Every cell equals its flattened twin."""
+    for label, (composed, twin, expected) in sorted(_b186_restage_verdicts(monkeypatch).items()):
+        assert composed == twin == expected, (label, composed, twin)
+
+
+def test_the_callers_content_judged_alone_re_refuses_a_mixture(monkeypatch):
+    """Mutant: the call judges only what the caller stored, without the child's own content — the caller's unprofiled
+    documents beside the child's own P1 are admitted either way, but a caller storing nothing beside the child's own
+    P1 is admitted where the twin refuses."""
+    _lineage_with_source(
+        monkeypatch,
+        "                together = state.content_of(cache_ref) | (\n"
+        "                    frozenset() if own_ref is None else frozenset({_identity(own_ref)}))\n",
+        "                together = state.content_of(cache_ref)\n")
+    verdicts = _b186_restage_verdicts(monkeypatch)
+    assert verdicts["nothing_beside_own_p1_into_p2"][0] == set() != verdicts["nothing_beside_own_p1_into_p2"][1]
+
+
+def test_a_mixture_refused_as_any_proved_profile_re_refuses_what_the_twin_admits(monkeypatch):
+    """Mutant: the pre-evaluation-2 rule — refuse wherever any proved profile other than the target's is among the
+    documents — refuses the caller's P1 and P2 together, which the twin admits."""
+    _lineage_with_source(
+        monkeypatch,
+        "                if not _completable(together):\n"
+        "                    continue\n",
+        "                wrong = [identity for identity in together if identity is not None and identity != (\n"
+        "                    None if profile_ref == UNKNOWN_PROFILE_REQUIREMENT else _identity(profile_ref))]\n"
+        "                if wrong:\n"
+        "                    together = frozenset(wrong[:1])\n"
+        "                elif not _completable(together):\n"
+        "                    continue\n")
+    verdicts = _b186_restage_verdicts(monkeypatch)
+    assert verdicts["mixed_p1_p2_into_p1"][0] == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH} != verdicts["mixed_p1_p2_into_p1"][1]
+
+
+def test_a_called_child_judging_its_own_restaged_write_refuses_what_its_caller_unproves(monkeypatch):
+    """Mutant: a called child judges its write of retrieved documents against its own content alone — its own P1
+    written into the P2 cache is refused in the child although the caller's unprofiled documents beside it leave the
+    twin's retrieve unproved and its write admitted."""
+    _lineage_with_source(
+        monkeypatch,
+        "            deferred = stream.caller_cache is not None and capabilities.called_by_a_root\n",
+        "            deferred = False\n")
+    verdicts = _b186_restage_verdicts(monkeypatch)
+    assert verdicts["unprofiled_beside_own_p1_into_p2"][0] == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert verdicts["unprofiled_beside_own_p1_into_p2"][1] == set()
+
+
+def test_reliance_measured_against_no_seed_promotes_a_seed_that_only_unproves(monkeypatch):
+    """Mutant: reliance measured against the unseeded walk, as before evaluation 2 — the seed clearing the child's
+    own write refusal by leaving the retrieved documents unproved counts as reliance, so the row becomes an exact
+    requirement and the caller's unprofiled documents are refused where the twin admits."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    real = process_ir_effects._caller_cache_write_requirements
+
+    def against_no_seed(prepared, capabilities, walk):
+        rows, _relied = real(prepared, capabilities, walk)
+        unseeded = {(item.code, item.path) for item in walk.findings}
+        relied = set()
+        for cache_ref, profile_ref, _own in walk.cache_write_requirement_refs:
+            seeded = capabilities.model_copy(update={"caller_cache_contents": tuple(sorted(
+                set(capabilities.caller_cache_contents) | {(cache_ref, profile_ref)}))})
+            if unseeded - {(item.code, item.path) for item in lineage.walk_lineage(prepared, seeded).findings}:
+                relied.add((cache_ref, profile_ref))
+        return tuple(row for row in walk.cache_write_requirement_refs if (row[0], row[1]) not in relied), tuple(sorted(relied))
+
+    monkeypatch.setattr(process_ir_effects, "_caller_cache_write_requirements", against_no_seed)
+    verdicts = _b186_restage_verdicts(monkeypatch)
+    assert verdicts["unprofiled_beside_own_p1_into_p2"][0] == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert verdicts["unprofiled_beside_own_p1_into_p2"][1] == set()
+
+
+def _b186_dropped_by_the_child_roots(prefix, parent_head=(), middle=False):
+    """ARCH-186-e1-04's constructible form: PARENT's call leg (``prefix`` before the call) reaches a Data Passthrough
+    child — directly or through a passthrough middle — whose first leg writes X, whose second runs custom scripting
+    and then a no-default Decision on X; the twin runs ``prefix`` at the head of each of the child's legs."""
+    legs = lambda head=(): [{"steps": list(head) + [_GET, _DYNAMIC_X], "terminal": _STOP},  # noqa: E731
+                            {"steps": list(head) + [_B30_SCRIPT], "terminal": _b30_decision()},
+                            {"steps": list(head) + [_MSG], "terminal": _STOP}]
+    target = "MID" if middle else "CACHE_CHILD"
+    roots = [("PARENT", _doc(*parent_head, {"kind": "branch", "legs": [
+                {"steps": [_MSG], "terminal": _STOP},
+                {"steps": list(prefix), "terminal": _call(target, wait=True, abort_on_error=True)}]})),
+             ("CACHE_CHILD", _doc(_ENTRY, {"kind": "branch", "legs": legs()}))]
+    if middle:
+        roots.append(("MID", _doc(_ENTRY, _call("CACHE_CHILD", wait=True, abort_on_error=True))))
+    return roots, _doc(*parent_head, {"kind": "branch", "legs": [{"steps": [_MSG], "terminal": _STOP}] + legs(prefix)})
+
+
+def test_a_read_whose_code_each_caller_decides_is_judged_at_each_call():
+    """ARCH-186-e1-04, matched (architect evaluation 2). Where the caller's documents carry X into the child, the
+    child's script drops it and the twin's read is a read before write; where they do not, the child's writer on
+    another leg makes it a scope error. Validated once, the child cannot serve both, so it records the read as the
+    conditional row each call judges and reports nothing itself: the composition's lineage codes equal the twin's
+    in both contexts, for a No Data or a Data Passthrough caller, directly and through a forwarding middle. A call
+    behind the prefix also draws the placement refusal — the child's script states no profile it consumes — which
+    the twin, having no call, cannot share; recorded as its actual refusal."""
+    from test_issue_184_child_entries import _STATIC_X
+
+    lineage_codes = lambda codes: {code for code in codes if "LINEAGE" in code}  # noqa: E731
+    for head in ((), (_ENTRY,)):
+        for middle in (False, True):
+            for prefix, expected in (([_STATIC_X], {_READ_BEFORE_WRITE}), ([], {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID})):
+                roots, twin = _b186_dropped_by_the_child_roots(prefix, head, middle)
+                composed = _b186_composed(roots)
+                assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, (head, middle, prefix)
+                assert lineage_codes(composed) == expected, (head, middle, prefix, composed)
+                assert composed - expected <= ({_B186_PLACEMENT} if prefix else set()), (head, middle, prefix, composed)
+                assert _b28_verdict(roots, "CACHE_CHILD", True)[0] == [], (head, middle, prefix)
+
+
+def test_the_child_reporting_a_caller_decided_read_itself_serves_both_codes(monkeypatch):
+    """Mutant: the read left to the child's own verdict, as before evaluation 2 — with the caller's X the composition
+    serves the child's scope error beside the call's read before write, where the twin serves only the latter."""
+    _lineage_with_source(
+        monkeypatch,
+        "                and (node.source_path, key[1]) in capabilities.caller_judged_read_sites):\n",
+        "                and False):\n")
+    from test_issue_184_child_entries import _STATIC_X
+
+    roots, _twin = _b186_dropped_by_the_child_roots([_STATIC_X])
+    assert PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID in _b186_composed(roots)
+
+
+def test_a_restaged_write_equals_its_twin_over_every_content_a_caller_and_the_child_can_store():
+    """The coverage claim of the structural fix (architect evaluation 2, the cache-write class's second instance):
+    the retrieve's proof rule is judged over everything its writes stored, so the case set is every content a caller
+    can stage (no write, documents nothing proves, P1, P2, and every mixture of them) times every content the child's
+    own writes can store before its retrieve (none, unprofiled, P1, both) times every target (declaring P1, declaring
+    P2, of unknown profile). Every cell's composed code set equals its flattened twin's."""
+    from test_issue_184_child_entries import _MAP
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    stores = {"none": {"steps": [_GET], "terminal": put("$ref:CACHE")},
+              "p1": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")},
+              "p2": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, _MAP], "terminal": put("$ref:CACHE")}}
+    subsets = lambda names: [[name for bit, name in enumerate(names) if mask >> bit & 1] for mask in range(1 << len(names))]  # noqa: E731
+    module = sys.modules[__name__]
+    saved, diverging, cells = module._symbols, [], 0
+    try:
+        for target, ref, update in (("p1", "$ref:CACHE2", {"cache_profile_ref": "$ref:P1"}),
+                                    ("p2", "$ref:CACHE_P2", {"cache_profile_ref": "$ref:P1"}),
+                                    ("unknown", "$ref:CACHE2", {"profiles_unknown": True})):
+            module._symbols = lambda update=update: _b186_cache2_symbols(**update)
+            for caller in subsets(["none", "p1", "p2"]):
+                for own in subsets(["none", "p1"]):
+                    stage = [stores[name] for name in caller] or [{"steps": [_MSG], "terminal": _STOP}]
+                    child = _legs(*[stores[name] for name in own], {"steps": [get("$ref:CACHE")], "terminal": put(ref)},
+                                  {"steps": [_MSG], "terminal": _STOP})
+                    parent = _legs(*stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+                    twin = _b30_codes(_b28_verdict([("PARENT", _legs(*stage, *child["body"]["steps"][-1]["legs"]))], "PARENT", True)[0])
+                    composed = _b186_composed([("PARENT", parent), ("CACHE_CHILD", child)])
+                    cells += 1
+                    if composed != twin:
+                        diverging.append((target, caller, own, sorted(composed), sorted(twin)))
+    finally:
+        module._symbols = saved
+    assert cells == 96 and diverging == [], diverging

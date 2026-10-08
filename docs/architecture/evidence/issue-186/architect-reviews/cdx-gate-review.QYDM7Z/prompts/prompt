@@ -1,0 +1,570 @@
+You are the ARCHITECT re-reviewing the IMPLEMENTATION of your own design plan for GitHub issue #186 (boomi-mcp-server) — EVALUATION 2, scoped to the CORRECTION DELTA since your evaluation 1. Read-only: do NOT edit files and do NOT call any MCP tools.
+
+Evaluation 1 reviewed `46100b7..518bac3` and raised ARCH-186-e1-01..08. Review now `git diff 518bac3..HEAD` (HEAD = the tip of `codex/issue-186`) — the batched corrections and their validations — judging (a) whether each of your eight findings is genuinely resolved, and (b) whether the corrections introduced new defects. Do not re-review unchanged code from evaluation 1 except where a correction depends on it.
+
+The dispositions and evidence are in `docs/architecture/ISSUE_186_AUDIT_LEDGER.md` (finding rows ARCH-186-e1-01..08, CDX-186-r3-01, CDX-186-r4-01, CDX-186-r5-01; the "Gate results" table; the loop-3 checkpoint). Read them first. In short:
+- e1-01: a child's cache write of documents retrieved from a caller-filled cache now records the target cache's declared (or UNKNOWN) profile in its own channel, `cache_write_requirements` (refused at a call only where the caller's stored content carries a PROVED other profile — the twin's rule for a write); a write requirement the child RELIES on (seeding it repairs one of the child's own refusals) is promoted to an exact `cache_requirements` row (`process_ir_effects._caller_cache_write_requirements`). Commit reviews r3/r4/r5 each found a P2 in this mechanism; each is fixed and measured.
+- e1-02: an account-backed but unjudged name binding makes a name-reusable cache's profile UNKNOWN (`binding_unjudged`).
+- e1-03: a stored profile id must pass `is_boomi_component_id`.
+- e1-04: REFUTED as a defect with the residual recorded (a called child's code depends on what each caller hands over; per-root validation cannot be per-caller). Evaluate that reasoning on its merits.
+- e1-05: each conditional document observation carries its origin; seed measurement keys by pointer, name and origin.
+- e1-06/07: added same-document, forwarding-over-every-step-kind, inherited-write route, same-id/other-type and typed-apply revalidation witnesses.
+- e1-08: live QA r3/r4 repeated item 3 on stored caches proven operable by executions (COMPLETE) before capture.
+
+Report format: start with `Reviewed files:`; then each finding as `[P0|P1|P2|P3] title — file:line` with a concrete failing scenario (inputs → wrong verdict vs the flattened twin or the plan) and the expected fix; state explicitly, for each of e1-01..08, RESOLVED or NOT RESOLVED. Do not report prose/style. END with a verdict on its OWN FINAL line: exactly 'VERDICT: NO ISSUES' or 'VERDICT: ISSUES FOUND'.
+
+
+=== ARCHITECT DESIGN PLAN (verbatim) ===
+# Issue #186 design plan: conditional property reads and stored cache profiles
+
+## 1. Baseline, decisions, and governing behavior
+
+Implement from dev `46100b7866c7962b53cf62a400276ae30258ccc6`. Measure runtime changes against #184’s final source tree, `e22b8fa46db594bf6845e97a03444ad760c2f181`. The current checkout is clean. This planning pass changed no files and ran no tests, network requests, or MCP calls.
+
+The implementation has three behavior batches:
+
+1. Entry-document DDP reads, including the adjacent entry-obligation classification problem.
+2. DPP reads and the writer-existence facts needed for sibling and grandchild writers.
+3. Account-backed cache profiles, including propagation through passthrough children.
+
+Use the existing lineage walk as the authority. Child contracts export observations from that walk; callers apply the same failure predicates and diagnostic precedence used for an ordinary in-process read. Do not introduce a second step-kind classifier or special-case the six and three originally measured failures.
+
+Two distinct meanings must remain separate:
+
+- A writer exists somewhere, which can make a non-strict read fail.
+- A write is guaranteed to establish state downstream.
+
+The new writer facts answer only the first question. They must never establish a caller’s properties.
+
+No authored request fields or new error codes are needed. New child-contract fields and cache snapshot rows remain trusted internal context.
+
+“Same documents” for a No Data child means documents created inside that child, with the writer placed before its read. A caller’s pre-call DDP write does not write the No Data child’s empty entry document. Erasing that boundary would produce an invalid twin. This follows the existing entry contract and derivation: [contracts.py:475](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py:475), [process_ir_effects.py:967](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/process_ir_effects.py:967).
+
+## 2. File-by-file runtime design
+
+### `src/boomi_mcp/compiler/process_ir/semantic_validation/contracts.py`
+
+Add four fields to `ChildEntryContractV1`, all defaulting to empty tuples:
+
+- `nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...]`
+- `nonstrict_process_reads: Tuple[Tuple[str, bool], ...]`
+- `process_property_writes: Tuple[str, ...]`
+- `establishing_process_property_writes: Tuple[str, ...]`
+
+The document-read fields are the bare DDP name and its relation to invocation-entry properties:
+
+- `inherits`: an entry property reaches this read.
+- `drops`: the child’s path discards an entry property before this read.
+- `fresh`: a No Data boundary prevents the caller’s entry properties from reaching it.
+
+The process-read fields are the bare DPP name and `local_later_leg_writer`. That boolean records an internal later-leg dependency and survives forwarding.
+
+The two DPP writer sets contain:
+
+- Every known authored or contracted DPP writer.
+- The subset the execution-scope writer-existence rule counts, excluding unwaited calls transitively.
+
+Document their existence-only meaning. Do not substitute `mutated_state` or `guaranteed_state`: the former disappears when effects are incomplete, and the latter omits conditional writers.
+
+Keep `nonstrict_cached_reads` unchanged. Its cache-less row represents a retrieved/property-loss context; its caller application forces `CACHE_TRANSFER_UNPROVED` and therefore serves `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE`. That is incorrect for an untouched entry-document read with a sibling writer, whose code is `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID`. The deciding branches are [lineage.py:2312](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:2312) and [lineage.py:3195](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:3195).
+
+### `src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py`
+
+Extend `LineageWalkV1` with pointer-bearing observations for derivation:
+
+- Non-strict document observations: read pointer, DDP name, whether a nested call imposed a fresh-entry cut, and whether that entry key was invalidated.
+- Non-strict process observations: read pointer, DPP name, later-leg-writer flag.
+- Unestablished entry-document read candidates: read pointer and DDP name, for measuring ordinary DDP entry obligations.
+
+Keep observations distinct by pointer and relation. Two reads of X may require both `fresh` and `drops`; collapsing them by name can erase one of the twin’s codes.
+
+In `_transfer` and `_classify_unmet_read`:
+
+- Continue using `_reads_of` to identify non-default, non-strict Decision operands.
+- Record entry-document observations when no triggered retrieve governs the read.
+- Record every unestablished non-strict DPP read, including one whose child has a local writer.
+- Keep these DPP observations out of strict `unestablished_reads`. They are conditional reads, not unconditional entry requirements.
+- Preserve immediate in-process diagnostics through the existing predicates.
+- Add an inherited later-leg fact to `_classify_unmet_read`; for execution-scoped reads its condition is the existing `_written_in_a_later_leg(...)` result OR that fact.
+- Record ordinary entry-document candidates at the same outward-obligation site, before discarding pointer information.
+
+Do not mark X invalidated merely because a script was encountered. `_drop_replaced_document_keys` invalidates only keys actually carried and dropped. Consequently, a script between entry and read still yields SCOPE when X exists solely on sibling documents, but yields BEFORE when arriving X was discarded. [lineage.py:922](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:922)
+
+Apply the new rows in `_discharge_child_contract`:
+
+For a document row:
+
+- `inherits`: discharge when the arriving caller documents establish X. Otherwise, if a writer exists, classify using the caller’s actual invalidation and retrieved-cache provenance.
+- `drops`: arriving X cannot discharge the read. Add X to the classification’s invalidated set only if the arriving documents actually carried it. Preserve existing invalidation; never manufacture it from a sibling-only writer.
+- `fresh`: discard caller document establishment, invalidation, and cache provenance for this judgment. A writer elsewhere produces SCOPE; no writer permits absence.
+- When this process cannot fail the read, forward an observation at the call so its own contract carries the conditional obligation.
+- A `fresh` cut remains fresh through further calls.
+
+For a process row:
+
+- Discharge if the caller’s execution state establishes P.
+- Otherwise ask `_nonstrict_read_can_fail(prepared, (DPP, P), capabilities)`.
+- With no establishing writer, tolerate absence and forward the row.
+- With a writer, classify using the row’s internal later-leg flag OR the caller’s later-leg predicate.
+- Forward the combined flag through intermediate callers that cannot discharge the read.
+
+Use the call node’s existing diagnostic pointer for lineage errors, with subprocess evidence. Profile obligations continue using `/process_ref`.
+
+Factor the DPP writer-existence collection so the exported facts and their consumers agree:
+
+- `_established_anywhere` consumes the establishing writer set of waited derived calls.
+- `_leg_write_index` consumes all known DPP writers to locate them, including conditional writers.
+- The all-writes collector and export share the same authored/contracted writer collection.
+- Unwaited calls contribute no execution-scoped establishing writer.
+- Keep `_awaited_guarantee`, `_child_guarantee`, and actual state transfer unchanged.
+
+This is required for the sibling sweep: the current indexes see only a derived child’s guaranteed writes, while a flattened graph counts its direct conditional DPP writers. [lineage.py:1462](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:1462), [lineage.py:4100](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:4100)
+
+For item 3, also close the caller-entry UNKNOWN bypass:
+
+- Preserve the direct known-stream cache-write check.
+- Add a private non-None unknown-profile requirement token that resolves to no profile symbol.
+- In the `STREAM_CALLER_ENTRY` cache-put arm, an unknown cache records `_requires(stream, None, unknown_token)`.
+- Keep its stored content identity unknown.
+- The existing caller profile loop then refuses a known profile against that token and forwards it through passthrough intermediates.
+
+Using `None` here is insufficient: the current caller loop explicitly skips a `None` document requirement. [lineage.py:2721](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:2721), [lineage.py:2853](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/compiler/process_ir/semantic_validation/lineage.py:2853)
+
+### `src/boomi_mcp/authoring/process_ir_effects.py`
+
+In `derive_child_entry_facts`, derive the new read rows from the walk:
+
+- For each DDP observation, seed `(ddp, name)` at entry and rewalk.
+- If that same observation is discharged, export `inherits`.
+- If it remains and the seeded key was dropped, export `drops`.
+- A scheduled child or recorded nested No Data cut exports `fresh`.
+- Preserve separate relations for one name.
+- Derive DPP rows directly from the walk’s pointer-bearing observations.
+- Derive both DPP writer sets from the shared writer helpers.
+
+Apply the same seed-and-rewalk measurement to DDP `required_reads`: export only entry reads that an entry seed actually repairs. Compare by pointer, not merely by key.
+
+This adjacent correction is necessary. A passthrough child that writes X, discards it, and reads it retains BEFORE after entry seeding; exporting it as an entry requirement currently lets the caller add SCOPE. If another read of X is repairable, it must still export its obligation even while the local dropped-X read remains defective.
+
+In `_entry_contract_bindings` and `_with_entry_contracts`:
+
+- Keep derivation unseeded with respect to the process’s own new conditional rows.
+- Seed conditional DPP names separately when validating a called root, because each call independently judges those rows.
+- Uncalled roots receive no such seed.
+- Continue deriving grandchildren before parents.
+- Preserve opacity filtering for reused roots and callers.
+
+Add all four contract tuple fields to `_OBLIGATION_FIELDS`. Their finite universe is property names, three document relations, and the DPP boolean. Preserve the existing monotonicity checks and least fixed point; add no depth or pass limit.
+
+### `src/boomi_mcp/authoring/connector_resolution_snapshot.py`
+
+Extend the existing snapshot rather than adding a separate route-specific reader.
+
+Add a private frozen `ResolvedDocumentCacheProfileV1` containing:
+
+- `component_key`
+- `profile_state: Literal["known", "absent", "unknown"]`
+- Optional profile component ID and normalized profile component type
+- Optional cache component ID, version, and account ID
+
+Add `cache_profiles` and `lookup_cache(component_key)` to `TrustedConnectorResolutionSnapshotV1`. Preserve connector-only `identities` and `lookup`. Extend `for_root` to project both collections.
+
+Add one pure stored-cache XML projection, using the existing strict expat parsing/refusal pattern. Read only the correctly typed component envelope’s direct `object/DocumentCache` configuration and its `profile` and `profileType` attributes.
+
+Classify:
+
+- Known: one valid cache configuration, a nonblank valid profile ID, and a normalized real profile type recognized by the shared profile identity authority.
+- Absent: an explicit unprofiled configuration, `profileType="profile.none"`, without a profile binding.
+- Unknown: unavailable or failed read; malformed, contradictory, incorrectly typed, or incomplete configuration; malformed binding; unsupported type; DTD/entity declaration.
+
+Missing attributes are not proof of absence. Inspecting an existing unprofiled cache does not unlock authoring of `profile.none`, which remains gated.
+
+The wire spelling is independently captured at [documentcache_profile_key_component.xml:1](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/tests/fixtures/live_xml/m11/documentcache_profile_key_component.xml:1). QA fixtures must additionally bind their capture to operability.
+
+Unknown cache rows do not raise `ConnectorIdentityError`. The profile-consuming write owns the refusal; an unused unreadable cache must not block unrelated work.
+
+Provide a shared account collector for reused cache bindings. Fetch once per canonical cache component ID, fan the reading out to aliases, and preserve failed readings explicitly. Use the existing binding/reuse authority.
+
+### `src/boomi_mcp/authoring/workflow.py`
+
+Typed plan already resolves the component plan before `_validate_processes`; compile delegates to plan and retains its snapshot. [workflow.py:2603](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/workflow.py:2603)
+
+At snapshot construction:
+
+- Collect document caches using `planned_existing_ids(component_plan)` and `reused_keys_for_components`.
+- Include declared-ID reuse, name reuse, and reference-only bindings, including config-level IDs.
+- Pass the complete cache reuse set; do not intersect it with the current explicit-ID connector readings.
+- Merge cache readings into the snapshot input while preserving connector behavior.
+- Compile consumes the same snapshot and symbol facts rather than rereading the account.
+
+The current explicit-ID reader alone cannot cover name reuse. [workflow.py:1727](/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/src/boomi_mcp/authoring/workflow.py:1727)
+
+Thread whether account binding was attempted but unjudged into validation. If an account-backed name lookup fails, a potentially reused cache under `conflict_policy="reuse"` is UNKNOWN for profile checking, rather than being described by its candidate create configuration. Preserve the existing degraded-plan reporting and typed-apply guard; the typed cache write now also receives its profile diagnostic.
+
+Without an account, a name-only create whose binding is unknown retains the requested-create assumption, explicitly stated in the served rule below.
+
+### `src/boomi_mcp/categories/integration_builder.py`
+
+Extend `_live_connector_xml` into the shared pre-write component reader for connectors and reused document caches.
+
+Preserve:
+
+- The reuse predicate and resolved `existing_ids`.
+- The hoisted once-per-apply snapshot.
+- The guard avoiding unused live reads when no submitted process root is compiled.
+- Pre-write canonical validation and dry emission before dependency writes.
+
+Pass cache rows through `_resolution` and `_build_canonical_symbols`. Wet apply uses its fresh account-backed facts; a previously compiled bundle’s reading is not current account authority.
+
+Written cache creates and updates use the configuration apply will submit. Reference-only updates remain writes under the existing predicate. Clone collisions remain creates.
+
+Keep write-conflict validation before fact derivation. Do not merge a stored pre-update profile into the facts describing a cache the request will update.
+
+### `src/boomi_mcp/recipes/materialization.py`
+
+In `build_symbol_table`, select profile authority using `apply_writes_component_config`:
+
+- Written structured cache: requested structured facts.
+- Written raw `config.xml` cache: UNKNOWN, preserving #184.
+- Unwritten cache: stored snapshot fact.
+- Unwritten cache without a reading: UNKNOWN.
+
+A known stored profile may not appear among the request’s profile specs. Preserve the existing ref-based child-obligation protocol by adding a deterministic internal profile symbol:
+
+- Ref: `urn:boomi:stored-profile:<sha256 of canonical ID/type>`.
+- Component type: stored normalized profile type.
+- Placeholder component ID derived from that internal ref.
+- `bound_component_id`: canonical stored profile ID.
+
+Set the cache’s existing `cache_profile_ref` to this ref. Deduplicate by canonical ID/type; reject a collision rather than shadowing a symbol.
+
+Absent sets neither a profile ref nor UNKNOWN. Unknown sets `profiles_unknown=True` and publishes no candidate profile ref.
+
+Use the existing GUID canonicalization and profile identity comparison. Do not compare display names or `$ref` spelling.
+
+Internal symbols must add no authored component specs, materialization slots, dependency writes, or emitted references. Existing placeholder rebinding must preserve their bound identity.
+
+### `src/boomi_mcp/compiler/process_ir/semantic_validation/context.py`
+
+Retain one canonical cache identity across aliases and aggregate both profile declarations and UNKNOWN facts through:
+
+- `canonical_cache_profiles`
+- `canonical_unknown_profile_caches`
+
+Update their documentation: a reused alias now states the stored fact or UNKNOWN. UNKNOWN continues to dominate any contradictory alias declaration.
+
+The new property-read rows contain no cache refs and need no cache canonicalization.
+
+### `src/boomi_mcp/compiler/process_ir/contracts.py`
+
+Update `cache_profile_ref`, `profiles_unknown`, and `profiles_unknown()` documentation to describe account-backed stored facts and unavailable stored caches.
+
+No new symbol field is required: the internal profile symbol makes the existing ref and identity consumers sufficient.
+
+### All profile consumers
+
+Retain and extend the source-derived inventory in `tests/test_issue_184_component_identity.py:3290`. Every producer and consumer must have an explicit UNKNOWN disposition.
+
+This includes materialization; both canonical cache helpers; both cache-put arms and inherited requirements; map, connector-input, listener, and cache-content checks; `profiles_unknown`; and the behavior oracles in `authoring/contract.py`.
+
+Do not fix only the ordinary cache-put arm. The passthrough-child obligation and its forwarding path are mandatory consumers of the same fact.
+
+## 3. Served contract, diagnostics, and expected codes
+
+### `src/boomi_mcp/authoring/process_ir_projection.py`
+
+Replace the universal process-call claim that every read-before-write requires establishment with:
+
+“Strict state reads must be established before the call. A Decision operand without a default tolerates absence, but a document-property read fails when a writer exists on documents that cannot reach it, and a process-property read fails when an establishing writer exists but its value is unavailable, including a write on a later Branch leg. These conditional reads are checked at each inspectable call and forwarded through intermediate calls. No Data starts with its own empty document; Data Passthrough receives the arriving document group.”
+
+Add the following shared route rule to `cache_put` ordering guidance.
+
+### `src/boomi_mcp/compiler/process_ir/diagnostics.py`
+
+Replace the reference-only cache portion of PROFILE_MISMATCH remediation with:
+
+“On routes with an account, a reused or reference-only document cache declares the profile read from its stored component; its discarded request configuration declares nothing. An unavailable stored reading or unresolved account binding gives the cache an unknown profile. Without an account, a cache already bound for reuse or named reference_only has an unknown profile, which matches no proved document profile. A name-only create with no account is checked against its requested create configuration; whether its name binds an existing cache is checked with the account before any apply write. A cache proved unprofiled declares no profile requirement. A map or operation named only by reference still states no profile of its own. A map, document cache or operation submitted as raw config.xml has an unknown profile.”
+
+Use the same cache rule in projection text. Update the short PROFILE_MISMATCH message to include unavailable stored profile facts.
+
+### `src/boomi_mcp/errors.py`
+
+Update PROFILE_MISMATCH’s served summary so UNKNOWN includes unreadable or unavailable stored caches, not solely raw submitted XML. Preserve its code, category, and retryability.
+
+### `src/boomi_mcp/authoring/contract.py`
+
+Extend the existing lineage-read, child-entry, child-call-state, child-forwarding, and component-identity oracles with the new rows and stored-cache facts. Include direct writes, caller-entry writes, forwarding, and matching controls.
+
+Oracles remain deterministic and account-free. Supply frozen independent XML/readings; never fetch live account data while computing revisions.
+
+Existing reused-cache oracle fixtures must distinguish known, absent, and UNKNOWN instead of asserting universal absence.
+
+### `docs/architecture/PROCESS_IR_V1.md`
+
+Update the child-state table and cache-profile explanation to match the served rules. Explain conditional reads separately from strict requirements.
+
+The expected lineage cells are:
+
+- DDP, earlier or later sibling-document writer, untouched entry read: `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID`.
+- DDP, property established on the actual read documents and preserved: admitted.
+- DDP, property established on those documents and then discarded: `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE`.
+- DDP, no writer anywhere: admitted.
+- DPP, established earlier or on the same execution path: admitted.
+- DPP, unavailable with a later-leg writer: `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID`.
+- DPP, an establishing writer exists but is unavailable and not later-leg ordered: `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE`.
+- DPP, no establishing writer: admitted.
+- Explicitly defaulted Decision operand: no new conditional obligation.
+
+The cache-profile cells are:
+
+- Known stream and matching stored profile ID/type: admitted.
+- Known stream and different stored profile ID or type: `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH`.
+- Known stream and UNKNOWN cache profile: the same mismatch code.
+- Explicit absent cache profile: no cache-profile requirement.
+- Written structured cache: existing declared-profile verdict.
+- Written raw cache: existing UNKNOWN verdict.
+- Unused unreadable cache: no profile refusal.
+
+Direct profile mismatches use `/cache_ref`; inherited child-profile mismatches use `/process_ref`. Typed plan reports semantic errors and blocks compilation; typed compile preserves them beneath its existing `AUTHORING_COMPILE_BLOCKED` envelope. Raw apply refuses before writes.
+
+For interposed steps that introduce other failures, compare the complete twin code set, including grammar, capability, cache-writer, profile, and dynamic-path codes. Do not reduce the differential to the targeted lineage code.
+
+## 4. Tests, rebaselines, and blast-radius evidence
+
+### Existing covered test modules
+
+Append property witnesses to `tests/test_issue_184_child_state_transfer.py`; append cache-profile and route witnesses to `tests/test_issue_184_component_identity.py`.
+
+Replace the two recorded-limit witnesses with matching witnesses. Rename each once to describe matching behavior and reconcile its historical node ID correctly.
+
+Do not add a new test module. The precise trap is:
+
+- `tests/_revision_corpus.py:112` covers `test_issue_184_*.py`, not a new `test_issue_186_*.py`.
+- `_standalone_sample` lives in `tests/test_issue_184_revision_corpus.py:2095`, rather than `test_wave_gate.py`.
+- Extending the covered module set rotates its sorted sample.
+- The wave gate forbids appending and then tombstoning a node within the same landing delta.
+
+Appending to existing covered modules avoids both an uncovered #186 suite and sample rotation.
+
+### Full property matrix
+
+Generate the cell universe from the emission and grammar authorities using `_b28_kinds_that_can_be_between`, `_B28_NODES`, `_B28_OPERATIONS`, and `_b30_between`.
+
+Cover:
+
+- No Data and Data Passthrough.
+- Bare read and every admitted interposed kind.
+- Every data-process operation and mixed operation sequences.
+- Earlier-leg, later-leg, actual-same-document, and no-writer placements.
+- Both dialects where constructible.
+- Reader grandchildren, forwarding middles, sibling writers, and writer grandchildren.
+- Conditional writers, unknown effects beside a known writer, defaults, both Decision operands, independent parents, aliases, repeated calls, and recursive contracts.
+
+Place reads inside admitted control bodies. Handle edge-only `continue` through its containing control. Terminal calls exercise a descendant read; cache sinks and other terminal kinds cannot precede a same-path read.
+
+Record candidate kinds that the grammar excludes, with their actual refusal and context. Do not silently skip them. A legacy caller may invoke the same explicit passthrough child; do not invent a source/target dialect inside a passthrough root.
+
+For each constructible cell:
+
+- Union diagnostics over every composition root.
+- Compare with the entry-faithful flattened twin’s full code set.
+- Assert validation equals compilation and None declarations equal empty declarations.
+- Pin caller diagnostics separately where the child is otherwise clean.
+
+Add the adjacent witnesses required by the derived mechanisms:
+
+- Incoming X dropped versus sibling-only X behind the same script.
+- A local dropped-X defect plus a separately repairable entry read of X.
+- Distinct fresh/drop reads of X forwarded through one middle.
+- A child’s own later-leg DPP read.
+- Conditional DPP writers in sibling children and grandchildren.
+
+Update `_BOUNDARY`, `_NON_DEFAULT`, `_OBLIGATION_SITES`, and writer/decision-unit dispositions. Every new contract field needs a real non-default derivation witness.
+
+### Source mutants
+
+Use `_lineage_with_source`’s counted replacement and real-module recompilation pattern.
+
+Require independent mutants for:
+
+- Removing document-read export.
+- Removing document-row discharge or replacing its classification with the cached cache-less rule.
+- Removing DPP export.
+- Removing caller later-leg judgment.
+- Removing internal later-leg forwarding.
+- Removing sibling/grandchild DPP writer-existence consumption.
+- Removing stored-cache profile selection.
+- Replacing the caller-entry UNKNOWN token with `None`.
+
+Each mutant must reopen an admission or serve the wrong code while the unchanged twin retains its verdict. Keep matching-profile, no-writer, defaulted-read, and actual-established-state controls.
+
+### Cache route matrix
+
+Cover declared-ID reuse, name reuse, reference-only ID/config-ID/name bindings, GUID aliases, and profiles absent from the request.
+
+Test matching profiles, different IDs, same ID/different type, explicit absence, missing attributes, malformed XML, failed reads, wrong component type, duplicates, and DTD/entity refusal.
+
+Exercise typed plan, typed compile, raw apply pre-write, direct materialization without an account, passthrough child cache writes, and forwarding grandchildren.
+
+Assert one fetch per stored cache ID, no synthetic slots or writes, and zero attempted mutations for refusals. Preserve creates, structured updates, reference-only updates, clone collisions, unused unreadable caches, and opaque reused process roots.
+
+### Rebaseline sequence
+
+After runtime behavior and test identities settle:
+
+1. Harvest packaged behavior inputs:
+   `PYTHONPATH=src .venv/bin/python tests/_revision_corpus.py --write`
+2. Regenerate the authoring contract fixture from `process_ir_authoring_revision_payload()` using the parity test’s compact sorted JSON serialization.
+3. Regenerate schema fixtures only where the owning schema output changes. Internal child rows do not automatically change the authored ProcessIR schema.
+4. Run:
+   `PYTHONPATH=src .venv/bin/python scripts/rebaseline_m12_12_inventory.py`
+5. Reconcile `tests/fixtures/wave_gate/test_nodes.jsonl`, preserving frozen identity fields and existing row IDs. Append new rows and tombstone removed baseline nodes.
+6. Check:
+   `PYTHONPATH=src .venv/bin/python scripts/wave_gate.py manifests --base 46100b7`
+
+Record computed compiler, capability, and schema revisions and attribute changed fingerprints. Do not assume every revision changes, or regenerate golden XML to conceal a behavior change.
+
+### Blast radius against `e22b8fa`
+
+Archive the selected replay scripts, dependencies, input hashes, commands, exit statuses, and results under `docs/architecture/evidence/issue-186/`. Existing #184 replay kits are largely gitignored; copy them into the new evidence set before use. Assert every replay imports `boomi_mcp` from its selected arm.
+
+Run these four measurements:
+
+1. All 80 active goldens
+
+   Inputs: `tests/fixtures/wave_gate/goldens.jsonl`; expected XML: `tests/fixtures/golden_xml/`.
+
+   Render the same active requests through each arm’s `tests/_wave_gate_golden_corpus.py --render <request.json>`, with that arm’s source/tests paths. Compare bytes, lengths, and SHA256 at two hash seeds. Preserve immutable golden payloads.
+
+2. The 216-cell matrix
+
+   Kit: `docs/plans/issue-184-resume/work/evidence/b21a_verify5/mx/matrix.py`.
+
+   Per arm:
+   `BOOMI_LOCAL=true PY_COLORS=0 .venv/bin/python <matrix.py> <arm-tree> <label> <arm-tree>/tests`
+
+   Adapt `work/b30/matrix_moves.py` to compare both arms’ composition and twin verdicts. Report changed twins; remove its historical assumption that the twin cannot change.
+
+3. Six frozen corpora: 89,444 requests
+
+   Inputs under `docs/plans/issue-184-resume/work/b30/blast/`:
+
+   - adversarial: 3,008
+   - removed: 4,500
+   - guarantee: 6,200
+   - stress: 8,640
+   - sweep: 47,096
+   - other: 20,000
+
+   Replay with:
+   `.venv/bin/python run_arm.py <arm-tree> <req.jsonl> <start> <end> <out.jsonl>`
+
+   Reuse `launch.sh`’s partition schedule with fresh outputs and explicit process-exit accounting. Adapt `compare.py` for baseline `e22b8fa` and candidate #186.
+
+   Its flattening is limited to supported last-leg empty-prefix calls, depth six. `complete_twin=false` and “twin n/a” are not passing evidence. Every admission-direction movement in such a cell needs a concrete faithful twin or an individually justified nonconstructible disposition.
+
+4. QA’s x29 universe: 4,872 cells
+
+   Kit: `work/b30/harness/x28_hunt.py` and `x29_hunt.py`.
+
+   Per arm:
+   `BOOMI_LOCAL=true Q184_TREE=<arm-tree> Q184_ARM=<label> .venv/bin/python x29_hunt.py`
+
+   Adapt QA’s `.claude/agent-memory/boomi-qa-tester/harness/184s1/r30/g30_x.py` to compare candidate and `e22b8fa` outputs.
+
+   Preserve and report the baseline’s 152 refused-both code-set residuals. The historical result is 4,720 exact matches plus those residuals, not 4,872 exact matches. The 951-cell universe is x28.
+
+For every dataset, require zero unexplained:
+
+- Admission → refusal with an admitting candidate twin.
+- Refusal → admission with a refusing candidate twin.
+- Raised exception, missing row, silently skipped cell, or unsupported twin used as proof.
+
+The new #186 property families require exact code-set equality. Broader historical residuals must remain explicitly accounted for.
+
+## 5. Live QA, records, ordering, and completion
+
+### Live QA through the public tool boundary
+
+The implementer must run scoped QA in an MCP session where approvals can be answered. This architect turn performs none of those calls.
+
+Use `build_integration`:
+
+- Typed `plan` and `compile` with `config.authoring_request`.
+- Raw `apply` with canonical `IntegrationSpecV1.processes`, reaching the pre-write compiler pass.
+- Typed `apply` for the matching cache control and fresh-account revalidation.
+
+For items 1–2, exercise both entry forms, original bare/Message/script witnesses, derived representative preservation/drop/control paths, and grandchild forwarding. Verify full causative code sets and zero writes on refusal.
+
+For item 3, use an independently proven operable stored document cache bound to profile B:
+
+- Known profile-A documents must be refused.
+- Known profile-B documents must remain admitted.
+- Exercise declared-ID reuse, name reuse, and reference-only binding.
+- Include a passthrough child and forwarding grandchild cache write.
+- Confirm mismatch refusal precedes every supporting dependency write.
+- Verify apply rechecks stored facts rather than trusting an earlier compilation reading.
+
+Fixture provenance must come from platform schemas, pre-baseline goldens, UI-authored references, or captures linked to executed-green artifacts. Generated/read-back XML alone is insufficient.
+
+The redacted `cap184-e1-fixtures/reused/e0_cache.stored.xml` documents attribute spelling but is not parseable as-is. Preserve it as historical evidence; obtain a parseable operability-bound capture for reader and live QA fixtures.
+
+### Records
+
+Create `docs/architecture/ISSUE_186_AUDIT_LEDGER.md` before implementation corrections. Record:
+
+- Literal baseline and comparison SHA.
+- Predeclared gate roster.
+- The three inherited rows: SELF-184-73, SELF-184-74, SELF-184-78.
+- Mechanisms, defect classes, corrections, measurements, checkpoints, gate results, and durable review attestations.
+- Closure evidence for each inherited recurrence.
+
+Add narrow closure cross-references to #184’s ledger; preserve its historical findings and deferral record.
+
+Respect `tests/test_wave_gate.py`’s prose-token scanner, including fenced text. Use ordinary prose for new labels; do not expand its allowlist to hide diagnostics. The new ledger filename is discovered automatically.
+
+### Work order and gates
+
+Land the three runtime batches in the order stated above, each with its witnesses and corresponding oracle changes. These are implementation batches within one slice, not new QA or review loops.
+
+After final rebaselines and blast measurements:
+
+1. Run affected suites and the full non-KB suite.
+2. Launch the initial scoped `boomi-qa-tester` pass once.
+3. Commit the QA-validated tree before Stage-2 review.
+4. Run the required detached Codex review against the literal baseline.
+5. Reconcile findings under `receiving-code-review`; every applied correction receives affected QA and a review of the complete unreviewed delta.
+6. Run the architect gate if required by the wrapping pipeline, respecting its three-evaluation cap.
+7. Finish with the composite wave gate:
+   `PYTHONPATH=src .venv/bin/python scripts/wave_gate.py wave --base 46100b7 --require-plan-fingerprint`
+
+Keep the final tree covered by every owed gate. Critical residue cannot be deferred. Standard blocking residue requires an existing checkpoint and an already-filed, enumerated, sequenced follow-up. A failed review or unavailable required validation leaves the issue incomplete.
+
+### Risks and issue clarifications
+
+- The issue’s S–M estimate understates the structural neighborhood: DPP writer existence, child-local later-leg forwarding, and DDP entry-obligation filtering are necessary to satisfy the full matrix.
+- Script presence is not proof that X was invalidated.
+- Guaranteed DPP writes are insufficient for the writer-existence rule.
+- No Data caller-prefix DDP writers are not “same documents”; twins must preserve the entry boundary.
+- UNKNOWN must propagate through caller-entry cache writes. Populating the symbol flag alone leaves a bypass.
+- Account-backed name reuse must use the planner’s resolved binding, not only explicit-ID readings.
+- No-account name-only creation uses a disclosed create assumption; account-backed unresolved reuse fails closed for known-profile writes.
+- The existing corpus comparator’s “n/a” twins and x29’s historical residuals limit what its aggregate counts prove.
+- Stored cache configuration is a requirement on writes, never evidence that a cache contains documents. Preserve reaching-content, append, cohort, emission, and legacy rules.
+
+
+=== ISSUE ACCEPTANCE CRITERIA ===
+## Acceptance criteria
+- Item 3: a write into a reused or reference-only cache whose stored profile differs from the documents is refused on every route that holds the account. A matching stored profile stays admitted, and the no-account routes state their verdict in the served rule.
+- Items 1 and 2: each family above, and its neighbours, earns its flattened twin's code set in every cell:
+  - both child entry forms;
+  - every step kind the emission authority admits between entry and read;
+  - writer on an earlier leg, a later leg, the same documents, and no writer;
+  - both dialects where the shape is constructible.
+- Each fix has a twin differential, a source mutant proving it is load-bearing, and a blast radius against the #184 final tree. The blast radius covers the active goldens, the #184 216-cell matrix, the six corpora, and QA's x29 explorer universe, and must show:
+  - no admission becomes a refusal the twin does not share;
+  - no refusal becomes an admission the twin refuses.
+- Both recorded-limit witnesses are replaced by matching witnesses, and the #184 ledger's recorded recurrences are marked closed here.
+- Live scoped QA through the MCP tool boundary, and the repo's Codex review, per the completion workflow.
+
+

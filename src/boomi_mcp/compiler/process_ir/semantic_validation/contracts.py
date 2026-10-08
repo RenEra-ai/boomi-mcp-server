@@ -502,9 +502,13 @@ class ChildEntryContractV1(_ValidationModel):
       rule 6); a caller that stores nothing there satisfies it vacuously.
     - ``cache_write_requirements``: per cache write of documents the child retrieved from such a
       cache, ``(cache ref, AUTHORED profile ref the target cache declares, or the unknown-profile
-      requirement)`` (#186). A caller's writes there must not have stored documents of a PROVED
-      profile other than that one (any proved profile, for an unknown target); documents whose
-      profile nothing states satisfy it, as they satisfy the write itself.
+      requirement, a profile ref naming what the child's OWN writes stored there before the
+      retrieve, or None where they stored nothing)`` (#186). The write is refused, as the twin's
+      is, only where the documents retrieved carry a PROVED profile other than the target's (any
+      proved profile, for an unknown target): where a caller's writes there and the child's own
+      together stored documents of that one other profile and of no other (architect evaluation
+      2). A child whose own writes stored documents of no single proved profile retrieves
+      documents nothing proves, whatever its callers store, and records no row.
     - ``cache_property_requirements``: per document property the child uses on
       documents it retrieved from such a cache, ``(cache ref, property name, request
       profile ref or None, bound)``, including a use the child's own writes satisfy. Every
@@ -610,7 +614,7 @@ class ChildEntryContractV1(_ValidationModel):
     required_read_leg_orders: Tuple[Tuple[str, str, bool], ...] = ()
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
-    cache_write_requirements: Tuple[Tuple[str, str], ...] = ()
+    cache_write_requirements: Tuple[Tuple[str, str, Optional[str]], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
     nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...] = ()
@@ -692,6 +696,20 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: for a passthrough root. Recorded with the build so a direct test run or a
     #: schedule, which starts the process as No Data, is refused before any mutation.
     entry_contract: Optional[ChildEntryContractV1] = None
+    #: #186 (architect evaluation 2): True for a root another root in the same request CALLS.
+    #: A cache write of documents it retrieved from a cache its callers' documents may share is
+    #: then judged at each call, against what that caller stored there beside this process's own
+    #: documents, and not here: a caller's documents can leave nothing proved, and the twin's
+    #: write refuses only a proved profile. False — a top-level process — judges it here.
+    called_by_a_root: bool = False
+    #: #186 (ARCH-186-e1-04, architect evaluation 2): for a CALLED passthrough root, the
+    #: ``(pointer, property name)`` of each read of a document property off its entry documents
+    #: whose flattened-twin code depends on whether the caller's documents carried the property:
+    #: measured on its own walk, an entry seed that reaches the read discarded changes the code
+    #: there and repairs nothing. The read is judged at each call, as the conditional document
+    #: read its contract states (`ChildEntryContractV1.nonstrict_document_reads`), and not here:
+    #: validated once, this process cannot serve a code that differs per caller.
+    caller_judged_read_sites: Tuple[Tuple[str, str], ...] = ()
 
     def writes_cache_externally(self, cache_ref: str) -> bool:
         """Whether a typed contract vouches for an outside writer of this cache."""

@@ -3862,3 +3862,94 @@ def test_typed_apply_judges_the_stored_profile_it_reads_not_the_one_compile_read
         assert verdict == expected, (later, result, writes)
         if expected == "refused":
             assert _MISMATCH in json.dumps(result), result
+
+
+def _b186_passthrough_route(depth, stored_xml):
+    """``{plan, compile, apply}`` for PARENT's GET documents (profile P, p_a reused by id), staged in `stage` and
+    retrieved on the call leg (an attested prefix), handed to a Data Passthrough child — directly, or through a
+    passthrough middle — that writes them into the reference-only cache `c`, against an offline account storing
+    ``stored_xml`` for `c`; and the flattened twin's plan codes."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import _normalize_intent, compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    op = _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a")
+    op["depends_on"], op["config"]["response_profile_id"] = ["conn", "p_a"], "$ref:p_a"
+    p_a = _profile("p_a", "a1")
+    p_a["component_id"] = _B186_P_STORED
+    cache = _cache("c", "p_a", "a1", "reference_only")
+    stage = _cache("stage", "p_a", "a1", "new")
+    staging = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:op_get1"}],
+               "terminal": {"kind": "cache_put", "cache_ref": "$ref:stage"}}
+    retrieve = {"kind": "cache_get", "cache_ref": "$ref:stage"}
+    entry, stop, msg = {"kind": "passthrough", "label": "Receive"}, {"kind": "stop"}, {"kind": "message", "text": "m"}
+    call = lambda key: {"kind": "process_call", "process_ref": "$ref:" + key, "wait": True, "abort_on_error": True}  # noqa: E731
+    writes_c = [{"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c"}}, {"steps": [msg], "terminal": stop}]
+    first = "middle" if depth == "grandchild" else "child"
+    parent = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "branch", "legs": [staging, {"steps": [retrieve], "terminal": call(first)}]}]}}
+    units = [("parent", parent), ("child", {"version": "1", "body": {"kind": "sequence", "steps": [
+        entry, {"kind": "branch", "legs": copy.deepcopy(writes_c)}]}})]
+    if depth == "grandchild":
+        units.append(("middle", {"version": "1", "body": {"kind": "sequence", "steps": [entry, call("child")]}}))
+    twin = {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": [staging] + [
+        dict(leg, steps=[retrieve] + leg["steps"]) for leg in copy.deepcopy(writes_c)]}]}}
+    components = [_CONN, op, p_a, stage, cache]
+    rows = [{"component_id": _B186_P_STORED, "name": "p_a", "type": "profile.json", "folder_name": "f"}]
+    out = {}
+    for label, request in (("composed", _b186_units(components, units)), ("twin", _b186_units(components, [("parent", twin)]))):
+        patches, writes = _b186_account(lambda: stored_xml, rows)
+        first_patch, second_patch, third_patch = patches()
+        with first_patch, second_patch, third_patch:
+            served = plan_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa", account_id="qa_account")[0]
+        out[label + "_plan"] = sorted({(code, error.path) for error in served.errors for code in error.cause_codes})
+        if label == "twin":
+            continue
+        first_patch, second_patch, third_patch = patches()
+        with first_patch, second_patch, third_patch:
+            try:
+                compile_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa", account_id="qa_account")
+                out["compile"] = "compiled"
+            except Exception as exc:  # noqa: BLE001 - the typed compile refuses by raising its blocked envelope
+                out["compile"] = sorted({(code, d.path) for d in getattr(exc, "diagnostics", ())
+                                         for code in (d.code, *getattr(d, "cause_codes", ()))})
+        del writes[:]
+        first_patch, second_patch, third_patch = patches()
+        with first_patch, second_patch, third_patch:
+            try:
+                result = integration_builder._apply_plan(mock.MagicMock(), "qa", {
+                    "dry_run": False, "conflict_policy": "reuse",
+                    "integration_spec": _normalize_intent(request).integration_spec.model_dump(mode="json")})
+            except Exception:  # noqa: BLE001 - past the pre-write pass the offline harness cannot create a process
+                result = {"_success": False, "error_code": None}
+        out["apply"] = ("refused", result.get("error_code")) if not writes else ("wrote",)
+    return out
+
+
+@pytest.mark.parametrize("depth", ["child", "grandchild"])
+def test_a_passthrough_child_writing_its_callers_documents_into_a_stored_cache_is_judged_at_the_call(depth):
+    """ARCH-186-e1-07 (architect evaluation 2): the stored-profile passthrough route. PARENT's GET documents of profile
+    P reach a Data Passthrough child — directly, or through a passthrough middle — that writes them into the
+    reference-only cache `c`. Stored profile P: plan, compile and raw apply admit, as the flattened twin does. Another
+    stored profile, or one nothing could read (UNKNOWN): plan and compile refuse PROFILE_MISMATCH at PARENT's call,
+    the twin refuses at its write, and raw apply refuses before any write. The UNKNOWN cell's call also draws the
+    #184 placement refusal, its actual extra refusal recorded here: a call behind a prefix is admitted only into a
+    child that states everything it consumes, and a write into a cache of unknown profile states no profile —
+    a capability rule the twin, having no call, cannot share."""
+    placement = "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"
+    call_at = "/body/steps/0/legs/1/terminal/process_ref"
+    twin_at = "/body/steps/0/legs/1/terminal/cache_ref"
+    for label, xml, extra in (("matching", _b186_stored_xml(_B186_P_STORED), None),
+                              ("another", _b186_stored_xml(_B186_P_OTHER), []),
+                              ("unknown", _b186_stored_xml(None, None), [(placement, call_at[:-len("/process_ref")])])):
+        got = _b186_passthrough_route(depth, xml)
+        if extra is None:
+            assert got["composed_plan"] == [] == got["twin_plan"], (label, got)
+            assert got["compile"] == "compiled" and got["apply"] == ("wrote",), (label, got)
+        else:
+            assert got["composed_plan"] == sorted(extra + [(_MISMATCH, call_at)]), (label, got)
+            assert got["twin_plan"] == [(_MISMATCH, twin_at)], (label, got)
+            assert any(code == _MISMATCH for code, _path in got["compile"]), (label, got)
+            assert got["apply"][0] == "refused" and got["apply"][1] in (_MISMATCH, placement), (label, got)
