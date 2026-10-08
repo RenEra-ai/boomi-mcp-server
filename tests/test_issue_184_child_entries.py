@@ -1415,3 +1415,15 @@ _FORWARDING_CASES.update({
     "required_read_leg_orders": ("CACHE_CHILD", _legs({"steps": [{"kind": "set_dpp", "name": "OUT", "source_values": [
         {"value_type": "dpp", "property_name": "K"}]}], "terminal": _STOP}, {"steps": [_SET_K], "terminal": _STOP})),
 })
+#: #186: one more cache, declaring P2, that no earlier request names — the target a cache-write requirement needs.
+_SYMBOLS_BEFORE_186 = _symbols
+
+
+def _symbols():
+    table = _SYMBOLS_BEFORE_186()
+    return table.model_copy(update={"symbols": table.symbols + (ComponentSymbolV1(
+        ref="$ref:CACHE_P2", component_id="CACHE_P2", component_type="documentcache", cache_profile_ref="$ref:P2"),)})
+
+
+_FORWARDING_CASES["cache_write_requirements"] = ("CACHE_CHILD", _legs(
+    {"steps": [_read_cache("$ref:CACHE")], "terminal": _put("$ref:CACHE_P2")}, {"steps": [_MSG], "terminal": _STOP}))

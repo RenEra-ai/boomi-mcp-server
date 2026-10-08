@@ -9286,10 +9286,10 @@ def test_every_read_of_a_stream_marker_answers_its_own_channels_question():
         ("_discharge_child_contract", "retrieved_origins"): "property",
         ("_transfer", "retrieved_from"): "property",
         ("_transfer", "retrieved_origins"): "property",
-        ("_requires", "caller_cache"): "content",
+        ("_requires", "caller_cache"): "content", ("_advance_stream", "caller_cache"): "content",  # #186: a cache write
     }, classified
     # The content marker lands in the one profile-requirement list; the property markers never do.
-    assert landing[("_requires", "caller_cache")] == {"cache_requirement_refs"}
+    assert landing[("_requires", "caller_cache")] == {"cache_requirement_refs"} and landing[("_advance_stream", "caller_cache")] == {"cache_write_requirement_refs"}
     assert all("cache_requirement_refs" not in lists for key, lists in landing.items() if key[1] != "caller_cache")
 
 
@@ -10591,7 +10591,7 @@ def test_the_target_cache_left_out_of_its_consumers_re_admits_the_caller(monkeyp
     _lineage_with_source(
         monkeypatch,
         "                for declared_ref in cache_profiles.get(semantic.cache_ref, ()):\n"
-        "                    _requires(stream, _identity(declared_ref), declared_ref)\n",
+        "                    cache_write_requirement_refs.append((stream.caller_cache, declared_ref))\n",
         "                pass\n")
     assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
     assert _b186_composed(roots) == set()
@@ -10716,3 +10716,49 @@ def test_a_reader_behind_a_forwarder_earns_its_twins_lineage_codes_after_every_s
 _COHORT_BUILDERS[("recipes/materialization.py", "build_symbol_table via facts._replace")] = (
     "not a cohort: the `_ProfileFacts` of a cache whose name binding the account could not judge, its profile "
     "made unknown (#186, ARCH-186-e1-02)")
+
+
+def test_a_childs_write_of_unprofiled_cached_documents_contradicts_nothing():
+    """CDX-186-r3-01. The twin's cache write refuses only a PROVED profile, so a caller staging documents whose
+    profile nothing states (a call declaring no output profile) into the cache its child restages from is admitted
+    whatever the target declares — a declared P2 or an UNKNOWN profile — exactly as the twin is; a caller staging
+    P1 is still refused against P2 or UNKNOWN and admitted against P1."""
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    module = sys.modules[__name__]
+    for target, update in (("P2", {"cache_profile_ref": "$ref:P2"}), ("P1", {"cache_profile_ref": "$ref:P1"}),
+                           ("unknown", {"profiles_unknown": True})):
+        for source, proved in (("$ref:GET", False), ("$ref:GETP1", True)):
+            child = _legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}], "terminal": put("$ref:CACHE2")},
+                          {"steps": [_MSG], "terminal": _STOP})
+            stage = {"steps": [{"kind": "connector_call", "operation_ref": source}], "terminal": put("$ref:CACHE")}
+            parent = _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+            saved = module._symbols
+            module._symbols = lambda update=update: _b186_cache2_symbols(**update)
+            try:
+                twin = _b30_codes(_b28_verdict([("PARENT", _legs(stage, *child["body"]["steps"][-1]["legs"]))], "PARENT", True)[0])
+                composed = _b186_composed([("PARENT", parent), ("CACHE_CHILD", child)])
+            finally:
+                module._symbols = saved
+            expected = {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH} if proved and target != "P1" else set()
+            assert twin == expected == composed, (target, source, twin, composed)
+
+
+_BOUNDARY[("content", "requirement")] += ("cache_write_requirements",)
+_NON_DEFAULT["cache_write_requirements"] = ([
+    ("PARENT", _legs({"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}],
+                      "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
+                     {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})),
+    ("CACHE_CHILD", _legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}],
+                           "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE_P2"}}, {"steps": [_MSG], "terminal": _STOP}))],
+    "CACHE_CHILD")
+_OBLIGATION_SITES.update({
+    ("_advance_stream", "cache_write_requirement_refs"): (
+        "#186 (ARCH-186-e1-01, CDX-186-r3-01): a cache write of documents retrieved from a cache a caller's documents "
+        "may share records the target's declared or UNKNOWN profile against that cache, read off the stream's "
+        "`caller_cache` marker — the same `_caller_documents_may_reach` answer at the retrieve every consumer uses"),
+    ("_discharge_child_contract", "cache_write_requirement_refs"): (
+        "#186: a call passes its child's write requirement up where its own caller's documents may be in the cache "
+        "(`_caller_documents_may_reach`), exactly as a content requirement is passed up"),
+})

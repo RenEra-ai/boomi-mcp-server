@@ -1109,6 +1109,8 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
     facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
+    # #186 (ARCH-186-e1-01): what the child's cache writes of retrieved documents ask of the callers.
+    facts["cache_write_requirements"] = tuple(sorted(set(walk.cache_write_requirement_refs)))
     # Correction batch 30 (QA-184-s1-r29-01): what a non-strict read the child cannot fail itself
     # owes a caller that writes the property — measured the same way.
     facts["nonstrict_cached_reads"] = _caller_nonstrict_reads(prepared, base, walk)
@@ -1120,6 +1122,7 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     # only ever make the claim stronger than the call it serves (fail-closed, correction batch 30).
     facts["required_caches_retain_nothing_it_stored"] = not (
         ({row[0] for row in facts["cache_requirements"]}
+         | {row[0] for row in facts["cache_write_requirements"]}
          | {row[0] for row in facts["cache_property_requirements"]}
          | {row[0] for row in facts["nonstrict_cached_reads"] if row[0] is not None})
         & set(walk.may_hold_at_exit)
@@ -1440,6 +1443,8 @@ _A_CYCLE_MEMBERS_CLAIMS: Dict[str, Any] = {
 #: row, and a carried field needs no monotonicity argument at all.
 _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "cache_requirements",
+    # #186: a write requirement a call must discharge — LARGER is fail-closed.
+    "cache_write_requirements",
     "cache_property_requirements",
     # Correction batch 30: one more requirement a call must discharge — LARGER is fail-closed.
     "nonstrict_cached_reads",

@@ -500,6 +500,11 @@ class ChildEntryContractV1(_ValidationModel):
       whether or not the child's own writes also reached that cache, because Add to Cache
       appends. A caller's writes there must have stored exactly that profile (amendment 1
       rule 6); a caller that stores nothing there satisfies it vacuously.
+    - ``cache_write_requirements``: per cache write of documents the child retrieved from such a
+      cache, ``(cache ref, AUTHORED profile ref the target cache declares, or the unknown-profile
+      requirement)`` (#186). A caller's writes there must not have stored documents of a PROVED
+      profile other than that one (any proved profile, for an unknown target); documents whose
+      profile nothing states satisfy it, as they satisfy the write itself.
     - ``cache_property_requirements``: per document property the child uses on
       documents it retrieved from such a cache, ``(cache ref, property name, request
       profile ref or None, bound)``, including a use the child's own writes satisfy. Every
@@ -605,6 +610,7 @@ class ChildEntryContractV1(_ValidationModel):
     required_read_leg_orders: Tuple[Tuple[str, str, bool], ...] = ()
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
+    cache_write_requirements: Tuple[Tuple[str, str], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
     nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...] = ()

@@ -1837,6 +1837,7 @@ def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[Tuple[s
         required |= {
             (PROCESS_CALL_REPEAT_CAUSES.cache_retained_content, ref)
             for ref in {row[0] for row in contract.cache_requirements}
+            | {row[0] for row in contract.cache_write_requirements}
             | {row[0] for row in contract.cache_property_requirements}
         }
     if not (contract.state_known or contract.cache_writes_known):
@@ -1897,6 +1898,12 @@ class LineageWalkV1(NamedTuple):
     #: #184 amendment 1 rule 6: ``(cache ref, AUTHORED profile ref or None)`` for each
     #: consumer of documents read from a cache no write in this process reached.
     cache_requirement_refs: Tuple[Tuple[str, Optional[str]], ...] = ()
+    #: #186 (ARCH-186-e1-01, CDX-186-r3-01): ``(cache ref, profile ref or the unknown-profile requirement)``
+    #: for each cache write of documents retrieved from a cache only a caller can have filled — the
+    #: target cache's declared (or UNKNOWN) profile, which the documents the callers stored there must
+    #: not be PROVED to contradict. Unlike `cache_requirement_refs`, content whose profile nothing
+    #: states satisfies it, as it satisfies the write itself.
+    cache_write_requirement_refs: Tuple[Tuple[str, str], ...] = ()
     #: #184: ``(pointer, property name, request profile ref)`` for each bound request
     #: path the binding rule found no writer for: this process's own binding at its
     #: ``/path_binding``, or one a call inherits from its passthrough child at the call's
@@ -2065,6 +2072,8 @@ def _walk_lineage(
     entry_requirements: List[Optional[Tuple[str, str]]] = []
     entry_requirement_refs: List[Optional[str]] = []
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
+    #: #186: the rows `LineageWalkV1.cache_write_requirement_refs` returns.
+    cache_write_requirement_refs: List[Tuple[str, str]] = []
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
     unestablished_cached_keys: List[Tuple[str, str, str, Optional[str], bool]] = []
@@ -2116,7 +2125,7 @@ def _walk_lineage(
         | {
             cache_ref
             for row in capabilities.child_entry_contracts
-            for cache_ref, _profile in row.cache_requirements
+            for cache_ref, _profile in tuple(row.cache_requirements) + tuple(row.cache_write_requirements)
         }
     )
     index = prepared.symbols.build_index()
@@ -2984,17 +2993,18 @@ def _walk_lineage(
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ())
             )):
                 mismatch(node, "/cache_ref")
-            if checked:
-                # #186 (ARCH-186-e1-01): a cache write is a consumer of the documents that reach it like
-                # a map or a declared input. Where those were retrieved from a cache a caller's
-                # documents may share, the profile the target cache declares — or the UNKNOWN one,
-                # which no proved profile satisfies — is a requirement of that caller's writes there,
-                # judged at each call as the flattened twin judges the write against what it
-                # retrieved. Recorded nowhere else: `_requires` keeps it only for such documents.
+            if checked and stream.caller_cache is not None:
+                # #186 (ARCH-186-e1-01): a cache write consumes the documents that reach it. Where those
+                # were retrieved from a cache a caller's documents may share, the profile the target
+                # cache declares — or the UNKNOWN one — is what the callers' writes to that cache must
+                # not CONTRADICT, judged at each call as the twin's write is judged here: only a proved
+                # profile is refused, so documents whose profile nothing states pass (CDX-186-r3-01).
+                # Its own channel, `cache_write_requirement_refs`, because a map or a declared input
+                # needs the profile and a write needs only no other one.
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ()):
-                    _requires(stream, _identity(declared_ref), declared_ref)
+                    cache_write_requirement_refs.append((stream.caller_cache, declared_ref))
                 if semantic.cache_ref in unknown_caches:
-                    _requires(stream, None, UNKNOWN_PROFILE_REQUIREMENT)
+                    cache_write_requirement_refs.append((stream.caller_cache, UNKNOWN_PROFILE_REQUIREMENT))
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
             return (
@@ -3333,6 +3343,22 @@ def _walk_lineage(
                     # still refuses such a caller, for the cache it never established.
                     continue
                 if contents != frozenset({_identity(profile_ref)}):
+                    _report(
+                        PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                        node,
+                        sub_path="/process_ref",
+                        phase=_PROFILE_PHASE,
+                    )
+            # #186 (CDX-186-r3-01): a write of what the child retrieves from a cache a caller fills is
+            # refused where THIS process's writes there stored documents of a PROVED profile other than
+            # the one the target cache declares (or any proved profile, for an UNKNOWN target) — the
+            # twin's write refuses only a proved profile — and passed on where a caller's own documents
+            # may be in the cache too.
+            for cache_ref, profile_ref in contract.cache_write_requirements:
+                if _caller_documents_may_reach(state, cache_ref):
+                    cache_write_requirement_refs.append((cache_ref, profile_ref))
+                required = None if profile_ref == UNKNOWN_PROFILE_REQUIREMENT else _identity(profile_ref)
+                if any(identity is not None and identity != required for identity in state.content_of(cache_ref)):
                     _report(
                         PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
                         node,
@@ -4180,6 +4206,7 @@ def _walk_lineage(
         entry_requirements=tuple(entry_requirements),
         entry_requirement_refs=tuple(entry_requirement_refs),
         cache_requirement_refs=tuple(cache_requirement_refs),
+        cache_write_requirement_refs=tuple(sorted(set(cache_write_requirement_refs))),
         unestablished_bindings=tuple(sorted(
             set(unestablished_bindings), key=lambda row: (row[0], row[1], row[2] or "")
         )),

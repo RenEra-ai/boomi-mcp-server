@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14483, "minimum_collected": 14483, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14484, "minimum_collected": 14484, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14583,3 +14583,4 @@
 {"kind": "test", "id": "pytest-014582", "node_id": "tests/test_issue_184_component_identity.py::test_a_child_restaging_what_its_caller_cached_into_a_reused_cache_is_judged_on_the_stored_profile[grandchild-reference_only_by_name]", "state": "active"}
 {"kind": "test", "id": "pytest-014583", "node_id": "tests/test_issue_184_component_identity.py::test_a_stored_profile_of_the_same_id_and_another_type_is_another_profile", "state": "active"}
 {"kind": "test", "id": "pytest-014584", "node_id": "tests/test_issue_184_component_identity.py::test_typed_apply_judges_the_stored_profile_it_reads_not_the_one_compile_read", "state": "active"}
+{"kind": "test", "id": "pytest-014585", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_write_of_unprofiled_cached_documents_contradicts_nothing", "state": "active"}

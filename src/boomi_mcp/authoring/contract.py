@@ -2797,6 +2797,9 @@ def _child_call_state_oracle():
         sym("cache", "documentcache"),
         # A SECOND reference to the one document cache the row above names.
         ComponentSymbolV1(ref="$ref:cache_alias", component_id="CACHE", component_type="documentcache"),
+        # #186: a cache whose profile is UNKNOWN, the target a child restages retrieved documents into.
+        ComponentSymbolV1(ref="$ref:target", component_id="TARGET", component_type="documentcache",
+                          profiles_unknown=True),
     ) + tuple(sym(key, "process") for key in ("parent", "mid", "child", "writer")))
 
     stop = {"kind": "stop"}
@@ -3199,6 +3202,14 @@ def _child_call_state_oracle():
         ("child", legs({"steps": [get_p1], "terminal": put(ref)}, {"steps": [message], "terminal": stop})),
     ]
     alias_cases["establishing_execution_state_writes"] = alias_cases["execution_state_writes"]
+    # #186 (ARCH-186-e1-01): the caller stores P1 documents through the first spelling; its child retrieves them
+    # through `ref` and writes them into a cache of UNKNOWN profile. Only the identity rule lands the child's write
+    # requirement on the cache the caller filled, which then refuses the proved P1 at the call.
+    alias_cases["cache_write_requirements"] = lambda ref: [
+        ("parent", legs({"steps": [get_p1], "terminal": put()},
+                        {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)})),
+        ("child", legs({"steps": [read_cache(ref)], "terminal": put("target")}, {"steps": [message], "terminal": stop})),
+    ]
     # The cohorts a caller stored land on the child of the cached-property chain, so that
     # chain answers for both facts; it is run once per fact so each has its own recorded
     # verdicts and neither rests on the other's.
@@ -3266,6 +3277,14 @@ def _child_call_state_oracle():
                 {"steps": [read_cache(), message], "terminal": stop},
                 {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
             ), ChildEntryContractV1(process_ref="$ref:child", entry_form="scheduled", **{field: (cache_key,)})
+        if field == "cache_write_requirements":
+            from ..compiler.process_ir.semantic_validation.lineage import UNKNOWN_PROFILE_REQUIREMENT
+
+            return legs(
+                {"steps": [get_p1], "terminal": put()},
+                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
+            ), ChildEntryContractV1(process_ref="$ref:child", entry_form="scheduled",
+                                    cache_write_requirements=(("$ref:" + ref, UNKNOWN_PROFILE_REQUIREMENT),))
         if field == "required_read_leg_orders":
             # The child states a read of the cache through ``ref`` found before a later-leg writer;
             # only the identity rule matches that order to the requirement this caller cannot
