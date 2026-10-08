@@ -2098,9 +2098,9 @@ rather than aspirational.
 | LG-ceea4ac3 | legacy_transitive_call | server.py | prepare_component_edit | 1 | 1997 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2319 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-af3aef13 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | _legacy_plan_echo | 1 | 1287 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 3242 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 2 | 2610 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 3483 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-b7cd58ae | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | compile_authoring_request_v1 | 1 | 3246 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-14572d6c | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | plan_authoring_request_v1 | 2 | 2614 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-f57fd778 | legacy_transitive_call | src/boomi_mcp/authoring/workflow.py | preflight_typed_apply_v1 | 1 | 3487 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 949 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1117 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3404 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2167,7 +2167,7 @@ rather than aspirational.
 | LG-bfc762c3 | renderer_call | src/boomi_mcp/patterns/archetypes/database_to_api_sync.py | _build_main_process | 1 | 1495 | #159 | migrate the archetype to canonical ProcessIR |
 | LG-08a97ecd | renderer_call | src/boomi_mcp/patterns/composition.py | compose_archetypes | 1 | 1127 | #160 | delete with the legacy renderer |
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-ac9e4212 | unclassified_reference | src/boomi_mcp/authoring/connector_resolution_snapshot.py | stored_document_cache_profile._start | 1 | 1476 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-ac9e4212 | unclassified_reference | src/boomi_mcp/authoring/connector_resolution_snapshot.py | stored_document_cache_profile._start | 1 | 1480 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 669 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-6993ec78 | unclassified_reference | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 2 | 105 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-88502416 | unclassified_reference | src/boomi_mcp/authoring/revision_corpus.py | <module> | 1 | 986 | #160 | residue: a watched name mentioned in a shape the census does not classify |

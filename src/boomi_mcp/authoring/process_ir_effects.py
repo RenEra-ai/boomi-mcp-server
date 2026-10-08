@@ -1347,16 +1347,19 @@ def _caller_entry_document_reads(
     if not candidates:
         return ()
     if not passthrough:
-        return tuple(sorted({(name, "fresh") for _pointer, name, _hint in candidates}))
-    rows = {(name, hint) for _pointer, name, hint in candidates if hint != "entry"}
-    entry = sorted({(pointer, name) for pointer, name, hint in candidates if hint == "entry"})
+        return tuple(sorted({(name, "fresh") for _pointer, name, _hint, _origin in candidates}))
+    rows = {(name, hint) for _pointer, name, hint, _origin in candidates if hint != "entry"}
+    # Keyed by pointer, name AND origin: a call can pass on two rows of one property — an inherited
+    # read and a fresh one — at one pointer, and a sibling that survives the seed must not stand in
+    # for the read the seed repaired (ARCH-186-e1-05).
+    entry = sorted({(pointer, name, origin) for pointer, name, hint, origin in candidates if hint == "entry"})
     if entry:
         seeded = capabilities.model_copy(update={"established_at_entry": tuple(sorted(
-            set(capabilities.established_at_entry) | {("ddp", name) for _pointer, name in entry}))})
-        after = {(pointer, name): hint
-                 for pointer, name, hint in walk_lineage(prepared, seeded).nonstrict_document_reads}
-        for pointer, name in entry:
-            hint = after.get((pointer, name))
+            set(capabilities.established_at_entry) | {("ddp", name) for _pointer, name, _origin in entry}))})
+        after = {(pointer, name, origin): hint
+                 for pointer, name, hint, origin in walk_lineage(prepared, seeded).nonstrict_document_reads}
+        for pointer, name, origin in entry:
+            hint = after.get((pointer, name, origin))
             rows.add((name, "inherits" if hint is None else "drops" if hint == "drops" else "fresh"))
     return tuple(sorted(rows))
 

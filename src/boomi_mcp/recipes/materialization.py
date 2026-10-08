@@ -290,7 +290,7 @@ def _stored_cache_profile_facts(component, snapshot, facts):
         return facts, None
     from ..compiler.process_ir.contracts import ComponentSymbolV1
 
-    read = snapshot is not None and snapshot.cache_profiles_read
+    read = bool(getattr(snapshot, "cache_profiles_read", False))
     reading = snapshot.lookup_cache(component.key) if read else None
     if not read or (reading is not None and reading.profile_state == "absent"):
         # No account on this route (the served rule states the limit: apply reads the stored
@@ -461,7 +461,13 @@ def build_symbol_table(
         # for the listener operation, which is what #158 carries in the same field.
         written = apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids)
         facts = _profile_facts(component, plan_keys, written=written)
-        if not written:
+        unjudged = (getattr(connector_resolution_snapshot, "cache_profiles_read", False)
+                    and getattr(connector_resolution_snapshot.lookup_cache(component.key), "binding_unjudged", False))
+        if unjudged:
+            # #186 (ARCH-186-e1-02): the account was consulted and could not bind this cache's name, so
+            # apply may reuse it: its requested configuration describes nothing known — unknown.
+            facts = facts._replace(cache_profile=None, unknown=True)
+        elif not written:
             # #186: a cache apply does not write declares what the ACCOUNT stores.
             facts, stored_symbol = _stored_cache_profile_facts(component, connector_resolution_snapshot, facts)
             if stored_symbol is not None and stored_symbol.ref not in {item.ref for item in stored_profiles}:

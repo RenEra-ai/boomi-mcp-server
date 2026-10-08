@@ -3679,3 +3679,186 @@ def test_the_unknown_requirement_is_judged_against_the_arriving_documents_in_eit
         twin = root(entry, {"kind": "branch", "legs": legs + [{"steps": [message], "terminal": stop}]})
         assert _b186_codes(roots, "PARENT", symbols) == [] == _b186_codes(roots, "CHILD", symbols), legs
         assert _b186_codes([("PARENT", twin)], "PARENT", symbols) == [], legs
+
+
+# --- #186 architect evaluation 1: the stored-cache reader and an unjudged binding -----------------------------
+def test_a_malformed_stored_profile_id_is_unknown_and_matches_no_placeholder():
+    """ARCH-186-e1-03. A stored profile attribute that is not a component id names nothing the request can match;
+    spelled like the placeholder of a profile the request creates, trusting it would admit that new profile's
+    documents into the stored cache. It is unknown, and the write is refused on every route."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import stored_document_cache_profile
+
+    for malformed in ("id-p_a", "not a guid", "$ref:p_a"):
+        assert stored_document_cache_profile("c", _b186_stored_xml(malformed), "cache").profile_state == "unknown"
+    got = _b186_route("reference_only", False, _b186_stored_xml("id-p_a"))
+    assert got["plan"] == [(_MISMATCH, _B186_AT_THE_WRITE)] and got["apply"] == ("refused", _MISMATCH), got
+
+
+def test_an_unjudged_name_binding_leaves_a_reusable_caches_profile_unknown():
+    """ARCH-186-e1-02. With the account held but its name listing failed, a name-only cache create under `reuse` may
+    still be bound to an existing cache at apply, so the configuration it requests describes nothing known: a typed
+    write into it is refused PROFILE_MISMATCH on the degraded plan. With the listing answering (no such name) the
+    cache is a create the request writes, and its requested profile admits the write; with no client at all the
+    no-account limit applies and it is admitted too."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    op = _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a")
+    op["depends_on"], op["config"]["response_profile_id"] = ["conn", "p_a"], "$ref:p_a"
+    ir = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:op_get1"},
+        {"kind": "branch", "legs": [{"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c"}},
+                                    {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}}]}]}}
+    request = _route_request([_CONN, op, _profile("p_a", "a1"), _named(_cache("c", "p_a", "a1", "new"))], ir)
+
+    def unreadable(_client, _comp):
+        raise ConnectionError("the component metadata listing failed")
+
+    def planned(resolver, client=True):
+        with mock.patch.object(integration_builder, "_resolve_existing_components", resolver), \
+                mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            served = plan_authoring_request_v1(request, boomi_client=mock.MagicMock() if client else None,
+                                               profile="qa", account_id="qa_account")[0]
+        return sorted({(code, error.path) for error in served.errors for code in error.cause_codes})
+
+    assert planned(unreadable) == [(_MISMATCH, _B186_AT_THE_WRITE)]
+    assert planned(lambda _client, _comp: []) == []
+    assert planned(unreadable, client=False) == []
+
+
+def _b186_account(xml_of, rows_extra=()):
+    """The offline account: name listing (the stored cache, plus ``rows_extra``), component execution recording
+    writes, and the stored component read answering ``xml_of()`` at call time."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    rows = [{"component_id": _CACHE_ID, "name": _STORED, "type": "documentcache", "folder_name": "f"}] + list(rows_extra)
+    writes = []
+
+    def execute(*args, **kwargs):
+        comp = kwargs.get("comp") or (args[1] if len(args) > 1 else None)
+        writes.append(getattr(comp, "key", None))
+        target = kwargs.get("target_id")
+        return {"_success": True, "component_id": target or "NEW-" + str(len(writes)),
+                "status": "updated" if target else "created"}
+
+    def patches():
+        return (mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(r) for r in rows]),
+                mock.patch.object(integration_builder, "_execute_component", side_effect=execute),
+                mock.patch.object(_shared, "component_get_xml",
+                                  side_effect=lambda _c, cid, *a, **k: {"xml": xml_of(), "component_id": cid, "version": 1}))
+    return patches, writes
+
+
+def _b186_units(components, units):
+    return AuthoringRequestV1.model_validate({"contract_version": "2", "intent": {
+        "intent_kind": "process_ir", "integration_name": "routes",
+        "units": [{"envelope": {"component_key": key, "name": key, "action": "create",
+                                "depends_on": [spec["key"] for spec in components] + [
+                                    other for other, _ir in units if '"$ref:' + other + '"' in json.dumps(ir)]},
+                   "process_ir": ir}
+                  for key, ir in units],
+        "components": components, "conflict_policy": "reuse"}})
+
+
+def _b186_plan_codes(request, patches):
+    from unittest import mock
+
+    first, second, third = patches()
+    with first, second, third:
+        served = plan_authoring_request_v1(request, boomi_client=mock.MagicMock(), profile="qa", account_id="qa_account")[0]
+    return sorted({code for error in served.errors for code in error.cause_codes})
+
+
+@pytest.mark.parametrize("binding", ["reference_only", "reference_only_by_name"])
+@pytest.mark.parametrize("depth", ["child", "grandchild"])
+def test_a_child_restaging_what_its_caller_cached_into_a_reused_cache_is_judged_on_the_stored_profile(binding, depth):
+    """ARCH-186-e1-07: the inherited write. PARENT stores GET documents of profile P (p_a, reused by id) in a cache
+    it writes, then calls a No Data child — directly, or through a forwarding middle — that retrieves them and
+    writes them into the reused cache `c`. A stored profile other than P refuses the composition on the typed plan;
+    the stored profile P admits it. Bound by a declared reference-only id, and by name."""
+    op = _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a")
+    op["depends_on"], op["config"]["response_profile_id"] = ["conn", "p_a"], "$ref:p_a"
+    p_a = _profile("p_a", "a1")
+    p_a["component_id"] = _B186_P_STORED
+    if binding == "reference_only":
+        cache = _cache("c", "p_a", "a1", "reference_only")
+    else:
+        cache = _named(_cache("c", "p_a", "a1", "new"))
+        cache["config"]["reference_only"] = True
+    stage = _cache("stage", "p_a", "a1", "new")
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    stop, msg = {"kind": "stop"}, {"kind": "message", "text": "m"}
+
+    def legs(*items):
+        return {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "branch", "legs": list(items)}]}}
+
+    call = lambda key: {"kind": "process_call", "process_ref": "$ref:" + key, "wait": True, "abort_on_error": True}  # noqa: E731
+    child = legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:stage"}], "terminal": put("$ref:c")},
+                 {"steps": [msg], "terminal": stop})
+    first = "middle" if depth == "grandchild" else "child"
+    parent = legs({"steps": [{"kind": "connector_call", "operation_ref": "$ref:op_get1"}], "terminal": put("$ref:stage")},
+                  {"steps": [], "terminal": call(first)})
+    units = [("parent", parent), ("child", child)]
+    if depth == "grandchild":
+        units.append(("middle", legs({"steps": [], "terminal": call("child")}, {"steps": [msg], "terminal": stop})))
+    request = _b186_units([_CONN, op, p_a, stage, cache], units)
+    rows = [{"component_id": _B186_P_STORED, "name": "p_a", "type": "profile.json", "folder_name": "f"}]
+    for stored, expected in ((_B186_P_OTHER, [_MISMATCH]), (_B186_P_STORED, [])):
+        patches, _writes = _b186_account(lambda stored=stored: _b186_stored_xml(stored), rows)
+        assert _b186_plan_codes(request, patches) == expected, (binding, depth, stored)
+
+
+def test_a_stored_profile_of_the_same_id_and_another_type_is_another_profile():
+    """ARCH-186-e1-07: identity is the component AND its profile type, as the profile identity rule reads it."""
+    got = _b186_route("reference_only", True, _b186_stored_xml(_B186_P_STORED, "profile.xml"))
+    assert got["plan"] == [(_MISMATCH, _B186_AT_THE_WRITE)] and got["apply"] == ("refused", _MISMATCH), got
+
+
+def test_typed_apply_judges_the_stored_profile_it_reads_not_the_one_compile_read():
+    """ARCH-186-e1-07: typed apply revalidation. Compile admits profile-P documents written into a reference-only
+    cache the account stores with profile P; the stored cache then changes to another profile. Typed apply reads
+    it again in its pre-write pass and refuses before any write; with the stored profile unchanged it writes."""
+    import copy
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+
+    op = _get("op_get1", "1bdb1503-2807-4771-b1b7-8689be8f8e0a")
+    op["depends_on"], op["config"]["response_profile_id"] = ["conn", "p_a"], "$ref:p_a"
+    p_a = _profile("p_a", "a1")
+    p_a["component_id"] = _B186_P_STORED
+    ir = {"version": "1", "body": {"kind": "sequence", "steps": [
+        {"kind": "connector_call", "operation_ref": "$ref:op_get1"},
+        {"kind": "branch", "legs": [{"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:c"}},
+                                    {"steps": [{"kind": "message", "text": "m"}], "terminal": {"kind": "stop"}}]}]}}
+    request = _route_request([_CONN, op, p_a, _cache("c", "p_a", "a1", "reference_only")], ir)
+    rows = [{"component_id": _B186_P_STORED, "name": "p_a", "type": "profile.json", "folder_name": "f"}]
+    for later, expected in ((_B186_P_OTHER, "refused"), (_B186_P_STORED, "wrote")):
+        stored = {"profile": _B186_P_STORED}
+        patches, writes = _b186_account(lambda: _b186_stored_xml(stored["profile"]), rows)
+        client = mock.MagicMock()
+        first, second, third = patches()
+        with first, second, third:
+            compiled = compile_authoring_request_v1(request, boomi_client=client, profile="qa",
+                                                    account_id=integration_builder._client_account_id(client))[0]
+        payload = request.model_dump(mode="json")
+        payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+        payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+        stored["profile"] = later
+        del writes[:]
+        first, second, third = patches()
+        with first, second, third:
+            try:
+                result = integration_builder._apply_plan(client, "qa", copy.deepcopy(
+                    {"dry_run": False, "authoring_request": payload}))
+            except Exception:  # noqa: BLE001 - past the pre-write pass the offline harness cannot create a process
+                result = {"_success": False, "error_code": None}
+        verdict = "wrote" if writes else "refused"
+        assert verdict == expected, (later, result, writes)
+        if expected == "refused":
+            assert _MISMATCH in json.dumps(result), result

@@ -1746,7 +1746,11 @@ def _validate_processes(
             # at the binding apply acts on, NOT intersected with the explicit-id readings above.
             cache_profiles=live_cache_profiles_for_unwritten_caches(
                 boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
-                existing_ids=existing_ids),
+                existing_ids=existing_ids,
+                # The account is held but the component plan could not be built from it: a name
+                # binding is unjudged (ARCH-186-e1-02; the owner decision of 2026-09-14 keeps plan and
+                # compile degraded rather than refused, and typed apply refuses before any write).
+                binding_unjudged=boomi_client is not None and existing_ids is None),
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the

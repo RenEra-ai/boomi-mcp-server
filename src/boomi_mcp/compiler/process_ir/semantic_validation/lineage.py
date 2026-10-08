@@ -1974,7 +1974,7 @@ class LineageWalkV1(NamedTuple):
     #: caller writer makes the read fail. The child contract measures these rows as
     #: `unestablished_cached_keys` are measured (`_caller_nonstrict_reads`).
     nonstrict_cached_reads: Tuple[Tuple[str, Optional[str], str], ...] = ()
-    #: #186: ``(pointer, property name, relation)`` for each NON-strict read of a document
+    #: #186: ``(pointer, property name, relation, origin)`` for each NON-strict read of a document
     #: property on documents no retrieve handed on, unestablished there, in a process that writes
     #: the property nowhere — the entry-document twin of `nonstrict_cached_reads`. The relation is
     #: what the walk saw of the documents' own properties: ``entry`` — nothing on the path
@@ -1983,7 +1983,7 @@ class LineageWalkV1(NamedTuple):
     #: nowhere) or a called child's row says it does; ``fresh`` — a called No Data child read it
     #: off its own empty document. The child contract measures ``entry`` rows against an entry
     #: seed (`_caller_entry_document_reads`).
-    nonstrict_document_reads: Tuple[Tuple[str, str, str], ...] = ()
+    nonstrict_document_reads: Tuple[Tuple[str, str, str, str], ...] = ()
     #: #186: ``(pointer, property name, later-leg writer)`` for each NON-strict read of a process
     #: property unestablished there, in a process with no establishing writer of it — itself, or a
     #: called child's row passed on. The flag is the in-process later-leg rule's answer at the
@@ -2075,7 +2075,7 @@ def _walk_lineage(
     #: #184 correction batch 30: the rows `LineageWalkV1.nonstrict_cached_reads` returns.
     nonstrict_cached_reads: List[Tuple[str, Optional[str], str]] = []
     #: #186: the rows `LineageWalkV1.nonstrict_document_reads` returns.
-    nonstrict_document_reads: List[Tuple[str, str, str]] = []
+    nonstrict_document_reads: List[Tuple[str, str, str, str]] = []
     #: #186: the rows `LineageWalkV1.nonstrict_process_reads` returns.
     nonstrict_process_reads: List[Tuple[str, str, bool]] = []
     #: #186: the rows `LineageWalkV1.unestablished_read_sites` returns.
@@ -2293,10 +2293,13 @@ def _walk_lineage(
         """
         scope, _name = key
         if nonstrict:
+            # Which observation this is: the read's own, or the relation of the child row passed on here.
+            # Two observations of one property at one call pointer stay two (ARCH-186-e1-05).
+            origin = relation or "read"
             if scope == DDP:
                 if relation == "fresh":
                     # The child's own empty document: nothing on this path ever reaches it.
-                    nonstrict_document_reads.append((node.source_path, key[1], "fresh"))
+                    nonstrict_document_reads.append((node.source_path, key[1], "fresh", origin))
                 elif relation == "drops":
                     if CACHE_TRANSFER_UNPROVED in invalidated:
                         # The retrieved documents' properties are discarded before the read, so
@@ -2304,7 +2307,7 @@ def _walk_lineage(
                         # caller writer fails as a read before write — the twin's code there.
                         nonstrict_cached_reads.append((node.source_path, None, key[1]))
                     else:
-                        nonstrict_document_reads.append((node.source_path, key[1], "drops"))
+                        nonstrict_document_reads.append((node.source_path, key[1], "drops", origin))
                 elif CACHE_TRANSFER_UNPROVED in invalidated:
                     named = tuple(dict.fromkeys(
                         ([] if cached_from is None else [cached_from]) + list(origins)))
@@ -2312,7 +2315,7 @@ def _walk_lineage(
                         nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
                 else:
                     nonstrict_document_reads.append(
-                        (node.source_path, key[1], "drops" if key in invalidated else "entry"))
+                        (node.source_path, key[1], "drops" if key in invalidated else "entry", origin))
             elif scope == DPP:
                 nonstrict_process_reads.append(
                     (node.source_path, key[1], bool(later_leg or _written_in_a_later_leg(leg_writes, leg, key))))
@@ -2981,6 +2984,17 @@ def _walk_lineage(
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ())
             )):
                 mismatch(node, "/cache_ref")
+            if checked:
+                # #186 (ARCH-186-e1-01): a cache write is a consumer of the documents that reach it like
+                # a map or a declared input. Where those were retrieved from a cache a caller's
+                # documents may share, the profile the target cache declares — or the UNKNOWN one,
+                # which no proved profile satisfies — is a requirement of that caller's writes there,
+                # judged at each call as the flattened twin judges the write against what it
+                # retrieved. Recorded nowhere else: `_requires` keeps it only for such documents.
+                for declared_ref in cache_profiles.get(semantic.cache_ref, ()):
+                    _requires(stream, _identity(declared_ref), declared_ref)
+                if semantic.cache_ref in unknown_caches:
+                    _requires(stream, None, UNKNOWN_PROFILE_REQUIREMENT)
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
             return (

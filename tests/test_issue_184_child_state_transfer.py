@@ -10426,7 +10426,7 @@ def test_the_entry_document_row_left_unrecorded_re_admits_the_reader(monkeypatch
         monkeypatch,
         "                else:\n"
         "                    nonstrict_document_reads.append(\n"
-        "                        (node.source_path, key[1], \"drops\" if key in invalidated else \"entry\"))\n",
+        "                        (node.source_path, key[1], \"drops\" if key in invalidated else \"entry\", origin))\n",
         "                else:\n"
         "                    pass\n")
     for form in ("no_data", "passthrough"):
@@ -10542,3 +10542,177 @@ def test_a_cache_a_later_leg_child_may_write_is_a_branch_order_error_as_in_its_t
                  ("WRITER", writer)]
         assert _b186_composed(roots) == {PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID}, wait
         assert ("cache", "$ref:CACHE") in _row(roots, "PARENT", "WRITER").execution_state_writes
+
+
+# --- #186 architect evaluation 1 ---------------------------------------------------------------------------
+def _b186_cache2_symbols(**update):
+    from test_issue_184_child_entries import _symbols as entry_symbols
+
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    return SymbolTableV1(symbols=tuple(
+        symbol.model_copy(update=update) if symbol.ref == "$ref:CACHE2" else symbol for symbol in entry_symbols().symbols))
+
+
+def _b186_restage_roots():
+    """PARENT stores P1 documents in CACHE on its first leg and calls a No Data child that retrieves CACHE and
+    writes what it retrieved into CACHE2; the twin holds the child's legs in PARENT's Branch."""
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    child = _legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}], "terminal": put("$ref:CACHE2")},
+                  {"steps": [_MSG], "terminal": _STOP})
+    stage = {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")}
+    parent = _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], _legs(stage, *child["body"]["steps"][-1]["legs"])
+
+
+@pytest.mark.parametrize("target", ["declares_p2", "declares_p1", "unknown"])
+def test_a_childs_write_of_what_its_caller_cached_is_judged_against_the_target_cache(target, monkeypatch):
+    """ARCH-186-e1-01. A cache write is a consumer of the documents reaching it: where they were retrieved from a
+    cache the caller fills, the target cache's profile — declared, or UNKNOWN — is the caller's obligation for
+    what it stored there. The twin, which holds both writes, refuses PROFILE_MISMATCH at the write; the
+    composition now refuses it at the caller's call, and a matching target stays admitted in both."""
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    update = {"declares_p2": {"cache_profile_ref": "$ref:P2"}, "declares_p1": {"cache_profile_ref": "$ref:P1"},
+              "unknown": {"profiles_unknown": True}}[target]
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(**update))
+    roots, twin = _b186_restage_roots()
+    expected = set() if target == "declares_p1" else {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected
+    assert _b186_composed(roots) == expected
+    assert _b28_verdict(roots, "CACHE_CHILD", True)[0] == []
+
+
+def test_the_target_cache_left_out_of_its_consumers_re_admits_the_caller(monkeypatch):
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P2"))
+    roots, twin = _b186_restage_roots()
+    _lineage_with_source(
+        monkeypatch,
+        "                for declared_ref in cache_profiles.get(semantic.cache_ref, ()):\n"
+        "                    _requires(stream, _identity(declared_ref), declared_ref)\n",
+        "                pass\n")
+    assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert _b186_composed(roots) == set()
+
+
+def _b186_forwarded_roots(prefix):
+    """PARENT (``prefix`` on its call leg) -> passthrough WRITER, a pure forwarder -> passthrough CACHE_CHILD, whose
+    first leg reads X off its entry documents and whose second calls a No Data grandchild reading X too; and the same
+    composition with the forwarder removed."""
+    dec = _b30_decision()
+    call = lambda key: _call(key, wait=True, abort_on_error=True)  # noqa: E731
+    grandchild = _legs({"steps": [_MSG], "terminal": dec}, {"steps": [_MSG], "terminal": _STOP})
+    child = _doc(_ENTRY, {"kind": "branch", "legs": [{"steps": [_MSG], "terminal": dec}, {"steps": [], "terminal": call("ENRICH")}]})
+    middle = _doc(_ENTRY, {"kind": "branch", "legs": [{"steps": [], "terminal": call("CACHE_CHILD")}, {"steps": [_MSG], "terminal": _STOP}]})
+    via = [("PARENT", _legs({"steps": list(prefix), "terminal": call("WRITER")}, {"steps": [_MSG], "terminal": _STOP})),
+           ("WRITER", middle), ("CACHE_CHILD", child), ("ENRICH", grandchild)]
+    direct = [("PARENT", _legs({"steps": list(prefix), "terminal": call("CACHE_CHILD")}, {"steps": [_MSG], "terminal": _STOP})),
+              ("CACHE_CHILD", child), ("ENRICH", grandchild)]
+    return via, direct
+
+
+def test_a_forwarder_keeps_an_inherited_read_apart_from_a_fresh_one_at_its_call():
+    """ARCH-186-e1-05. A child exports an `inherits` and a `fresh` read of X; a pure forwarder passes both on at one
+    call pointer. A caller that writes X and drops it before calling serves {BEFORE, SCOPE} through the forwarder
+    exactly as without it: the seed repairs the inherited observation, and the surviving fresh one is not mistaken
+    for it."""
+    for prefix in ([_DYNAMIC_X, _B30_SCRIPT], [_DYNAMIC_X]):
+        via, direct = _b186_forwarded_roots(prefix)
+        assert _b186_composed(via) == _b186_composed(direct), prefix
+    assert {"PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID", _READ_BEFORE_WRITE} <= _b186_composed(
+        _b186_forwarded_roots([_DYNAMIC_X, _B30_SCRIPT])[0])
+
+
+def test_one_observation_per_pointer_merges_the_forwarded_reads_again(monkeypatch):
+    _lineage_with_source(monkeypatch, "            origin = relation or \"read\"\n", "            origin = \"read\"\n")
+    via, direct = _b186_forwarded_roots([_DYNAMIC_X, _B30_SCRIPT])
+    assert _READ_BEFORE_WRITE not in _b186_composed(via)
+
+
+#: The call-placement capability refusal a step before a call draws: the twin, having no call, cannot share it.
+_B186_PLACEMENT = "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"
+
+
+def _b186_same_roots(item, form, typed, steps, terminal):
+    """The writer on the SAME documents as the read, faithfully: a Data Passthrough child receives the caller's
+    documents, so the caller writes X just before its call and the twin's legs each start with that write; a No
+    Data child starts from its own empty document, so the same documents are ones the child creates — its own
+    write on the read's leg, with the caller writing nothing (the twin keeps that boundary)."""
+    head = (_ENTRY,) if form == "passthrough" else (() if typed else (_B27_SOURCE,))
+    writer = _b186_writer_steps(item)[-1:]
+    first = list(steps) if form == "passthrough" else writer + list(steps)
+    child = _doc(*head, {"kind": "branch", "legs": [{"steps": first, "terminal": terminal}, {"steps": [_MSG], "terminal": _STOP}]})
+    prefix = writer if form == "passthrough" else []
+    call = {"steps": list(prefix), "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}
+    legs = child["body"]["steps"][-1]["legs"]
+    twin_head = (_B27_SOURCE,) if (form == "no_data" and not typed) else ()
+    twin = _doc(*twin_head, {"kind": "branch", "legs": [{"steps": [_GET], "terminal": _STOP}]
+                             + [dict(leg, steps=list(prefix) + leg["steps"]) for leg in legs]})
+    return [("PARENT", _legs({"steps": [_GET], "terminal": _STOP}, call)), ("CACHE_CHILD", child)], twin
+
+
+@pytest.mark.parametrize("item", ["ddp", "dpp"])
+def test_a_writer_on_the_same_documents_earns_its_twins_codes_after_every_step_kind(item):
+    """ARCH-186-e1-06, the same-document placement over the whole step universe: both entry forms, both dialects,
+    every kind the emission authority admits between the entry and the read. Every constructible cell serves its
+    twin's code set apart from the call-placement capability refusal the twin cannot share, and the recorded
+    residuals of the differential above."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    diverging, placed = [], 0
+    for dialect, typed in sorted(_B28_DIALECTS.items()):
+        for form in ("no_data", "passthrough"):
+            for kind in ["none"] + _b28_kinds_that_can_be_between():
+                for cell, steps, terminal in _b30_between(kind, _b186_use(item)):
+                    try:
+                        roots, twin = _b186_same_roots(item, form, typed, steps, terminal)
+                        composed = set()
+                        for key, _document in roots:
+                            composed |= _b30_codes(_b28_verdict(roots, key, typed)[0])
+                        expected = _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", typed)[0])
+                    except ProcessIRValidationError:
+                        continue
+                    placed += 1
+                    row = (dialect, form, cell, "same", sorted(composed - {_B186_PLACEMENT}), sorted(expected))
+                    if set(row[4]) != expected and not _b186_is_a_recorded_residual(row):
+                        diverging.append(row)
+    # 13 constructible step kinds (incl. the bare read) x 2 entry forms x 2 dialects, measured.
+    assert placed == 52, placed
+    assert diverging == [], diverging
+
+
+def test_a_reader_behind_a_forwarder_earns_its_twins_lineage_codes_after_every_step_kind():
+    """ARCH-186-e1-06, the forwarding neighbours over the step universe: a reader of either form behind a middle of
+    either form, every admitted step kind before the reader's read and before the middle's call, both dialects,
+    the writer in the caller (earlier, later), in the middle or nowhere. Lineage codes, as for the bare grandchild
+    matrix (a step before a call draws the placement capability refusal the twin cannot share)."""
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    kinds = [("none", [])] + [(cell, steps) for kind in _b28_kinds_that_can_be_between()
+                              for cell, steps, _terminal in _b30_between(kind, _b30_decision()) if steps]
+    diverging, placed = [], 0
+    for typed in (True, False):
+        for item in ("ddp", "dpp"):
+            for mform in ("no_data", "passthrough"):
+                for rform in ("no_data", "passthrough"):
+                    for (mname, msteps), (rname, rsteps) in [(m, ("none", [])) for m in kinds] + [(("none", []), r) for r in kinds[1:]]:
+                        for placement in ("none", "earlier", "later", "middle_elsewhere", "middle_later"):
+                            try:
+                                roots, twin = _b186_deep(item, mform, rform, msteps, rsteps, placement)
+                                expected = {c for c in _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", typed)[0])
+                                            if "LINEAGE" in c}
+                                composed = set()
+                                for key, _document in roots:
+                                    composed |= {c for c in _b30_codes(_b28_verdict(roots, key, typed)[0]) if "LINEAGE" in c}
+                            except ProcessIRValidationError:
+                                continue
+                            placed += 1
+                            if composed != expected and not (mname in _B186_RETRIEVES or rname in _B186_RETRIEVES):
+                                diverging.append((typed, item, mform, rform, mname, rname, placement, sorted(composed), sorted(expected)))
+    assert placed > 500, placed
+    assert diverging == [], diverging[:10]
+_COHORT_BUILDERS[("recipes/materialization.py", "build_symbol_table via facts._replace")] = (
+    "not a cohort: the `_ProfileFacts` of a cache whose name binding the account could not judge, its profile "
+    "made unknown (#186, ARCH-186-e1-02)")

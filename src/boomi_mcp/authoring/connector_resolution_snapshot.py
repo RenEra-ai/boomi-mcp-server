@@ -267,6 +267,10 @@ class StoredDocumentCacheProfileV1(_SnapshotModel):
     profile_component_id: Optional[str] = None
     profile_component_type: Optional[str] = None
     cache_component_id: Optional[str] = None
+    #: True for a cache the route could not bind: the account was consulted, its binding of the
+    #: request's names failed, and apply may yet reuse this cache by name — so the request's own
+    #: configuration is not known to describe it, and its profile is unknown (ARCH-186-e1-02).
+    binding_unjudged: bool = False
 
 
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
@@ -1502,16 +1506,23 @@ def stored_document_cache_profile(
     if not profile or profile_type not in PROFILE_COMPONENT_TYPES:
         return unknown
     from ..categories.integration_builder import canonical_component_id
+    from ..connector_replay.ids import is_boomi_component_id
 
+    profile = canonical_component_id(profile)
+    # A stored id that is not a component id names no profile this request can match — and spelled
+    # like one of the request's own placeholders it would match a profile the request CREATES
+    # (ARCH-186-e1-03). Malformed is unknown.
+    if not profile or not is_boomi_component_id(profile):
+        return unknown
     return unknown.model_copy(update={
         "profile_state": "known",
-        "profile_component_id": canonical_component_id(profile),
+        "profile_component_id": profile,
         "profile_component_type": profile_type,
     })
 
 
 def live_cache_profiles_for_unwritten_caches(
-    boomi_client, components, conflict_policy="reuse", existing_ids=None
+    boomi_client, components, conflict_policy="reuse", existing_ids=None, binding_unjudged=False
 ) -> Optional[Tuple[StoredDocumentCacheProfileV1, ...]]:
     """The stored profile of every document cache the request names and apply does NOT write (#186).
 
@@ -1524,6 +1535,11 @@ def live_cache_profiles_for_unwritten_caches(
     the account is the authority there and could not be consulted, which is not the same as an
     unprofiled cache. Never raises — a profile-consuming write owns the refusal, and an unused
     unreadable cache must block nothing. ``None`` with no client: nothing was read.
+
+    ``binding_unjudged``: the route consulted the account and its binding of the request's names
+    failed (`existing_ids` is then None). A cache create naming no id under ``reuse`` may still be
+    bound by name at apply, so it is recorded unknown too, flagged so the symbol table applies it
+    although the request appears to write the cache (ARCH-186-e1-02).
     """
     from ..categories.components._shared import component_get_xml
     from ..categories.integration_builder import (
@@ -1541,6 +1557,11 @@ def live_cache_profiles_for_unwritten_caches(
         if not isinstance(key, str) or not key or str(getattr(component, "type", "") or "").strip() != "documentcache":
             continue
         if apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids):
+            if (binding_unjudged and conflict_policy == "reuse"
+                    and getattr(component, "action", None) == "create"
+                    and _bound_existing_id(component, existing_ids) is None):
+                readings.append(StoredDocumentCacheProfileV1(
+                    component_key=key, profile_state="unknown", binding_unjudged=True))
             continue
         component_id = canonical_component_id(_bound_existing_id(component, existing_ids))
         if component_id is None:
