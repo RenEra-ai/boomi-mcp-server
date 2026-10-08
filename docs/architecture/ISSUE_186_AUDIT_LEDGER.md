@@ -127,6 +127,7 @@ entry forms, both dialects, six writer placements, and the grandchild matrix.
 
 | Loop | Evaluation (window / cumulative) | SHA (+dirty) | Outcome | Rationale |
 | --- | --- | --- | --- | --- |
+| Stage-2 repo commit review (loop 2) | 2 / 2 | `be398c3` (records dirty) | `CLOSE-CLEAN` | Recorded off the third-evaluation cadence because loop 2 is satisfied here. Evaluation 1 is the initial review over `46100b7..2e17b7e`, which raised CDX-186-r1-01 (P2, standard), reproduced and fixed in correction batch 1. Evaluation 2 is that batch with its ordered validation: the affected QA re-run r2 clean and the fix-only review `cdx-review.82wGYi` over `2e17b7e..be398c3` clean. No blocking residue; no deferral. |
 
 ## Deferrals
 
@@ -144,6 +145,8 @@ None so far.
 | Blast radius, x29 universe | QA's `x29_hunt.py` per arm, graded by `grade_x29.py` (`blast/x29/grade.txt`) | same | 4,872 cells, 0 moved: 4,720 match and the 152 refused-both residuals unchanged, violations 0 |
 | Stage-1 QA r1 (loop 1) | live, `boomi-qa-tester`, through `build_integration` typed plan, typed compile and raw apply on the `renera` account; kit `.claude/agent-memory/boomi-qa-tester/harness/186r1/` (gitignored), capture records `.claude/agent-memory/boomi-qa-tester/evidence/issue-186/` | the uncommitted implementation | clean, no findings: 26 property-read compositions each serve their twin's code at the caller's call, the 12 newly refused were admitted at the baseline, every refusal made zero writes; item 3 refuses a stored profile other than the documents' on all three routes and admits the matching and the unprofiled stored cache, leaving the reused cache at version 1; all 45 live components removed |
 | Stage-2 review r1 (loop 2, initial) | `cdx-review.zKZCQy`, `--base 46100b7`, head `2e17b7e` | `2e17b7e` | one P2 finding, CDX-186-r1-01 |
+| Stage-2 review r2 (loop 2, fix-only, validates correction batch 1) | `cdx-review.82wGYi`, `--base 2e17b7e` (r1's `last-reviewed-sha`), head `be398c3` | `be398c3` | clean — "No actionable defects were found in the diff" |
+| Stage-1 QA r2 (affected re-run of correction batch 1, billed to loop 2) | live, `boomi-qa-tester`, typed plan and compile on `renera`; report `agents/reports/2026-10-07-issue-186-r2.md`, kit `.claude/agent-memory/boomi-qa-tester/harness/186r1/` (both gitignored) | `be398c3` | clean, no findings: the unproved caller is admitted in both leg orders for an unknown cache named by an id that resolves to nothing and for a raw-XML cache, as the twin is (at `2e17b7e` the map-first order was refused); proved callers still refused at the call in both orders; the item-3 reference-only refusal re-confirmed with zero writes |
 
 ## Evidence index
 
