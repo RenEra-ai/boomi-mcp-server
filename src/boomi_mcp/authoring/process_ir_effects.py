@@ -1109,8 +1109,14 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
     facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
-    # #186 (ARCH-186-e1-01): what the child's cache writes of retrieved documents ask of the callers.
-    facts["cache_write_requirements"] = tuple(sorted(set(walk.cache_write_requirement_refs)))
+    # #186 (ARCH-186-e1-01): what the child's cache writes of retrieved documents ask of the callers —
+    # measured, so each lands in the channel whose rule the flattened twin applies to it.
+    measured_writes = _caller_cache_write_requirements(prepared, base, walk)
+    facts["cache_write_requirements"] = measured_writes[0]
+    relied_on = measured_writes[1]
+    if relied_on:
+        facts["cache_requirements"] = tuple(sorted(
+            set(facts["cache_requirements"]) | set(relied_on), key=lambda row: (row[0], row[1] or "")))
     # Correction batch 30 (QA-184-s1-r29-01): what a non-strict read the child cannot fail itself
     # owes a caller that writes the property — measured the same way.
     facts["nonstrict_cached_reads"] = _caller_nonstrict_reads(prepared, base, walk)
@@ -1295,6 +1301,36 @@ def _caller_nonstrict_reads(
     rows = {(None if cache is None or (pointer, name) in still else cache, name)
             for pointer, cache, name in candidates}
     return tuple(sorted(rows, key=lambda row: (row[0] is not None, row[0] or "", row[1])))
+
+
+def _caller_cache_write_requirements(prepared: Any, capabilities: Any, walk: Any):
+    """``(write requirements, requirements the child relies on)`` for its cache writes of documents a caller stored (#186).
+
+    A cache write of documents retrieved from a cache a caller fills is refused, in the flattened twin, only
+    where those documents carry a PROVED profile other than the target's (CDX-186-r3-01) — so by itself it asks
+    the callers only not to contradict it. But the child may go on to USE what it restaged: a later retrieve of
+    the target feeding a map needs the profile, which the twin proves from the caller's write. MEASURED, as
+    every other row here is: seed the caller's content of the source cache with the target's declared profile
+    and walk again. Where the child's own verdicts move, the child relies on that profile, so the row is a
+    content requirement of the callers — exact, and seeded into the child's validation like any other
+    (CDX-186-r4-01). Where nothing moves, it stays a write requirement. The unknown-profile requirement names
+    no profile a seed could state, so it is never relied on.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import UNKNOWN_PROFILE_REQUIREMENT, walk_lineage
+
+    rows = sorted(set(walk.cache_write_requirement_refs))
+    if not rows:
+        return (), ()
+    unseeded = {(item.code, item.path) for item in walk.findings}
+    relied_on = set()
+    for cache_ref, profile_ref in rows:
+        if profile_ref == UNKNOWN_PROFILE_REQUIREMENT:
+            continue
+        seeded = capabilities.model_copy(update={"caller_cache_contents": tuple(sorted(
+            set(capabilities.caller_cache_contents) | {(cache_ref, profile_ref)}))})
+        if {(item.code, item.path) for item in walk_lineage(prepared, seeded).findings} != unseeded:
+            relied_on.add((cache_ref, profile_ref))
+    return tuple(row for row in rows if row not in relied_on), tuple(sorted(relied_on))
 
 
 def _entry_repairable_reads(prepared: Any, capabilities: Any, walk: Any, reads) -> Tuple[Tuple[str, str], ...]:

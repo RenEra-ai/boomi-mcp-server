@@ -10762,3 +10762,46 @@ _OBLIGATION_SITES.update({
         "#186: a call passes its child's write requirement up where its own caller's documents may be in the cache "
         "(`_caller_documents_may_reach`), exactly as a content requirement is passed up"),
 })
+
+
+def _b186_restage_then_map_roots(staged_profile):
+    """A child that restages what its caller cached (CACHE -> CACHE2, declaring P2) and, on a later leg, maps what it
+    restaged with M22 (P2 -> P2); the caller stages P2 documents (GETP1 then M12) or ones whose profile nothing states."""
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    produce = ([{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, {"kind": "map_ref", "map_ref": "$ref:M12"}]
+               if staged_profile else [{"kind": "connector_call", "operation_ref": "$ref:GET"}])
+    stage = {"steps": produce, "terminal": put("$ref:CACHE")}
+    child = _legs({"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}], "terminal": put("$ref:CACHE2")},
+                  {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE2"}, {"kind": "map_ref", "map_ref": "$ref:M22"}],
+                   "terminal": _STOP})
+    parent = _legs(stage, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})
+    return [("PARENT", parent), ("CACHE_CHILD", child)], _legs(stage, *child["body"]["steps"][-1]["legs"])
+
+
+def test_a_child_relying_on_what_it_restaged_asks_its_caller_for_that_profile(monkeypatch):
+    """CDX-186-r4-01. A child that maps what it restaged relies on the target's profile, which the twin proves from the
+    caller's write: the restaging write's requirement is then a CONTENT requirement — exact, and seeded into the child's
+    validation — so a caller staging P2 is admitted (the twin is; `e22b8fa` refused the child's map), and one staging
+    documents whose profile nothing states is refused, as the twin is. Measured per child: a write nothing downstream
+    relies on keeps the proved-only rule (`test_a_childs_write_of_unprofiled_cached_documents_contradicts_nothing`)."""
+    from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
+
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P2"))
+    for staged, expected in ((True, set()), (False, {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})):
+        roots, twin = _b186_restage_then_map_roots(staged)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected == _b186_composed(roots), staged
+    entries = sys.modules["test_issue_184_child_entries"]
+    table = _b186_cache2_symbols(cache_profile_ref="$ref:P2")
+    monkeypatch.setattr(entries, "_symbols", lambda: table)
+    row = _row(_b186_restage_then_map_roots(True)[0], "PARENT", "CACHE_CHILD")
+    assert ("$ref:CACHE", "$ref:P2") in row.cache_requirements and row.cache_write_requirements == (), row
+
+
+def test_a_relied_on_write_requirement_left_proved_only_refuses_the_childs_map(monkeypatch):
+    from boomi_mcp.authoring import process_ir_effects
+
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P2"))
+    monkeypatch.setattr(process_ir_effects, "_caller_cache_write_requirements",
+                        lambda prepared, capabilities, walk: (tuple(sorted(set(walk.cache_write_requirement_refs))), ()))
+    roots, _twin = _b186_restage_then_map_roots(True)
+    assert _b28_verdict(roots, "CACHE_CHILD", True)[0] != []

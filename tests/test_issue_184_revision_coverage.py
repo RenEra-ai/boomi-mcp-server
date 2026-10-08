@@ -248,6 +248,9 @@ def _perturbations():
         # #186: the entry-document rows dropped, and the entry-repair filter reverted.
         ("effects", "_caller_entry_document_reads"): lambda prepared, capabilities, walk, passthrough: (),
         ("effects", "_entry_repairable_reads"): lambda prepared, capabilities, walk, reads: reads,
+        # #186: a write requirement never promoted, however the child relies on it.
+        ("effects", "_caller_cache_write_requirements"):
+            lambda prepared, capabilities, walk: (tuple(sorted(set(walk.cache_write_requirement_refs))), ()),
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
         ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None,
         opaque=frozenset(): {
