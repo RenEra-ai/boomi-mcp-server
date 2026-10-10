@@ -379,8 +379,11 @@ be derived (not in the request, a listener) and a No Data child refuse a prefix 
 cycle is not in that set: its entry form and its requirements are derived against the fail-closed
 seed every cycle member starts from, so a prefix into one is admitted only where those derived
 requirements are provable, and refused wherever what it consumes stays unknown. An empty-prefix call
-keeps its compatibility placement. Every call adds unknown content to the caches its child may
-write.
+keeps its compatibility placement. A call adds to the caches its child may write what that child may
+leave there: where the request derives every cache the child writes, documents of each profile its
+contract states it may leave in each (`cache_contents_at_exit`), so a later retrieve of the cache proves
+or leaves unproved a profile exactly as it would in one process; otherwise documents of no proved profile.
+What the child's documents carry as properties is added as unknown either way.
 
 A document cache is shared with every caller and Add to Cache appends, so a child's own writes to a
 cache never take its callers' documents out of it: the cache obligations travel to each caller that

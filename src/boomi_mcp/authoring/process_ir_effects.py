@@ -1053,6 +1053,9 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         # process nothing derives, so a parent that filled that cache, called the child
         # and read the cache afterwards was admitted (correction batch 18).
         "removed_caches": tuple(sorted(removed)),
+        # #186 (architect evaluation 3): the profiles of what those writes may leave in the caches, gated as
+        # `mutated_state` is — a caller adds exactly these where it knows every cache this process writes.
+        "cache_contents_at_exit": tuple(walk.cache_contents_at_exit) if known or caches_known else (),
         # Amendment 1 rule 7: what a completion of this process may still be writing, off the
         # walk — its own unwaited calls, and what every child it calls says of itself.
         "unwaited_cache_writes": tuple(walk.unwaited_cache_writes),
@@ -1440,8 +1443,18 @@ def _caller_judged_entry_reads(prepared: Any, capabilities: Any, walk: Any) -> T
     if not judged:
         return ()
     routed = walk_lineage(prepared, _seeded(sorted({name for _pointer, name in judged}), judged))
-    relations = {(pointer, name): hint for pointer, name, hint, _origin in routed.nonstrict_document_reads}
-    return tuple(sorted((pointer, name, relations.get((pointer, name), "drops")) for pointer, name in judged))
+    # Every relation observed at a site is kept (architect evaluation 3): a call can judge two child rows of one
+    # property there, a dropped and a fresh one, and keeping one per site lost the other's code. The walk is seeded
+    # with the property, so what it hints is what the documents AT the site do: ``drops`` where the seed was
+    # discarded on the way to the read, ``entry`` where the seed never reaches it at all — the documents the read
+    # sees are not the ones the caller hands over, which is ``fresh``, as `_caller_entry_document_reads` measures an
+    # ``entry`` hint. The walk's own ``entry`` is no contract relation, and exporting it raised.
+    relations: Dict[Tuple[str, str], set] = {}
+    for pointer, name, hint, _origin in routed.nonstrict_document_reads:
+        if (pointer, name) in judged:
+            relations.setdefault((pointer, name), set()).add("fresh" if hint == "entry" else hint)
+    return tuple(sorted((pointer, name, relation) for pointer, name in judged
+                        for relation in relations.get((pointer, name), {"drops"})))
 
 
 def _caller_entry_document_reads(
@@ -1586,6 +1599,9 @@ _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "required_writers",
     "document_requirements",
     "unwaited_cache_writes",
+    # #186 (architect evaluation 3): read only where the child's cache writes are known, which a cycle
+    # member's never are (`_A_CYCLE_MEMBERS_CLAIMS`), so the carried union is never read for one.
+    "cache_contents_at_exit",
 )
 #: The row fields where a LARGER value is PERMISSIVE for a caller, so they are never carried as
 #: a union: inheriting a permissive fact from a partner whose own facts were derived against

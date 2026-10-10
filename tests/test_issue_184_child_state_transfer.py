@@ -4612,20 +4612,26 @@ def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_u
     document, so the second call cannot prove the row.
 
     The admitted way out: the child empties CACHE2 first, on a leg the walk proves runs, so no
-    earlier call's document reaches its use."""
+    earlier call's document reaches its use.
+
+    #186 (ARCH-186-e3-01) retires the ``content`` cell: a child whose cache writes are known now
+    states the profiles of what it leaves there (`ChildEntryContractV1.cache_contents_at_exit`), so
+    the second call meets P2 documents, not an unknown possibility, and is admitted exactly as the
+    flattened graph is. The property cohort still crosses as unknown, so the other two stay refused."""
     fill, after, code, suffix = _SELF_FILLING_USES[use]
     use_leg = {"steps": [_READ2] + after, "terminal": _STOP}
     child = _legs(fill, use_leg)
+    at = lambda leg: [] if use == "content" else [(code, "/body/steps/0/legs/{0}/terminal".format(leg) + suffix)]  # noqa: E731
     twice = [("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
-    assert _both_routes(twice, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    assert _both_routes(twice, "PARENT") == at(1)
     assert _both_routes(twice, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(fill, use_leg, fill, use_leg))], "PARENT") == []
     writer_first = [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
                     ("WRITER", _legs(fill, _STORES_NOTHING)), ("CACHE_CHILD", child)]
-    assert _both_routes(writer_first, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    assert _both_routes(writer_first, "PARENT") == at(1)
     parent_fills_between = [("PARENT", _legs(_waited("CACHE_CHILD"), fill, _waited("CACHE_CHILD"))),
                             ("CACHE_CHILD", child)]
-    assert _both_routes(parent_fills_between, "PARENT") == [(code, "/body/steps/0/legs/2/terminal" + suffix)]
+    assert _both_routes(parent_fills_between, "PARENT") == at(2)
     empties_first = _legs(_EMPTIES2, fill, use_leg)
     for roots in ([("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", empties_first)],
                   [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
@@ -4644,16 +4650,26 @@ def test_a_middle_that_calls_a_cache_writer_before_a_self_filling_consumer_meets
     ends the requirement, so the middle's check meets that unknown content.
 
     The admitted ways out: the middle without the writer call, and a consumer that empties CACHE
-    first on a leg the walk proves runs."""
+    first on a leg the walk proves runs.
+
+    #186 (ARCH-186-e3-01) retires this refusal: the writer's contract states the P2 it leaves in
+    CACHE (`ChildEntryContractV1.cache_contents_at_exit`), so the middle's check meets P2, not an
+    unknown possibility, and is admitted exactly as the flattened graph is."""
     stores_p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
     consumes = {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP}
     caller_leg = stores_p2 if caller == "stores_the_profile" else _STORES_NOTHING
     roots = [("PARENT", _legs(caller_leg, _waited("MID"))),
              ("MID", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
              ("WRITER", _legs(stores_p2, _STORES_NOTHING)), ("CACHE_CHILD", _legs(stores_p2, consumes))]
-    assert _both_routes(roots, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _both_routes(roots, "MID") == []
     assert _both_routes(roots, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(caller_leg, stores_p2, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == []
+    # Non-vacuity: a writer leaving P1 instead is refused at the middle's call, as the twin's consumer refuses it.
+    stores_p1 = {"steps": [_GETP1], "terminal": _PUT}
+    leaves_p1 = roots[:2] + [("WRITER", _legs(stores_p1, _STORES_NOTHING)), roots[3]]
+    assert _both_routes(leaves_p1, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _errors([("PARENT", _legs(caller_leg, stores_p1, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == [
+        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/4/steps/1/map_ref")]
     without_the_writer = [("PARENT", _legs(caller_leg, _waited("MID"))),
                           ("MID", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))),
                           ("CACHE_CHILD", _legs(stores_p2, consumes))]
@@ -11162,3 +11178,246 @@ def test_a_cycle_member_deferring_to_its_callers_admits_the_cycle(monkeypatch):
     monkeypatch.setattr(process_ir_effects, "_entry_contract_bindings", namespace["_entry_contract_bindings"])
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
     assert _b186_composed(_b186_cycle_roots("$ref:CACHE_P2")) == set()
+
+
+# --- #186 architect evaluation 3 ---------------------------------------------------------------------------
+def _b186_root_control(kind, held):
+    """``held`` — a call or a read — as the terminal ``kind`` holds at a process root: the static Decision's true arm,
+    a Branch's first leg, a Try/Catch's try body; ``none`` is ``held`` itself."""
+    if kind == "none":
+        return held
+    holding = {"steps": [], "terminal": held}
+    return {"decision": dict(_decision(_STOP), true_arm=holding),
+            "branch": {"kind": "branch", "legs": [holding, _B28_BODY]},
+            "try_catch": {"kind": "try_catch", "scope": "process", "try_body": holding, "catch_body": _B28_BODY}}[kind]
+
+
+def _b186_root_control_cell(item, mform, rform, mwrap, rwrap, writer, typed):
+    """``(roots, twin)``: PARENT (the writer's steps before its call, or none) -> WRITER, whose root control ``mwrap``
+    holds its call -> CACHE_CHILD, whose root control ``rwrap`` holds the non-default read; the twin nests the read in
+    both controls, behind the same writer steps. Legacy No Data roots start with their `source`."""
+    head = lambda form: (_ENTRY,) if form == "passthrough" else (() if typed else (_B27_SOURCE,))  # noqa: E731
+    first = () if typed else (_B27_SOURCE,)
+    prefix = list(_b186_writer_steps(item)) if writer else []
+    roots = [("PARENT", _doc(*first, *prefix, _call("WRITER", wait=True, abort_on_error=True))),
+             ("WRITER", _doc(*head(mform), _b186_root_control(mwrap, _call("CACHE_CHILD", wait=True, abort_on_error=True)))),
+             ("CACHE_CHILD", _doc(*head(rform), _b186_root_control(rwrap, _b186_use(item))))]
+    return roots, _doc(*first, *prefix, _b186_root_control(mwrap, _b186_root_control(rwrap, _b186_use(item))))
+
+
+def test_a_reader_behind_a_root_control_earns_its_twins_complete_verdict():
+    """ARCH-186-e1-06 (architect evaluation 3): the control-body neighbours the step matrix drops — a Decision, Branch
+    or Try/Catch holds no step between, it holds the call or the read in its body. A control inside a Branch leg is
+    refused or past the nesting bound on one side or both, so these are the containing-ROOT forms: the middle's root
+    control holds its call, the reader's holds its read, each form, both dialects, the writer before PARENT's call or
+    none. Every cell both sides can author is exact; every other is refused by the model's authoring rules on one side
+    or both, pinned by each side's code — none counted as a match."""
+    import collections
+
+    from boomi_mcp.models.process_ir import ProcessIRValidationError
+
+    def verdict(roots, typed):
+        try:
+            found = set()
+            for key, _document in roots:
+                found |= _b30_codes(_b28_verdict(roots, key, typed)[0])
+            return found
+        except ProcessIRValidationError as error:
+            return ("refused", str(error).split("failed: ")[1].split(" at ")[0].strip())
+
+    kinds = ("none", "decision", "branch", "try_catch")
+    exact, refused, other = [], collections.Counter(), []
+    for typed in (True, False):
+        for item in ("ddp", "dpp"):
+            for mform in ("no_data", "passthrough"):
+                for rform in ("no_data", "passthrough"):
+                    for mwrap in kinds:
+                        for rwrap in kinds:
+                            for writer in (False, True):
+                                roots, twin = _b186_root_control_cell(item, mform, rform, mwrap, rwrap, writer, typed)
+                                composed, expected = verdict(roots, typed), verdict([("PARENT", twin)], typed)
+                                cell = (typed, item, mform, rform, mwrap, rwrap, writer)
+                                if isinstance(composed, tuple) or isinstance(expected, tuple):
+                                    refused[(composed[1] if isinstance(composed, tuple) else "admitted" if not composed else "refused",
+                                             expected[1] if isinstance(expected, tuple) else "admitted" if not expected else "refused")] += 1
+                                elif composed == expected:
+                                    exact.append(cell)
+                                else:
+                                    other.append(cell + (sorted(composed), sorted(expected)))
+    assert other == [], other
+    # Constructible on both sides: the typed dialect, no writer, a read under at most one control.
+    assert len(exact) == 40 and {cell[0] for cell in exact} == {True} and {cell[6] for cell in exact} == {False}, exact
+    assert {(cell[4], cell[5]) for cell in exact} == {
+        ("none", "none"), ("none", "decision"), ("none", "branch"), ("decision", "none"), ("branch", "none")}
+    # Every other cell is one the model refuses to AUTHOR on at least one side, before any validation runs — no
+    # verdict to compare — pinned by (composition, twin) with each side's code, or ``admitted`` where that side alone
+    # is authorable: a legacy `source` or a writer's steps before a root's call, a control a Try/Catch body or a
+    # Decision arm cannot hold, a twin past the nesting bound. Both authorable cells are the ``exact`` ones above.
+    unsupported, placement, cardinality = (
+        "PROCESS_IR_CAPABILITY_UNSUPPORTED", _B186_PLACEMENT, "PROCESS_IR_SCHEMA_INVALID_CARDINALITY")
+    not_allowed, nesting = "PROCESS_IR_CAPABILITY_NODE_NOT_ALLOWED_IN_BODY", "PROCESS_IR_SEMANTIC_NESTING_LIMIT"
+    assert dict(refused) == {
+        (placement, not_allowed): 12, (placement, cardinality): 52, (unsupported, not_allowed): 60,
+        (unsupported, unsupported): 32, (unsupported, cardinality): 100, (unsupported, nesting): 48,
+        (unsupported, "admitted"): 80, (cardinality, not_allowed): 16, (cardinality, cardinality): 40,
+        ("admitted", not_allowed): 8, ("admitted", nesting): 24,
+    }, sorted(refused.items())
+    assert sum(refused.values()) == 2 * 2 * 2 * 2 * 4 * 4 * 2 - 40
+
+
+def _b186_sibling_writer_verdicts():
+    """``{(target, caller, writer, depth): (composed, twin)}``: PARENT stages ``caller`` content in CACHE on its first
+    legs, then calls a No Data WRITER — directly (``sibling``) or through a forwarding middle (``grandchild``) — whose
+    legs store ``writer`` content there, then calls CACHE_CHILD, which restages CACHE into the target; the twin holds
+    every leg in PARENT's Branch (architect evaluation 3)."""
+    from test_issue_184_child_entries import _MAP
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    stores = {"none": {"steps": [_GET], "terminal": put("$ref:CACHE")},
+              "p1": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")},
+              "p2": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, _MAP], "terminal": put("$ref:CACHE")}}
+    subsets = lambda names: [[name for bit, name in enumerate(names) if mask >> bit & 1] for mask in range(1 << len(names))]  # noqa: E731
+    call = lambda key: {"steps": [], "terminal": _call(key, wait=True, abort_on_error=True)}  # noqa: E731
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    module = sys.modules[__name__]
+    saved, verdicts = module._symbols, {}
+    try:
+        for target, ref, update in (("p1", "$ref:CACHE2", {"cache_profile_ref": "$ref:P1"}),
+                                    ("p2", "$ref:CACHE_P2", {"cache_profile_ref": "$ref:P1"}),
+                                    ("unknown", "$ref:CACHE2", {"profiles_unknown": True})):
+            module._symbols = lambda update=update: _b186_cache2_symbols(**update)
+            reader = [{"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE"}], "terminal": put(ref)}, noop]
+            for caller in subsets(["none", "p1", "p2"]):
+                for writer in subsets(["none", "p1", "p2"])[1:]:
+                    for depth in ("sibling", "grandchild"):
+                        stage, written = [stores[name] for name in caller], [stores[name] for name in writer] + [noop]
+                        roots = [("PARENT", _legs(*stage, call("MID" if depth == "grandchild" else "WRITER"),
+                                                  call("CACHE_CHILD"))),
+                                 ("WRITER", _legs(*written)), ("CACHE_CHILD", _legs(*reader))]
+                        if depth == "grandchild":
+                            roots.append(("MID", _legs(call("WRITER"), noop)))
+                        twin = _b30_codes(_b28_verdict([("PARENT", _legs(*(stage + written + reader)))], "PARENT", True)[0])
+                        verdicts[(target, tuple(caller), tuple(writer), depth)] = (_b186_composed(roots), twin)
+    finally:
+        module._symbols = saved
+    return verdicts
+
+
+def test_a_sibling_writers_stored_profile_reaches_a_later_restage():
+    """ARCH-186-e3-01. A child whose cache writes are known states what it leaves there, so a later sibling's retrieve
+    proves what the twin's proves: the caller's P1 beside a sibling's P1, restaged into the P2 cache, is refused, where
+    adding documents of no proved profile for the sibling's write made it an unproved mixture and admitted it. Every
+    caller content times every sibling content times three targets, directly and through a forwarding middle: every
+    cell equals its twin but one pre-existing class, pinned by count — with no caller write, the composition adds
+    `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` (a sibling's write behind a producer guarantees no establishment
+    across a call; fail-closed, identical at `e22b8fa`)."""
+    missing = "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
+    verdicts = _b186_sibling_writer_verdicts()
+    exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
+    writer_missing = [cell for cell, (composed, twin) in verdicts.items()
+                      if composed != twin and not cell[1] and composed - twin == {missing} and twin <= composed]
+    assert len(verdicts) == 336 and len(exact) == 294 and len(writer_missing) == 42, [
+        (cell, verdicts[cell]) for cell in set(verdicts) - set(exact) - set(writer_missing)]
+    assert verdicts[("p2", ("p1",), ("p1",), "sibling")] == ({PROCESS_IR_SEMANTIC_PROFILE_MISMATCH},) * 2
+    assert verdicts[("p2", ("p1",), ("p1",), "grandchild")] == ({PROCESS_IR_SEMANTIC_PROFILE_MISMATCH},) * 2
+
+
+def test_a_sibling_writer_stating_no_content_admits_the_proved_restage(monkeypatch):
+    """Mutant: the call adds documents of no proved profile whatever the child states, as before evaluation 3 — the
+    caller's P1 beside the sibling's P1 is an unproved mixture, and the restage the twin refuses is admitted."""
+    _lineage_with_source(
+        monkeypatch,
+        "            for cache_ref, profile_ref in contract.cache_contents_at_exit:\n",
+        "            for cache_ref, profile_ref in ():\n")
+    verdicts = _b186_sibling_writer_verdicts()
+    assert verdicts[("p2", ("p1",), ("p1",), "sibling")] == (set(), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
+
+
+def _b186_two_relation_roots(supplied):
+    """ARCH-186-e3-02: a No Data PARENT calls passthrough MID (writing X on PARENT's call leg when ``supplied``); MID
+    writes X on one leg and calls passthrough CACHE_CHILD on another; CACHE_CHILD has no writer of X — one leg drops
+    what its documents carried and reads X with no default, another calls a No Data WRITER that reads X off its own
+    document. The faithful twin holds every leg in PARENT's Branch, the No Data reader's on a leg of its own."""
+    from test_issue_184_child_entries import _STATIC_X
+
+    call = lambda key: {"steps": [], "terminal": _call(key, wait=True, abort_on_error=True)}  # noqa: E731
+    prefix = [_STATIC_X] if supplied else []
+    roots = [("PARENT", _doc({"kind": "branch", "legs": [
+                 {"steps": [_MSG], "terminal": _STOP},
+                 {"steps": list(prefix), "terminal": _call("MID", wait=True, abort_on_error=True)}]})),
+             ("MID", _doc(_ENTRY, {"kind": "branch", "legs": [{"steps": [_GET, _DYNAMIC_X], "terminal": _STOP},
+                                                               call("CACHE_CHILD")]})),
+             ("CACHE_CHILD", _doc(_ENTRY, {"kind": "branch", "legs": [
+                 {"steps": [_B30_SCRIPT], "terminal": _b30_decision()}, call("WRITER"),
+                 {"steps": [_MSG], "terminal": _STOP}]})),
+             ("WRITER", _doc({"kind": "branch", "legs": [{"steps": [_MSG], "terminal": _b30_decision()},
+                                                         {"steps": [_MSG], "terminal": _STOP}]}))]
+    twin = _doc({"kind": "branch", "legs": [
+        {"steps": [_MSG], "terminal": _STOP}, {"steps": prefix + [_GET, _DYNAMIC_X], "terminal": _STOP},
+        {"steps": prefix + [_B30_SCRIPT], "terminal": _b30_decision()}, {"steps": prefix or [_MSG], "terminal": _STOP},
+        {"steps": [_MSG], "terminal": _b30_decision()}, {"steps": [_MSG], "terminal": _STOP},
+        {"steps": prefix + [_MSG], "terminal": _STOP}]})
+    return roots, twin
+
+
+def test_two_relations_a_call_judges_for_one_property_are_both_exported():
+    """ARCH-186-e3-02. MID's call judges CACHE_CHILD's dropped and fresh rows of X at one caller-judged site: every
+    relation observed there is kept and the walk's ``entry`` hint exported as ``fresh``, so MID exports both and the
+    contract validates, where keeping one per site exported the walk's internal ``entry`` hint and raised. Without X the composition and the twin serve the scope
+    error; with it, the dropped read's read before write beside it — lineage codes equal, the call placement refusal
+    the twin cannot share recorded."""
+    lineage_codes = lambda codes: {code for code in codes if "LINEAGE" in code}  # noqa: E731
+    for supplied, expected in ((False, {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID}),
+                               (True, {PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID, _READ_BEFORE_WRITE})):
+        roots, twin = _b186_two_relation_roots(supplied)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, supplied
+        composed = _b186_composed(roots)
+        assert lineage_codes(composed) == expected and composed - expected <= ({_B186_PLACEMENT} if supplied else set()), (
+            supplied, composed)
+    assert set(_row(_b186_two_relation_roots(False)[0], "PARENT", "MID").nonstrict_document_reads) == {
+        ("X", "drops"), ("X", "fresh")}
+
+
+def _b186_with_judged_relations(monkeypatch, new):
+    """`process_ir_effects._caller_judged_entry_reads` with its relation collection replaced by ``new``."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    path = Path(process_ir_effects.__file__)
+    source = path.read_text(encoding="utf-8")
+    old = '            relations.setdefault((pointer, name), set()).add("fresh" if hint == "entry" else hint)\n'
+    assert source.count(old) == 1
+    namespace = {"__name__": process_ir_effects.__name__, "__package__": process_ir_effects.__package__,
+                 "__file__": str(path)}
+    exec(compile(source.replace(old, new), str(path), "exec"), namespace)  # noqa: S102
+    monkeypatch.setattr(process_ir_effects, "_caller_judged_entry_reads", namespace["_caller_judged_entry_reads"])
+
+
+def test_one_relation_kept_per_judged_site_loses_the_dropped_reads_code(monkeypatch):
+    """Mutant: one relation per site, as before evaluation 3 — MID exports only ``fresh``, and with X supplied the
+    dropped read's read before write, which the twin serves, is gone."""
+    _b186_with_judged_relations(
+        monkeypatch, '            relations[(pointer, name)] = {"fresh" if hint == "entry" else hint}\n')
+    roots, _twin = _b186_two_relation_roots(True)
+    assert _READ_BEFORE_WRITE not in _b186_composed(roots)
+    assert _row(roots, "PARENT", "MID").nonstrict_document_reads == (("X", "fresh"),)
+
+
+def test_a_judged_site_exporting_the_walks_own_hint_exports_an_invalid_relation(monkeypatch):
+    """Mutant: the export carries the walk's own ``entry`` hint for the fresh row's observation — MID exports
+    ``entry``, which no contract carries, and deriving it raises."""
+    from pydantic import ValidationError
+
+    _b186_with_judged_relations(monkeypatch, "            relations.setdefault((pointer, name), set()).add(hint)\n")
+    with pytest.raises(ValidationError):
+        _b186_composed(_b186_two_relation_roots(False)[0])
+
+
+#: The lattice table's cell and non-default witness for the content a child leaves (ARCH-186-e3-01): the PROFILE part
+#: of the content component's possible effect, which `cache_writes_known` alone carried as "some unknown profile".
+_BOUNDARY[("content", "possible_effect")] += ("cache_contents_at_exit",)
+_NON_DEFAULT["cache_contents_at_exit"] = ([
+    ("PARENT", _legs({"steps": [], "terminal": _call("WRITER", wait=True, abort_on_error=True)},
+                     {"steps": [_MSG], "terminal": _STOP})),
+    ("WRITER", _legs({"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}],
+                      "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
+                     {"steps": [_MSG], "terminal": _STOP}))], "WRITER")

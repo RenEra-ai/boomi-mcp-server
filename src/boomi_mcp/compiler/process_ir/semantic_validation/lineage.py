@@ -1997,6 +1997,11 @@ class LineageWalkV1(NamedTuple):
     #: off its own empty document. The child contract measures ``entry`` rows against an entry
     #: seed (`_caller_entry_document_reads`).
     nonstrict_document_reads: Tuple[Tuple[str, str, str, str], ...] = ()
+    #: #186 (architect evaluation 3): ``(cache ref, profile ref or None)`` for each profile of documents this
+    #: process's own writes — its children's included — may leave in a cache at a completion, read off the
+    #: same continuation `may_hold_at_exit` reads; a caller's seeded content is not this process's write and is
+    #: left out. The ref names the identity (`_ref_naming`); None is documents nothing proves a profile of.
+    cache_contents_at_exit: Tuple[Tuple[str, Optional[str]], ...] = ()
     #: #186: ``(pointer, property name, later-leg writer)`` for each NON-strict read of a process
     #: property unestablished there, in a process with no establishing writer of it — itself, or a
     #: called child's row passed on. The flag is the in-process later-leg rule's answer at the
@@ -3179,9 +3184,22 @@ def _walk_lineage(
 
         A child that may write one also ends any proof that a removal on this path left it
         holding this process's own documents alone (amendment 3 §7-§8).
+
+        A child whose cache writes are known states the profiles of what it may leave there
+        (`ChildEntryContractV1.cache_contents_at_exit`), so a later retrieve of the cache proves
+        what the twin's proves (#186, architect evaluation 3): adding documents of no proved
+        profile in their place made a sibling's P1 beside the caller's P1 an unproved mixture,
+        and admitted a restaged write of them into a P2 cache that the twin refuses. A cache it
+        may write but states no content for gets documents of no proved profile, as before.
         """
+        stated = {}
+        if contract is not None and (contract.state_known or contract.cache_writes_known):
+            for cache_ref, profile_ref in contract.cache_contents_at_exit:
+                stated.setdefault(cache_ref, set()).add(None if profile_ref is None else _identity(profile_ref))
         for ref in _caches_a_call_may_write(cache_refs, contract):
-            state = state.with_content(ref, None, legacy_source=False).with_cohort(ref, UNKNOWN_COHORT)
+            for identity in sorted(stated.get(ref) or {None}, key=lambda item: (item is not None, item or ())):
+                state = state.with_content(ref, identity, legacy_source=False)
+            state = state.with_cohort(ref, UNKNOWN_COHORT)
         return state
 
     def _judge_a_cached_property_row(node, semantic, state, leg, invalidated, cache_ref, name,
@@ -4311,6 +4329,9 @@ def _walk_lineage(
         unwaited_cache_writes=tuple(sorted(unwaited_cache_writes)),
         unwaited_writes_of_an_unknown_cache=unwaited_writes_of_an_unknown_cache,
         profile_proof=profile_proof,
+        cache_contents_at_exit=tuple(sorted(
+            {(fact[0], _ref_naming(fact[1])) for fact in returned.content if fact[2] is not None},
+            key=lambda row: (row[0], row[1] is not None, row[1] or ""))),
     )
 
 

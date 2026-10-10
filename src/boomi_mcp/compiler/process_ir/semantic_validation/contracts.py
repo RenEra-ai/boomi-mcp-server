@@ -509,6 +509,12 @@ class ChildEntryContractV1(_ValidationModel):
       together stored documents of that one other profile and of no other (architect evaluation
       2). A child whose own writes stored documents of no single proved profile retrieves
       documents nothing proves, whatever its callers store, and records no row.
+    - ``cache_contents_at_exit``: per cache a completion of the child may leave holding documents
+      its own writes stored there — its children's included — ``(cache ref, a profile ref naming
+      the documents' profile, or None where nothing proves one)`` (#186, architect evaluation 3).
+      Read only where the child's cache writes are known: a call then adds exactly these to the
+      cache, so a later retrieve of it is proved or unproved as the flattened twin's is; any other
+      call adds documents of no proved profile to every cache it may write.
     - ``cache_property_requirements``: per document property the child uses on
       documents it retrieved from such a cache, ``(cache ref, property name, request
       profile ref or None, bound)``, including a use the child's own writes satisfy. Every
@@ -615,6 +621,7 @@ class ChildEntryContractV1(_ValidationModel):
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_write_requirements: Tuple[Tuple[str, str, Optional[str]], ...] = ()
+    cache_contents_at_exit: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
     nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...] = ()
