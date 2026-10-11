@@ -572,33 +572,6 @@ def state_visibility_rows() -> Tuple["Mapping[str, object]", ...]:
     )
 
 
-#: #186 (Stage-2 review r11): the source a caller-dependent write names for documents a caller HANDED OVER, rather
-#: than retrieved from a cache. Never a cache ref.
-CALLER_ENTRY_SOURCE = "@entry"
-#: ... and the marker row `ChildEntryContractV1.cache_contents_at_exit` carries for each caller-dependent write, so a
-#: write whose own documents were none still names its source. Never a profile ref.
-CALLER_CONTENT_DEPENDS = "@depends"
-
-
-class _CallerDependent(NamedTuple):
-    """The provenance of documents an Add to Cache stored whose profile this process's CALLERS decide (#186).
-
-    Documents retrieved from a cache a caller's documents may share (``source`` names it; ``own`` is what this
-    process's own writes had stored there, the retrieve's `_Stream.retrieved_own`), or documents a caller handed
-    over (``source`` is `CALLER_ENTRY_SOURCE`). The fact's identity is what THIS walk proves of them; a call resolves
-    the row against what its caller stored (Stage-2 review r11). Kept IN the content fact, so a proved whole-cache
-    removal clears it with the fact and a join keeps every surviving alternative. Truthy exactly as the
-    ``legacy_source`` flag it stands in for (`holds_only_legacy_source_documents`).
-    """
-
-    source: str
-    own: FrozenSet
-    legacy: bool
-
-    def __bool__(self) -> bool:
-        return self.legacy
-
-
 class _State:
     """What is established at one program point.
 
@@ -678,7 +651,7 @@ class _State:
         return _State(self.document, self.execution | {key}, self.content, self.cohorts,
                       self.sealed, (self.proved | {key}) if proved else self.proved)
 
-    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool], depends=None) -> "_State":
+    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool]) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown).
 
         ``legacy_source`` says whether the write stored documents a legacy ``source`` endpoint
@@ -687,9 +660,6 @@ class _State:
         exemption by omission.
         """
         provenance = None if legacy_source is None else bool(legacy_source)
-        if depends is not None and provenance is not None:
-            # #186 (review r11): documents whose profile this process's callers decide — ``(source, own)``.
-            provenance = _CallerDependent(depends[0], frozenset(depends[1]), provenance)
         return _State(
             self.document, self.execution, self.content | {(cache_ref, identity, provenance)},
             self.cohorts, self.sealed, self.proved,
@@ -2027,11 +1997,6 @@ class LineageWalkV1(NamedTuple):
     #: off its own empty document. The child contract measures ``entry`` rows against an entry
     #: seed (`_caller_entry_document_reads`).
     nonstrict_document_reads: Tuple[Tuple[str, str, str, str], ...] = ()
-    #: #186 (architect evaluation 3): ``(cache ref, profile ref or None)`` for each profile of documents this
-    #: process's own writes — its children's included — may leave in a cache at a completion, read off the
-    #: same continuation `may_hold_at_exit` reads; a caller's seeded content is not this process's write and is
-    #: left out. The ref names the identity (`_ref_naming`); None is documents nothing proves a profile of.
-    cache_contents_at_exit: Tuple[Tuple[str, Optional[str]], ...] = ()
     #: #186: ``(pointer, property name, later-leg writer)`` for each NON-strict read of a process
     #: property unestablished there, in a process with no establishing writer of it — itself, or a
     #: called child's row passed on. The flag is the in-process later-leg rule's answer at the
@@ -2793,25 +2758,6 @@ def _walk_lineage(
             return None
         return min(ref for ref in index if _identity(ref) == identity)
 
-    def _exported_contents(content):
-        """`ChildEntryContractV1.cache_contents_at_exit` off a set of content facts (#186).
-
-        One ``(cache, profile ref or None, None)`` row per profile this process's own documents prove there. A write of
-        documents whose profile its callers decide (`_CallerDependent`) exports instead what each call resolves it
-        from: a `CALLER_CONTENT_DEPENDS` marker row naming its source, and one row per profile this process's own writes
-        had stored in that source (review r11). A caller's seeded content is not this process's write and is left out.
-        """
-        rows = set()
-        for cache_ref, identity, provenance in content:
-            if provenance is None:
-                continue
-            if isinstance(provenance, _CallerDependent):
-                rows.add((cache_ref, CALLER_CONTENT_DEPENDS, provenance.source))
-                rows.update((cache_ref, _ref_naming(own), provenance.source) for own in provenance.own)
-            else:
-                rows.add((cache_ref, _ref_naming(identity), None))
-        return rows
-
     def _requires(stream, identity, ref):
         """Record what a consumer needs of documents this process cannot prove.
 
@@ -3072,9 +3018,7 @@ def _walk_lineage(
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
-                # #186 (review r11): the caller's documents — their profile is the one each call hands over.
-                state.with_content(semantic.cache_ref, declared, legacy_source=legacy,
-                                   depends=(CALLER_ENTRY_SOURCE, ())),
+                state.with_content(semantic.cache_ref, declared, legacy_source=legacy),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -3111,12 +3055,9 @@ def _walk_lineage(
                     cache_write_requirement_refs.append(
                         (stream.caller_cache, UNKNOWN_PROFILE_REQUIREMENT, _ref_naming(_proved_profile(stream.retrieved_own))))
             # Add to Cache hands on no documents, as the document-emission authority
-            # states: the path ends here. Documents retrieved from a cache a caller's documents may share — the
-            # payload itself, since a rebuild drops `caller_cache` — carry that dependency in the fact (review r11).
+            # states: the path ends here.
             return (
-                state.with_content(semantic.cache_ref, identity, legacy_source=legacy,
-                                   depends=None if stream.caller_cache is None
-                                   else (stream.caller_cache, stream.retrieved_own or ())),
+                state.with_content(semantic.cache_ref, identity, legacy_source=legacy),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -3229,7 +3170,7 @@ def _walk_lineage(
 
         return state, stream, legacy
 
-    def _child_may_write_caches(state, contract, semantic=None, stream=None):
+    def _child_may_write_caches(state, contract):
         """What a child's cache writes may leave in this execution's caches.
 
         A child shares its caller's document caches (capture `cap184-shared-cache`),
@@ -3238,68 +3179,10 @@ def _walk_lineage(
 
         A child that may write one also ends any proof that a removal on this path left it
         holding this process's own documents alone (amendment 3 §7-§8).
-
-        A child whose cache writes are known states the profiles of what it may leave there
-        (`ChildEntryContractV1.cache_contents_at_exit`), so a later retrieve of the cache proves
-        what the twin's proves (#186, architect evaluation 3): adding documents of no proved
-        profile in their place made a sibling's P1 beside the caller's P1 an unproved mixture,
-        and admitted a restaged write of them into a P2 cache that the twin refuses. A cache it
-        may write but states no content for gets documents of no proved profile, as before.
-
-        Only a call that WAITS and ABORTS on the child's error reads them (Stage-2 review r9): the
-        contract states what a NORMAL completion may leave, and only then does nothing after the
-        call run unless the child completed — the gate `_awaited_guarantee` puts on a guarantee.
-        A call that continues after a failure, or does not wait, meets whatever the child's run
-        had stored when it stopped, so it adds documents of no proved profile, as before.
-
-        Nor does a cache the child may STILL be writing when it returns (wave integration review):
-        a write it handed to a call it did not wait for — its own or one inside a process it calls —
-        may land after the very removal its summary relies on. Such a cache, and every cache when a
-        pending write's cache is unknown, gets documents of no proved profile, as before.
         """
-        stated, dependent = {}, {}
-        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))
-        if (contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known)
-                and not contract.unwaited_writes_of_an_unknown_cache):
-            in_flight = set(contract.unwaited_cache_writes)
-            for cache_ref, profile_ref, source in contract.cache_contents_at_exit:
-                if cache_ref in in_flight:
-                    continue
-                if source is None:
-                    stated.setdefault(cache_ref, set()).add(None if profile_ref is None else _identity(profile_ref))
-                    continue
-                own = dependent.setdefault(cache_ref, {}).setdefault(source, set())
-                if profile_ref != CALLER_CONTENT_DEPENDS:
-                    own.add(None if profile_ref is None else _identity(profile_ref))
         for ref in _caches_a_call_may_write(cache_refs, contract):
-            facts = [(identity, None) for identity in stated.get(ref, ())]
-            for source, own in sorted(dependent.get(ref, {}).items()):
-                facts.append(_resolve_caller_dependent(state, stream, source, frozenset(own)))
-            for identity, depends in sorted(facts or [(None, None)], key=lambda item: (
-                    item[0] is not None, item[0] or (), item[1] is not None, repr(item[1]))):
-                state = state.with_content(ref, identity, legacy_source=False, depends=depends)
-            state = state.with_cohort(ref, UNKNOWN_COHORT)
+            state = state.with_content(ref, None, legacy_source=False).with_cohort(ref, UNKNOWN_COHORT)
         return state
-
-    def _resolve_caller_dependent(state, stream, source, own):
-        """``(identity, depends)`` of what a child stored from documents its callers decide, resolved at THIS call (#186).
-
-        Documents it retrieved from ``source``, beside the ``own`` profiles its own writes had stored there, are what
-        this process's writes there stored too: the retrieve's proof rule over both (`_proved_profile`) — and where
-        this process's callers' documents may be in ``source`` as well, the result depends on them again, carried on
-        with what this process stored there. Documents it was handed are the ones this call hands over (review r11).
-        """
-        if source == CALLER_ENTRY_SOURCE:
-            if stream is not None and stream.state == STREAM_CALLER_ENTRY:
-                return None, (CALLER_ENTRY_SOURCE, ())
-            return (stream.identity if stream is not None and stream.state == STREAM_KNOWN else None), None
-        here = state.content_of(source)
-        seen = here | own
-        identity = _proved_profile(seen) if seen else None
-        if _caller_documents_may_reach(state, source):
-            mine = frozenset(fact[1] for fact in state.content if fact[0] == source and fact[2] is not None)
-            return identity, (source, mine | own)
-        return identity, None
 
     def _judge_a_cached_property_row(node, semantic, state, leg, invalidated, cache_ref, name,
                                      request_profile_ref, bound, nonstrict=False):
@@ -3635,7 +3518,7 @@ def _walk_lineage(
                         ("repeat_cause", cause) for cause in sorted(causes)),
                     phase=_CAPABILITY_PHASE,
                 )
-        state = _child_may_write_caches(state, contract, semantic, stream)
+        state = _child_may_write_caches(state, contract)
         # Amendment 3 §8: a cache this child may have emptied is no longer established,
         # whatever filled it before the call — a later read of it would retrieve nothing.
         # Applied BEFORE the guarantee below, so a child that removes a cache and then
@@ -4428,9 +4311,6 @@ def _walk_lineage(
         unwaited_cache_writes=tuple(sorted(unwaited_cache_writes)),
         unwaited_writes_of_an_unknown_cache=unwaited_writes_of_an_unknown_cache,
         profile_proof=profile_proof,
-        cache_contents_at_exit=tuple(sorted(
-            _exported_contents(returned.content),
-            key=lambda row: (row[0], row[2] is not None, row[2] or "", row[1] is not None, row[1] or ""))),
     )
 
 

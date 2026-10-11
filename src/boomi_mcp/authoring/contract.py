@@ -3210,17 +3210,6 @@ def _child_call_state_oracle():
                         {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)})),
         ("child", legs({"steps": [read_cache(ref)], "terminal": put("target")}, {"steps": [message], "terminal": stop})),
     ]
-    # #186 (architect evaluation 3): the caller stores P1 documents through the first spelling, then calls a writer that
-    # stores P1 documents through `ref`, then a child restaging the cache into the UNKNOWN target. Only the identity rule
-    # lands the writer's stated content on the cache the caller filled, so the retrieve proves P1 and the call refuses
-    # it; through a second spelling the call would add documents of no proved profile and admit the mixture.
-    alias_cases["cache_contents_at_exit"] = lambda ref: [
-        ("parent", legs({"steps": [get_p1], "terminal": put()},
-                        {"steps": [], "terminal": call("writer", wait=True, abort_on_error=True)},
-                        {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)})),
-        ("writer", legs({"steps": [get_p1], "terminal": put(ref)}, {"steps": [message], "terminal": stop})),
-        ("child", legs({"steps": [read_cache()], "terminal": put("target")}, {"steps": [message], "terminal": stop})),
-    ]
     # The cohorts a caller stored land on the child of the cached-property chain, so that
     # chain answers for both facts; it is run once per fact so each has its own recorded
     # verdicts and neither rests on the other's.
@@ -3296,16 +3285,6 @@ def _child_call_state_oracle():
                 {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
             ), ChildEntryContractV1(process_ref="$ref:child", entry_form="scheduled",
                                     cache_write_requirements=(("$ref:" + ref, UNKNOWN_PROFILE_REQUIREMENT, None),))
-        if field == "cache_contents_at_exit":
-            # The child states P1 documents left in the cache through ``ref``; only the identity rule adds them to the
-            # cache this caller filled with P1 and then restages into the UNKNOWN target — a proved P1, refused.
-            return legs(
-                {"steps": [get_p1], "terminal": put()},
-                {"steps": [], "terminal": call("child", wait=True, abort_on_error=True)},
-                {"steps": [read_cache()], "terminal": put("target")},
-            ), ChildEntryContractV1(
-                process_ref="$ref:child", entry_form="scheduled", mutated_state=(cache_key,),
-                state_known=True, cache_writes_known=True, cache_contents_at_exit=(("$ref:" + ref, "$ref:p1", None),))
         if field == "required_read_leg_orders":
             # The child states a read of the cache through ``ref`` found before a later-leg writer;
             # only the identity rule matches that order to the requirement this caller cannot

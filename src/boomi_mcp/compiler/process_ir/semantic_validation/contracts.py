@@ -509,18 +509,6 @@ class ChildEntryContractV1(_ValidationModel):
       together stored documents of that one other profile and of no other (architect evaluation
       2). A child whose own writes stored documents of no single proved profile retrieves
       documents nothing proves, whatever its callers store, and records no row.
-    - ``cache_contents_at_exit``: per cache a completion of the child may leave holding documents
-      its own writes stored there — its children's included — ``(cache ref, a profile ref naming
-      the documents' profile or None where nothing proves one, None)`` (#186, architect evaluation
-      3). A write of documents whose profile the child's CALLERS decide names its source instead:
-      ``(cache ref, the marker "@depends", source)`` plus one ``(cache ref, profile ref or None,
-      source)`` per profile the child's own writes had stored in that source, where the source is
-      the cache the documents were retrieved from, or "@entry" for documents the caller handed
-      over; a call resolves it against what it stored there, or hands over (Stage-2 review r11).
-      Read only by a call that waits and aborts on the child's error, for a cache no write the child
-      left in flight may still reach: it then adds exactly these, so a later retrieve of the cache
-      is proved or unproved as the flattened twin's is; any other call adds documents of no proved
-      profile to every cache it may write.
     - ``cache_property_requirements``: per document property the child uses on
       documents it retrieved from such a cache, ``(cache ref, property name, request
       profile ref or None, bound)``, including a use the child's own writes satisfy. Every
@@ -627,7 +615,6 @@ class ChildEntryContractV1(_ValidationModel):
     required_writers: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_requirements: Tuple[Tuple[str, Optional[str]], ...] = ()
     cache_write_requirements: Tuple[Tuple[str, str, Optional[str]], ...] = ()
-    cache_contents_at_exit: Tuple[Tuple[str, Optional[str], Optional[str]], ...] = ()
     cache_property_requirements: Tuple[Tuple[str, str, Optional[str], bool], ...] = ()
     nonstrict_cached_reads: Tuple[Tuple[Optional[str], str], ...] = ()
     nonstrict_document_reads: Tuple[Tuple[str, Literal["inherits", "drops", "fresh"]], ...] = ()

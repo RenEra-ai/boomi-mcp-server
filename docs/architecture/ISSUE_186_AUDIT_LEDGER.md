@@ -199,6 +199,22 @@ profile, not a dependent one) — both carry the dependence; the cohort componen
 (resolution load-bearing) and `test_a_copy_of_caller_shared_documents_stating_its_own_proof_admits_the_consumer`
 (the dependence load-bearing); `test_a_proved_removal_ends_a_copys_caller_dependence` pins path sensitivity.
 
+**Correction batch 12 — removal of the child cache-content channel** (owner checkpoint decision, composite wave
+gate evaluation 3). `ChildEntryContractV1.cache_contents_at_exit` and everything that derives, carries or resolves
+it (`_child_may_write_caches`' stated contents, `_CallerDependent`, the export, its canonicalization and two-reference
+case, its lattice-table cell) are removed: `lineage.py`, `contracts.py`, `context.py` and `contract.py` are byte-equal
+to `e99b749`, and `process_ir_effects.py` differs from it only by the ARCH-186-e3-02 relation fix. A call again adds
+documents of no proved profile to every cache its child may write — the `e22b8fa` behaviour. Consequences, each
+measured: the findings of the channel (CDX-186-r9-01, CDX-186-w1-01, CDX-186-w1-02, CDX-186-r11-01, CDX-186-r11-02,
+CDX-186-r12-01, CDX-186-r12-02) cannot occur — their scenarios are judged exactly as at `e99b749`, and are #187's
+regression cells; ARCH-186-e3-01 is deferred to #187 and pinned by the limit witness
+`test_a_sibling_writers_stored_profile_is_a_recorded_limit` (286 exact, 8 fail-open, 34 + 8 writer-missing cells, the
+`e22b8fa` numbers); the two #184 deliberate refusals (B21A-OVR-01 `content`, SOUND-21a-02) are refused again, as at
+`e22b8fa`, and their #184 tests are restored unchanged. Kept: ARCH-186-e3-02's relation fix with its witness and two
+mutants, and ARCH-186-e3-03's root-control coverage. The structural-fix records above for
+`final-state-summary-read-past-a-continuing-failure` and the second structural fix of
+`child-contract-omits-cache-content` describe code this batch removes; they stay as history.
+
 ## Recorded residuals (measured; both sides refuse, or no faithful twin exists)
 
 - A sibling child's cache write behind a producer that may return nothing does not establish the cache
@@ -206,6 +222,9 @@ profile, not a dependent one) — both carry the dependence; the cohort componen
   adds `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING`, which the twin (one process, the write on an
   earlier leg) does not serve. 42 of the 336 sibling-writer cells; fail-closed and identical at
   `e22b8fa`.
+- (correction batch 12) Of those 42 writer-missing cells, 34 add the code beside the twin's codes and 8 serve it in
+  place of the twin's profile mismatch — both sides refusing; and the 8 sibling-writer cells the twin refuses are
+  admitted (ARCH-186-e3-01, deferred to #187). All identical at `e22b8fa`.
 - A sibling child's cache write crosses the call with an unknown property cohort: a later retrieve's
   strict or non-strict use of a property the caller and the sibling both stored is refused where the
   twin admits. Fail-closed, identical at `e22b8fa`.

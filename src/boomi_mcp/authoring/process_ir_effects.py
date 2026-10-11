@@ -1053,9 +1053,6 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         # process nothing derives, so a parent that filled that cache, called the child
         # and read the cache afterwards was admitted (correction batch 18).
         "removed_caches": tuple(sorted(removed)),
-        # #186 (architect evaluation 3): the profiles of what those writes may leave in the caches, gated as
-        # `mutated_state` is — a caller adds exactly these where it knows every cache this process writes.
-        "cache_contents_at_exit": tuple(walk.cache_contents_at_exit) if known or caches_known else (),
         # Amendment 1 rule 7: what a completion of this process may still be writing, off the
         # walk — its own unwaited calls, and what every child it calls says of itself.
         "unwaited_cache_writes": tuple(walk.unwaited_cache_writes),
@@ -1599,9 +1596,6 @@ _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "required_writers",
     "document_requirements",
     "unwaited_cache_writes",
-    # #186 (architect evaluation 3): read only where the child's cache writes are known, which a cycle
-    # member's never are (`_A_CYCLE_MEMBERS_CLAIMS`), so the carried union is never read for one.
-    "cache_contents_at_exit",
 )
 #: The row fields where a LARGER value is PERMISSIVE for a caller, so they are never carried as
 #: a union: inheriting a permissive fact from a partner whose own facts were derived against

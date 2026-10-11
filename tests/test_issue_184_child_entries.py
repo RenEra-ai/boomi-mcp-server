@@ -1427,7 +1427,3 @@ def _symbols():
 
 _FORWARDING_CASES["cache_write_requirements"] = ("CACHE_CHILD", _legs(
     {"steps": [_read_cache("$ref:CACHE")], "terminal": _put("$ref:CACHE_P2")}, {"steps": [_MSG], "terminal": _STOP}))
-# #186 (ARCH-186-e3-01): the profiles of what the child may leave in a cache — effect side, like `mutated_state`.
-_CONTRACT_FIELDS_NOT_FORWARDED["cache_contents_at_exit"] = (
-    "effect side: the profiles of what a completion of the child may leave in each cache it writes, added to "
-    "those caches by each call's own rule")

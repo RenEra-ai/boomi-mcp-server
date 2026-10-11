@@ -4612,26 +4612,20 @@ def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_u
     document, so the second call cannot prove the row.
 
     The admitted way out: the child empties CACHE2 first, on a leg the walk proves runs, so no
-    earlier call's document reaches its use.
-
-    #186 (ARCH-186-e3-01) retires the ``content`` cell: a child whose cache writes are known now
-    states the profiles of what it leaves there (`ChildEntryContractV1.cache_contents_at_exit`), so
-    the second call meets P2 documents, not an unknown possibility, and is admitted exactly as the
-    flattened graph is. The property cohort still crosses as unknown, so the other two stay refused."""
+    earlier call's document reaches its use."""
     fill, after, code, suffix = _SELF_FILLING_USES[use]
     use_leg = {"steps": [_READ2] + after, "terminal": _STOP}
     child = _legs(fill, use_leg)
-    at = lambda leg: [] if use == "content" else [(code, "/body/steps/0/legs/{0}/terminal".format(leg) + suffix)]  # noqa: E731
     twice = [("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
-    assert _both_routes(twice, "PARENT") == at(1)
+    assert _both_routes(twice, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
     assert _both_routes(twice, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(fill, use_leg, fill, use_leg))], "PARENT") == []
     writer_first = [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
                     ("WRITER", _legs(fill, _STORES_NOTHING)), ("CACHE_CHILD", child)]
-    assert _both_routes(writer_first, "PARENT") == at(1)
+    assert _both_routes(writer_first, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
     parent_fills_between = [("PARENT", _legs(_waited("CACHE_CHILD"), fill, _waited("CACHE_CHILD"))),
                             ("CACHE_CHILD", child)]
-    assert _both_routes(parent_fills_between, "PARENT") == at(2)
+    assert _both_routes(parent_fills_between, "PARENT") == [(code, "/body/steps/0/legs/2/terminal" + suffix)]
     empties_first = _legs(_EMPTIES2, fill, use_leg)
     for roots in ([("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", empties_first)],
                   [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
@@ -4650,26 +4644,16 @@ def test_a_middle_that_calls_a_cache_writer_before_a_self_filling_consumer_meets
     ends the requirement, so the middle's check meets that unknown content.
 
     The admitted ways out: the middle without the writer call, and a consumer that empties CACHE
-    first on a leg the walk proves runs.
-
-    #186 (ARCH-186-e3-01) retires this refusal: the writer's contract states the P2 it leaves in
-    CACHE (`ChildEntryContractV1.cache_contents_at_exit`), so the middle's check meets P2, not an
-    unknown possibility, and is admitted exactly as the flattened graph is."""
+    first on a leg the walk proves runs."""
     stores_p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
     consumes = {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP}
     caller_leg = stores_p2 if caller == "stores_the_profile" else _STORES_NOTHING
     roots = [("PARENT", _legs(caller_leg, _waited("MID"))),
              ("MID", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
              ("WRITER", _legs(stores_p2, _STORES_NOTHING)), ("CACHE_CHILD", _legs(stores_p2, consumes))]
-    assert _both_routes(roots, "MID") == []
+    assert _both_routes(roots, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
     assert _both_routes(roots, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(caller_leg, stores_p2, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == []
-    # Non-vacuity: a writer leaving P1 instead is refused at the middle's call, as the twin's consumer refuses it.
-    stores_p1 = {"steps": [_GETP1], "terminal": _PUT}
-    leaves_p1 = roots[:2] + [("WRITER", _legs(stores_p1, _STORES_NOTHING)), roots[3]]
-    assert _both_routes(leaves_p1, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
-    assert _errors([("PARENT", _legs(caller_leg, stores_p1, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == [
-        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/4/steps/1/map_ref")]
     without_the_writer = [("PARENT", _legs(caller_leg, _waited("MID"))),
                           ("MID", _legs(_STORES_NOTHING, _waited("CACHE_CHILD"))),
                           ("CACHE_CHILD", _legs(stores_p2, consumes))]
@@ -11303,34 +11287,30 @@ def _b186_sibling_writer_verdicts():
     return verdicts
 
 
-def test_a_sibling_writers_stored_profile_reaches_a_later_restage():
-    """ARCH-186-e3-01. A child whose cache writes are known states what it leaves there, so a later sibling's retrieve
-    proves what the twin's proves: the caller's P1 beside a sibling's P1, restaged into the P2 cache, is refused, where
-    adding documents of no proved profile for the sibling's write made it an unproved mixture and admitted it. Every
-    caller content times every sibling content times three targets, directly and through a forwarding middle: every
-    cell equals its twin but one pre-existing class, pinned by count — with no caller write, the composition adds
+def test_a_sibling_writers_stored_profile_is_a_recorded_limit():
+    """ARCH-186-e3-01, deferred to #187 (`blocked-by-mechanism`). A call adds documents of no proved profile to every
+    cache its child may write, so a sibling's P1 beside the caller's P1 makes an unproved mixture and the restage into
+    the P2 cache is admitted where the twin, holding the sibling's P1, refuses — the `e22b8fa` behaviour, pinned here
+    so it changes only deliberately. Over every caller content times every sibling content times three targets,
+    directly and through a forwarding middle: 286 cells exact; these 8 fail-open; and, where the caller stores nothing,
     `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` (a sibling's write behind a producer guarantees no establishment
-    across a call; fail-closed, identical at `e22b8fa`)."""
+    across a call) — beside the twin's codes in 34 cells, in place of the twin's profile mismatch in 8, both sides
+    refusing. The witness fails the moment #187 closes the limit."""
     missing = "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
     verdicts = _b186_sibling_writer_verdicts()
     exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
-    writer_missing = [cell for cell, (composed, twin) in verdicts.items()
-                      if composed != twin and not cell[1] and composed - twin == {missing} and twin <= composed]
-    assert len(verdicts) == 336 and len(exact) == 294 and len(writer_missing) == 42, [
-        (cell, verdicts[cell]) for cell in set(verdicts) - set(exact) - set(writer_missing)]
-    assert verdicts[("p2", ("p1",), ("p1",), "sibling")] == ({PROCESS_IR_SEMANTIC_PROFILE_MISMATCH},) * 2
-    assert verdicts[("p2", ("p1",), ("p1",), "grandchild")] == ({PROCESS_IR_SEMANTIC_PROFILE_MISMATCH},) * 2
-
-
-def test_a_sibling_writer_stating_no_content_admits_the_proved_restage(monkeypatch):
-    """Mutant: the call adds documents of no proved profile whatever the child states, as before evaluation 3 — the
-    caller's P1 beside the sibling's P1 is an unproved mixture, and the restage the twin refuses is admitted."""
-    _lineage_with_source(
-        monkeypatch,
-        "            for cache_ref, profile_ref, source in contract.cache_contents_at_exit:\n",
-        "            for cache_ref, profile_ref, source in ():\n")
-    verdicts = _b186_sibling_writer_verdicts()
-    assert verdicts[("p2", ("p1",), ("p1",), "sibling")] == (set(), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
+    beside = [cell for cell, (composed, twin) in verdicts.items()
+              if composed != twin and not cell[1] and composed - twin == {missing} and twin <= composed]
+    instead = [cell for cell, (composed, twin) in verdicts.items()
+               if not cell[1] and composed == {missing} and twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}]
+    fail_open = sorted(cell for cell, (composed, twin) in verdicts.items()
+                       if composed == set() and twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
+    assert len(verdicts) == 336 and (len(exact), len(beside), len(instead)) == (286, 34, 8), [
+        (cell, verdicts[cell]) for cell in set(verdicts) - set(exact) - set(beside) - set(instead) - set(fail_open)]
+    assert fail_open == sorted(
+        (target, (shared,), (shared,), depth)
+        for target, shared in (("p1", "p2"), ("p2", "p1"), ("unknown", "p1"), ("unknown", "p2"))
+        for depth in ("grandchild", "sibling")), fail_open
 
 
 def _b186_two_relation_roots(supplied):
@@ -11410,158 +11390,3 @@ def test_a_judged_site_exporting_the_walks_own_hint_exports_an_invalid_relation(
     _b186_with_judged_relations(monkeypatch, "            relations.setdefault((pointer, name), set()).add(hint)\n")
     with pytest.raises(ValidationError):
         _b186_composed(_b186_two_relation_roots(False)[0])
-
-
-#: The lattice table's cell and non-default witness for the content a child leaves (ARCH-186-e3-01): the PROFILE part
-#: of the content component's possible effect, which `cache_writes_known` alone carried as "some unknown profile".
-_BOUNDARY[("content", "possible_effect")] += ("cache_contents_at_exit",)
-_NON_DEFAULT["cache_contents_at_exit"] = ([
-    ("PARENT", _legs({"steps": [], "terminal": _call("WRITER", wait=True, abort_on_error=True)},
-                     {"steps": [_MSG], "terminal": _STOP})),
-    ("WRITER", _legs({"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}],
-                      "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
-                     {"steps": [_MSG], "terminal": _STOP}))], "WRITER")
-
-
-def _b186_continuing_call_roots(wait, abort_on_error):
-    """CDX-186-r9-01: CHILD stores P1 in CACHE, empties it on a leg the walk proves runs, then stores P2 — a normal
-    completion leaves only P2 — and PARENT, after calling it, appends P2 and retrieves CACHE into a P2 consumer."""
-    stores_p1 = {"steps": [_GETP1], "terminal": _PUT}
-    stores_p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
-    call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=wait, abort_on_error=abort_on_error)}
-    return [("PARENT", _legs(call, stores_p2, {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP})),
-            ("CACHE_CHILD", _legs(stores_p1, _EMPTIES_IT, stores_p2))]
-
-
-def test_a_childs_final_cache_contents_reach_only_a_call_that_waits_and_aborts():
-    """CDX-186-r9-01. The contract states what a NORMAL completion of the child leaves in a cache. Only a call that
-    waits and aborts on the child's error runs nothing after it unless the child completed, so only there does the
-    caller meet the child's P2 alone, admitted as the flattened twin is; a call that continues after a failure, or
-    does not wait, may meet the P1 a failed run left before its removal, and refuses the P2 consumer as before."""
-    refused = [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref")]
-    for wait, abort_on_error in ((True, True), (True, False), (False, True), (False, False)):
-        expected = [] if wait and abort_on_error else refused
-        assert _both_routes(_b186_continuing_call_roots(wait, abort_on_error), "PARENT") == expected, (wait, abort_on_error)
-
-
-def test_final_contents_read_past_a_continuing_failure_admit_the_consumer(monkeypatch):
-    """Mutant: the call reads the child's final contents whether or not it waits and aborts — a call continuing after
-    the child's failure admits the P2 consumer, though the failed run may have left P1 in the cache."""
-    _lineage_with_source(
-        monkeypatch,
-        "        if (contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known)\n",
-        "        if (contract is not None and (contract.state_known or contract.cache_writes_known)\n")
-    assert _both_routes(_b186_continuing_call_roots(True, False), "PARENT") == []
-
-
-def _b186_in_flight_roots():
-    """Wave integration review, finding 1: a waited, aborting CACHE_CHILD hands a P1 write to WRITER without waiting,
-    empties CACHE, then stores P2 — its normal completion leaves only P2, but WRITER may append P1 after the removal;
-    PARENT then appends P2 and retrieves CACHE into a P2 consumer."""
-    p1 = {"steps": [_GETP1], "terminal": _PUT}
-    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
-    return [("PARENT", _legs({"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}, p2,
-                             {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP})),
-            ("CACHE_CHILD", _legs({"steps": [], "terminal": _call("WRITER", wait=False, abort_on_error=False)},
-                                  _EMPTIES_IT, p2)),
-            ("WRITER", _legs(p1, {"steps": [_MSG], "terminal": _STOP}))]
-
-
-def _b186_caller_dependent_copy_roots():
-    """Wave integration review, finding 2: PARENT stores P1 in CACHE and calls CACHE_CHILD, which stores P2 there and
-    copies CACHE into unprofiled CACHE2 — the copy holds PARENT's P1 beside P2 — then appends P2 to CACHE2 and
-    retrieves it into a P2 consumer. The twin holds the child's legs in PARENT's Branch."""
-    p1 = {"steps": [_GETP1], "terminal": _PUT}
-    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
-    copy = {"steps": [_READ], "terminal": _PUT2}
-    tail = [{"steps": [_GETP1, _TO_P2], "terminal": _PUT2}, {"steps": [_READ2, _CONSUMES_P2], "terminal": _STOP}]
-    roots = [("PARENT", _legs(p1, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}, *tail)),
-             ("CACHE_CHILD", _legs(p2, copy))]
-    return roots, _legs(p1, p2, copy, *tail)
-
-
-def test_a_cache_the_child_may_still_be_writing_gets_no_stated_profile():
-    """Wave integration review, finding 1. A cache the child may still be writing when it returns — a write it handed
-    to a call it did not wait for — gets documents of no proved profile whatever its summary states: the pending P1
-    may land after the removal the summary relies on, so the P2 consumer is refused, as before batch 8."""
-    assert _both_routes(_b186_in_flight_roots(), "PARENT") == [
-        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref")]
-
-
-def test_a_summary_trusted_for_a_cache_still_being_written_admits_the_consumer(monkeypatch):
-    """Mutant: the stated contents are read for a cache the child may still be writing — the consumer is admitted."""
-    _lineage_with_source(monkeypatch, "                if cache_ref in in_flight:\n", "                if False:\n")
-    assert _both_routes(_b186_in_flight_roots(), "PARENT") == []
-
-
-def test_a_copy_of_caller_shared_documents_states_no_profile():
-    """Wave integration review, finding 2. What the child stores from documents its caller's may sit beside — handed
-    over, or retrieved from a cache a caller's documents may share — is proved without the caller's documents, so
-    the contract names the source it depends on and each call resolves it against what it stored there (Stage-2 review
-    r11): the caller's P1 rides in the copy, and the P2 consumer is refused, as the twin refuses it."""
-    roots, twin = _b186_caller_dependent_copy_roots()
-    refused = [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/3/steps/1/map_ref")]
-    assert _both_routes(roots, "PARENT") == refused
-    assert _errors([("PARENT", twin)], "PARENT") == [
-        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/4/steps/1/map_ref")]
-    assert ("$ref:CACHE2", lineage.CALLER_CONTENT_DEPENDS, "$ref:CACHE") in _row(roots, "PARENT", "CACHE_CHILD").cache_contents_at_exit
-
-
-def test_a_copy_of_caller_shared_documents_stating_its_own_proof_admits_the_consumer(monkeypatch):
-    """Mutant: the copy exports the profile the child proves alone — P2 — and the consumer is admitted."""
-    _lineage_with_source(
-        monkeypatch,
-        "                                   depends=None if stream.caller_cache is None\n",
-        "                                   depends=None if True\n")
-    roots, _twin = _b186_caller_dependent_copy_roots()
-    assert _both_routes(roots, "PARENT") == []
-
-
-def _b186_resolved_copy_roots(remove_between):
-    """Stage-2 review r11. PARENT stores P1 in CACHE and calls CACHE_CHILD, which copies CACHE into unprofiled CACHE2.
-    Finding 1 (``remove_between`` False): the child also stores P1 in CACHE first and PARENT, which stored P1 in CACHE2
-    too, restages CACHE2 into the P2 cache — every document is P1. Finding 2 (True): the child provably empties CACHE2
-    after the copy and stores its own P2 there; PARENT appends P2 and retrieves CACHE2 into a P2 consumer."""
-    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
-    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
-    p1 = lambda ref: {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put(ref)}  # noqa: E731
-    copy = {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE2")}
-    call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}
-    if not remove_between:
-        restage = {"steps": [get("$ref:CACHE2")], "terminal": put("$ref:CACHE_P2")}
-        return ([("PARENT", _legs(p1("$ref:CACHE"), p1("$ref:CACHE2"), call, restage)),
-                 ("CACHE_CHILD", _legs(p1("$ref:CACHE"), copy))],
-                _legs(p1("$ref:CACHE"), p1("$ref:CACHE2"), p1("$ref:CACHE"), copy, restage))
-    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT2}
-    empty = {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:CACHE2", "remove_all_documents": True}}
-    consume = {"steps": [_READ2, _CONSUMES_P2], "terminal": _STOP}
-    return ([("PARENT", _legs(p1("$ref:CACHE"), call, p2, consume)), ("CACHE_CHILD", _legs(copy, empty, p2))],
-            _legs(p1("$ref:CACHE"), copy, empty, p2, p2, consume))
-
-
-def test_a_caller_dependent_copy_is_resolved_against_what_the_caller_stored(monkeypatch):
-    """Stage-2 review r11, finding 1. The copy's profile is resolved at the call by the retrieve's proof rule over what
-    PARENT stored in CACHE beside the child's own P1: proved P1, so PARENT's restage into the P2 cache is refused, as
-    the twin refuses it — where exporting no profile for the copy left CACHE2 unproved and admitted it."""
-    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
-    roots, twin = _b186_resolved_copy_roots(False)
-    assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
-    assert _b186_composed(roots) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
-
-
-def test_a_caller_dependent_copy_resolved_to_no_profile_admits_the_restage(monkeypatch):
-    """Mutant: the call resolves a caller-dependent copy to no proved profile — CACHE2 is unproved and the restage the
-    twin refuses is admitted."""
-    _lineage_with_source(monkeypatch, "        identity = _proved_profile(seen) if seen else None\n",
-                         "        identity = None\n")
-    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
-    assert _b186_composed(_b186_resolved_copy_roots(False)[0]) == set()
-
-
-def test_a_proved_removal_ends_a_copys_caller_dependence():
-    """Stage-2 review r11, finding 2. The dependence lives in the content fact, so the child's proved removal of
-    CACHE2 clears it with the copy: the child leaves only its own P2, PARENT's P2 consumer is admitted, as the twin
-    admits it — where a walk-wide mark kept CACHE2 unproved after the removal and refused it."""
-    roots, twin = _b186_resolved_copy_roots(True)
-    assert _errors([("PARENT", twin)], "PARENT") == []
-    assert _both_routes(roots, "PARENT") == []
