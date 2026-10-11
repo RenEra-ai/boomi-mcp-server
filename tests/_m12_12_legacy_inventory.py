@@ -4525,6 +4525,11 @@ def parse_section_11_ids() -> Dict[str, List[str]]:
 # CLI
 # ======================================================================
 
+#: `tests/_revision_corpus.py::DEFER_ENV`, spelled again because this script runs standalone;
+#: `tests/test_revision_freshness_deferral.py` pins the two spellings together.
+_DEFER_ENV = "BOOMI_DEFER_REVISION_GATES"
+
+
 def _main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", metavar="PATH", default=None,
@@ -4532,16 +4537,18 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="compare the derivation to the committed baseline (default)")
     parser.add_argument("--emit-markdown", action="store_true",
-                        help="print the generated section-11 tables")
+                        help="print the generated section-11 tables (combinable with --write: "
+                             "both come from ONE derivation)")
     args = parser.parse_args(argv)
 
-    document = build_inventory()
+    if _DEFER_ENV in os.environ:
+        # This CLI is where deferred revision-freshness debt is PAID or checked, so it never
+        # runs under the deferral — refused whatever the value, before the derivation.
+        sys.stderr.write("refusing: %s is set; the inventory producer and its check run only "
+                         "strict. Unset it and re-run.\n" % _DEFER_ENV)
+        return 2
 
-    if args.emit_markdown:
-        for key, table in sorted(emit_section_11_markdown(document).items()):
-            print("\n<!-- generated: %s -->" % key)
-            print(table)
-        return 0
+    document = build_inventory()
 
     if args.write:
         target = Path(args.write)
@@ -4559,6 +4566,16 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
                      len(document.get("served_artifacts", []))))
         else:
             print("rebaselined %s\n%s" % (target, compare(document, previous).report()))
+
+    # After the write report, so a reader collecting from the first marker on never sees it.
+    # The rebaseline script asks for both at once: the tables and the JSON then describe one
+    # derivation instead of two, and the full served collection is paid once rather than twice.
+    if args.emit_markdown:
+        for key, table in sorted(emit_section_11_markdown(document).items()):
+            print("\n<!-- generated: %s -->" % key)
+            print(table)
+
+    if args.write or args.emit_markdown:
         return 0
 
     baseline = load_baseline()

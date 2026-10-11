@@ -28,6 +28,11 @@ if _TESTS not in sys.path:
     sys.path.insert(0, _TESTS)
 
 import _m12_12_legacy_inventory as inv  # noqa: E402
+import _revision_corpus  # noqa: E402 - the plugin `tests/conftest.py` registers
+
+
+#: Every transport verb the sentinel intercepted in this module, in order — swallowed or not.
+_TRANSPORT_HITS = []
 
 
 def _transport_bomb():
@@ -45,8 +50,15 @@ def _transport_bomb():
     """
     from boomi.services.component import ComponentService
 
-    def bomb(*args, **kwargs):
-        raise AssertionError("the #149 derivation reached the Boomi transport")
+    def sentinel(name):
+        def bomb(*args, **kwargs):
+            # RECORDED before it raises: a producer that catches the error and serves
+            # something else would otherwise leave no trace, and the only remaining
+            # witness would be its drifted text against the committed baseline — a
+            # freshness comparison, skipped under the revision-freshness deferral.
+            _TRANSPORT_HITS.append(name)
+            raise AssertionError("the #149 derivation reached the Boomi transport")
+        return bomb
 
     # DERIVED from the same vocabulary the census watches, plus the read verbs.
     # A hand-listed sentinel drifts from the watched set the moment the set
@@ -63,7 +75,7 @@ def _transport_bomb():
         not hasattr(ComponentService, "stream_request"), \
         "stream_request exists but is not sentinelled"
     for owner, name, _ in patches:
-        setattr(owner, name, bomb)
+        setattr(owner, name, sentinel(name))
     return patches
 
 
@@ -251,6 +263,12 @@ def test_the_vocabulary_is_derived_from_the_live_runtime(derived):
 
 def test_legacy_callers_and_process_kind_producers_match_the_baseline(derived, baseline):
     diff = inv.compare(derived, baseline)
+    # Every drift kind EXCEPT a served artifact's changed value, which is
+    # `test_served_artifacts_match_the_committed_values`'s — the freshness check the
+    # revision-freshness deferral skips. A moved revision changes only values, so
+    # leaving it here would fail this census freeze whenever that one is deferred;
+    # an artifact ADDED or REMOVED is reachability growth and stays here.
+    diff.artifact_changed = []
     assert diff.empty(), (
         "the legacy-reachability census drifted from the frozen #149 baseline.\n\n%s\n\n"
         "If this change is INTENTIONAL, rebaseline with\n"
@@ -2215,9 +2233,13 @@ def test_the_dormant_shared_writer_has_no_production_callers(derived):
 # Served artifacts
 # ======================================================================
 
-def test_served_artifacts_match_the_committed_values(derived, baseline):
+@pytest.mark.revision_freshness(artifact=_revision_corpus.INVENTORY_BASELINE)
+def test_served_artifacts_match_the_committed_values(derived):
+    import json
+
+    committed = json.loads(_revision_corpus.committed_artifact(_revision_corpus.INVENTORY_BASELINE))
     current = {a["artifact_id"]: a for a in derived["served_artifacts"]}
-    frozen = {a["artifact_id"]: a for a in baseline["served_artifacts"]}
+    frozen = {a["artifact_id"]: a for a in committed["served_artifacts"]}
     assert sorted(current) == sorted(frozen)
     changed = [aid for aid in sorted(current)
                if current[aid]["sha256"] != frozen[aid]["sha256"]]
@@ -2251,7 +2273,7 @@ def test_every_served_artifact_stores_its_exact_value(baseline):
             assert "legacy_excerpt" in artifact
 
 
-def test_the_served_collection_cannot_touch_boomi_transport(baseline):
+def test_the_served_collection_cannot_touch_boomi_transport(derived):
     """Every served producer must return without reaching the platform.
 
     The sentinel is already armed for the whole module (`transport_guard`);
@@ -2262,11 +2284,25 @@ def test_the_served_collection_cannot_touch_boomi_transport(baseline):
     artifact, so a probe that hit the sentinel produced an artifact of the same
     shape and the count matched. The probes no longer catch anything, and this
     node now checks hashes, so a sentinel hit fails the derivation outright.
+
+    The decisive check is the sentinel's own record: no transport verb was
+    intercepted during `derived` or during this collection. That holds whether a
+    producer let the error propagate or caught it and served something else, and it
+    reads nothing committed — the earlier comparison against the committed baseline
+    caught the swallowing case only through the served text drifting, which is the
+    freshness test's question (`test_served_artifacts_match_the_committed_values`)
+    and is skipped under the revision-freshness deferral (QA-134-r1-01). The hashes
+    are still compared with the module's own derivation, so a collection that is
+    not repeatable under the sentinel fails too.
     """
+    assert _TRANSPORT_HITS == [], "the derivation reached the transport: %s" % _TRANSPORT_HITS
     artifacts = inv.collect_served_artifacts()
+    assert _TRANSPORT_HITS == [], (
+        "a served producer reached the Boomi transport, and its error was swallowed "
+        "if the collection still returned: %s" % _TRANSPORT_HITS)
     assert artifacts, "the served collection produced nothing under the transport bomb"
 
-    frozen = {a["artifact_id"]: a["sha256"] for a in baseline["served_artifacts"]}
+    frozen = {a["artifact_id"]: a["sha256"] for a in derived["served_artifacts"]}
     current = {a["artifact_id"]: a["sha256"] for a in artifacts}
     assert current == frozen, (
         "the served collection differs under the transport bomb — a producer "
@@ -2280,11 +2316,19 @@ def test_the_served_collection_cannot_touch_boomi_transport(baseline):
 
 def test_the_transport_sentinel_is_actually_armed():
     """Guard the guard: prove the bomb fires, so the node above is not passing
-    because the patch silently missed its target."""
+    because the patch silently missed its target — and prove it RECORDS, so the
+    no-hits assertion above is not passing because nothing is ever written. The
+    witness's own hit is removed again, so the order the two nodes run in does
+    not matter."""
     from boomi.services.component import ComponentService
 
-    with pytest.raises(AssertionError, match="reached the Boomi transport"):
-        ComponentService.create_component(object(), "<Component/>")
+    before = len(_TRANSPORT_HITS)
+    try:
+        with pytest.raises(AssertionError, match="reached the Boomi transport"):
+            ComponentService.create_component(object(), "<Component/>")
+        assert _TRANSPORT_HITS[before:] == ["create_component"]
+    finally:
+        del _TRANSPORT_HITS[before:]
 
 
 def test_the_sdk_evidence_survives_the_transport_sentinel(derived, baseline):

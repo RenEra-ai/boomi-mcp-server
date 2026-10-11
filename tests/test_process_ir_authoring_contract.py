@@ -3684,27 +3684,30 @@ def _served_contract_page(query, selector=None):
     return payload.get("contract_page")
 
 
-def test_the_served_state_mappings_match_the_committed_fixture_by_value():
+def test_the_served_state_mappings_match_the_current_projection_by_value():
     """#517. Its declared default is `()`, so the default loop skipped it.
 
     Cross-page identity cannot see a row dropped identically at BOTH
     construction sites, and the declared-default comparison exempts any rule
     whose default is empty — so 14 published mappings could be deleted from the
-    served payload with the whole suite green. The committed contract snapshot
-    already pins every row; this asserts the SERVED payload against it, which is
-    the comparison that was missing.
+    served payload with the whole suite green. This asserts the SERVED payload,
+    through the MCP wrapper, against the revision payload's own mappings: the
+    comparison that was missing.
+
+    Against the CURRENT projection, not the committed snapshot. The snapshot pins
+    every row already (`test_the_whole_contract_is_frozen_in_a_committed_snapshot`,
+    whose payload carries `state_mappings`); comparing the served page to it here
+    too made this behaviour check fail whenever the snapshot was merely stale, and
+    a stale snapshot is the freshness check's to report.
     """
     import json
 
-    committed = json.loads(
-        (
-            Path(__file__).resolve().parent
-            / "fixtures"
-            / "authoring_contract"
-            / "process_ir_authoring_v1.contract.json"
-        ).read_text()
-    )["state_mappings"]
-    assert committed, "the fixture pins no mappings"
+    from boomi_mcp.authoring.process_ir_projection import (
+        process_ir_authoring_revision_payload,
+    )
+
+    current = process_ir_authoring_revision_payload()["state_mappings"]
+    assert current, "the revision payload publishes no mappings"
 
     def canonical(rows):
         # The page model sorts its mappings; the revision payload dumps them in
@@ -3714,7 +3717,7 @@ def test_the_served_state_mappings_match_the_committed_fixture_by_value():
 
     served = _served_contract_page({"category": "capability"})
     assert served is not None
-    assert canonical(served["state_mappings"]) == canonical(committed)
+    assert canonical(served["state_mappings"]) == canonical(current)
 
 
 def test_the_index_publishes_the_same_page_rules_as_the_page_itself():

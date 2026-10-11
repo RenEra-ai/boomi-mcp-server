@@ -25,6 +25,7 @@ no line that is not a table row may be added or removed.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import subprocess
@@ -35,6 +36,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "tests/fixtures/m12_12/legacy_reachability_inventory.json"
 DOCUMENT = ROOT / "docs/architecture/M12_COMPATIBILITY_INVENTORY.md"
 EMITTER = ROOT / "tests/_m12_12_legacy_inventory.py"
+
+#: `tests/_revision_corpus.py::DEFER_ENV`, spelled again because this script runs standalone;
+#: `tests/test_revision_freshness_deferral.py` pins the spellings together.
+DEFER_ENV = "BOOMI_DEFER_REVISION_GATES"
 
 #: Which generated block belongs under which section heading, in document order.
 #: A section may also hold hand-authored tables, which is why the match is by
@@ -64,11 +69,14 @@ def _run(*args: str) -> str:
     return result.stdout
 
 
-def _emitted_blocks() -> dict[str, list[str]]:
-    """The generated tables, with the emitter's own log lines removed."""
+def _emitted_blocks(output: str) -> dict[str, list[str]]:
+    """The generated tables in the emitter's ``output``, with its own log lines removed.
+
+    Everything before the first ``generated`` marker — the ``--write`` report included — is
+    outside every block, so only table rows under a marker are collected."""
     blocks: dict[str, list[str]] = {}
     key = None
-    for line in _run(str(EMITTER), "--emit-markdown").split("\n"):
+    for line in output.split("\n"):
         if re.match(r"^\[(INFO|WARN|ERROR)\]", line):
             continue
         marker = re.match(r"<!-- generated: (\S+) -->", line)
@@ -104,6 +112,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # A rebaseline is where deferred revision-freshness debt is PAID, so it never runs under
+    # the deferral — refused whatever the value, before anything is derived or written.
+    if DEFER_ENV in os.environ:
+        raise SystemExit(
+            f"refusing: {DEFER_ENV} is set; a rebaseline runs only strict. Unset it and re-run."
+        )
+
     before_doc = DOCUMENT.read_text()
     before_inventory = INVENTORY.read_text()
 
@@ -112,12 +127,16 @@ def main() -> int:
     # marker, a header that no longer matches, the orphan or prose grade — exited
     # nonzero with the two generated artifacts disagreeing about which tree they
     # describe. A rebaseline that half-succeeds is worse than one that fails.
+    #
+    # ONE emitter run produces both, from one derivation. Two runs (`--write`, then
+    # `--emit-markdown`) built the whole inventory twice — the served collection included —
+    # and let the JSON and the tables come from two separate derivations.
     with tempfile.TemporaryDirectory() as scratch:
         candidate = pathlib.Path(scratch) / INVENTORY.name
-        _run(str(EMITTER), "--write", str(candidate))
+        output = _run(str(EMITTER), "--write", str(candidate), "--emit-markdown")
         new_inventory = candidate.read_text()
 
-    blocks = _emitted_blocks()
+    blocks = _emitted_blocks(output)
     missing = [k for keys in PLACEMENT.values() for k in keys if k not in blocks]
     if missing:
         raise SystemExit(f"the emitter produced no block for: {missing}")

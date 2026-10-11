@@ -28,6 +28,8 @@ _src = str(Path(__file__).resolve().parent.parent / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
+import _revision_corpus  # noqa: E402 - the plugin `tests/conftest.py` registers
+
 from boomi_mcp.authoring.process_ir_projection import (  # noqa: E402
     AUTHORING_LAYERS,
     AUTHORING_LAYER_SEMANTIC_VALIDATOR,
@@ -710,11 +712,16 @@ def test_state_mappings_cover_every_projected_source_state():
 # §6 review: frozen evidence, and content pins for handwritten prose
 # ---------------------------------------------------------------------------
 
-_CONTRACT_FIXTURES = (
-    Path(__file__).resolve().parent / "fixtures" / "authoring_contract"
-)
+def _render_contract():
+    return json.dumps(
+        process_ir_authoring_revision_payload(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
 
 
+@pytest.mark.revision_freshness(artifact=_revision_corpus.CONTRACT_SNAPSHOT)
 def test_the_whole_contract_is_frozen_in_a_committed_snapshot():
     """What makes ``parity_pinned`` TRUE for prose.
 
@@ -732,34 +739,40 @@ def test_the_whole_contract_is_frozen_in_a_committed_snapshot():
     behavioural statement land in a diff a reviewer must approve, which is the
     reviewable property the label was asserting.
     """
-    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
-    rendered = json.dumps(
-        process_ir_authoring_revision_payload(),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
-    assert rendered == committed, (
+    committed = _revision_corpus.committed_artifact(_revision_corpus.CONTRACT_SNAPSHOT)
+    assert _render_contract() == committed, (
         "the served authoring contract changed. If the change is intended, "
-        "regenerate tests/fixtures/authoring_contract/"
-        "process_ir_authoring_v1.contract.json and review the diff — every line "
-        "of it is text an LLM caller will read."
-    )
-    # ...and it is deterministic across rebuilds, not merely stable in one read.
-    assert rendered == json.dumps(
-        process_ir_authoring_revision_payload(),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
+        "regenerate " + _revision_corpus.CONTRACT_SNAPSHOT + " and review the "
+        "diff — every line of it is text an LLM caller will read."
     )
 
 
+def test_the_served_contract_renders_identically_after_a_cache_reset():
+    """Deterministic across REBUILDS, not merely stable in one read.
+
+    This used to ride on the snapshot comparison above as its second assertion,
+    but it is behaviour, not freshness: it holds whether or not the committed
+    snapshot is current, so it must not be skipped with it. The projection's
+    entries are cached, so the cache is dropped between the two renders —
+    otherwise the second render reads the first one's objects back and the
+    comparison proves nothing.
+    """
+    from boomi_mcp.authoring.process_ir_projection import (
+        reset_process_ir_authoring_cache,
+    )
+
+    first = _render_contract()
+    reset_process_ir_authoring_cache()
+    assert _render_contract() == first
+
+
+@pytest.mark.revision_freshness(artifact=_revision_corpus.SCHEMA_SNAPSHOT)
 def test_the_page_schema_is_frozen_in_a_committed_snapshot():
     from boomi_mcp.models.process_ir_authoring import (
         process_ir_authoring_contract_v1_json_schema,
     )
 
-    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.schema.json").read_text()
+    committed = _revision_corpus.committed_artifact(_revision_corpus.SCHEMA_SNAPSHOT)
     rendered = json.dumps(
         process_ir_authoring_contract_v1_json_schema(),
         sort_keys=True,
@@ -1035,12 +1048,9 @@ def test_rewriting_the_label_legend_moves_the_revision():
     inverted = dict(payload, diagnostic_label_legend="A compile never returns "
                     "parser-authored wording.")
     assert json.dumps(inverted, sort_keys=True) != json.dumps(payload, sort_keys=True)
-
-    # ...and the committed snapshot carries it, so a rewrite lands in a diff.
-    committed = json.loads(
-        (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
-    )
-    assert committed["diagnostic_label_legend"] == DIAGNOSTIC_LABEL_LEGEND
+    # That the committed snapshot CARRIES the legend, so a rewrite lands in a diff, is
+    # `test_the_whole_contract_is_frozen_in_a_committed_snapshot`'s byte comparison of
+    # the whole payload — a freshness check, deferred with it, not repeated here.
 
 
 #: §8's own table syntax, pinned. The parser below refuses the document unless
@@ -1515,8 +1525,9 @@ def test_the_two_sentences_this_slice_falsified_are_gone():
     )
     assert "Admitted in the root sequence only" not in blob
     assert "A trailing cache_put belongs in a Branch path terminal" not in blob
-    # the committed golden must not carry them either
-    committed = (_CONTRACT_FIXTURES / "process_ir_authoring_v1.contract.json").read_text()
+    # the committed golden must not carry them either. Not a freshness comparison — it
+    # checks fixed strings, which a stale golden cannot reintroduce — so it stays active.
+    committed = (_revision_corpus.ROOT / _revision_corpus.CONTRACT_SNAPSHOT).read_text()
     assert "Admitted in the root sequence only" not in committed
     assert "A trailing cache_put belongs in a Branch path terminal" not in committed
 

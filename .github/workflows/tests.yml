@@ -92,6 +92,9 @@ jobs:
       BOOMI_LOCAL: "true"
       BOOMI_DOCS_ENABLED: "false"
       BOOMI_GOTCHAS_ENABLED: "false"
+      # BOOMI_DEFER_REVISION_GATES is deliberately NOT set, here or anywhere in CI:
+      # it is the development-only revision-freshness deferral, and the gate below
+      # refuses to run at all while it is present (REVISION_DEFERRAL_PRESENT).
 
     steps:
       # fetch-depth: 0 is REQUIRED, not tidiness. The scratch preflight resolves

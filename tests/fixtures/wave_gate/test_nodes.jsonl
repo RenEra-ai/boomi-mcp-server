@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14431, "minimum_collected": 14431, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14463, "minimum_collected": 14463, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -4921,7 +4921,7 @@
 {"kind": "test", "id": "pytest-004920", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_selector_vocabularies_are_derived_from_the_served_description", "state": "active"}
 {"kind": "test", "id": "pytest-004921", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_served_layer_labels_are_the_published_spelling", "state": "active"}
 {"kind": "test", "id": "pytest-004922", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_served_state_mappings_are_normalised_before_they_are_served", "state": "active"}
-{"kind": "test", "id": "pytest-004923", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_served_state_mappings_match_the_committed_fixture_by_value", "state": "active"}
+{"kind": "test", "id": "pytest-004923", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_served_state_mappings_match_the_committed_fixture_by_value", "state": "tombstone"}
 {"kind": "test", "id": "pytest-004924", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_source_fallback_actually_reaches_the_env_gated_tools", "state": "active"}
 {"kind": "test", "id": "pytest-004925", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_specialization_vocabularies_are_asked_of_the_runtime", "state": "active"}
 {"kind": "test", "id": "pytest-004926", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_strict_rule_reaches_the_surfaces_earlier_bugs_were_found_on", "state": "active"}
@@ -14529,3 +14529,36 @@
 {"kind": "test", "id": "pytest-014528", "node_id": "tests/test_issue_184_component_identity.py::test_the_served_mismatch_text_names_the_raw_xml_cause", "state": "active"}
 {"kind": "test", "id": "pytest-014529", "node_id": "tests/test_issue_184_component_identity.py::test_every_profile_consumer_has_an_unknown_disposition", "state": "active"}
 {"kind": "test", "id": "pytest-014530", "node_id": "tests/test_issue_184_component_identity.py::test_the_profile_sweep_refuses_a_new_consumer", "state": "active"}
+{"kind": "test", "id": "pytest-014531", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_deferred_run_records_an_absent_input_as_pending_and_keeps_every_other_refusal", "state": "active"}
+{"kind": "test", "id": "pytest-014532", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_deferred_run_still_refuses_a_funnel_reached_around_the_entry_points", "state": "active"}
+{"kind": "test", "id": "pytest-014533", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_deferred_run_carries_an_import_time_absent_input_as_pending", "state": "active"}
+{"kind": "test", "id": "pytest-014534", "node_id": "tests/test_issue_184_revision_corpus.py::test_a_child_run_is_strict_unless_its_caller_defers_it", "state": "active"}
+{"kind": "test", "id": "pytest-014535", "node_id": "tests/test_issue_184_revision_corpus.py::test_the_producer_refuses_to_run_under_the_deferral", "state": "active"}
+{"kind": "test", "id": "pytest-014536", "node_id": "tests/test_process_ir_authoring_contract.py::test_the_served_state_mappings_match_the_current_projection_by_value", "state": "active"}
+{"kind": "test", "id": "pytest-014537", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_served_contract_renders_identically_after_a_cache_reset", "state": "active"}
+{"kind": "test", "id": "pytest-014538", "node_id": "tests/test_revision_freshness_deferral.py::test_absent_is_strict_and_only_the_exact_value_1_defers", "state": "active"}
+{"kind": "test", "id": "pytest-014539", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014540", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[zero]", "state": "active"}
+{"kind": "test", "id": "pytest-014541", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[leading-space]", "state": "active"}
+{"kind": "test", "id": "pytest-014542", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[trailing-space]", "state": "active"}
+{"kind": "test", "id": "pytest-014543", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[true]", "state": "active"}
+{"kind": "test", "id": "pytest-014544", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[yes]", "state": "active"}
+{"kind": "test", "id": "pytest-014545", "node_id": "tests/test_revision_freshness_deferral.py::test_any_other_value_is_a_usage_error_rather_than_a_quiet_answer[zero-one]", "state": "active"}
+{"kind": "test", "id": "pytest-014546", "node_id": "tests/test_revision_freshness_deferral.py::test_every_spelling_of_the_variable_is_the_plugins", "state": "active"}
+{"kind": "test", "id": "pytest-014547", "node_id": "tests/test_revision_freshness_deferral.py::test_the_inventory_artifact_is_the_one_its_producers_write", "state": "active"}
+{"kind": "test", "id": "pytest-014548", "node_id": "tests/test_revision_freshness_deferral.py::test_a_marker_and_its_comparison_imply_each_other", "state": "active"}
+{"kind": "test", "id": "pytest-014549", "node_id": "tests/test_revision_freshness_deferral.py::test_a_deferred_run_skips_exactly_the_marked_tests", "state": "active"}
+{"kind": "test", "id": "pytest-014550", "node_id": "tests/test_revision_freshness_deferral.py::test_a_marker_naming_an_unknown_artifact_refuses_the_collection", "state": "active"}
+{"kind": "test", "id": "pytest-014551", "node_id": "tests/test_revision_freshness_deferral.py::test_every_freshness_artifact_is_compared_by_a_collected_test", "state": "active"}
+{"kind": "test", "id": "pytest-014552", "node_id": "tests/test_revision_freshness_deferral.py::test_the_inventory_producer_refuses_before_deriving_anything[one]", "state": "active"}
+{"kind": "test", "id": "pytest-014553", "node_id": "tests/test_revision_freshness_deferral.py::test_the_inventory_producer_refuses_before_deriving_anything[zero]", "state": "active"}
+{"kind": "test", "id": "pytest-014554", "node_id": "tests/test_revision_freshness_deferral.py::test_the_inventory_producer_refuses_before_deriving_anything[empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014555", "node_id": "tests/test_revision_freshness_deferral.py::test_the_rebaseline_refuses_before_deriving_or_writing_anything[one]", "state": "active"}
+{"kind": "test", "id": "pytest-014556", "node_id": "tests/test_revision_freshness_deferral.py::test_the_rebaseline_refuses_before_deriving_or_writing_anything[zero]", "state": "active"}
+{"kind": "test", "id": "pytest-014557", "node_id": "tests/test_revision_freshness_deferral.py::test_the_rebaseline_refuses_before_deriving_or_writing_anything[empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014558", "node_id": "tests/test_wave_gate.py::test_the_revision_deferral_switch_is_refused_whatever_its_value[one]", "state": "active"}
+{"kind": "test", "id": "pytest-014559", "node_id": "tests/test_wave_gate.py::test_the_revision_deferral_switch_is_refused_whatever_its_value[zero]", "state": "active"}
+{"kind": "test", "id": "pytest-014560", "node_id": "tests/test_wave_gate.py::test_the_revision_deferral_switch_is_refused_whatever_its_value[empty]", "state": "active"}
+{"kind": "test", "id": "pytest-014561", "node_id": "tests/test_wave_gate.py::test_every_gate_subcommand_refuses_the_revision_deferral_switch[ci]", "state": "active"}
+{"kind": "test", "id": "pytest-014562", "node_id": "tests/test_wave_gate.py::test_every_gate_subcommand_refuses_the_revision_deferral_switch[wave]", "state": "active"}
+{"kind": "test", "id": "pytest-014563", "node_id": "tests/test_wave_gate.py::test_no_gate_child_inherits_the_revision_deferral_switch", "state": "active"}

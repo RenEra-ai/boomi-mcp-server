@@ -67,9 +67,15 @@ def _no_ambient_github_sha(monkeypatch):
     MANDATORY", so leaving it ambient while scrubbing the sha would make every
     `ci_mode` test fail on the runner only. Scrubbing one and not the other is
     the enumeration this fixture exists to replace.
+
+    The revision-freshness deferral switch joins them by the same rule: the gate
+    refuses it at entry, so a developer running this module under the deferral
+    would see every gate invocation here refuse for a reason unrelated to the test.
+    The witness that the gate DOES refuse it sets it explicitly.
     """
     monkeypatch.delenv("GITHUB_SHA", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv(gate.DEFER_ENV, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1622,6 +1628,46 @@ def test_manifests_announces_that_it_is_not_a_gate(tmp_path):
     assert "NOT A GATE" in stderr
 
 
+@pytest.mark.parametrize("value", ["1", "0", ""], ids=["one", "zero", "empty"])
+def test_the_revision_deferral_switch_is_refused_whatever_its_value(tmp_path, monkeypatch, value):
+    """A pytest run carrying the development-only deferral skips the revision-freshness
+    checks, so a gate run under it would certify what nothing checked. Its PRESENCE is
+    refused, whatever the value — `"0"` and empty included, so no spelling reads as "off" —
+    as the first stderr token, before git or pytest runs.
+
+    Non-vacuity: the SAME invocation on the same seeded repo is green without the variable,
+    so the refusal is the variable and not the fixture."""
+    repo, base = _seeded(tmp_path)
+    status, stderr = _manifests(repo, base)
+    assert status == 0, stderr
+
+    monkeypatch.setenv(gate.DEFER_ENV, value)
+    status, stderr = _manifests(repo, base)
+    assert status == 2, stderr
+    assert stderr.split()[0] == "REVISION_DEFERRAL_PRESENT", stderr
+    assert "NOT A GATE" not in stderr  # refused before the subcommand ran at all
+
+
+@pytest.mark.parametrize("argv", [["ci", "--base"], ["wave", "--base"]], ids=["ci", "wave"])
+def test_every_gate_subcommand_refuses_the_revision_deferral_switch(tmp_path, monkeypatch, argv):
+    """`ci` and `wave` run the suite, so they are where the refusal matters most; the check
+    sits in `main` ahead of `execute`, which every subcommand passes through. Neither gets far
+    enough to collect a test."""
+    repo, base = _seeded(tmp_path)
+    monkeypatch.setenv(gate.DEFER_ENV, "1")
+    status, stderr = _gate(repo, *argv, base)
+    assert status == 2, stderr
+    assert stderr.split()[0] == "REVISION_DEFERRAL_PRESENT", stderr
+
+
+def test_no_gate_child_inherits_the_revision_deferral_switch(tmp_path, monkeypatch):
+    """Defense in depth behind the entry refusal: the pytest and golden-render children are
+    built without the variable however their builders are reached."""
+    monkeypatch.setenv(gate.DEFER_ENV, "1")
+    assert gate.DEFER_ENV not in gate._pytest_env()
+    assert gate.DEFER_ENV not in gate._render_env(str(tmp_path), 0)
+
+
 def test_ci_requires_exactly_one_baseline_selector(tmp_path, monkeypatch, capsys):
     """``ci`` takes EXACTLY ONE of ``--base`` / ``--github-event`` (#171).
 
@@ -1919,6 +1965,10 @@ _LEDGER_NON_DIAGNOSTIC_TOKENS = frozenset({
     # environment variables the harnesses SET, never diagnostics the gate can emit.
     "FORCE_COLOR",
     "PY_COLORS",
+    # The development-only revision-freshness deferral switch. The #134 ledger names it
+    # recording the slice that introduced it — an environment variable the gate REFUSES
+    # (with `REVISION_DEFERRAL_PRESENT`, the diagnostic), never a diagnostic itself.
+    "BOOMI_DEFER_REVISION_GATES",
     # Collector trailer keywords, not diagnostics: the ledger quotes `STATUS:` and
     # `SCOPE:` when recording a review round's attestation.
     "SCOPE",

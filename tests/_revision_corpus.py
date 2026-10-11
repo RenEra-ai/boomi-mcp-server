@@ -86,6 +86,47 @@ EXTRA_COVERED_ENV = "REVISION_CORPUS_EXTRA_COVERED"
 #: only this producer and its witness (CDX-184-r9-R5-BOOTSTRAP-NOCONSUMER-05).
 BOOTSTRAP_ENV = "REVISION_CORPUS_BOOTSTRAP"
 
+#: The DEVELOPMENT-ONLY revision-freshness deferral (`docs/architecture/
+#: COMPLETION_WORKFLOW_RULES.md`). Exactly ``"1"`` turns it on for a LOCAL pytest run, and
+#: then only two things change: an input absent from the packaged corpus is recorded as
+#: pending debt instead of failing its test, and every ``revision_freshness`` test is
+#: skipped. Unreadable corpora, unrecordable inputs and probe bypasses stay fatal, and the
+#: revision-movement sweeps keep running. Any other value is refused, and so is the switch
+#: under CI. Every gate and producer entry point refuses it whatever its value, and
+#: :func:`child_env` drops it, so a strict child never inherits a parent's deferral.
+#: Spelled again in `scripts/wave_gate.py`, `scripts/rebaseline_m12_12_inventory.py` and
+#: `tests/_m12_12_legacy_inventory.py` (no import path between them);
+#: `tests/test_revision_freshness_deferral.py` pins every spelling to this one.
+DEFER_ENV = "BOOMI_DEFER_REVISION_GATES"
+
+#: The marker a freshness test carries: ``@pytest.mark.revision_freshness(artifact=...)``.
+FRESHNESS_MARKER = "revision_freshness"
+
+#: The committed DERIVED artifacts a freshness test compares the current source against —
+#: closed, and pinned both ways: every marker names one of these, every one of these is
+#: named by a collected marker, and a marked test must read its artifact through
+#: :func:`committed_artifact` (the only sanctioned reader), which refuses a read the running
+#: test's marker does not declare. The packaged corpus is NOT here: its freshness is this
+#: plugin's own absent-input check, not a test.
+CONTRACT_SNAPSHOT = "tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json"
+SCHEMA_SNAPSHOT = "tests/fixtures/authoring_contract/process_ir_authoring_v1.schema.json"
+INVENTORY_BASELINE = "tests/fixtures/m12_12/legacy_reachability_inventory.json"
+FRESHNESS_ARTIFACTS = frozenset({CONTRACT_SNAPSHOT, SCHEMA_SNAPSHOT, INVENTORY_BASELINE})
+
+
+def deferral_requested(environ=None):
+    """Whether :data:`DEFER_ENV` defers this run. Absent is strict; ``"1"`` defers; ANY other
+    present value — empty, ``"0"``, ``"true"``, padded — is a usage error rather than a quiet
+    "off", so a typo can never be read as either answer."""
+    value = (os.environ if environ is None else environ).get(DEFER_ENV)
+    if value is None:
+        return False
+    if value != "1":
+        raise pytest.UsageError(
+            "{0}={1!r}: only the exact value '1' defers revision-freshness checks; unset it "
+            "for a strict run".format(DEFER_ENV, value))
+    return True
+
 #: The four funnels every recorded entry kind passes through, watched so a covered test
 #: cannot reach the behaviour BEHIND an entry point without the corpus seeing the input.
 #: Deliberately these four and not every compiler internal: a covered test that calls
@@ -177,6 +218,8 @@ class _Session:
         self.installed = []
         self.stats = {"calls": 0, "recorded": 0, "unrecordable": 0, "fidelity_mismatch": 0,
                       "probe_hits": 0, "absent": 0}
+        #: The deferral ledger of this run (:data:`DEFER_ENV`), or None for a strict run.
+        self.deferral = _DEFERRAL
 
     def digests(self):
         """The packaged inputs, read on the first recorded call. Read LATE: the session is
@@ -355,7 +398,13 @@ class _Session:
                 self._problem("the packaged corpus could not be read ({0})".format(self.unreadable))
             elif key not in packaged:
                 self.stats["absent"] += 1
-                self._problem("a {0} input absent from the packaged corpus ({1})".format(kind, key[:16]))
+                if self.deferral is not None:
+                    # DEFERRED, never dropped: the debt is listed in the run's summary, and
+                    # only THIS branch defers — the unreadable branch above stays first, so a
+                    # corpus that cannot be read is never mistaken for one that lacks inputs.
+                    self.deferral["pending"].setdefault((kind, key[:16]), self.node)
+                else:
+                    self._problem("a {0} input absent from the packaged corpus ({1})".format(kind, key[:16]))
         if error is not None:
             raise error
         return result
@@ -466,6 +515,92 @@ class _InstallOnImport:
 
 _SESSION = None
 
+#: ``{"skipped": [(node id, artifact)], "pending": {(kind, digest prefix): node id}}`` while
+#: :data:`DEFER_ENV` defers this run; None for a strict one. Set per configured session, and
+#: read by the terminal summary, which runs after ``pytest_sessionfinish`` has dropped
+#: :data:`_SESSION`.
+_DEFERRAL = None
+#: The test item running now, for :func:`committed_artifact`; and the ``(node id, artifact)``
+#: reads it served, which a marked test must have made by the end of its call phase.
+_CURRENT_ITEM = None
+_FRESHNESS_READS = set()
+
+
+def pytest_configure(config):
+    global _DEFERRAL
+    config.addinivalue_line(
+        "markers",
+        "{0}(artifact): compares a committed derived artifact against the current source; "
+        "skipped only by {1}=1 (see tests/_revision_corpus.py)".format(FRESHNESS_MARKER, DEFER_ENV))
+    _FRESHNESS_READS.clear()
+    _DEFERRAL = None
+    if not deferral_requested():
+        return
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        raise pytest.UsageError(
+            "{0} is set under CI. The deferral is for local development runs only; CI is "
+            "where every revision-freshness check is enforced.".format(DEFER_ENV))
+    _DEFERRAL = {"skipped": [], "pending": {}}
+
+
+def _declared_artifact(item):
+    marker = item.get_closest_marker(FRESHNESS_MARKER)
+    return None if marker is None else marker.kwargs.get("artifact")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Every marker must name a :data:`FRESHNESS_ARTIFACTS` member — refused at collection,
+    in strict runs too — and a deferred run skips exactly the marked tests."""
+    for item in items:
+        if item.get_closest_marker(FRESHNESS_MARKER) is None:
+            continue
+        artifact = _declared_artifact(item)
+        if artifact not in FRESHNESS_ARTIFACTS:
+            raise pytest.UsageError(
+                "{0}: @pytest.mark.{1} must name artifact= one of {2}, not {3!r}".format(
+                    item.nodeid, FRESHNESS_MARKER, sorted(FRESHNESS_ARTIFACTS), artifact))
+        if _DEFERRAL is not None:
+            _DEFERRAL["skipped"].append((item.nodeid, artifact))
+            item.add_marker(pytest.mark.skip(
+                reason="deferred by {0}=1 — a strict run is owed before closure".format(DEFER_ENV)))
+
+
+def committed_artifact(artifact):
+    """The committed text of a freshness ``artifact`` — the ONE sanctioned read of it from a
+    freshness test, and half of the marker's two-way bind: it refuses unless the running test
+    is marked ``revision_freshness(artifact=<this artifact>)``, and the marked test fails if
+    it never asks (:func:`pytest_runtest_makereport`). A dropped or swapped marker therefore
+    fails, where comparing the SET of marked artifacts could not see one of two markers on the
+    same artifact go missing."""
+    item = _CURRENT_ITEM
+    declared = None if item is None else _declared_artifact(item)
+    if artifact not in FRESHNESS_ARTIFACTS or declared != artifact:
+        raise AssertionError(
+            "{0} reads the committed {1!r} but is marked {2}(artifact={3!r}); a freshness "
+            "comparison must declare the artifact it reads, so the deferral skips exactly "
+            "it".format(getattr(item, "nodeid", "<no running test>"), artifact,
+                        FRESHNESS_MARKER, declared))
+    _FRESHNESS_READS.add((item.nodeid, artifact))
+    return (ROOT / artifact).read_text(encoding="utf-8")
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """A deferred run says so in its terminal summary — ahead of pytest's own short summary
+    and final count line — and lists what it did not check."""
+    if _DEFERRAL is None:
+        return
+    write = terminalreporter.write_line
+    terminalreporter.write_sep("=", "PARTIAL VALIDATION — NOT COMPLETION", yellow=True, bold=True)
+    write("{0}=1 deferred revision freshness. A strict run (variable unset) is owed before "
+          "this tree can close anything.".format(DEFER_ENV))
+    for node, artifact in _DEFERRAL["skipped"]:
+        write("  freshness check skipped: {0} ({1})".format(node, artifact))
+    for (kind, digest), node in sorted(_DEFERRAL["pending"].items()):
+        write("  not yet in the packaged corpus (deferred): a {0} input ({1}) from {2}".format(
+            kind, digest, node))
+    if _DEFERRAL["pending"]:
+        write("Regenerate the packaged corpus before closure: " + producer_command())
+
 
 def _session():
     """The instrumentation, created the first time a covered module is reached.
@@ -541,6 +676,8 @@ def pytest_make_collect_report(collector):
 
 
 def pytest_runtest_setup(item):
+    global _CURRENT_ITEM
+    _CURRENT_ITEM = item
     path = _item_path(item)
     session = _session() if path in covered() else _SESSION
     if session is not None:
@@ -564,7 +701,12 @@ def _refusal(problems):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
+    global _CURRENT_ITEM
     outcome = yield
+    if call.when == "call":
+        _unread_freshness(item, outcome.get_result())
+    elif call.when == "teardown":
+        _CURRENT_ITEM = None
     session = _SESSION
     if session is None or not session.active:
         return
@@ -579,6 +721,20 @@ def pytest_runtest_makereport(item, call):
         del report.wasxfail
     report.outcome = "failed"
     report.longrepr = message if not report.longrepr else "{0}\n\n{1}".format(report.longrepr, message)
+
+
+def _unread_freshness(item, report):
+    """The other half of the marker's bind: a marked test that PASSED without reading its
+    declared artifact through :func:`committed_artifact` compared nothing the marker claims,
+    so the deferral would be skipping a check that is not there. It fails."""
+    artifact = _declared_artifact(item)
+    if artifact is None or not report.passed or (item.nodeid, artifact) in _FRESHNESS_READS:
+        return
+    report.outcome = "failed"
+    report.longrepr = (
+        "{0} is marked {1}(artifact={2!r}) but never read it through "
+        "_revision_corpus.committed_artifact; mark only a test that compares that "
+        "artifact".format(item.nodeid, FRESHNESS_MARKER, artifact))
 
 
 def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - `session` is pytest's
@@ -642,6 +798,10 @@ def child_env(env=None):
     child.pop(HARVEST_OUT_ENV, None)
     child.pop(EXTRA_COVERED_ENV, None)
     child.pop(BOOTSTRAP_ENV, None)
+    # A child is STRICT unless its caller asks otherwise in `env`: the witnesses that expect
+    # an absent input to fail would otherwise pass under a developer's deferral, and the
+    # producer would harvest with the guard's verdicts deferred.
+    child.pop(DEFER_ENV, None)
     child.pop("PYTHONHASHSEED", None)
     child.update({
         "PYTHONPATH": os.pathsep.join([str(SRC), str(ROOT / "tests")]),
@@ -724,6 +884,12 @@ def _main(argv):
                         help="run the covered tests with the guard on, as the suite does")
     parser.add_argument("--corpus", default=str(CORPUS_PATH), help="where --write writes")
     options = parser.parse_args(argv)
+    if DEFER_ENV in os.environ:
+        # Refused whatever its value, before anything runs: the producer and its check are
+        # where deferred debt is PAID, so they never run under the deferral.
+        sys.stderr.write("refusing: {0} is set; the corpus producer and its check run only "
+                         "strict. Unset it and re-run.\n".format(DEFER_ENV))
+        return 2
     if options.write:
         ok, report = write(corpus_path=options.corpus)
         print(report)

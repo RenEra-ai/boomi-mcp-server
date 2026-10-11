@@ -99,7 +99,7 @@ asserts those flags stay absent.
 |---|---|
 | 0 | every requested check passed |
 | 1 | a validation ran and failed (pytest, floor, required node, golden bytes, nondeterminism, fingerprint, hygiene) |
-| 2 | a contract failure that prevented validation from being meaningful (usage, baseline, bootstrap, manifest format, manifest transition) |
+| 2 | a contract failure that prevented validation from being meaningful (usage, baseline, bootstrap, manifest format, manifest transition, the revision-freshness deferral switch present) |
 
 Every failure prints a stable diagnostic code as the first stderr token:
 
@@ -120,7 +120,7 @@ Every failure prints a stable diagnostic code as the first stderr token:
 `PYTEST_PASSED_BELOW_FLOOR` · `GOLDEN_FILE_MISSING` · `GOLDEN_FILE_UNDECLARED` ·
 `GOLDEN_RENDER_FAILED` · `GOLDEN_OUTPUT_SET_MISMATCH` · `GOLDEN_NONDETERMINISTIC` ·
 `GOLDEN_MISMATCH` · `PLAN_FINGERPRINT_PENDING` · `PLAN_FINGERPRINT_MISMATCH` ·
-`WORKTREE_DIRTY` · `GATE_DIAGNOSTIC_UNRENDERABLE`
+`WORKTREE_DIRTY` · `REVISION_DEFERRAL_PRESENT` · `GATE_DIAGNOSTIC_UNRENDERABLE`
 
 The last of those is emitted, never raised: if the gate fails and its own
 diagnostic cannot be rendered, the fallback line still leads with a documented
@@ -747,6 +747,16 @@ by `MANIFEST_FLOOR_INVALID` at parse time. Minting codes that alias existing one
 would make the roster longer without making the gate stricter, and
 `test_every_diagnostic_code_the_gate_can_raise_is_documented` keeps the roster and
 the code in exact agreement in both directions.
+
+One variable is deliberately NOT set, and its presence is refused:
+**`BOOMI_DEFER_REVISION_GATES`**, the development-only revision-freshness deferral
+(`docs/architecture/COMPLETION_WORKFLOW_RULES.md`). A pytest run carrying it skips the
+`revision_freshness` comparisons and records absent corpus inputs as pending instead of
+failing, so a gate run under it would certify what nothing checked. Every subcommand
+refuses it with `REVISION_DEFERRAL_PRESENT` before running git or pytest, whatever its
+value, and the pytest and golden-render children are built without it. The corpus plugin
+refuses it on its own under `GITHUB_ACTIONS=true`, so a direct pytest step in a workflow
+cannot carry it either.
 
 ## 10. What enforces the check, and what does not
 

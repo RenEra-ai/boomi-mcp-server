@@ -53,7 +53,7 @@ EXIT CODES
    nondeterminism, fingerprint, worktree hygiene)
 2  a contract failure that prevented validation from being meaningful (usage,
    event/baseline resolution, bootstrap eligibility, manifest format, manifest
-   transition)
+   transition, the revision-freshness deferral switch present)
 
 Every failure prints one stable diagnostic code as the first stderr token so
 CI logs and the negative-test matrix can key on it rather than on prose.
@@ -164,6 +164,15 @@ EMIT_ONLY_CODES = (
     "GATE_DIAGNOSTIC_UNRENDERABLE",     # emitted when the diagnostic cannot render
     "SCRATCH_FOREIGN_ENTRIES",          # raised via `_ScratchDir.refusal_code`
 )
+
+#: The development-only revision-freshness deferral switch. A pytest run that carries it
+#: skips the freshness checks and treats an absent corpus input as pending debt, so a gate
+#: run under it would certify a tree nothing has checked. Its PRESENCE — any value — is
+#: refused before the gate does anything (`REVISION_DEFERRAL_PRESENT`), and the pytest and
+#: golden-render children never inherit it. The authority for the name is
+#: `tests/_revision_corpus.py::DEFER_ENV`; `tests/test_revision_freshness_deferral.py` pins
+#: this spelling to it.
+DEFER_ENV = "BOOMI_DEFER_REVISION_GATES"
 
 
 # --------------------------------------------------------------------------
@@ -1385,6 +1394,9 @@ def _pytest_env():
     # measured). PY_COLORS takes precedence over FORCE_COLOR in pytest's terminal writer.
     env["PY_COLORS"] = "0"
     env.pop("PYTHONHASHSEED", None)
+    # Already refused at entry; dropped again so no child can run deferred however this
+    # function is reached.
+    env.pop(DEFER_ENV, None)
     return env
 
 
@@ -1411,6 +1423,7 @@ def _render_env(repo, hashseed, tmpdir=None):
     )
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONHASHSEED"] = str(hashseed)
+    env.pop(DEFER_ENV, None)  # as in `_pytest_env`
     if tmpdir is not None:
         # Per-pass temporary space, so the two children cannot meet through it.
         for key in ("TMPDIR", "TEMP", "TMP"):
@@ -3592,6 +3605,7 @@ DIAGNOSTIC_CODES = frozenset({
     "PYTEST_SKIPPED_EXCEEDS_CAP",
     "PYTEST_SUMMARY_AMBIGUOUS",
     "PYTEST_SUMMARY_UNPARSEABLE",
+    "REVISION_DEFERRAL_PRESENT",
     "SCRATCH_CONTAINMENT_UNPROVEN",
     "SCRATCH_FOREIGN_ENTRIES",
     "SCRATCH_INSIDE_REPO",
@@ -3692,6 +3706,15 @@ def main(argv=None):
             raise _contract(
                 "GATE_USAGE_INVALID",
                 "{0}; see --help".format(exc.detail),
+            )
+        # Every subcommand passes here, and nothing has run yet: no git, no pytest.
+        if DEFER_ENV in os.environ:
+            raise _contract(
+                "REVISION_DEFERRAL_PRESENT",
+                "{0} is set (to {1!r}); it is a development-only deferral of the "
+                "revision-freshness checks and the gate refuses it whatever its "
+                "value. Unset it and re-run.".format(
+                    DEFER_ENV, os.environ[DEFER_ENV]),
             )
         return execute(args)
     except GateFailure as failure:

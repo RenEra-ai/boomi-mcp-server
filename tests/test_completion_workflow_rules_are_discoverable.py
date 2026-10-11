@@ -30,6 +30,10 @@ def test_the_tracked_rules_document_exists_and_carries_the_rule():
     # while keeping the file fails here rather than passing on an empty shell.
     assert "capped at THREE evaluations" in text, "the architect cap is missing"
     assert "CRITICAL" in text, "the cap's non-relaxation carve-outs are missing"
+    # The revision-freshness deferral, by its variable and by the line that keeps a deferred
+    # run from being read as completion.
+    assert "BOOMI_DEFER_REVISION_GATES=1" in text, "the deferral rule is missing"
+    assert "PARTIAL VALIDATION" in text, "the deferral's partial-validation bound is missing"
 
 
 def test_the_tracked_readme_names_the_rules_document():

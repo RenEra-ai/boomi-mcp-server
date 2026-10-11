@@ -2028,6 +2028,96 @@ def test_a_covered_test_whose_input_the_corpus_lacks_fails_and_only_that_test(tm
     assert producer.run_pytest([str(module)]).returncode == 0
 
 
+_PROBE_BYPASS = textwrap.dedent('''
+    from boomi_mcp.compiler.process_ir import pipeline
+
+    def test_a_funnel_reached_with_no_entry_point_on_the_stack():
+        try:
+            pipeline._compile_parsed_process_ir_v1(None)
+        except Exception:
+            pass
+''')
+
+
+def _failed_names(output):
+    return sorted(line.split("::", 1)[1].split(" ")[0]
+                  for line in output.splitlines() if line.startswith("FAILED "))
+
+
+def test_a_deferred_run_records_an_absent_input_as_pending_and_keeps_every_other_refusal(tmp_path):
+    """The development-only deferral (`DEFER_ENV`) defers ONE verdict: an input absent from
+    the packaged corpus is listed as pending debt instead of failing its test. The same module
+    as the strict witness above: the absent-input test now PASSES and is named in the summary;
+    the unrecordable one still FAILS, so the deferral cannot launder an input the corpus could
+    never replay; and the strict refusal's wording appears nowhere."""
+    producer = _producer()
+    module = tmp_path / "test_guard_witness.py"
+    module.write_text(_MODULE.format(doc=_DOC), encoding="utf-8")
+    process = producer.run_pytest([str(module)], env={producer.EXTRA_COVERED_ENV: str(module),
+                                                      producer.DEFER_ENV: "1"})
+    output = process.stdout + process.stderr
+    assert _failed_names(output) == ["test_an_input_the_corpus_cannot_record"], output
+    assert "cannot record exactly" in output
+    assert "absent from the packaged corpus" not in output
+    assert "PARTIAL VALIDATION — NOT COMPLETION" in output
+    pending = [line for line in output.splitlines()
+               if "not yet in the packaged corpus (deferred): a validate input" in line]
+    assert len(pending) == 1 and "test_a_graph_no_covered_test_exercises" in pending[0], output
+    assert producer.producer_command() in output
+    assert "2 passed" in output and process.returncode == 1
+
+
+def test_a_deferred_run_still_refuses_a_funnel_reached_around_the_entry_points(tmp_path):
+    """A probe bypass is not missing corpus coverage — no regeneration can record what never
+    passed an entry point — so the deferral leaves it fatal."""
+    producer = _producer()
+    module = tmp_path / "test_probe_witness.py"
+    module.write_text(_PROBE_BYPASS, encoding="utf-8")
+    for deferral in ({}, {producer.DEFER_ENV: "1"}):
+        process = producer.run_pytest([str(module)], env={producer.EXTRA_COVERED_ENV: str(module),
+                                                          **deferral})
+        output = process.stdout + process.stderr
+        assert _failed_names(output) == ["test_a_funnel_reached_with_no_entry_point_on_the_stack"], output
+        assert "with no entry point on the stack" in output and process.returncode == 1
+
+
+def test_a_deferred_run_carries_an_import_time_absent_input_as_pending(tmp_path):
+    """The module-body path (`pytest_make_collect_report`) defers the same way as a test body:
+    the strict run fails (as `test_an_entry_point_call_made_while_a_covered_module_is_imported_
+    is_checked` pins); the deferred one passes and lists the input."""
+    producer = _producer()
+    module = tmp_path / "test_import_absent.py"
+    module.write_text(_IMPORT_MODULE.format(doc=_DOC), encoding="utf-8")
+    covered = {producer.EXTRA_COVERED_ENV: str(module)}
+    assert producer.run_pytest([str(module)], env=covered).returncode == 1
+    process = producer.run_pytest([str(module)], env={**covered, producer.DEFER_ENV: "1"})
+    output = process.stdout + process.stderr
+    assert process.returncode == 0, output
+    assert "not yet in the packaged corpus (deferred): a validate input" in output
+    assert "test_import_absent.py" in output
+
+
+def test_a_child_run_is_strict_unless_its_caller_defers_it(monkeypatch):
+    """`child_env` drops a developer's deferral: every witness here that expects an absent
+    input to FAIL runs a child, and an inherited deferral would turn each of them green. A
+    caller that wants a deferred child says so in `env`, as the witnesses above do."""
+    producer = _producer()
+    monkeypatch.setenv(producer.DEFER_ENV, "1")
+    assert producer.DEFER_ENV not in producer.child_env()
+    assert producer.child_env({producer.DEFER_ENV: "1"})[producer.DEFER_ENV] == "1"
+
+
+def test_the_producer_refuses_to_run_under_the_deferral(monkeypatch, capsys):
+    """The producer and its check are where deferred debt is PAID: refused whatever the value,
+    before any harvest starts (a harvest is the 12-minute run the deferral exists to skip)."""
+    producer = _producer()
+    for value in ("1", "0", ""):
+        monkeypatch.setenv(producer.DEFER_ENV, value)
+        for argv in (["--check"], ["--write", "--corpus", os.devnull]):
+            assert producer._main(argv) == 2
+            assert "refusing: " + producer.DEFER_ENV in capsys.readouterr().err
+
+
 _IMPORT_MODULE = textwrap.dedent('''
     from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
     from boomi_mcp.compiler.process_ir.semantic_validation.pipeline import validate_process_ir

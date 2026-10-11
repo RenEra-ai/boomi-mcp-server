@@ -22,7 +22,9 @@ Standing amendments that must govern EVERY slice, in every checkout, are therefo
 
 - **[`docs/architecture/COMPLETION_WORKFLOW_RULES.md`](docs/architecture/COMPLETION_WORKFLOW_RULES.md)**
   — currently: the architect implementation review is capped at three evaluations, and the closing
-  gate is a clean Stage-2 commit review over the third round's correction.
+  gate is a clean Stage-2 commit review over the third round's correction; and the development-only
+  revision-freshness deferral (`BOOMI_DEFER_REVISION_GATES=1`), which local correction runs may use
+  and every gate, CI run and artifact producer refuses.
 
 If you are setting up a local `CLAUDE.md` or `AGENTS.md`, it must cite that file;
 `tests/test_completion_workflow_rules_are_discoverable.py` enforces the citation whenever those
