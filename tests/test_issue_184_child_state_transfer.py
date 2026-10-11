@@ -11449,8 +11449,69 @@ def test_final_contents_read_past_a_continuing_failure_admit_the_consumer(monkey
     the child's failure admits the P2 consumer, though the failed run may have left P1 in the cache."""
     _lineage_with_source(
         monkeypatch,
-        '        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))\n'
-        '        if contract is not None and waits_and_aborts',
-        '        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))\n'
-        '        if contract is not None')
+        "        if (contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known)\n",
+        "        if (contract is not None and (contract.state_known or contract.cache_writes_known)\n")
     assert _both_routes(_b186_continuing_call_roots(True, False), "PARENT") == []
+
+
+def _b186_in_flight_roots():
+    """Wave integration review, finding 1: a waited, aborting CACHE_CHILD hands a P1 write to WRITER without waiting,
+    empties CACHE, then stores P2 — its normal completion leaves only P2, but WRITER may append P1 after the removal;
+    PARENT then appends P2 and retrieves CACHE into a P2 consumer."""
+    p1 = {"steps": [_GETP1], "terminal": _PUT}
+    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
+    return [("PARENT", _legs({"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}, p2,
+                             {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP})),
+            ("CACHE_CHILD", _legs({"steps": [], "terminal": _call("WRITER", wait=False, abort_on_error=False)},
+                                  _EMPTIES_IT, p2)),
+            ("WRITER", _legs(p1, {"steps": [_MSG], "terminal": _STOP}))]
+
+
+def _b186_caller_dependent_copy_roots():
+    """Wave integration review, finding 2: PARENT stores P1 in CACHE and calls CACHE_CHILD, which stores P2 there and
+    copies CACHE into unprofiled CACHE2 — the copy holds PARENT's P1 beside P2 — then appends P2 to CACHE2 and
+    retrieves it into a P2 consumer. The twin holds the child's legs in PARENT's Branch."""
+    p1 = {"steps": [_GETP1], "terminal": _PUT}
+    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
+    copy = {"steps": [_READ], "terminal": _PUT2}
+    tail = [{"steps": [_GETP1, _TO_P2], "terminal": _PUT2}, {"steps": [_READ2, _CONSUMES_P2], "terminal": _STOP}]
+    roots = [("PARENT", _legs(p1, {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}, *tail)),
+             ("CACHE_CHILD", _legs(p2, copy))]
+    return roots, _legs(p1, p2, copy, *tail)
+
+
+def test_a_cache_the_child_may_still_be_writing_gets_no_stated_profile():
+    """Wave integration review, finding 1. A cache the child may still be writing when it returns — a write it handed
+    to a call it did not wait for — gets documents of no proved profile whatever its summary states: the pending P1
+    may land after the removal the summary relies on, so the P2 consumer is refused, as before batch 8."""
+    assert _both_routes(_b186_in_flight_roots(), "PARENT") == [
+        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref")]
+
+
+def test_a_summary_trusted_for_a_cache_still_being_written_admits_the_consumer(monkeypatch):
+    """Mutant: the stated contents are read for a cache the child may still be writing — the consumer is admitted."""
+    _lineage_with_source(monkeypatch, "                if cache_ref in in_flight:\n", "                if False:\n")
+    assert _both_routes(_b186_in_flight_roots(), "PARENT") == []
+
+
+def test_a_copy_of_caller_shared_documents_states_no_profile():
+    """Wave integration review, finding 2. What the child stores from documents its caller's may sit beside — handed
+    over, or retrieved from a cache a caller's documents may share — is proved without the caller's documents, so
+    the contract states no profile for it: the caller's P1 rides in the copy, and the P2 consumer is refused, as the
+    twin refuses it."""
+    roots, twin = _b186_caller_dependent_copy_roots()
+    refused = [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/3/steps/1/map_ref")]
+    assert _both_routes(roots, "PARENT") == refused
+    assert _errors([("PARENT", twin)], "PARENT") == [
+        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/4/steps/1/map_ref")]
+    assert ("$ref:CACHE2", None) in _row(roots, "PARENT", "CACHE_CHILD").cache_contents_at_exit
+
+
+def test_a_copy_of_caller_shared_documents_stating_its_own_proof_admits_the_consumer(monkeypatch):
+    """Mutant: the copy exports the profile the child proves alone — P2 — and the consumer is admitted."""
+    _lineage_with_source(
+        monkeypatch,
+        "            if stream.caller_cache is not None:\n                caller_dependent_caches.add(semantic.cache_ref)\n",
+        "            pass\n")
+    roots, _twin = _b186_caller_dependent_copy_roots()
+    assert _both_routes(roots, "PARENT") == []

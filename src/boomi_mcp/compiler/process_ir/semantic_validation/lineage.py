@@ -2085,6 +2085,11 @@ def _walk_lineage(
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
     #: #186: the rows `LineageWalkV1.cache_write_requirement_refs` returns.
     cache_write_requirement_refs: List[Tuple[str, str, Optional[str]]] = []
+    #: #186 (wave integration review): the caches a write of documents whose profile its CALLERS decide may have
+    #: filled — documents a caller handed over, or ones retrieved from a cache a caller's documents may share. What
+    #: this walk proves of them is proved without those callers' documents, so `cache_contents_at_exit` states no
+    #: profile for them.
+    caller_dependent_caches: set = set()
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
     unestablished_cached_keys: List[Tuple[str, str, str, Optional[str], bool]] = []
@@ -3022,6 +3027,7 @@ def _walk_lineage(
             )):
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
+            caller_dependent_caches.add(semantic.cache_ref)
             return (
                 state.with_content(semantic.cache_ref, declared, legacy_source=legacy),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
@@ -3059,6 +3065,8 @@ def _walk_lineage(
                 if semantic.cache_ref in unknown_caches:
                     cache_write_requirement_refs.append(
                         (stream.caller_cache, UNKNOWN_PROFILE_REQUIREMENT, _ref_naming(_proved_profile(stream.retrieved_own))))
+            if stream.caller_cache is not None:
+                caller_dependent_caches.add(semantic.cache_ref)
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
             return (
@@ -3197,11 +3205,20 @@ def _walk_lineage(
         call run unless the child completed — the gate `_awaited_guarantee` puts on a guarantee.
         A call that continues after a failure, or does not wait, meets whatever the child's run
         had stored when it stopped, so it adds documents of no proved profile, as before.
+
+        Nor does a cache the child may STILL be writing when it returns (wave integration review):
+        a write it handed to a call it did not wait for — its own or one inside a process it calls —
+        may land after the very removal its summary relies on. Such a cache, and every cache when a
+        pending write's cache is unknown, gets documents of no proved profile, as before.
         """
         stated = {}
         waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))
-        if contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known):
+        if (contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known)
+                and not contract.unwaited_writes_of_an_unknown_cache):
+            in_flight = set(contract.unwaited_cache_writes)
             for cache_ref, profile_ref in contract.cache_contents_at_exit:
+                if cache_ref in in_flight:
+                    continue
                 stated.setdefault(cache_ref, set()).add(None if profile_ref is None else _identity(profile_ref))
         for ref in _caches_a_call_may_write(cache_refs, contract):
             for identity in sorted(stated.get(ref) or {None}, key=lambda item: (item is not None, item or ())):
@@ -4337,7 +4354,8 @@ def _walk_lineage(
         unwaited_writes_of_an_unknown_cache=unwaited_writes_of_an_unknown_cache,
         profile_proof=profile_proof,
         cache_contents_at_exit=tuple(sorted(
-            {(fact[0], _ref_naming(fact[1])) for fact in returned.content if fact[2] is not None},
+            {(fact[0], _ref_naming(fact[1])) for fact in returned.content if fact[2] is not None}
+            | {(ref, None) for ref in caller_dependent_caches},
             key=lambda row: (row[0], row[1] is not None, row[1] or ""))),
     )
 
