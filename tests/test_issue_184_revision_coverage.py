@@ -205,7 +205,7 @@ def _perturbations():
         ("lineage", "_keys_established_anywhere"): lambda prepared, capabilities=None: frozenset(),
         # --- lineage: the lattice's transfer and meet -----------------------------------
         ("lineage", "_State.with_write"): lambda self, key, proved=False: self,
-        ("lineage", "_State.with_content"): lambda self, cache_ref, identity, legacy_source=False: self,
+        ("lineage", "_State.with_content"): lambda self, cache_ref, identity, legacy_source=False, depends=None: self,
         ("lineage", "_State.with_cohort"): lambda self, cache_ref, cohort, ours=False: self,
         ("lineage", "_State.cohorts_of"): lambda self, cache_ref: frozenset(),
         ("lineage", "_State.without_content"): lambda self, cache_ref: self,

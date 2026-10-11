@@ -3305,7 +3305,7 @@ def _child_call_state_oracle():
                 {"steps": [read_cache()], "terminal": put("target")},
             ), ChildEntryContractV1(
                 process_ref="$ref:child", entry_form="scheduled", mutated_state=(cache_key,),
-                state_known=True, cache_writes_known=True, cache_contents_at_exit=(("$ref:" + ref, "$ref:p1"),))
+                state_known=True, cache_writes_known=True, cache_contents_at_exit=(("$ref:" + ref, "$ref:p1", None),))
         if field == "required_read_leg_orders":
             # The child states a read of the cache through ``ref`` found before a later-leg writer;
             # only the identity rule matches that order to the requirement this caller cannot

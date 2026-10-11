@@ -11327,8 +11327,8 @@ def test_a_sibling_writer_stating_no_content_admits_the_proved_restage(monkeypat
     caller's P1 beside the sibling's P1 is an unproved mixture, and the restage the twin refuses is admitted."""
     _lineage_with_source(
         monkeypatch,
-        "            for cache_ref, profile_ref in contract.cache_contents_at_exit:\n",
-        "            for cache_ref, profile_ref in ():\n")
+        "            for cache_ref, profile_ref, source in contract.cache_contents_at_exit:\n",
+        "            for cache_ref, profile_ref, source in ():\n")
     verdicts = _b186_sibling_writer_verdicts()
     assert verdicts[("p2", ("p1",), ("p1",), "sibling")] == (set(), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
 
@@ -11497,21 +11497,71 @@ def test_a_summary_trusted_for_a_cache_still_being_written_admits_the_consumer(m
 def test_a_copy_of_caller_shared_documents_states_no_profile():
     """Wave integration review, finding 2. What the child stores from documents its caller's may sit beside — handed
     over, or retrieved from a cache a caller's documents may share — is proved without the caller's documents, so
-    the contract states no profile for it: the caller's P1 rides in the copy, and the P2 consumer is refused, as the
-    twin refuses it."""
+    the contract names the source it depends on and each call resolves it against what it stored there (Stage-2 review
+    r11): the caller's P1 rides in the copy, and the P2 consumer is refused, as the twin refuses it."""
     roots, twin = _b186_caller_dependent_copy_roots()
     refused = [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/3/steps/1/map_ref")]
     assert _both_routes(roots, "PARENT") == refused
     assert _errors([("PARENT", twin)], "PARENT") == [
         (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/4/steps/1/map_ref")]
-    assert ("$ref:CACHE2", None) in _row(roots, "PARENT", "CACHE_CHILD").cache_contents_at_exit
+    assert ("$ref:CACHE2", lineage.CALLER_CONTENT_DEPENDS, "$ref:CACHE") in _row(roots, "PARENT", "CACHE_CHILD").cache_contents_at_exit
 
 
 def test_a_copy_of_caller_shared_documents_stating_its_own_proof_admits_the_consumer(monkeypatch):
     """Mutant: the copy exports the profile the child proves alone — P2 — and the consumer is admitted."""
     _lineage_with_source(
         monkeypatch,
-        "            if stream.caller_cache is not None:\n                caller_dependent_caches.add(semantic.cache_ref)\n",
-        "            pass\n")
+        "                                   depends=None if stream.caller_cache is None\n",
+        "                                   depends=None if True\n")
     roots, _twin = _b186_caller_dependent_copy_roots()
+    assert _both_routes(roots, "PARENT") == []
+
+
+def _b186_resolved_copy_roots(remove_between):
+    """Stage-2 review r11. PARENT stores P1 in CACHE and calls CACHE_CHILD, which copies CACHE into unprofiled CACHE2.
+    Finding 1 (``remove_between`` False): the child also stores P1 in CACHE first and PARENT, which stored P1 in CACHE2
+    too, restages CACHE2 into the P2 cache — every document is P1. Finding 2 (True): the child provably empties CACHE2
+    after the copy and stores its own P2 there; PARENT appends P2 and retrieves CACHE2 into a P2 consumer."""
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    p1 = lambda ref: {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put(ref)}  # noqa: E731
+    copy = {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE2")}
+    call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)}
+    if not remove_between:
+        restage = {"steps": [get("$ref:CACHE2")], "terminal": put("$ref:CACHE_P2")}
+        return ([("PARENT", _legs(p1("$ref:CACHE"), p1("$ref:CACHE2"), call, restage)),
+                 ("CACHE_CHILD", _legs(p1("$ref:CACHE"), copy))],
+                _legs(p1("$ref:CACHE"), p1("$ref:CACHE2"), p1("$ref:CACHE"), copy, restage))
+    p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT2}
+    empty = {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:CACHE2", "remove_all_documents": True}}
+    consume = {"steps": [_READ2, _CONSUMES_P2], "terminal": _STOP}
+    return ([("PARENT", _legs(p1("$ref:CACHE"), call, p2, consume)), ("CACHE_CHILD", _legs(copy, empty, p2))],
+            _legs(p1("$ref:CACHE"), copy, empty, p2, p2, consume))
+
+
+def test_a_caller_dependent_copy_is_resolved_against_what_the_caller_stored(monkeypatch):
+    """Stage-2 review r11, finding 1. The copy's profile is resolved at the call by the retrieve's proof rule over what
+    PARENT stored in CACHE beside the child's own P1: proved P1, so PARENT's restage into the P2 cache is refused, as
+    the twin refuses it — where exporting no profile for the copy left CACHE2 unproved and admitted it."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    roots, twin = _b186_resolved_copy_roots(False)
+    assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert _b186_composed(roots) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+
+
+def test_a_caller_dependent_copy_resolved_to_no_profile_admits_the_restage(monkeypatch):
+    """Mutant: the call resolves a caller-dependent copy to no proved profile — CACHE2 is unproved and the restage the
+    twin refuses is admitted."""
+    _lineage_with_source(monkeypatch, "        identity = _proved_profile(seen) if seen else None\n",
+                         "        identity = None\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    assert _b186_composed(_b186_resolved_copy_roots(False)[0]) == set()
+
+
+def test_a_proved_removal_ends_a_copys_caller_dependence():
+    """Stage-2 review r11, finding 2. The dependence lives in the content fact, so the child's proved removal of
+    CACHE2 clears it with the copy: the child leaves only its own P2, PARENT's P2 consumer is admitted, as the twin
+    admits it — where a walk-wide mark kept CACHE2 unproved after the removal and refused it."""
+    roots, twin = _b186_resolved_copy_roots(True)
+    assert _errors([("PARENT", twin)], "PARENT") == []
     assert _both_routes(roots, "PARENT") == []

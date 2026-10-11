@@ -284,7 +284,8 @@ def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
             "cache_write_requirements": tuple(
                 (canonical.get(item[0], item[0]),) + tuple(item[1:]) for item in row.cache_write_requirements),
             "cache_contents_at_exit": tuple(
-                (canonical.get(item[0], item[0]), item[1]) for item in row.cache_contents_at_exit),
+                (canonical.get(item[0], item[0]), item[1], None if item[2] is None else canonical.get(item[2], item[2]))
+                for item in row.cache_contents_at_exit),
             "removed_caches": tuple(canonical.get(ref, ref) for ref in row.removed_caches),
             "unwaited_cache_writes": tuple(
                 canonical.get(ref, ref) for ref in row.unwaited_cache_writes),

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14520, "minimum_collected": 14520, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14524, "minimum_collected": 14524, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14640,3 +14640,7 @@
 {"kind": "test", "id": "pytest-014639", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_trusted_for_a_cache_still_being_written_admits_the_consumer", "state": "active"}
 {"kind": "test", "id": "pytest-014640", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_copy_of_caller_shared_documents_states_no_profile", "state": "active"}
 {"kind": "test", "id": "pytest-014641", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_copy_of_caller_shared_documents_stating_its_own_proof_admits_the_consumer", "state": "active"}
+{"kind": "test", "id": "pytest-014642", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11555]", "state": "active"}
+{"kind": "test", "id": "pytest-014643", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_caller_dependent_copy_is_resolved_against_what_the_caller_stored", "state": "active"}
+{"kind": "test", "id": "pytest-014644", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_caller_dependent_copy_resolved_to_no_profile_admits_the_restage", "state": "active"}
+{"kind": "test", "id": "pytest-014645", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_proved_removal_ends_a_copys_caller_dependence", "state": "active"}
