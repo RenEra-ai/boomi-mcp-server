@@ -178,3 +178,7 @@ Stage-1.5 commit with this file.
 
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| Stage-1 QA | r1 8/8 PASS, r2 (QA-134-r1-01) 9/9 PASS, r3 (CDX-134-r1-01 support) 5/5 PASS — reports under `agents/reports/2026-10-10-issue-134-defer-revision-gates-r{1,2,3}.md` (gitignored) | `0d43974b` (r3 tree) |
+| Stage-2 repo Codex review | r2 `cdx-review.oDEsGW` CLEAN over `df677533..0d43974b` (archived) | `0d43974b` |
+| Composite wave gate (pre-rebase) | `scripts/wave_gate.py wave --base 46100b78…`: "non-KB suite green (14446 passed, 19 skipped, cap 30)", "80 active goldens deterministic and byte-exact", "plan fingerprint checked:2 case(s)", rc=0 | `88a35de` |
+| Rebase onto #186 + wave gate replay + scratch preflight | OWED — the slice lands after #186; the rebase is a mutation and re-owes the strict suite, a fix-only review of the rebase delta, the wave gate and `Python 3.11 non-KB` on `scratch/**` | — |
