@@ -199,3 +199,49 @@ def test_the_rebaseline_refuses_before_deriving_or_writing_anything(monkeypatch,
     monkeypatch.setenv(plugin.DEFER_ENV, value)
     with pytest.raises(SystemExit, match="refusing: " + plugin.DEFER_ENV):
         rebaseline.main()
+
+
+# ---------------------------------------------------------------------------
+# children: every variable the plugin reads comes from the caller (CDX-134-r1-01)
+# ---------------------------------------------------------------------------
+
+
+def test_the_plugin_reads_the_environment_only_through_its_funnel():
+    """`_env` refuses a name outside `PLUGIN_ENV`, and `child_env` drops every name in it — so
+    the invariant "a child inherits nothing the plugin reads" holds exactly when no read
+    bypasses `_env`. Read from the plugin's own syntax tree: `os.environ` may appear only in
+    `_env` (the funnel) and `child_env` (the copy that is then scrubbed)."""
+    import ast
+
+    tree = ast.parse((ROOT / "tests" / "_revision_corpus.py").read_text(encoding="utf-8"))
+    owners = {}
+    for function in ast.walk(tree):
+        if isinstance(function, ast.FunctionDef):
+            for node in ast.walk(function):
+                if (isinstance(node, ast.Attribute) and node.attr == "environ"
+                        and isinstance(node.value, ast.Name) and node.value.id == "os"):
+                    owners.setdefault(node.lineno, function.name)
+    every = {node.lineno for node in ast.walk(tree)
+             if isinstance(node, ast.Attribute) and node.attr == "environ"
+             and isinstance(node.value, ast.Name) and node.value.id == "os"}
+    assert every, "the scan found no os.environ access at all; it is not reading the plugin"
+    assert set(owners) == every, "os.environ outside any function: %s" % sorted(every - set(owners))
+    assert set(owners.values()) == {"_env", "child_env"}, owners
+    with pytest.raises(AssertionError, match="missing from PLUGIN_ENV"):
+        plugin._env("NOT_A_PLUGIN_VARIABLE")
+
+
+def test_a_deferred_child_runs_locally_even_when_its_parent_runs_under_ci(tmp_path, monkeypatch):
+    """The regression CDX-134-r1-01 reproduced: with ``GITHUB_ACTIONS=true`` in the PARENT (as on
+    the runner, where the gate's pytest inherits it), a witness that asks for a deferred child
+    was refused before collection. The child is now built local; and asking for CI explicitly
+    still gets the refusal, so the CI rule itself is untouched."""
+    module = tmp_path / "test_bind_witness.py"
+    module.write_text(_BIND, encoding="utf-8")
+    monkeypatch.setenv(plugin.CI_ENV, "true")
+    process = plugin.run_pytest([str(module)], env={plugin.DEFER_ENV: "1"})
+    output = process.stdout + process.stderr
+    assert "1 failed, 3 skipped" in output, output
+    refused = plugin.run_pytest([str(module)], env={plugin.DEFER_ENV: "1", plugin.CI_ENV: "true"})
+    assert refused.returncode == pytest.ExitCode.USAGE_ERROR, refused.stdout + refused.stderr
+    assert "is set under CI" in refused.stdout + refused.stderr

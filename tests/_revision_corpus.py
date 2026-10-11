@@ -114,11 +114,32 @@ INVENTORY_BASELINE = "tests/fixtures/m12_12/legacy_reachability_inventory.json"
 FRESHNESS_ARTIFACTS = frozenset({CONTRACT_SNAPSHOT, SCHEMA_SNAPSHOT, INVENTORY_BASELINE})
 
 
+#: GitHub Actions' own marker, read to refuse the deferral under CI.
+CI_ENV = "GITHUB_ACTIONS"
+
+#: EVERY environment variable this plugin reads or sets for a child — and so every one a child
+#: run must get from its CALLER (`child_env`'s ``env``), never inherit from the parent process.
+#: Inheriting them made each child's behaviour depend on where the parent happened to run: a
+#: developer's deferral turned strict witnesses green (#134 DSN-03), and CI's
+#: ``GITHUB_ACTIONS=true`` refused every deliberately deferred witness (CDX-134-r1-01). The
+#: plugin reads the environment ONLY through :func:`_env`, which refuses a name outside this
+#: tuple, so a new read cannot exist without being dropped from children too —
+#: `tests/test_revision_freshness_deferral.py` pins that no other ``os.environ`` access exists.
+PLUGIN_ENV = (HARVEST_OUT_ENV, EXTRA_COVERED_ENV, BOOTSTRAP_ENV, DEFER_ENV, CI_ENV)
+
+
+def _env(name, default=None):
+    if name not in PLUGIN_ENV:
+        raise AssertionError("{0} is read by the corpus plugin but missing from PLUGIN_ENV, so "
+                             "child runs would inherit it".format(name))
+    return os.environ.get(name, default)
+
+
 def deferral_requested(environ=None):
     """Whether :data:`DEFER_ENV` defers this run. Absent is strict; ``"1"`` defers; ANY other
     present value — empty, ``"0"``, ``"true"``, padded — is a usage error rather than a quiet
     "off", so a typo can never be read as either answer."""
-    value = (os.environ if environ is None else environ).get(DEFER_ENV)
+    value = _env(DEFER_ENV) if environ is None else environ.get(DEFER_ENV)
     if value is None:
         return False
     if value != "1":
@@ -161,7 +182,7 @@ def covered_targets():
 
 def covered_paths():
     paths = {str((ROOT / module).resolve()) for module in covered_targets()}
-    for extra in filter(None, os.environ.get(EXTRA_COVERED_ENV, "").split(os.pathsep)):
+    for extra in filter(None, _env(EXTRA_COVERED_ENV, "").split(os.pathsep)):
         paths.add(str(Path(extra).resolve()))
     return frozenset(paths)
 
@@ -536,7 +557,7 @@ def pytest_configure(config):
     _DEFERRAL = None
     if not deferral_requested():
         return
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    if _env(CI_ENV) == "true":
         raise pytest.UsageError(
             "{0} is set under CI. The deferral is for local development runs only; CI is "
             "where every revision-freshness check is enforced.".format(DEFER_ENV))
@@ -625,7 +646,7 @@ def _session():
         # own, and no regeneration could clear it (CDX-184-r6-GUARD-R2-01).
         for module_name, _name in list(corpus.ENTRY_POINTS.values()) + list(_PROBES) + list(_EXCLUDED):
             importlib.import_module("boomi_mcp." + module_name)
-        _SESSION = _Session(os.environ.get(HARVEST_OUT_ENV), covered())
+        _SESSION = _Session(_env(HARVEST_OUT_ENV), covered())
         _SESSION.install()
         # …and every copy imported from here on, under either spelling, is wrapped as it
         # loads rather than at the next collect/test boundary. Removed again at session end.
@@ -787,7 +808,7 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: D401 - `session` is pyte
 def child_env(env=None):
     """The documented suite environment (``PYTHONPATH=src``, no plugin autoload, local and
     offline), plus this directory so ``-p _revision_corpus`` resolves to the same module a
-    ``pytest_plugins`` declaration registers. No harvest or coverage setting is inherited.
+    ``pytest_plugins`` declaration registers. Nothing in :data:`PLUGIN_ENV` is inherited.
 
     Uncoloured, whatever the caller's terminal asks for: the child's output is PARSED — its
     ``FAILED`` lines, its summary — and a parent shell exporting ``FORCE_COLOR`` made every
@@ -795,13 +816,11 @@ def child_env(env=None):
     failed while the runs themselves behaved (correction batch 22, measured). ``PY_COLORS=0``
     takes precedence over ``FORCE_COLOR`` in pytest's own terminal writer."""
     child = dict(os.environ)
-    child.pop(HARVEST_OUT_ENV, None)
-    child.pop(EXTRA_COVERED_ENV, None)
-    child.pop(BOOTSTRAP_ENV, None)
-    # A child is STRICT unless its caller asks otherwise in `env`: the witnesses that expect
-    # an absent input to fail would otherwise pass under a developer's deferral, and the
-    # producer would harvest with the guard's verdicts deferred.
-    child.pop(DEFER_ENV, None)
+    # Every variable the plugin reads comes from the CALLER's `env`, never from this process:
+    # a child is strict and local unless its caller says otherwise, wherever the parent runs
+    # (a developer's deferral, CI's GITHUB_ACTIONS — see PLUGIN_ENV).
+    for name in PLUGIN_ENV:
+        child.pop(name, None)
     child.pop("PYTHONHASHSEED", None)
     child.update({
         "PYTHONPATH": os.pathsep.join([str(SRC), str(ROOT / "tests")]),
@@ -884,7 +903,7 @@ def _main(argv):
                         help="run the covered tests with the guard on, as the suite does")
     parser.add_argument("--corpus", default=str(CORPUS_PATH), help="where --write writes")
     options = parser.parse_args(argv)
-    if DEFER_ENV in os.environ:
+    if _env(DEFER_ENV) is not None:
         # Refused whatever its value, before anything runs: the producer and its check are
         # where deferred debt is PAID, so they never run under the deferral.
         sys.stderr.write("refusing: {0} is set; the corpus producer and its check run only "

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14463, "minimum_collected": 14463, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14465, "minimum_collected": 14465, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14562,3 +14562,5 @@
 {"kind": "test", "id": "pytest-014561", "node_id": "tests/test_wave_gate.py::test_every_gate_subcommand_refuses_the_revision_deferral_switch[ci]", "state": "active"}
 {"kind": "test", "id": "pytest-014562", "node_id": "tests/test_wave_gate.py::test_every_gate_subcommand_refuses_the_revision_deferral_switch[wave]", "state": "active"}
 {"kind": "test", "id": "pytest-014563", "node_id": "tests/test_wave_gate.py::test_no_gate_child_inherits_the_revision_deferral_switch", "state": "active"}
+{"kind": "test", "id": "pytest-014564", "node_id": "tests/test_revision_freshness_deferral.py::test_the_plugin_reads_the_environment_only_through_its_funnel", "state": "active"}
+{"kind": "test", "id": "pytest-014565", "node_id": "tests/test_revision_freshness_deferral.py::test_a_deferred_child_runs_locally_even_when_its_parent_runs_under_ci", "state": "active"}

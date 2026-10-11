@@ -2100,10 +2100,14 @@ def test_a_deferred_run_carries_an_import_time_absent_input_as_pending(tmp_path)
 def test_a_child_run_is_strict_unless_its_caller_defers_it(monkeypatch):
     """`child_env` drops a developer's deferral: every witness here that expects an absent
     input to FAIL runs a child, and an inherited deferral would turn each of them green. A
-    caller that wants a deferred child says so in `env`, as the witnesses above do."""
+    caller that wants a deferred child says so in `env`, as the witnesses above do. The same
+    holds for every variable the plugin reads (`PLUGIN_ENV`) — CI's own marker included, or
+    the deliberately deferred witnesses are refused on the runner (CDX-134-r1-01)."""
     producer = _producer()
     monkeypatch.setenv(producer.DEFER_ENV, "1")
-    assert producer.DEFER_ENV not in producer.child_env()
+    monkeypatch.setenv(producer.CI_ENV, "true")
+    for name in producer.PLUGIN_ENV:
+        assert name not in producer.child_env(), name
     assert producer.child_env({producer.DEFER_ENV: "1"})[producer.DEFER_ENV] == "1"
 
 
