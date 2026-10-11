@@ -11421,3 +11421,36 @@ _NON_DEFAULT["cache_contents_at_exit"] = ([
     ("WRITER", _legs({"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}],
                       "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE"}},
                      {"steps": [_MSG], "terminal": _STOP}))], "WRITER")
+
+
+def _b186_continuing_call_roots(wait, abort_on_error):
+    """CDX-186-r9-01: CHILD stores P1 in CACHE, empties it on a leg the walk proves runs, then stores P2 — a normal
+    completion leaves only P2 — and PARENT, after calling it, appends P2 and retrieves CACHE into a P2 consumer."""
+    stores_p1 = {"steps": [_GETP1], "terminal": _PUT}
+    stores_p2 = {"steps": [_GETP1, _TO_P2], "terminal": _PUT}
+    call = {"steps": [], "terminal": _call("CACHE_CHILD", wait=wait, abort_on_error=abort_on_error)}
+    return [("PARENT", _legs(call, stores_p2, {"steps": [_READ, _CONSUMES_P2], "terminal": _STOP})),
+            ("CACHE_CHILD", _legs(stores_p1, _EMPTIES_IT, stores_p2))]
+
+
+def test_a_childs_final_cache_contents_reach_only_a_call_that_waits_and_aborts():
+    """CDX-186-r9-01. The contract states what a NORMAL completion of the child leaves in a cache. Only a call that
+    waits and aborts on the child's error runs nothing after it unless the child completed, so only there does the
+    caller meet the child's P2 alone, admitted as the flattened twin is; a call that continues after a failure, or
+    does not wait, may meet the P1 a failed run left before its removal, and refuses the P2 consumer as before."""
+    refused = [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/2/steps/1/map_ref")]
+    for wait, abort_on_error in ((True, True), (True, False), (False, True), (False, False)):
+        expected = [] if wait and abort_on_error else refused
+        assert _both_routes(_b186_continuing_call_roots(wait, abort_on_error), "PARENT") == expected, (wait, abort_on_error)
+
+
+def test_final_contents_read_past_a_continuing_failure_admit_the_consumer(monkeypatch):
+    """Mutant: the call reads the child's final contents whether or not it waits and aborts — a call continuing after
+    the child's failure admits the P2 consumer, though the failed run may have left P1 in the cache."""
+    _lineage_with_source(
+        monkeypatch,
+        '        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))\n'
+        '        if contract is not None and waits_and_aborts',
+        '        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))\n'
+        '        if contract is not None')
+    assert _both_routes(_b186_continuing_call_roots(True, False), "PARENT") == []

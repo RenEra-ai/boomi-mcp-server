@@ -3175,7 +3175,7 @@ def _walk_lineage(
 
         return state, stream, legacy
 
-    def _child_may_write_caches(state, contract):
+    def _child_may_write_caches(state, contract, semantic=None):
         """What a child's cache writes may leave in this execution's caches.
 
         A child shares its caller's document caches (capture `cap184-shared-cache`),
@@ -3191,9 +3191,16 @@ def _walk_lineage(
         profile in their place made a sibling's P1 beside the caller's P1 an unproved mixture,
         and admitted a restaged write of them into a P2 cache that the twin refuses. A cache it
         may write but states no content for gets documents of no proved profile, as before.
+
+        Only a call that WAITS and ABORTS on the child's error reads them (Stage-2 review r9): the
+        contract states what a NORMAL completion may leave, and only then does nothing after the
+        call run unless the child completed — the gate `_awaited_guarantee` puts on a guarantee.
+        A call that continues after a failure, or does not wait, meets whatever the child's run
+        had stored when it stopped, so it adds documents of no proved profile, as before.
         """
         stated = {}
-        if contract is not None and (contract.state_known or contract.cache_writes_known):
+        waits_and_aborts = bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))
+        if contract is not None and waits_and_aborts and (contract.state_known or contract.cache_writes_known):
             for cache_ref, profile_ref in contract.cache_contents_at_exit:
                 stated.setdefault(cache_ref, set()).add(None if profile_ref is None else _identity(profile_ref))
         for ref in _caches_a_call_may_write(cache_refs, contract):
@@ -3536,7 +3543,7 @@ def _walk_lineage(
                         ("repeat_cause", cause) for cause in sorted(causes)),
                     phase=_CAPABILITY_PHASE,
                 )
-        state = _child_may_write_caches(state, contract)
+        state = _child_may_write_caches(state, contract, semantic)
         # Amendment 3 §8: a cache this child may have emptied is no longer established,
         # whatever filled it before the call — a later read of it would retrieve nothing.
         # Applied BEFORE the guarantee below, so a child that removes a cache and then

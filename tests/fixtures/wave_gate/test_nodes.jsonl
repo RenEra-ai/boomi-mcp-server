@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14511, "minimum_collected": 14511, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14514, "minimum_collected": 14514, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14631,3 +14631,6 @@
 {"kind": "test", "id": "pytest-014630", "node_id": "tests/test_issue_184_child_state_transfer.py::test_two_relations_a_call_judges_for_one_property_are_both_exported", "state": "active"}
 {"kind": "test", "id": "pytest-014631", "node_id": "tests/test_issue_184_child_state_transfer.py::test_one_relation_kept_per_judged_site_loses_the_dropped_reads_code", "state": "active"}
 {"kind": "test", "id": "pytest-014632", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_judged_site_exporting_the_walks_own_hint_exports_an_invalid_relation", "state": "active"}
+{"kind": "test", "id": "pytest-014633", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11450]", "state": "active"}
+{"kind": "test", "id": "pytest-014634", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_final_cache_contents_reach_only_a_call_that_waits_and_aborts", "state": "active"}
+{"kind": "test", "id": "pytest-014635", "node_id": "tests/test_issue_184_child_state_transfer.py::test_final_contents_read_past_a_continuing_failure_admit_the_consumer", "state": "active"}
