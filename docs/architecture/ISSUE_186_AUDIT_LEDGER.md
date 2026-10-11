@@ -265,6 +265,7 @@ None so far.
 | Full non-KB suite | `python -m pytest tests --ignore=tests/kb -p no:cacheprovider`, `.venv` 3.12, `PYTHONDONTWRITEBYTECODE=1` | `e99b749` (the records commit `850a07b` landed during the run and touched only the ledger and evidence) | `14485 passed, 19 skipped, 19 warnings in 5648.88s` — all 14,504 required nodes |
 | §6 architect implementation review, evaluation 3 (the last) | `cdx-gate-review.OoZL0p`, `71c046f..cdf2cef`, attested `ok:true` `stopped:true` | `cdf2cef` | `ISSUES FOUND` — three P2 (ARCH-186-e3-01..03); e2-01..05, e1-04, e1-07 and CDX-186-r7-01 RESOLVED; e1-06 NOT RESOLVED (closed by e3-03) |
 | Commit review r9 (support review of correction batch 8) | `cdx-review.Xyg6zK`, `--base e99b749`, head `acd80a8` | `acd80a8` | one P2 finding, CDX-186-r9-01 |
+| Commit review r10 (support review of correction batch 9) | `cdx-review.H8aYzz`, `--base acd80a8`, head `eeb1e09` | `eeb1e09` | clean — "No actionable regressions were identified in the diff" |
 
 ## Evidence index
 
