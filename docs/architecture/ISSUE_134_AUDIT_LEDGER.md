@@ -157,7 +157,7 @@ Stage-2 correction support QA (billed to the Stage-2 loop, not Stage 1): r3
 (`agents/reports/2026-10-10-issue-134-defer-revision-gates-r3.md`) — affected re-run of
 CDX-134-r1-01: R3-1..R3-5 PASS; control on pre-fix `df677533` under a CI parent: "3 failed, 2
 passed"; with the fix "22 passed" / "5 passed"; the CI refusal intact (exit 4) top-level and for an
-explicitly requested child. Stage-2 review evaluations: r1 (1 Critical, fixed). No checkpoint due.
+explicitly requested child. Stage-2 review evaluations: r1 `cdx-review.o2tFRa` (1 Critical, fixed); r2 `cdx-review.oDEsGW`, fix-only `df677533..0d43974b`, dirty=false — "No actionable defects were found in the changes." — CLEAN, which closes Stage 2. No checkpoint due (2 < 3).
 
 ## Checkpoints
 
