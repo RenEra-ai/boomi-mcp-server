@@ -11390,3 +11390,44 @@ def test_a_judged_site_exporting_the_walks_own_hint_exports_an_invalid_relation(
     _b186_with_judged_relations(monkeypatch, "            relations.setdefault((pointer, name), set()).add(hint)\n")
     with pytest.raises(ValidationError):
         _b186_composed(_b186_two_relation_roots(False)[0])
+
+
+def _b186_forwarded_unknown_write_roots(stage):
+    """Wave integration review round 3. PARENT stages ``stage`` documents in CACHE and calls MID, a No Data middle that
+    retrieves CACHE and, in a static Decision's arm, calls a passthrough CACHE_CHILD writing what it receives into
+    CACHE2 of UNKNOWN profile; the twin retrieves CACHE and writes CACHE2 in PARENT's Branch."""
+    from test_issue_184_child_entries import _MAP
+
+    put = lambda ref: {"kind": "cache_put", "cache_ref": ref}  # noqa: E731
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    stores = {"p1": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}], "terminal": put("$ref:CACHE")},
+              "p2": {"steps": [{"kind": "connector_call", "operation_ref": "$ref:GETP1"}, _MAP], "terminal": put("$ref:CACHE")}}
+    legs = [stores[name] for name in stage]
+    mid = _legs({"steps": [get("$ref:CACHE")], "terminal": _decision(_call("CACHE_CHILD", wait=True, abort_on_error=True))},
+                {"steps": [_MSG], "terminal": _STOP})
+    child = _doc(_ENTRY, {"kind": "branch", "legs": [{"steps": [_MSG], "terminal": _STOP},
+                                                     {"steps": [], "terminal": put("$ref:CACHE2")}]})
+    roots = [("PARENT", _legs(*legs, {"steps": [], "terminal": _call("MID", wait=True, abort_on_error=True)})),
+             ("MID", mid), ("CACHE_CHILD", child)]
+    return roots, _legs(*legs, {"steps": [get("$ref:CACHE")], "terminal": put("$ref:CACHE2")}, {"steps": [_MSG], "terminal": _STOP})
+
+
+def test_a_forwarded_write_into_an_unknown_cache_keeps_the_write_rule(monkeypatch):
+    """Wave integration review round 3. A child's write of what a middle retrieved from a caller-shared cache into a
+    cache of UNKNOWN profile reaches the caller as a cache WRITE requirement — the twin's write refuses only a proved
+    profile — never as an exact content requirement: the caller's P1 and P2 together prove nothing and are admitted, as
+    the twin and `e22b8fa` admit them; the caller's P1 alone is proved and refused, as the twin refuses it."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(profiles_unknown=True))
+    for stage, expected in ((("p1", "p2"), set()), (("p1",), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})):
+        roots, twin = _b186_forwarded_unknown_write_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert _b186_composed(roots) == expected, stage
+
+
+def test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixture(monkeypatch):
+    """Mutant: the forwarded unknown-target write stays an exact content requirement, as before the fix — the caller's
+    P1 and P2 together are refused, where the twin admits them."""
+    _lineage_with_source(monkeypatch, "                        if arriving.caller_cache is not None:\n",
+                         "                        if False:\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(profiles_unknown=True))
+    assert _b186_composed(_b186_forwarded_unknown_write_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}

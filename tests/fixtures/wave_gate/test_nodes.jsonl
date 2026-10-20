@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14509, "minimum_collected": 14509, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14512, "minimum_collected": 14512, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14609,3 +14609,6 @@
 {"kind": "test", "id": "pytest-014608", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11006]", "state": "active"}
 {"kind": "test", "id": "pytest-014609", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11082]", "state": "active"}
 {"kind": "test", "id": "pytest-014610", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_sibling_writers_stored_profile_is_a_recorded_limit", "state": "active"}
+{"kind": "test", "id": "pytest-014611", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11430]", "state": "active"}
+{"kind": "test", "id": "pytest-014612", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_forwarded_write_into_an_unknown_cache_keeps_the_write_rule", "state": "active"}
+{"kind": "test", "id": "pytest-014613", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixture", "state": "active"}

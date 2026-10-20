@@ -2869,6 +2869,18 @@ def _walk_lineage(
                         # #186: refused where the ARRIVING documents' profile is proved, as the twin's
                         # Add to Cache is; passed on unchanged where a caller's documents arrive, and
                         # never a narrowing of the stream — it states no profile.
+                        if arriving.caller_cache is not None:
+                            # Documents retrieved from a cache a caller's documents may share: the
+                            # child's write of them is a cache WRITE of retrieved documents, judged as
+                            # the cache_put arm judges one — the retrieve's proof over everything the
+                            # writes there stored, refusing only a proved profile — never the exact
+                            # content requirement a consumer states (wave integration review r3).
+                            if checked and arriving.identity is not None and not capabilities.called_by_a_root:
+                                mismatch(node, "/process_ref")
+                            if checked and _completable(arriving.retrieved_own):
+                                cache_write_requirement_refs.append((arriving.caller_cache, UNKNOWN_PROFILE_REQUIREMENT,
+                                                                     _ref_naming(_proved_profile(arriving.retrieved_own))))
+                            continue
                         _requires(arriving, None, ref)
                         if arriving.identity is not None and arriving.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
                             mismatch(node, "/process_ref")
