@@ -11500,3 +11500,39 @@ _OBLIGATION_SITES.update({
         "#186 (review r16): the entry requirements are handed to `_relied_on_writes_exact`, which returns them with "
         "each re-read staging write exact — the one place a recorded requirement is rewritten"),
 })
+
+
+def _b186_staged_and_bare_reread_roots(stage):
+    """Wave integration review round 5: the re-read roots with the child's re-read leg retrieving CACHE2 and stopping —
+    no consumer of its profile — and the same leg in the twin."""
+    roots, twin = _b186_forwarded_unknown_write_roots(stage)
+    reread = {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE2"}, _MSG], "terminal": _STOP}
+    documents = dict(roots)
+    documents["CACHE_CHILD"]["body"]["steps"][-1]["legs"].append(reread)
+    twin["body"]["steps"][-1]["legs"].insert(-1, reread)
+    return [(key, documents[key]) for key, _document in roots], twin
+
+
+def test_a_staged_cache_read_again_without_a_profile_consumer_keeps_the_write_rule(monkeypatch):
+    """Wave integration review round 5. Reliance is measured where the profile is USED: only a consumer that needs a
+    profile, receiving documents retrieved over the staged content (or a called process stating a profile requirement
+    on the cache), makes the staging write's requirement exact. A bare re-read uses no profile, so the caller's P1 and
+    P2 together stay admitted, as the twin admits them; P2 alone is still refused by the write rule."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    for stage, expected in ((("p1", "p2"), set()), (("p2",), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})):
+        roots, twin = _b186_staged_and_bare_reread_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert _b186_composed(roots) == expected, stage
+
+
+def test_a_bare_reread_counted_as_reliance_refuses_the_mixture(monkeypatch):
+    """Mutant: every retrieve over staged content counts as reliance, as batch 16 had it — the bare re-read makes the
+    requirement exact, and the caller's P1 and P2 are refused where the twin admits them."""
+    _lineage_with_source(monkeypatch,
+                         "            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):\n"
+                         "                staged_retrieves[node] = cache_reads[0]\n",
+                         "            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):\n"
+                         "                staged_retrieves[node] = cache_reads[0]\n"
+                         "                read_caches.add(cache_reads[0])\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    assert _b186_composed(_b186_staged_and_bare_reread_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}

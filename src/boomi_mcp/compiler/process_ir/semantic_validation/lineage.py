@@ -585,6 +585,17 @@ def state_visibility_rows() -> Tuple["Mapping[str, object]", ...]:
     )
 
 
+class _Staged(NamedTuple):
+    """The provenance of a content fact an Add to Cache of the HANDED documents recorded (#186, review r16): its
+    identity is the cache's declared profile, which only an exact requirement on the caller makes true. Truthy exactly
+    as the ``legacy_source`` flag it stands in for (`holds_only_legacy_source_documents`)."""
+
+    legacy: bool
+
+    def __bool__(self) -> bool:
+        return self.legacy
+
+
 class _State:
     """What is established at one program point.
 
@@ -664,7 +675,7 @@ class _State:
         return _State(self.document, self.execution | {key}, self.content, self.cohorts,
                       self.sealed, (self.proved | {key}) if proved else self.proved)
 
-    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool]) -> "_State":
+    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool], staged: bool = False) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown).
 
         ``legacy_source`` says whether the write stored documents a legacy ``source`` endpoint
@@ -673,6 +684,8 @@ class _State:
         exemption by omission.
         """
         provenance = None if legacy_source is None else bool(legacy_source)
+        if staged and provenance is not None:
+            provenance = _Staged(provenance)
         return _State(
             self.document, self.execution, self.content | {(cache_ref, identity, provenance)},
             self.cohorts, self.sealed, self.proved,
@@ -2107,11 +2120,14 @@ def _walk_lineage(
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
     #: #186: the rows `LineageWalkV1.cache_write_requirement_refs` returns.
     cache_write_requirement_refs: List[Tuple[str, str, Optional[str]]] = []
-    #: #186 (Stage-2 review r16): where this walk staged the handed documents in a declaring cache — the position of
-    #: that write requirement in `entry_requirement_refs`, the cache and the declared ref — and every cache it, or a
-    #: process it calls, may READ. A staged cache read again is relied on: what the read sees is the declared profile
-    #: the write recorded as its content, so the requirement stays exact; one never read is a write requirement.
+    #: #186 (Stage-2 review r16, integration review r5): where this walk staged the handed documents in a declaring
+    #: cache — the position of that write requirement in `entry_requirement_refs`, the cache and the declared ref — and
+    #: the staged caches whose recorded profile something RELIES on: a consumer that needs a profile receiving documents
+    #: retrieved over staged content (the retrieve nodes are `staged_retrieves`), or a called process stating a profile
+    #: requirement on the cache, or one nothing derives. A relied-on staging write keeps the exact requirement; any
+    #: other — a bare retrieve included — is a write requirement.
     entry_staged: List[Tuple[int, str, str]] = []
+    staged_retrieves: Dict[Any, str] = {}
     read_caches: set = set()
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
@@ -2801,6 +2817,9 @@ def _walk_lineage(
         each call judges what it stored. Any other stream records nothing: the consumer is
         checked against it instead.
         """
+        if identity is not None and stream.origin_node in staged_retrieves:
+            # #186 (integration review r5): a consumer needing a profile of documents retrieved over staged content.
+            read_caches.add(staged_retrieves[stream.origin_node])
         if stream.state == STREAM_CALLER_ENTRY:
             entry_requirements.append(identity)
             entry_requirement_refs.append(ref)
@@ -3075,7 +3094,8 @@ def _walk_lineage(
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
-                state.with_content(semantic.cache_ref, declared, legacy_source=legacy),
+                state.with_content(semantic.cache_ref, declared, legacy_source=legacy,
+                                   staged=declared_ref is not None and not unknown),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -3129,7 +3149,8 @@ def _walk_lineage(
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
                 state = state.with_content(cache_reads[0], None, legacy_source=False)
-            read_caches.add(cache_reads[0])
+            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):
+                staged_retrieves[node] = cache_reads[0]
             contents = state.content_of(cache_reads[0])
             # Whether a caller's documents may be among the ones retrieved, asked ONCE, here,
             # of the one authority. Both markers carry the same answer: a consumer records
@@ -3317,15 +3338,12 @@ def _walk_lineage(
         """
         contract = capabilities.child_entry_contract(semantic.process_ref)
         form = contract.entry_form if contract is not None else None
-        # #186 (review r16): the caches this child may read — every one, where nothing derives it.
+        # #186 (review r16, integration review r5): the caches whose profile this child relies on — a stated profile
+        # requirement, or every cache where nothing derives the child.
         if contract is None or contract.entry_form == "unknown":
             read_caches.update(cache_refs)
         else:
-            read_caches.update(row[0] for row in contract.cache_requirements)
-            read_caches.update(row[0] for row in contract.cache_write_requirements)
-            read_caches.update(row[0] for row in contract.cache_property_requirements)
-            read_caches.update(row[0] for row in contract.nonstrict_cached_reads if row[0] is not None)
-            read_caches.update(key[1] for key in contract.required_reads if key[0] == CACHE)
+            read_caches.update(row[0] for row in contract.cache_requirements if row[1] is not None)
         context, own = _call_prefix(prepared.ir, node.source_path)
         # Keyed on this parent's own entry form, read off its own CFG and never off a caller.
         predecessor = _prefix_predecessor(context, own, stream.native_kind, classify_entry(prepared.cfg))
