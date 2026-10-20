@@ -11529,10 +11529,50 @@ def test_a_bare_reread_counted_as_reliance_refuses_the_mixture(monkeypatch):
     """Mutant: every retrieve over staged content counts as reliance, as batch 16 had it — the bare re-read makes the
     requirement exact, and the caller's P1 and P2 are refused where the twin admits them."""
     _lineage_with_source(monkeypatch,
-                         "            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):\n"
-                         "                staged_retrieves[node] = cache_reads[0]\n",
-                         "            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):\n"
-                         "                staged_retrieves[node] = cache_reads[0]\n"
-                         "                read_caches.add(cache_reads[0])\n")
+                         "                staged_retrieves[node] = tuple(staged_sources)\n",
+                         "                staged_retrieves[node] = tuple(staged_sources)\n"
+                         "                read_caches.update(staged_sources)\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
     assert _b186_composed(_b186_staged_and_bare_reread_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+
+
+def _b186_cache3_symbols():
+    """`_b186_cache2_symbols` with CACHE2 declaring P1 and an unprofiled CACHE3 beside it."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    base = _b186_cache2_symbols(cache_profile_ref="$ref:P1")
+    return SymbolTableV1(symbols=tuple(base.symbols) + (
+        ComponentSymbolV1(ref="$ref:CACHE3", component_id="CACHE3", component_type="documentcache"),))
+
+
+def _b186_staged_then_recached_roots(stage):
+    """Stage-2 review r19: the forwarded-write roots with CACHE_CHILD also copying CACHE2 into CACHE3 on one leg and
+    mapping CACHE3 with M12 (consuming P1) on the next — the map relies on the staging write through the copy."""
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    roots, twin = _b186_forwarded_unknown_write_roots(stage)
+    copy = {"steps": [get("$ref:CACHE2")], "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE3"}}
+    consume = {"steps": [get("$ref:CACHE3"), {"kind": "map_ref", "map_ref": "$ref:M12"}], "terminal": _STOP}
+    documents = dict(roots)
+    documents["CACHE_CHILD"]["body"]["steps"][-1]["legs"].extend([copy, consume])
+    twin["body"]["steps"][-1]["legs"][-1:-1] = [copy, consume]
+    return [(key, documents[key]) for key, _document in roots], twin
+
+
+def test_a_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement(monkeypatch):
+    """Stage-2 review r19. The staged provenance survives a re-cache: a P1 map over a copy of the staged cache relies
+    on the staging write as directly as one over the staged cache itself, so the caller's P1 and P2 together are
+    refused, as the twin's map refuses them, and P1 alone is admitted."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
+    for stage, expected in ((("p1", "p2"), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}), (("p1",), set())):
+        roots, twin = _b186_staged_then_recached_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert _b186_composed(roots) == expected, stage
+
+
+def test_a_recache_dropping_the_staged_source_admits_the_mixture(monkeypatch):
+    """Mutant: a re-cache drops the staging write its documents came from, as batch 18 had it — the map over the copy
+    reads as relying on nothing, and the caller's P1 and P2 are admitted where the twin refuses them."""
+    _lineage_with_source(monkeypatch, "            restaged = staged_retrieves.get(stream.origin_node, ())\n",
+                         "            restaged = ()\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
+    assert _b186_composed(_b186_staged_then_recached_roots(("p1", "p2"))[0]) == set()

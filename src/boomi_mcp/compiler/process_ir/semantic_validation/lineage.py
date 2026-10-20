@@ -591,6 +591,9 @@ class _Staged(NamedTuple):
     as the ``legacy_source`` flag it stands in for (`holds_only_legacy_source_documents`)."""
 
     legacy: bool
+    #: The cache the handed documents were staged in — kept through every re-cache of them (review r19), so a consumer
+    #: of a copy relies on the original staging write.
+    source: str = ""
 
     def __bool__(self) -> bool:
         return self.legacy
@@ -675,7 +678,8 @@ class _State:
         return _State(self.document, self.execution | {key}, self.content, self.cohorts,
                       self.sealed, (self.proved | {key}) if proved else self.proved)
 
-    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool], staged: bool = False) -> "_State":
+    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool],
+                     staged: Optional[str] = None) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown).
 
         ``legacy_source`` says whether the write stored documents a legacy ``source`` endpoint
@@ -685,7 +689,7 @@ class _State:
         """
         provenance = None if legacy_source is None else bool(legacy_source)
         if staged and provenance is not None:
-            provenance = _Staged(provenance)
+            provenance = _Staged(provenance, staged)
         return _State(
             self.document, self.execution, self.content | {(cache_ref, identity, provenance)},
             self.cohorts, self.sealed, self.proved,
@@ -2127,7 +2131,7 @@ def _walk_lineage(
     #: requirement on the cache, or one nothing derives. A relied-on staging write keeps the exact requirement; any
     #: other — a bare retrieve included — is a write requirement.
     entry_staged: List[Tuple[int, str, str]] = []
-    staged_retrieves: Dict[Any, str] = {}
+    staged_retrieves: Dict[Any, Tuple[str, ...]] = {}
     read_caches: set = set()
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
@@ -2818,8 +2822,9 @@ def _walk_lineage(
         checked against it instead.
         """
         if identity is not None and stream.origin_node in staged_retrieves:
-            # #186 (integration review r5): a consumer needing a profile of documents retrieved over staged content.
-            read_caches.add(staged_retrieves[stream.origin_node])
+            # #186 (integration review r5): a consumer needing a profile of documents retrieved over staged content —
+            # directly, or through any re-cache of them (review r19).
+            read_caches.update(staged_retrieves[stream.origin_node])
         if stream.state == STREAM_CALLER_ENTRY:
             entry_requirements.append(identity)
             entry_requirement_refs.append(ref)
@@ -3095,7 +3100,7 @@ def _walk_lineage(
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
                 state.with_content(semantic.cache_ref, declared, legacy_source=legacy,
-                                   staged=declared_ref is not None and not unknown),
+                                   staged=semantic.cache_ref if declared_ref is not None and not unknown else None),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -3133,8 +3138,14 @@ def _walk_lineage(
                         (stream.caller_cache, UNKNOWN_PROFILE_REQUIREMENT, _ref_naming(_proved_profile(stream.retrieved_own))))
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
+            # #186 (review r19): a re-cache of documents retrieved over staged content keeps the staging write each
+            # came from, so a later consumer of the copy relies on it.
+            restaged = staged_retrieves.get(stream.origin_node, ())
+            state = state.with_content(semantic.cache_ref, identity, legacy_source=legacy)
+            for source in restaged:
+                state = state.with_content(semantic.cache_ref, identity, legacy_source=legacy, staged=source)
             return (
-                state.with_content(semantic.cache_ref, identity, legacy_source=legacy),
+                state,
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -3149,8 +3160,10 @@ def _walk_lineage(
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
                 state = state.with_content(cache_reads[0], None, legacy_source=False)
-            if any(isinstance(fact[2], _Staged) for fact in state.content if fact[0] == cache_reads[0]):
-                staged_retrieves[node] = cache_reads[0]
+            staged_sources = sorted({fact[2].source for fact in state.content
+                                     if fact[0] == cache_reads[0] and isinstance(fact[2], _Staged)})
+            if staged_sources:
+                staged_retrieves[node] = tuple(staged_sources)
             contents = state.content_of(cache_reads[0])
             # Whether a caller's documents may be among the ones retrieved, asked ONCE, here,
             # of the one authority. Both markers carry the same answer: a consumer records
