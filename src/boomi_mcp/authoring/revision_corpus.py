@@ -1224,15 +1224,26 @@ def _settle(records: List[Dict[str, Any]]) -> None:
         package = importlib.import_module(subtree)
         for module in pkgutil.walk_packages(package.__path__, subtree + "."):
             try:
-                importlib.import_module(module.name)
+                imported = importlib.import_module(module.name)
             except Exception:  # noqa: BLE001 - a module that will not import is not replay material
-                pass
+                continue
+            # A model whose schema waits for its first use is completed by that use, mid-row (#186:
+            # `connector_replay.models.CapabilityEvidenceRecordV1`); complete it here instead.
+            for item in list(vars(imported).values()):
+                if isinstance(item, type) and getattr(item, "__pydantic_complete__", True) is False:
+                    try:
+                        item.model_rebuild()
+                    except Exception:  # noqa: BLE001 - one that will not build stays as it is
+                        pass
 
 
 #: Package subtrees a replay reaches through a registry rather than an import, measured by
 #: profiling one replay: settling by entry kind and by class path still left these imported
-#: mid-row (CDX-184-r8-B21B-R4-STORE-01).
-_SETTLE_SUBTREES = ("boomi_mcp.categories", "boomi_mcp.recipes")
+#: mid-row (CDX-184-r8-B21B-R4-STORE-01). `boomi_mcp.connector_replay` joined when #186's corpus
+#: changed which record of each kind comes first: none of the first ones reached it, so its
+#: `models`, `registry` and `digests` were imported mid-row and every process computed twice
+#: (measured, the #186 wave gate's second run).
+_SETTLE_SUBTREES = ("boomi_mcp.categories", "boomi_mcp.recipes", "boomi_mcp.connector_replay")
 
 
 def _class_paths(value: Any) -> Iterable[str]:
