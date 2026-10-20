@@ -3649,8 +3649,8 @@ def test_the_unknown_requirement_spelled_as_none_re_admits_the_caller(monkeypatc
 
     symbols = _b186_unknown_cache_symbols()
     roots, _twin = _b186_staging([{"kind": "map_ref", "map_ref": "$ref:M12"}])
-    with_source(monkeypatch, "            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else declared_ref)\n",
-                "            _requires(stream, declared, declared_ref)\n")
+    with_source(monkeypatch, "            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else (\n",
+                "            _requires(stream, declared, None if unknown else (\n")
     # Only the hand-off refusal an unstated consumption draws is left: the profile refusal is gone.
     assert [code for code, _path in _b186_codes(roots, "PARENT", symbols)] == [
         "PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED"]

@@ -11431,3 +11431,31 @@ def test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixtu
                          "                        if False:\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(profiles_unknown=True))
     assert _b186_composed(_b186_forwarded_unknown_write_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+
+
+def test_a_forwarded_write_into_a_declaring_cache_keeps_the_write_rule(monkeypatch):
+    """Wave integration review round 4 (CDX-186-w4-01), the structural fix. A child contract marks a cache WRITE's
+    requirement as one (`lineage.CACHE_WRITE_REQUIREMENT_PREFIX`) for a target declaring — or storing — a profile, as
+    `UNKNOWN_PROFILE_REQUIREMENT` marks one of unknown profile, so every call judges it by the write rule: the
+    caller's P1 and P2 together prove nothing and are admitted, P1 alone matches the P1 target, P2 alone is a proved
+    other profile and is refused — each as the twin judges it. Before the fix the declared ref read as a consumer's,
+    and the mixture was refused (as at `e22b8fa` for a declared target, and newly for a stored one)."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    for stage, expected in ((("p1", "p2"), set()), (("p1",), set()), (("p2",), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})):
+        roots, twin = _b186_forwarded_unknown_write_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert _b186_composed(roots) == expected, stage
+    entries = sys.modules["test_issue_184_child_entries"]
+    declared = _b186_cache2_symbols(cache_profile_ref="$ref:P1")
+    monkeypatch.setattr(entries, "_symbols", lambda: declared)
+    roots, _twin = _b186_forwarded_unknown_write_roots(("p1",))
+    assert _row(roots, "MID", "CACHE_CHILD").document_requirements == (lineage.CACHE_WRITE_REQUIREMENT_PREFIX + "$ref:P1",)
+
+
+def test_a_write_requirement_read_as_a_consumers_refuses_a_mixture(monkeypatch):
+    """Mutant: the write marker is ignored, so a declaring target's requirement reads as a consumer's exact one — the
+    caller's P1 and P2 together are refused, where the twin admits them."""
+    _lineage_with_source(monkeypatch, "    if isinstance(ref, str) and ref.startswith(CACHE_WRITE_REQUIREMENT_PREFIX):\n",
+                         "    if False:\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    assert _b186_composed(_b186_forwarded_unknown_write_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}

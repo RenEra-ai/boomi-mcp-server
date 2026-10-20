@@ -155,6 +155,19 @@ CALLER_CACHE_WRITER = "caller-cache:"
 #: refuses a proved profile into that cache. Documents whose profile nothing proves satisfy it, as
 #: they satisfy the twin.
 UNKNOWN_PROFILE_REQUIREMENT = "urn:boomi:unknown-profile"
+#: #186 (wave integration review r4): the prefix a child contract's `document_requirements` entry carries when it is
+#: the requirement of a cache WRITE of the handed documents into a cache declaring (or storing) the profile the ref
+#: names — never a consumer's. A write refuses only documents of a PROVED other profile, as the twin's Add to Cache
+#: does, while a consumer needs the profile itself; one channel for both made every call read a write as exact.
+#: `UNKNOWN_PROFILE_REQUIREMENT` is the write requirement of a cache of unknown profile.
+CACHE_WRITE_REQUIREMENT_PREFIX = "urn:boomi:cache-write:"
+
+
+def written_profile_ref(ref: Optional[str]) -> Optional[str]:
+    """The profile ref a cache-write requirement names, or None for a consumer's requirement (#186)."""
+    if isinstance(ref, str) and ref.startswith(CACHE_WRITE_REQUIREMENT_PREFIX):
+        return ref[len(CACHE_WRITE_REQUIREMENT_PREFIX):]
+    return None
 
 
 class _InheritedBinding(NamedTuple):
@@ -2865,24 +2878,30 @@ def _walk_lineage(
                     if ref is None:
                         _requires(stream, None, None)
                         continue
-                    if ref == UNKNOWN_PROFILE_REQUIREMENT:
-                        # #186: refused where the ARRIVING documents' profile is proved, as the twin's
-                        # Add to Cache is; passed on unchanged where a caller's documents arrive, and
-                        # never a narrowing of the stream — it states no profile.
+                    written = written_profile_ref(ref)
+                    if ref == UNKNOWN_PROFILE_REQUIREMENT or written is not None:
+                        # #186: a cache WRITE's requirement — into a cache of unknown profile, or one declaring
+                        # or storing ``written`` (wave integration review r4). Refused where the ARRIVING
+                        # documents' profile is proved and is not the target's, as the twin's Add to Cache is;
+                        # passed on unchanged where a caller's documents arrive, and never a narrowing of the
+                        # stream — a write consumes no profile.
+                        target = None if written is None else _identity(written)
+                        contradicted = arriving.identity is not None and (written is None or arriving.identity != target)
                         if arriving.caller_cache is not None:
                             # Documents retrieved from a cache a caller's documents may share: the
                             # child's write of them is a cache WRITE of retrieved documents, judged as
                             # the cache_put arm judges one — the retrieve's proof over everything the
                             # writes there stored, refusing only a proved profile — never the exact
                             # content requirement a consumer states (wave integration review r3).
-                            if checked and arriving.identity is not None and not capabilities.called_by_a_root:
+                            if checked and contradicted and not capabilities.called_by_a_root:
                                 mismatch(node, "/process_ref")
                             if checked and _completable(arriving.retrieved_own):
-                                cache_write_requirement_refs.append((arriving.caller_cache, UNKNOWN_PROFILE_REQUIREMENT,
-                                                                     _ref_naming(_proved_profile(arriving.retrieved_own))))
+                                cache_write_requirement_refs.append((
+                                    arriving.caller_cache, UNKNOWN_PROFILE_REQUIREMENT if written is None else written,
+                                    _ref_naming(_proved_profile(arriving.retrieved_own))))
                             continue
                         _requires(arriving, None, ref)
-                        if arriving.identity is not None and arriving.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
+                        if contradicted and arriving.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
                             mismatch(node, "/process_ref")
                         continue
                     required = _identity(ref)
@@ -3022,8 +3041,11 @@ def _walk_lineage(
             declared_ref = declared_refs[0] if len(identities) == 1 and not unknown else None
             declared = _identity(declared_ref) if declared_ref is not None else None
             # #186: an UNKNOWN cache states a requirement every proved profile contradicts — None
-            # would be skipped by every call, admitting a caller the twin refuses.
-            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else declared_ref)
+            # would be skipped by every call, admitting a caller the twin refuses. A declared (or
+            # stored) profile is the requirement of a WRITE, which refuses only a proved other profile,
+            # so it is marked as one (wave integration review r4); an undeclared cache states nothing.
+            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else (
+                None if declared_ref is None else CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref))
             if checked and stream.identity is not None and (unknown or any(
                 identity is not None and identity != stream.identity for identity in identities
             )):

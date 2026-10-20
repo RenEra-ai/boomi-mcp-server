@@ -481,6 +481,11 @@ class ChildEntryContractV1(_ValidationModel):
       nothing states: a called process whose entry cannot be derived, or a waited
       passthrough child's own None. Refs, not resolved ids, so the contract survives
       placeholder-to-real-id conversion; each call resolves them against its own symbols.
+      An Add to Cache of the documents is a WRITE, not a consumer (#186): into a cache of
+      unknown profile it states "urn:boomi:unknown-profile", into one declaring or storing a
+      profile it states that ref prefixed "urn:boomi:cache-write:". A call refuses a write only
+      where the documents carry a PROVED other profile (any proved profile, for an unknown
+      cache), as the flattened process's Add to Cache does, while a consumer needs its profile.
     - ``required_reads``: state keys the child reads before establishing them. A No
       Data child's document properties are not among them: they cannot arrive. A passthrough
       child's document property is among them only where seeding it on the entry documents

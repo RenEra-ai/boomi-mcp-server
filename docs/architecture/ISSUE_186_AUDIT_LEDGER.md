@@ -215,6 +215,28 @@ mutants, and ARCH-186-e3-03's root-control coverage. The structural-fix records 
 `final-state-summary-read-past-a-continuing-failure` and the second structural fix of
 `child-contract-omits-cache-content` describe code this batch removes; they stay as history.
 
+**Correction batch 15 — structural fix: a cache write's requirement is a WRITE requirement in the child contract**
+(CDX-186-w3-01's site, CDX-186-w4-01; owner checkpoint decision, composite wave gate window 2 evaluation 3). The
+child contract's `document_requirements` carried a cache write's target profile in the channel a consumer's uses,
+so every call read it as an exact profile; batch 14 special-cased only the unknown-profile target. The invariant now:
+every requirement an Add to Cache of the handed documents records is marked as a write —
+the unknown-profile token for a cache of unknown profile, the cache-write prefix (`urn:boomi:cache-write:`) plus
+the ref for one declaring or storing a profile (`written_profile_ref` reads it back) — and the ONE call-site branch for a write
+requirement applies the twin's write rule: refused only where the arriving documents carry a proved profile other
+than the target's (any proved profile, for an unknown target); over documents retrieved from a caller-shared cache,
+the cache_put arm's own deferral and `cache_write_requirement_refs` row; passed on unchanged where a caller's
+documents arrive, never narrowing the stream. A consumer's requirement (a map, a declared input, a split or
+combine) stays exact. Sibling sweep, every reader of `document_requirements`: the call site (fixed); the
+prefix-placement rule (`None` or the unknown-profile token withhold a prefixed call — a marked declared write
+does not, as its unmarked ref did not: unchanged); `integration_builder`'s "consumes caller documents" (truthiness,
+unchanged); the cycle fixpoint (carried as distinct entries, unchanged); `entry_requirements` (recorded, read by
+nothing). Non-vacuity: `test_a_write_requirement_read_as_a_consumers_refuses_a_mixture` and
+`test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixture`. Coverage: every target kind
+(declared, unknown) times every caller content a mixture decides (mixture, the target's profile, another profile),
+each equal to its twin (`test_a_forwarded_write_into_a_declaring_cache_keeps_the_write_rule`,
+`test_a_forwarded_write_into_an_unknown_cache_keeps_the_write_rule`); a stored profile reaches the same marked ref
+through the stored-profile authority (item 3). It also closes the request-declared variant identical at `e22b8fa`.
+
 ## Recorded residuals (measured; both sides refuse, or no faithful twin exists)
 
 - A sibling child's cache write behind a producer that may return nothing does not establish the cache
