@@ -4329,6 +4329,8 @@ def _walk_lineage(
     established = None
     for at_exit in normal_exits:
         established = at_exit if established is None else established.merged_with(at_exit)
+    # #186 (review r16): a staging write of a cache this walk reads again keeps its exact requirement.
+    entry_requirement_refs[:] = _relied_on_writes_exact(entry_requirement_refs, entry_staged, read_caches)
     return LineageWalkV1(
         findings=tuple(findings),
         unestablished_reads=tuple(sorted(set(unmet))),
@@ -4338,7 +4340,7 @@ def _walk_lineage(
             else tuple(sorted(established.document | established.execution))
         ),
         entry_requirements=tuple(entry_requirements),
-        entry_requirement_refs=tuple(_relied_on_writes_exact(entry_requirement_refs, entry_staged, read_caches)),
+        entry_requirement_refs=tuple(entry_requirement_refs),
         cache_requirement_refs=tuple(cache_requirement_refs),
         cache_write_requirement_refs=tuple(sorted(
             set(cache_write_requirement_refs), key=lambda row: (row[0], row[1], row[2] is not None, row[2] or ""))),

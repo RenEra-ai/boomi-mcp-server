@@ -11492,3 +11492,11 @@ def test_a_reread_staged_cache_kept_as_a_write_requirement_admits_the_mixture(mo
                          "        if False:\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
     assert _b186_composed(_b186_staged_and_reread_roots(("p1", "p2"))[0]) == set()
+
+
+#: The obligation sites correction batch 16 adds (Stage-2 review r16).
+_OBLIGATION_SITES.update({
+    ("_walk_lineage", "entry_requirement_refs"): (
+        "#186 (review r16): the entry requirements are handed to `_relied_on_writes_exact`, which returns them with "
+        "each re-read staging write exact — the one place a recorded requirement is rewritten"),
+})
