@@ -3356,7 +3356,11 @@ def _walk_lineage(
         if contract is None or contract.entry_form == "unknown":
             read_caches.update(cache_refs)
         else:
-            read_caches.update(row[0] for row in contract.cache_requirements if row[1] is not None)
+            relied = {row[0] for row in contract.cache_requirements if row[1] is not None}
+            read_caches.update(relied)
+            # ... and the staging writes those caches' documents came from, through any re-cache (integration r6).
+            read_caches.update(fact[2].source for fact in state.content
+                               if fact[0] in relied and isinstance(fact[2], _Staged))
         context, own = _call_prefix(prepared.ir, node.source_path)
         # Keyed on this parent's own entry form, read off its own CFG and never off a caller.
         predecessor = _prefix_predecessor(context, own, stream.native_kind, classify_entry(prepared.cfg))

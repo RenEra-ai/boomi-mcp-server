@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14524, "minimum_collected": 14524, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14527, "minimum_collected": 14527, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14624,3 +14624,6 @@
 {"kind": "test", "id": "pytest-014623", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11575]", "state": "active"}
 {"kind": "test", "id": "pytest-014624", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement", "state": "active"}
 {"kind": "test", "id": "pytest-014625", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_recache_dropping_the_staged_source_admits_the_mixture", "state": "active"}
+{"kind": "test", "id": "pytest-014626", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11610]", "state": "active"}
+{"kind": "test", "id": "pytest-014627", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement", "state": "active"}
+{"kind": "test", "id": "pytest-014628", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_call_ignoring_the_staged_sources_admits_the_mixture", "state": "active"}

@@ -11576,3 +11576,39 @@ def test_a_recache_dropping_the_staged_source_admits_the_mixture(monkeypatch):
                          "            restaged = ()\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
     assert _b186_composed(_b186_staged_then_recached_roots(("p1", "p2"))[0]) == set()
+
+
+def _b186_staged_recached_then_called_roots(stage):
+    """Wave integration review round 6: the re-cache roots with the final consumer moved into a called passthrough
+    READER (`cache_get CACHE3 -> M12`); the twin is unchanged — the consumer runs on the same documents."""
+    get = lambda ref: {"kind": "cache_get", "cache_ref": ref}  # noqa: E731
+    roots, twin = _b186_staged_then_recached_roots(stage)
+    documents = dict(roots)
+    documents["CACHE_CHILD"]["body"]["steps"][-1]["legs"][-1] = {
+        "steps": [], "terminal": _call("WRITER", wait=True, abort_on_error=True)}
+    documents["WRITER"] = _doc(_ENTRY, {"kind": "branch", "legs": [
+        {"steps": [get("$ref:CACHE3"), {"kind": "map_ref", "map_ref": "$ref:M12"}], "terminal": _STOP},
+        {"steps": [_MSG], "terminal": _STOP}]})
+    return [(key, documents[key]) for key, _document in roots] + [("WRITER", documents["WRITER"])], twin
+
+
+def test_a_called_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement(monkeypatch):
+    """Wave integration review round 6. A called process stating a profile requirement on a copy relies on every staging
+    write the copy's documents came from: the caller's P1 and P2 together are refused, as the twin's map refuses them;
+    P1 alone is admitted."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
+    for stage, expected in ((("p1", "p2"), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}), (("p1",), set())):
+        roots, twin = _b186_staged_recached_then_called_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH in _b186_composed(roots) if expected else \
+            PROCESS_IR_SEMANTIC_PROFILE_MISMATCH not in _b186_composed(roots), stage
+
+
+def test_a_call_ignoring_the_staged_sources_admits_the_mixture(monkeypatch):
+    """Mutant: a call marks only the cache its child requires, not the staging writes behind it — the caller's P1 and
+    P2 are admitted where the twin refuses them."""
+    _lineage_with_source(monkeypatch,
+                         "                               if fact[0] in relied and isinstance(fact[2], _Staged))\n",
+                         "                               if False)\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
+    assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH not in _b186_composed(_b186_staged_recached_then_called_roots(("p1", "p2"))[0])
