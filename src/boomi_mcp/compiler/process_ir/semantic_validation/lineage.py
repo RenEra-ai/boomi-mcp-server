@@ -1559,6 +1559,20 @@ def _opaque_reason(
     return None
 
 
+def _relied_on_writes_exact(refs, staged, read_caches) -> List[Optional[str]]:
+    """``refs`` with each write requirement of a staged cache this walk reads again made exact (#186, review r16).
+
+    The write records the declared profile as the cache's content, so a later read of the cache proves it; that proof
+    holds only if the handed documents carried that profile, so a read cache keeps the exact requirement it had before
+    the write marker existed. A cache never read is a write the twin judges by the write rule alone.
+    """
+    refs = list(refs)
+    for position, cache_ref, declared_ref in staged:
+        if cache_ref in read_caches and refs[position] == CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref:
+            refs[position] = declared_ref
+    return refs
+
+
 def _caches_a_call_may_write(cache_refs, contract) -> Tuple[str, ...]:
     """The caches one call may leave holding content this process cannot see (#184).
 
@@ -2093,6 +2107,12 @@ def _walk_lineage(
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
     #: #186: the rows `LineageWalkV1.cache_write_requirement_refs` returns.
     cache_write_requirement_refs: List[Tuple[str, str, Optional[str]]] = []
+    #: #186 (Stage-2 review r16): where this walk staged the handed documents in a declaring cache — the position of
+    #: that write requirement in `entry_requirement_refs`, the cache and the declared ref — and every cache it, or a
+    #: process it calls, may READ. A staged cache read again is relied on: what the read sees is the declared profile
+    #: the write recorded as its content, so the requirement stays exact; one never read is a write requirement.
+    entry_staged: List[Tuple[int, str, str]] = []
+    read_caches: set = set()
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
     unestablished_cached_keys: List[Tuple[str, str, str, Optional[str], bool]] = []
@@ -3043,7 +3063,10 @@ def _walk_lineage(
             # #186: an UNKNOWN cache states a requirement every proved profile contradicts — None
             # would be skipped by every call, admitting a caller the twin refuses. A declared (or
             # stored) profile is the requirement of a WRITE, which refuses only a proved other profile,
-            # so it is marked as one (wave integration review r4); an undeclared cache states nothing.
+            # so it is marked as one (wave integration review r4) — unless the cache is read again
+            # (resolved at the walk's end, Stage-2 review r16); an undeclared cache states nothing.
+            if declared_ref is not None and not unknown and stream.state == STREAM_CALLER_ENTRY:
+                entry_staged.append((len(entry_requirement_refs), semantic.cache_ref, declared_ref))
             _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else (
                 None if declared_ref is None else CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref))
             if checked and stream.identity is not None and (unknown or any(
@@ -3106,6 +3129,7 @@ def _walk_lineage(
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
                 state = state.with_content(cache_reads[0], None, legacy_source=False)
+            read_caches.add(cache_reads[0])
             contents = state.content_of(cache_reads[0])
             # Whether a caller's documents may be among the ones retrieved, asked ONCE, here,
             # of the one authority. Both markers carry the same answer: a consumer records
@@ -3293,6 +3317,15 @@ def _walk_lineage(
         """
         contract = capabilities.child_entry_contract(semantic.process_ref)
         form = contract.entry_form if contract is not None else None
+        # #186 (review r16): the caches this child may read — every one, where nothing derives it.
+        if contract is None or contract.entry_form == "unknown":
+            read_caches.update(cache_refs)
+        else:
+            read_caches.update(row[0] for row in contract.cache_requirements)
+            read_caches.update(row[0] for row in contract.cache_write_requirements)
+            read_caches.update(row[0] for row in contract.cache_property_requirements)
+            read_caches.update(row[0] for row in contract.nonstrict_cached_reads if row[0] is not None)
+            read_caches.update(key[1] for key in contract.required_reads if key[0] == CACHE)
         context, own = _call_prefix(prepared.ir, node.source_path)
         # Keyed on this parent's own entry form, read off its own CFG and never off a caller.
         predecessor = _prefix_predecessor(context, own, stream.native_kind, classify_entry(prepared.cfg))
@@ -4305,7 +4338,7 @@ def _walk_lineage(
             else tuple(sorted(established.document | established.execution))
         ),
         entry_requirements=tuple(entry_requirements),
-        entry_requirement_refs=tuple(entry_requirement_refs),
+        entry_requirement_refs=tuple(_relied_on_writes_exact(entry_requirement_refs, entry_staged, read_caches)),
         cache_requirement_refs=tuple(cache_requirement_refs),
         cache_write_requirement_refs=tuple(sorted(
             set(cache_write_requirement_refs), key=lambda row: (row[0], row[1], row[2] is not None, row[2] or ""))),

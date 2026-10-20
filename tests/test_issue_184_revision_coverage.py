@@ -133,6 +133,9 @@ def _perturbations():
         ("lineage", "_handed_document_requirements"): lambda contract, wait: (),
         # #186 (wave integration review r4): no requirement read as a cache write's.
         ("lineage", "written_profile_ref"): lambda ref: None,
+        # #186 (review r16): no staged cache read again keeps its exact requirement.
+        ("lineage", "_relied_on_writes_exact"): lambda refs, staged, read_caches: list(refs),
+        # #186 (review r16): no staged cache read again keeps its exact requirement.
         ("lineage", "_caller_cohort"): lambda names: lineage.UNKNOWN_COHORT,
         ("lineage", "cache_content_judgement"):
             lambda stream, identity: None if stream.origin != "cache" else True,

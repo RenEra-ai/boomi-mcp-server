@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14515, "minimum_collected": 14515, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14518, "minimum_collected": 14518, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14615,3 +14615,6 @@
 {"kind": "test", "id": "pytest-014614", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11458]", "state": "active"}
 {"kind": "test", "id": "pytest-014615", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_forwarded_write_into_a_declaring_cache_keeps_the_write_rule", "state": "active"}
 {"kind": "test", "id": "pytest-014616", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_write_requirement_read_as_a_consumers_refuses_a_mixture", "state": "active"}
+{"kind": "test", "id": "pytest-014617", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11491]", "state": "active"}
+{"kind": "test", "id": "pytest-014618", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_staged_cache_the_child_reads_again_keeps_the_exact_requirement", "state": "active"}
+{"kind": "test", "id": "pytest-014619", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_reread_staged_cache_kept_as_a_write_requirement_admits_the_mixture", "state": "active"}

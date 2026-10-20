@@ -11459,3 +11459,36 @@ def test_a_write_requirement_read_as_a_consumers_refuses_a_mixture(monkeypatch):
                          "    if False:\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
     assert _b186_composed(_b186_forwarded_unknown_write_roots(("p1", "p2"))[0]) == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+
+
+def _b186_staged_and_reread_roots(stage):
+    """Stage-2 review r16: the forwarded-write roots with CACHE_CHILD also retrieving CACHE2 into the P1 map on a later
+    leg — the child relies on what its write staged — and the same leg in the twin."""
+    roots, twin = _b186_forwarded_unknown_write_roots(stage)
+    reread = {"steps": [{"kind": "cache_get", "cache_ref": "$ref:CACHE2"}, {"kind": "map_ref", "map_ref": "$ref:M12"}],
+              "terminal": _STOP}
+    documents = dict(roots)
+    documents["CACHE_CHILD"]["body"]["steps"][-1]["legs"].append(reread)
+    twin["body"]["steps"][-1]["legs"].insert(-1, reread)
+    return [(key, documents[key]) for key, _document in roots], twin
+
+
+def test_a_staged_cache_the_child_reads_again_keeps_the_exact_requirement(monkeypatch):
+    """Stage-2 review r16. The child's write of the handed documents records the cache's declared P1 as its content, so
+    a later read of the cache proves P1 — sound only if the documents carried P1. A staged cache the child (or a
+    process it calls) reads again therefore keeps the exact requirement: the caller's P1 and P2 together are refused,
+    as the twin's map refuses them, and P1 alone is admitted. Never read again, it is a write requirement (above)."""
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    for stage, expected in ((("p1", "p2"), {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}), (("p1",), set())):
+        roots, twin = _b186_staged_and_reread_roots(stage)
+        assert _b30_codes(_b28_verdict([("PARENT", twin)], "PARENT", True)[0]) == expected, stage
+        assert _b186_composed(roots) == expected, stage
+
+
+def test_a_reread_staged_cache_kept_as_a_write_requirement_admits_the_mixture(monkeypatch):
+    """Mutant: a staged cache stays a write requirement though the child reads it again — the declared P1 the write
+    recorded proves the mixture P1 to the map, and the caller's P1 and P2 are admitted where the twin refuses."""
+    _lineage_with_source(monkeypatch, "        if cache_ref in read_caches and refs[position] == CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref:\n",
+                         "        if False:\n")
+    monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P1"))
+    assert _b186_composed(_b186_staged_and_reread_roots(("p1", "p2"))[0]) == set()
