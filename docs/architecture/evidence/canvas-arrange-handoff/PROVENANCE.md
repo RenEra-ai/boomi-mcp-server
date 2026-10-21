@@ -32,7 +32,7 @@ server. The implementation slice ports the package to `src/boomi_mcp/arrange/` a
 | `componentId` | 36 distinct GUIDs: the lab processes; each before/after pair shares one |
 | `folderId` / `folderFullPath` / `folderName` | `Rjo4ODczNzkw` / `root/AutoFormat Lab` / `AutoFormat Lab` |
 | `branchId` / `branchName` | `Qjo1OTQ0NDE` / `main` |
-| `createdBy` / `modifiedBy` | the demo account's API user |
+| `createdBy` / `modifiedBy` | the demo account's API user, replaced before landing (2026-10-21) by the placeholder `demo-api-user@example.invalid` in every `lab/` fixture, so no mailbox is published |
 | `createdDate` / `modifiedDate` / `version` | 2026-09-30; `before` mostly v1, `after` v2 or v3 |
 | `processcall processId` | `008d7f8b-a21d-4a7a-b00b-9feb55182502` (106×; a demo-account child process ending in Return Documents, with `childShapeName="shape14"`) and `9373fce3-e13f-45cb-9165-d18f21d6ef0b` (2×; the no-op QA fixture process) |
 | decision `propertyId` | `dynamicdocument.DDP_LAB` (synthetic) |
