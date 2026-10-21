@@ -272,9 +272,17 @@ def canonical_cache_capabilities(capabilities, canonical: Mapping[str, str]):
     def contract(row):
         return row.model_copy(update={
             "required_reads": keys(row.required_reads),
+            # #186: the execution-state writer sets name caches too.
+            "execution_state_writes": keys(row.execution_state_writes),
+            "establishing_execution_state_writes": keys(row.establishing_execution_state_writes),
+            # #186: the same keys, with their leg order.
+            "required_read_leg_orders": tuple(
+                key((item[0], item[1])) + (item[2],) for item in row.required_read_leg_orders),
             "mutated_state": keys(row.mutated_state),
             "guaranteed_state": keys(row.guaranteed_state),
             "cache_requirements": cache_pairs(row.cache_requirements),
+            "cache_write_requirements": tuple(
+                (canonical.get(item[0], item[0]),) + tuple(item[1:]) for item in row.cache_write_requirements),
             "removed_caches": tuple(canonical.get(ref, ref) for ref in row.removed_caches),
             "unwaited_cache_writes": tuple(
                 canonical.get(ref, ref) for ref in row.unwaited_cache_writes),

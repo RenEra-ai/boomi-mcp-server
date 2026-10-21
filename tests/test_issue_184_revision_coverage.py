@@ -131,6 +131,12 @@ def _perturbations():
         ("lineage", "_native_work_marker"): lambda incoming, semantic_kind, authored_kind: incoming,
         ("lineage", "_prefix_predecessor"): lambda context, own, marker, parent_form: own,
         ("lineage", "_handed_document_requirements"): lambda contract, wait: (),
+        # #186 (wave integration review r4): no requirement read as a cache write's.
+        ("lineage", "written_profile_ref"): lambda ref: None,
+        # #186 (review r16): no staged cache read again keeps its exact requirement.
+        ("lineage", "_relied_on_writes_exact"): lambda refs, staged, read_caches: list(refs),
+        # #186 (review r16): no staged cache read again keeps its exact requirement.
+        # #186 (review r16): no staged cache read again keeps its exact requirement.
         ("lineage", "_caller_cohort"): lambda names: lineage.UNKNOWN_COHORT,
         ("lineage", "cache_content_judgement"):
             lambda stream, identity: None if stream.origin != "cache" else True,
@@ -201,6 +207,8 @@ def _perturbations():
         ("lineage", "_written_anywhere"): lambda prepared, key, capabilities=None: False,
         # Correction batch 30 sibling sweep: the one writer set, its called children's writes included.
         ("lineage", "_keys_written_anywhere"): lambda prepared, capabilities=None: frozenset(),
+        # #186: no establishing writer anywhere, so no execution-scoped non-strict read can fail.
+        ("lineage", "_keys_established_anywhere"): lambda prepared, capabilities=None: frozenset(),
         # --- lineage: the lattice's transfer and meet -----------------------------------
         ("lineage", "_State.with_write"): lambda self, key, proved=False: self,
         ("lineage", "_State.with_content"): lambda self, cache_ref, identity, legacy_source=False: self,
@@ -243,10 +251,19 @@ def _perturbations():
         ("effects", "_caller_cached_properties"): lambda prepared, capabilities, walk: (),
         # Correction batch 30: a child's non-strict cached reads owe its callers nothing again.
         ("effects", "_caller_nonstrict_reads"): lambda prepared, capabilities, walk: (),
+        # #186: the entry-document rows dropped, and the entry-repair filter reverted.
+        ("effects", "_caller_entry_document_reads"): lambda prepared, capabilities, walk, passthrough: (),
+        ("effects", "_entry_repairable_reads"): lambda prepared, capabilities, walk, reads: reads,
+        # #186: a write requirement never promoted, however the child relies on it.
+        ("effects", "_caller_cache_write_requirements"):
+            lambda prepared, capabilities, walk: (tuple(sorted(set(walk.cache_write_requirement_refs))), ()),
+        # #186 (ARCH-186-e1-04): no read is left to each caller's judgment.
+        ("effects", "_caller_judged_entry_reads"): lambda prepared, capabilities, walk: (),
+        ("effects", "caller_judged_read_sites"): lambda child_ir, symbols, capabilities=None: (),
         ("effects", "_caller_cache_seeds"): lambda requirements, symbols: (),
         ("effects", "_entry_contract_bindings"): lambda process_roots, symbols, symbols_for, base_for=None,
         opaque=frozenset(): {
-            key: ((), (), (), None, "unknown", (), ()) for key, _ir in process_roots},
+            key: ((), (), (), None, "unknown", (), (), False, ()) for key, _ir in process_roots},
         ("effects", "_binds"): lambda binding: False,
         ("effects", "_with_entry_contracts"): lambda capabilities, binding: capabilities,
         ("effects", "_aliases"): lambda symbols, ref: frozenset({ref}),

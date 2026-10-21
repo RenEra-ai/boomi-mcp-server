@@ -979,6 +979,7 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         canonical_cache_refs,
     )
     from ..compiler.process_ir.semantic_validation.lineage import (
+        _keys_established_anywhere,
         _keys_written_anywhere,
         _trusted_effects,
         proved_removals,
@@ -1063,6 +1064,20 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         "document_property_writes": tuple(sorted(
             key[1] for key in _keys_written_anywhere(prepared, base) if key[0] == "ddp")),
     }
+    # #186: the execution-scoped halves of the same two writer sets — every writer, which the
+    # caller's later-leg rule LOCATES, and the establishing ones its "an establishing writer exists"
+    # rule counts — so a caller counts the writers its flattened twin would hold.
+    facts["execution_state_writes"] = tuple(sorted(
+        (key[0], key[1]) for key in _keys_written_anywhere(prepared, base) if key[0] != "ddp"))
+    facts["establishing_execution_state_writes"] = tuple(sorted(
+        (key[0], key[1]) for key in _keys_established_anywhere(prepared, base) if key[0] != "ddp"))
+    # #186 (SELF-184-74): the non-strict process-property reads it cannot fail itself, each with
+    # whether a writer sits on a later leg than the read.
+    facts["nonstrict_process_reads"] = tuple(sorted(
+        {(name, flag) for _pointer, name, flag in walk.nonstrict_process_reads}))
+    # #186 (SELF-184-73): the non-strict document-property reads off documents no retrieve handed
+    # on, each with what the documents a call hands over do for it — measured.
+    facts["nonstrict_document_reads"] = _caller_entry_document_reads(prepared, base, walk, form == PASSTHROUGH)
     # Amendment 1 rule 7: what every normal completion establishes, off the walk's meet
     # over normal exits. Execution-scoped keys the child itself writes: a document
     # property never lands on a caller's sibling copies, and a key the walk was only
@@ -1086,10 +1101,22 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
         if key[0] != "ddp" and (key[0], key[1]) in listed
     ))
     reads = tuple(sorted({(key[0], key[1]) for key in walk.unestablished_reads}))
+    # #186: which leg order each execution-scoped requirement was found in.
+    facts["required_read_leg_orders"] = tuple(sorted(
+        {(scope, name, later) for _pointer, scope, name, later in walk.unestablished_read_sites
+         if scope != "ddp" and (scope, name) in set(reads)}))
     facts["cache_requirements"] = tuple(sorted(
         set(walk.cache_requirement_refs), key=lambda row: (row[0], row[1] or "")
     ))
     facts["cache_property_requirements"] = _caller_cached_properties(prepared, base, walk)
+    # #186 (ARCH-186-e1-01): what the child's cache writes of retrieved documents ask of the callers —
+    # measured, so each lands in the channel whose rule the flattened twin applies to it.
+    measured_writes = _caller_cache_write_requirements(prepared, base, walk)
+    facts["cache_write_requirements"] = measured_writes[0]
+    relied_on = measured_writes[1]
+    if relied_on:
+        facts["cache_requirements"] = tuple(sorted(
+            set(facts["cache_requirements"]) | set(relied_on), key=lambda row: (row[0], row[1] or "")))
     # Correction batch 30 (QA-184-s1-r29-01): what a non-strict read the child cannot fail itself
     # owes a caller that writes the property — measured the same way.
     facts["nonstrict_cached_reads"] = _caller_nonstrict_reads(prepared, base, walk)
@@ -1101,6 +1128,7 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
     # only ever make the claim stronger than the call it serves (fail-closed, correction batch 30).
     facts["required_caches_retain_nothing_it_stored"] = not (
         ({row[0] for row in facts["cache_requirements"]}
+         | {row[0] for row in facts["cache_write_requirements"]}
          | {row[0] for row in facts["cache_property_requirements"]}
          | {row[0] for row in facts["nonstrict_cached_reads"] if row[0] is not None})
         & set(walk.may_hold_at_exit)
@@ -1111,9 +1139,15 @@ def derive_child_entry_facts(child_ir: Any, symbols: Any, capabilities: Any = No
             required_reads=tuple(key for key in reads if key[0] != "ddp"),
         )
         return facts
+    # #186 (ARCH-186-e1-04): the entry-document reads whose code each caller decides are judged at the
+    # call as conditional rows of the relation measured with the seed.
+    judged = _caller_judged_entry_reads(prepared, base, walk)
+    if judged:
+        facts["nonstrict_document_reads"] = tuple(sorted(
+            set(facts["nonstrict_document_reads"]) | {(name, relation) for _pointer, name, relation in judged}))
     facts.update(
         entry_form="passthrough",
-        required_reads=reads,
+        required_reads=_entry_repairable_reads(prepared, base, walk, reads),
         document_requirements=(
             tuple(walk.entry_requirement_refs) if walk.profile_proof else (None,)
         ),
@@ -1275,6 +1309,196 @@ def _caller_nonstrict_reads(
     return tuple(sorted(rows, key=lambda row: (row[0] is not None, row[0] or "", row[1])))
 
 
+def _caller_cache_write_requirements(prepared: Any, capabilities: Any, walk: Any):
+    """``(write requirements, requirements the child relies on)`` for its cache writes of documents a caller stored (#186).
+
+    A cache write of documents retrieved from a cache a caller fills is refused, in the flattened twin, only
+    where those documents carry a PROVED profile other than the target's (CDX-186-r3-01) — so by itself it asks
+    the callers only not to contradict it. But the child may go on to USE what it restaged: a later retrieve of
+    the target feeding a map needs the profile, which the twin proves from the caller's write. MEASURED, as
+    every other row here is, by walking the child twice with the caller's content of the source cache seeded:
+    once with the target's declared profile, once with documents whose profile nothing states. Where the
+    profile clears a refusal the unprofiled documents leave standing, a consumer needs what only that proved
+    profile gives, so the row is a content requirement of the callers — exact, and seeded into the child's
+    validation like any other (CDX-186-r4-01). A refusal a seed ADDS is no reliance (CDX-186-r5-01), and
+    neither is one a seed clears only by leaving the retrieved documents unproved, which the unprofiled seed
+    clears too (architect evaluation 2). The unknown-profile requirement names no profile a seed could
+    state, so it is never relied on.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import UNKNOWN_PROFILE_REQUIREMENT, walk_lineage
+
+    rows = tuple(walk.cache_write_requirement_refs)
+    if not rows:
+        return (), ()
+
+    def _findings_with(cache_ref, profile_ref):
+        seeded = capabilities.model_copy(update={"caller_cache_contents": tuple(sorted(
+            set(capabilities.caller_cache_contents) | {(cache_ref, profile_ref)}))})
+        return {(item.code, item.path) for item in walk_lineage(prepared, seeded).findings}
+
+    relied_on = set()
+    for cache_ref, profile_ref in sorted({(row[0], row[1]) for row in rows}):
+        if profile_ref == UNKNOWN_PROFILE_REQUIREMENT:
+            continue
+        # The unknown-profile token resolves to no profile, so as a seed it stores documents nothing proves.
+        if _findings_with(cache_ref, UNKNOWN_PROFILE_REQUIREMENT) - _findings_with(cache_ref, profile_ref):
+            relied_on.add((cache_ref, profile_ref))
+    return tuple(row for row in rows if (row[0], row[1]) not in relied_on), tuple(sorted(relied_on))
+
+
+def _entry_repairable_reads(prepared: Any, capabilities: Any, walk: Any, reads) -> Tuple[Tuple[str, str], ...]:
+    """A passthrough child's required reads, its document properties kept only where an entry seed repairs one (#186).
+
+    MEASURED as `_caller_composed_paths` measures a bound path: seed every document property the
+    walk found unestablished on the entry documents and walk again, keyed by read site. A property
+    is the caller's obligation exactly when the seed clears one of its reads. A read the seed does
+    not clear — a step between the entry and the read discards what the documents carried — is the
+    child's own defect: exporting it asked the caller for a property no arriving document can
+    deliver, and validating the child against that seed reported a read before write the
+    flattened twin, whose read is a different-document-copy scope error, never serves. Execution
+    keys pass through unchanged: an entry seed is not how they arrive.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    sites = {(pointer, name) for pointer, scope, name, _later in walk.unestablished_read_sites if scope == "ddp"}
+    if not sites:
+        return reads
+    seeded = capabilities.model_copy(update={"established_at_entry": tuple(sorted(
+        set(capabilities.established_at_entry) | {("ddp", name) for _pointer, name in sites}))})
+    still = {(pointer, name) for pointer, scope, name, _later in walk_lineage(prepared, seeded).unestablished_read_sites
+             if scope == "ddp"}
+    repaired = {name for pointer, name in sites if (pointer, name) not in still}
+    return tuple(key for key in reads if key[0] != "ddp" or key[1] in repaired)
+
+
+def caller_judged_read_sites(child_ir: Any, symbols: Any, capabilities: Any = None) -> Tuple[Tuple[str, str], ...]:
+    """``(pointer, property name)`` of each read a CALLED passthrough child leaves to each caller's judgment (#186).
+
+    Not a contract fact — a pointer into the child's own graph — but what its validation needs when a root calls
+    it (`ProcessIRValidationCapabilitiesV1.caller_judged_read_sites`): the sites of the rows
+    `derive_child_entry_facts` adds to `nonstrict_document_reads`, measured by the same function on the same walk.
+    """
+    from ..compiler.process_ir.semantic_validation.context import (
+        canonical_cache_capabilities,
+        canonical_cache_refs,
+        prepare_validation_context,
+    )
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    prepared = prepare_validation_context(child_ir, symbols)
+    base = canonical_cache_capabilities(
+        capabilities or DEFAULT_VALIDATION_CAPABILITIES, canonical_cache_refs(symbols))
+    judged = _caller_judged_entry_reads(prepared, base, walk_lineage(prepared, base))
+    return tuple(sorted({(pointer, name) for pointer, name, _relation in judged}))
+
+
+def _caller_judged_entry_reads(prepared: Any, capabilities: Any, walk: Any) -> Tuple[Tuple[str, str, str], ...]:
+    """``(pointer, property name, relation)`` for each entry-document read whose code each caller decides (#186).
+
+    A read of a document property the entry documents may carry, unestablished there, that an entry seed
+    reaches only DISCARDED — a step between the entry and the read drops what the documents carried — fails in
+    the flattened twin whatever the caller does wherever a writer of the property exists. WHICH code it fails
+    with is the caller's: a read before write where the caller's documents carried the property, a scope
+    error where they did not and the writer sits on another document copy (ARCH-186-e1-04). Validated once,
+    the child cannot serve both, so the read is judged at each call instead, as the conditional row
+    `lineage._classify_unmet_read` records for a non-strict read, whose judgment asks each caller's writer set
+    — the child's own writes included — exactly as the twin's walk does.
+
+    MEASURED, per property: seed it on the entry documents and walk again; a read site the seed leaves
+    unestablished whose codes there differ from the unseeded walk's is one. The relation is the one the seeded
+    walk records for the site when routed to that row. A read the seed repairs is a required read
+    (`_entry_repairable_reads`), and one whose code no seed moves stays the child's own defect.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    sites = sorted({(pointer, name) for pointer, scope, name, _later in walk.unestablished_read_sites if scope == "ddp"})
+    if not sites:
+        return ()
+
+    def _codes_at(findings):
+        codes: Dict[str, set] = {}
+        for item in findings:
+            codes.setdefault(item.path, set()).add(item.code)
+        return codes
+
+    def _seeded(names, routed=()):
+        return capabilities.model_copy(update={
+            "established_at_entry": tuple(sorted(
+                set(capabilities.established_at_entry) | {("ddp", name) for name in names})),
+            "caller_judged_read_sites": tuple(sorted(set(capabilities.caller_judged_read_sites) | set(routed))),
+        })
+
+    before = _codes_at(walk.findings)
+    judged = set()
+    for name in sorted({name for _pointer, name in sites}):
+        after_walk = walk_lineage(prepared, _seeded([name]))
+        still = {(pointer, read) for pointer, scope, read, _later in after_walk.unestablished_read_sites
+                 if scope == "ddp" and read == name}
+        after = _codes_at(after_walk.findings)
+        judged |= {(pointer, read) for pointer, read in sites
+                   if read == name and (pointer, read) in still and before.get(pointer, set()) != after.get(pointer, set())}
+    if not judged:
+        return ()
+    routed = walk_lineage(prepared, _seeded(sorted({name for _pointer, name in judged}), judged))
+    # Every relation observed at a site is kept (architect evaluation 3): a call can judge two child rows of one
+    # property there, a dropped and a fresh one, and keeping one per site lost the other's code. The walk is seeded
+    # with the property, so what it hints is what the documents AT the site do: ``drops`` where the seed was
+    # discarded on the way to the read, ``entry`` where the seed never reaches it at all — the documents the read
+    # sees are not the ones the caller hands over, which is ``fresh``, as `_caller_entry_document_reads` measures an
+    # ``entry`` hint. The walk's own ``entry`` is no contract relation, and exporting it raised.
+    relations: Dict[Tuple[str, str], set] = {}
+    for pointer, name, hint, _origin in routed.nonstrict_document_reads:
+        if (pointer, name) in judged:
+            relations.setdefault((pointer, name), set()).add("fresh" if hint == "entry" else hint)
+    return tuple(sorted((pointer, name, relation) for pointer, name in judged
+                        for relation in relations.get((pointer, name), {"drops"})))
+
+
+def _caller_entry_document_reads(
+    prepared: Any, capabilities: Any, walk: Any, passthrough: bool
+) -> Tuple[Tuple[str, str], ...]:
+    """What a child's non-strict entry-document reads ask of the documents a call hands over (#186).
+
+    A non-strict read — a Decision operand with no default — of a document property the child
+    writes nowhere tolerates absence, but fails wherever a writer of the property exists on
+    documents it can never see (`lineage._nonstrict_read_can_fail`); a caller's writer is one,
+    and the flattened twin, which holds it, refuses the read (SELF-184-73). Which code the twin
+    serves depends on what the documents the call hands over do for the read, so each row names
+    that relation, MEASURED on the child's own walk as `_caller_cached_properties` measures a
+    cached row: seed the property on the entry documents and walk again, keyed by the read's
+    pointer and property.
+
+    - the seed clears the read: ``inherits`` — the handed documents' property reaches it;
+    - the read is still unestablished with the seed DISCARDED on its path: ``drops``;
+    - anything else — the seed never reaches it undiscarded — and every read of a No Data
+      child, whose run starts from its own empty document: ``fresh``.
+
+    Rows a call passed on already carry ``drops`` or ``fresh`` and keep them. Distinct relations
+    for one property are kept apart: two reads of it can owe different codes.
+    """
+    from ..compiler.process_ir.semantic_validation.lineage import walk_lineage
+
+    candidates = sorted(set(walk.nonstrict_document_reads))
+    if not candidates:
+        return ()
+    if not passthrough:
+        return tuple(sorted({(name, "fresh") for _pointer, name, _hint, _origin in candidates}))
+    rows = {(name, hint) for _pointer, name, hint, _origin in candidates if hint != "entry"}
+    # Keyed by pointer, name AND origin: a call can pass on two rows of one property — an inherited
+    # read and a fresh one — at one pointer, and a sibling that survives the seed must not stand in
+    # for the read the seed repaired (ARCH-186-e1-05).
+    entry = sorted({(pointer, name, origin) for pointer, name, hint, origin in candidates if hint == "entry"})
+    if entry:
+        seeded = capabilities.model_copy(update={"established_at_entry": tuple(sorted(
+            set(capabilities.established_at_entry) | {("ddp", name) for _pointer, name, _origin in entry}))})
+        after = {(pointer, name, origin): hint
+                 for pointer, name, hint, origin in walk_lineage(prepared, seeded).nonstrict_document_reads}
+        for pointer, name, origin in entry:
+            hint = after.get((pointer, name, origin))
+            rows.add((name, "inherits" if hint is None else "drops" if hint == "drops" else "fresh"))
+    return tuple(sorted(rows))
+
+
 def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     """The cache contents a CALLED child may be validated under (#184 amendment 1 rule 6).
 
@@ -1293,9 +1517,13 @@ def _caller_cache_seeds(requirements, symbols) -> Tuple[Tuple[str, str], ...]:
     """
     from ..compiler.process_ir.contracts import component_identity
 
+    from ..compiler.process_ir.semantic_validation.lineage import UNKNOWN_PROFILE_REQUIREMENT
+
     by_cache: Dict[str, List[Optional[str]]] = {}
     for cache_ref, profile_ref in requirements:
-        by_cache.setdefault(cache_ref, []).append(profile_ref)
+        # #186: an unknown cache's requirement states no profile a caller could store.
+        by_cache.setdefault(cache_ref, []).append(
+            None if profile_ref == UNKNOWN_PROFILE_REQUIREMENT else profile_ref)
     seeds = []
     for cache_ref, refs in sorted(by_cache.items()):
         stated = [ref for ref in refs if ref is not None]
@@ -1347,13 +1575,24 @@ _A_CYCLE_MEMBERS_CLAIMS: Dict[str, Any] = {
 #: row, and a carried field needs no monotonicity argument at all.
 _OBLIGATION_FIELDS: Tuple[str, ...] = (
     "cache_requirements",
+    # #186: a write requirement a call must discharge — LARGER is fail-closed.
+    "cache_write_requirements",
     "cache_property_requirements",
     # Correction batch 30: one more requirement a call must discharge — LARGER is fail-closed.
     "nonstrict_cached_reads",
     # Correction batch 30 sibling sweep: a writer set read only to REFUSE a read (a writer exists
     # that the read can never see) — never to establish one — so LARGER is fail-closed too.
     "document_property_writes",
+    # #186: each a read a call must judge, or a writer read only to REFUSE one — LARGER is
+    # fail-closed. A document read's relation is part of the row, so a member stating two
+    # relations for one property is judged under both.
+    "nonstrict_document_reads",
+    "nonstrict_process_reads",
+    "execution_state_writes",
+    "establishing_execution_state_writes",
     "required_reads",
+    # #186: a leg order a call must report — LARGER is fail-closed (one more code, never a pass).
+    "required_read_leg_orders",
     "required_writers",
     "document_requirements",
     "unwaited_cache_writes",
@@ -1384,7 +1623,7 @@ _PERMISSIVE_FIELDS: Tuple[str, ...] = (
 
 
 def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None, opaque=frozenset()) -> Dict[str, tuple]:
-    """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds)``.
+    """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds, judged by callers, caller-judged reads)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
     child's own walk. The members of a call cycle cannot be put in that order: they are
@@ -1623,6 +1862,11 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
         for child in targets.values()
         if child is not None
     }
+    # #186 (CDX-186-r7-01): a root may leave a judgment to its callers only where every chain of callers
+    # above it ends at a root that makes it. Callers of an ORDERED root form no cycle, so every chain ends at a
+    # root nothing calls or at an unordered one — a call-cycle member, or a process that reaches one — and
+    # neither defers. A cycle member deferring to the others passed the obligation round the cycle forever.
+    defers = {key for key in called if key in ordered}
     bindings: Dict[str, tuple] = {}
     for key in roots:
         own = facts[key]
@@ -1642,13 +1886,23 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
                 (cache_ref, name)
                 for cache_ref, name, _ref, _bound in own.get("cache_property_requirements", ())
             })) if is_called else (),
+            # #186 (architect evaluation 2): a called root whose contract leaves a cache write of
+            # retrieved documents to its callers does not judge that write itself.
+            key in defers and bool(own.get("cache_write_requirements")),
+            # #186 (ARCH-186-e1-04): a called root's reads whose code each caller decides — the sites of the
+            # rows its contract states, measured on the same walk over the same context it was derived from.
+            caller_judged_read_sites(
+                roots[key], symbols_for(key, roots[key]),
+                ProcessIRValidationCapabilitiesV1(child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})))
+            if key in defers and own.get("entry_form") == "passthrough" else (),
         )
     return bindings
 
 
 def _binds(binding: tuple) -> bool:
-    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds = binding
-    return bool(rows or reads or writers or cache_seeds or cohort_seeds or entry is not None)
+    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds, judged_by_callers, judged_reads = binding
+    return bool(rows or reads or writers or cache_seeds or cohort_seeds or judged_by_callers or judged_reads
+                or entry is not None)
 
 
 def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
@@ -1656,7 +1910,7 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         ProcessIRValidationCapabilitiesV1,
     )
 
-    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds = binding
+    rows, reads, writers, entry, _form, cache_seeds, cohort_seeds, judged_by_callers, judged_reads = binding
     fields = {
         name: getattr(capabilities, name)
         for name in ProcessIRValidationCapabilitiesV1.model_fields
@@ -1668,6 +1922,8 @@ def _with_entry_contracts(capabilities: Any, binding: tuple) -> Any:
         caller_cache_contents=cache_seeds,
         caller_cache_cohorts=cohort_seeds,
         entry_contract=entry,
+        called_by_a_root=judged_by_callers,
+        caller_judged_read_sites=judged_reads,
     )
     return ProcessIRValidationCapabilitiesV1(**fields)
 

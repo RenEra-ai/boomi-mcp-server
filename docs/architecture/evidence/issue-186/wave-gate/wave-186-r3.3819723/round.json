@@ -1,0 +1,12 @@
+{
+ "collector": "wave_gate",
+ "durable_dir": "wave-gate/wave-186-r3.3819723",
+ "files": {
+  "wave-gate/wave-186-r3.3819723/wave.log": "a050b1f429c43d4e1ca52a0a942dda4ce8811e38a350c6fd87be354a27095e80"
+ },
+ "logical_loop": "L4 (composite wave gate)",
+ "source_run_dir": "docs/plans/issue-186/work/wave-186-r3.3819723",
+ "status": "completed",
+ "verdict": null,
+ "wave_sha": "381972316bdf9df0a896b05686a0b0adc35a5211"
+}

@@ -919,11 +919,14 @@ def test_the_three_lattice_consumers_ask_three_different_questions():
         assert "effect.writes" in inspect.getsource(fn), fn.__name__
         assert "_establishes_downstream(" not in inspect.getsource(fn), fn.__name__
 
-    # and the establishment question must consult the predicate
-    assert "_establishes_downstream(" in inspect.getsource(lineage._established_anywhere)
+    # and the establishment question must consult the predicate (#186: `_established_anywhere`
+    # reads the one establishing-writer set, `_keys_established_anywhere`, which a child contract
+    # also exports, so the source pins sit on the set)
+    assert "_keys_established_anywhere(" in inspect.getsource(lineage._established_anywhere)
+    assert "_establishes_downstream(" in inspect.getsource(lineage._keys_established_anywhere)
 
     # the derived guarantee: its path-independent half in both indexes that count it
-    for fn in (lineage._leg_write_index, lineage._established_anywhere):
+    for fn in (lineage._leg_write_index, lineage._keys_established_anywhere):
         assert "_awaited_guarantee(" in inspect.getsource(fn), fn.__name__
     assert "_awaited_guarantee(" not in inspect.getsource(lineage._keys_written_anywhere)
     assert re.search(r"(?<![A-Za-z_])_child_guarantee\(", inspect.getsource(lineage._walk_lineage))

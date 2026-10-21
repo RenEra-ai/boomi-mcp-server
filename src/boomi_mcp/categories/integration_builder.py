@@ -10339,6 +10339,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # layer out from where it was closed.
     from ..authoring.connector_resolution_snapshot import (
         build_connector_resolution_snapshot as _build_resolution,
+        live_cache_profiles_for_unwritten_caches,
     )
     from ..authoring.workflow import _connector_metadata_from_components
 
@@ -10351,6 +10352,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     try:
         _resolution = _build_resolution(
             spec.components,
+            # #186: the stored profile of every document cache apply does not write, read fresh from
+            # the account here — a compiled bundle's earlier reading is not this apply's authority.
+            # Gated with the connector reading: only a compiled root consumes it.
+            cache_profiles=(
+                live_cache_profiles_for_unwritten_caches(
+                    boomi_client, spec.components, conflict_policy, existing_ids=existing_ids)
+                if _roots_to_compile else ()
+            ),
             live_component_xml=_pre_write_live_xml,
             reused_keys=_reused_component_keys,
             # DECLARED HERE TOO, so the comparison covers a components-only

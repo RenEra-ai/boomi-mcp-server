@@ -394,6 +394,50 @@ may be skipped while a later leg runs, so what was stored before it may still be
 needs a caller is refused a direct test run or schedule before deployment mutates anything, because
 run directly it starts as No Data (capture `cap184-passthrough-standalone`).
 
+**Conditional reads (#186).** A Decision operand with no default is not a requirement: it tolerates
+absence. It still fails where a writer exists that it can never see, and a caller's writer is one, so
+the child exports each such read it cannot fail itself and every inspectable call judges it with the
+in-process rule against its own writers, exactly as the flattened twin's walk would:
+
+| Child read | What the call checks | Code at the call |
+|---|---|---|
+| a document property off its entry documents, `inherits` (Data Passthrough, nothing between drops it) | discharged where the handed documents carry it; otherwise a writer elsewhere in the caller | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID`, or the read-before-write code when the caller's own path dropped it |
+| the same read behind a step that drops what the documents carried, `drops` | a carried property dropped on the way; a writer elsewhere otherwise | `PROCESS_IR_SEMANTIC_LINEAGE_PROPERTY_READ_BEFORE_WRITE` / `…_DDP_SCOPE_INVALID` |
+| a No Data child's own empty document, `fresh` | any writer of the property in the caller | `PROCESS_IR_SEMANTIC_LINEAGE_DDP_SCOPE_INVALID` |
+| a process property | an establishing writer in the caller (waited children's included, conditional ones too) when the property is not established before the call | `PROCESS_IR_SEMANTIC_LINEAGE_BRANCH_ORDER_INVALID` when a writer sits on a later Branch leg — of the caller's Branch, or inside the child or a process between — else `…_PROPERTY_READ_BEFORE_WRITE` |
+
+A Data Passthrough child's read whose code the arriving documents decide — a step between its entry
+and the read drops what they carried, while a writer of its own sits on another document copy — is a
+`drops` row too, judged at each call and not by the child, which is validated once and cannot serve a
+code that differs per caller: `…_PROPERTY_READ_BEFORE_WRITE` where the caller's documents carried the
+property, `…_DDP_SCOPE_INVALID` where they did not (ARCH-186-e1-04).
+
+A call whose process writes the property nowhere passes the read on, in kind, to its own callers. A
+strict requirement passes on its leg order the same way (`required_read_leg_orders`), and a Data
+Passthrough child asks its callers for a document property only where seeding it on the entry
+documents repairs one of its reads.
+
+**Stored cache profiles (#186).** A document cache apply reuses (a declared id, or a name the
+component plan binds under `conflict_policy='reuse'`) or names only by reference is described by the
+profile its STORED component declares, read from the account on every route that holds one — the
+typed plan and compile, and the raw and typed apply's pre-write pass — before any write. A stored
+profile other than the documents' is `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the write's
+`/cache_ref` (or the call's `/process_ref` for a passthrough child staging its caller's documents); a
+stored cache proved unprofiled (`profileType="profile.none"`) declares none; one whose stored profile
+could not be read is unknown and matches no proved profile. A route with no account reads none and
+states that limit: the cache declares no profile there, and apply judges it.
+
+A child's Add to Cache of documents it retrieved from a cache its callers' documents may share is
+judged at each call by the retrieve's own proof rule over everything the retrieve hands on: what that
+caller stored in the cache AND what the child's own writes stored there before the retrieve. It is
+refused (`PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at the call's `/process_ref`) only where the two
+together prove one profile other than the target's — any proved profile, for a target of unknown
+profile; a mixture of profiles, or one beside documents nothing proves, proves none and is admitted,
+as the flattened twin's write is. A called process leaves the judgment to its own callers wherever
+theirs may be in the cache too. Where the child goes on to USE what it restaged (a later retrieve
+of the target feeding a typed consumer), and only a proved profile repairs that use, the callers
+must have stored exactly that profile.
+
 ## 4. Alias normalization (private codec)
 
 The public model has ONE canonical spelling per node. Legacy spellings are normalized only in

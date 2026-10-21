@@ -243,6 +243,36 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
         return self.document_parsed is not False
 
 
+class StoredDocumentCacheProfileV1(_SnapshotModel):
+    """The profile a document cache the request does NOT write declares in the account (#186).
+
+    Read from the account's stored component, because apply discards the request's own
+    configuration for a cache it reuses or names only by reference, so that configuration
+    describes nothing. Tri-state, and never inferred from a missing answer:
+
+    - ``known``: one ``DocumentCache`` configuration naming a profile component id and a real
+      profile type (``connector_resolution.PROFILE_COMPONENT_TYPES``);
+    - ``absent``: one configuration stating ``profileType="profile.none"`` with no profile
+      bound — the platform's spelling of an unprofiled cache;
+    - ``unknown``: anything else — a failed or unavailable read, unparseable or
+      entity-declaring bytes, a component of another type, several or no configurations, a
+      missing attribute, a profile type nothing here recognises.
+
+    A requirement on WRITES only: it says what documents the cache accepts, never that the cache
+    holds any.
+    """
+
+    component_key: str
+    profile_state: Literal["known", "absent", "unknown"]
+    profile_component_id: Optional[str] = None
+    profile_component_type: Optional[str] = None
+    cache_component_id: Optional[str] = None
+    #: True for a cache the route could not bind: the account was consulted, its binding of the
+    #: request's names failed, and apply may yet reuse this cache by name — so the request's own
+    #: configuration is not known to describe it, and its profile is unknown (ARCH-186-e1-02).
+    binding_unjudged: bool = False
+
+
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     """Every connector identity the request settles, keyed by component.
 
@@ -255,6 +285,13 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     #: resolution had no account to consult. Strict: a snapshot that cannot say
     #: which account it describes must say so rather than imply one.
     account_scope: Optional[str] = None
+    #: #186: the stored profile of every document cache the request does not write, read from
+    #: the account by a route that holds one (`live_cache_profiles_for_unwritten_caches`).
+    cache_profiles: Tuple[StoredDocumentCacheProfileV1, ...] = ()
+    #: #186: whether the route READ them. False on a route with no account, which states the limit
+    #: instead (an unwritten cache's stored profile is judged at apply, before any write); True on a
+    #: route that read, where a cache with no reading has an unknown profile.
+    cache_profiles_read: bool = False
 
     def for_root(
         self, root_key: str, component_keys: Sequence[str]
@@ -275,12 +312,23 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
                 if identity.component_key in wanted
             ),
             account_scope=self.account_scope,
+            cache_profiles=tuple(
+                reading for reading in self.cache_profiles if reading.component_key in wanted
+            ),
+            cache_profiles_read=self.cache_profiles_read,
         )
 
     def lookup(self, component_key: str) -> Optional[ResolvedConnectorComponentIdentityV1]:
         for identity in self.identities:
             if identity.component_key == component_key:
                 return identity
+        return None
+
+    def lookup_cache(self, component_key: str) -> Optional[StoredDocumentCacheProfileV1]:
+        """The stored profile reading of a cache the request does not write, if one was taken (#186)."""
+        for reading in self.cache_profiles:
+            if reading.component_key == component_key:
+                return reading
         return None
 
 
@@ -677,8 +725,13 @@ def build_connector_resolution_snapshot(
     reused_keys: Optional[Sequence[str]] = None,
     account_id: Optional[str] = None,
     declared: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
+    cache_profiles: Optional[Sequence[StoredDocumentCacheProfileV1]] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
+
+    ``cache_profiles`` (#186) are the stored profiles of the document caches the request does
+    not write, read by the route that holds the account; they are carried, not resolved here.
+    ``None`` says the route read none (it holds no account), which is not an empty reading.
 
     Non-connector components are skipped rather than recorded as unresolved:
     the snapshot answers "what did this connector resolve to", and a process or
@@ -967,6 +1020,8 @@ def build_connector_resolution_snapshot(
     snapshot = TrustedConnectorResolutionSnapshotV1(
         identities=tuple(sorted(resolved, key=lambda item: item.component_key)),
         account_scope=account_id,
+        cache_profiles=tuple(sorted(cache_profiles or (), key=lambda item: item.component_key)),
+        cache_profiles_read=cache_profiles is not None,
     )
 
     # THE COMPARISON IS PART OF CONSTRUCTION, not a call a route can omit. It was
@@ -1385,3 +1440,138 @@ def live_readings_for_declared_components(boomi_client, components) -> Dict[str,
             "read_failed": False,
         }
     return readings
+
+
+def stored_document_cache_profile(
+    component_key: str, component_xml: Any, cache_component_id: Optional[str] = None
+) -> StoredDocumentCacheProfileV1:
+    """Classify the profile a STORED document cache component declares (#186).
+
+    Reads only the component envelope's type and its direct ``object/DocumentCache`` element's
+    ``profile`` and ``profileType`` attributes — the spelling the platform stores and this
+    repository's cache builder emits (live capture
+    ``tests/fixtures/live_xml/m11/documentcache_profile_key_component.xml``). Streamed with expat,
+    and an entity declaration refuses the document before any expansion, exactly as
+    `live_identity_from_component_xml` reads connector bytes. Every answer that is not a single,
+    complete, recognised configuration is ``unknown``: a missing attribute is not proof of an
+    unprofiled cache.
+    """
+    import xml.parsers.expat
+
+    from ..compiler.process_ir.connector_resolution import PROFILE_COMPONENT_TYPES
+
+    unknown = StoredDocumentCacheProfileV1(
+        component_key=component_key, profile_state="unknown", cache_component_id=cache_component_id)
+    if not isinstance(component_xml, str) or not component_xml.strip():
+        return unknown
+
+    class _Refused(Exception):
+        pass
+
+    stack = []
+    envelope_types = []
+    configurations = []
+
+    def _start(name, attributes):
+        local = name.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+        stack.append(local)
+        if len(stack) == 1:
+            envelope_types.append(attributes.get("type"))
+        if local == "DocumentCache" and len(stack) == 3 and stack[0] == "Component" and stack[1] == "object":
+            configurations.append((attributes.get("profile"), attributes.get("profileType")))
+
+    def _end(_name):
+        if stack:
+            stack.pop()
+
+    def _refuse(*_args, **_kwargs):
+        raise _Refused
+
+    parser = xml.parsers.expat.ParserCreate(namespace_separator="}")
+    parser.EntityDeclHandler = _refuse
+    parser.StartDoctypeDeclHandler = _refuse
+    parser.StartElementHandler = _start
+    parser.EndElementHandler = _end
+    try:
+        parser.Parse(component_xml, True)
+    except (_Refused, xml.parsers.expat.ExpatError):
+        return unknown
+    if envelope_types != ["documentcache"] or len(configurations) != 1:
+        return unknown
+    profile, profile_type = configurations[0]
+    profile = profile.strip() if isinstance(profile, str) else None
+    profile_type = profile_type.strip().casefold() if isinstance(profile_type, str) else None
+    if profile_type == "profile.none" and not profile:
+        return unknown.model_copy(update={"profile_state": "absent"})
+    if not profile or profile_type not in PROFILE_COMPONENT_TYPES:
+        return unknown
+    from ..categories.integration_builder import canonical_component_id
+    from ..connector_replay.ids import is_boomi_component_id
+
+    profile = canonical_component_id(profile)
+    # A stored id that is not a component id names no profile this request can match — and spelled
+    # like one of the request's own placeholders it would match a profile the request CREATES
+    # (ARCH-186-e1-03). Malformed is unknown.
+    if not profile or not is_boomi_component_id(profile):
+        return unknown
+    return unknown.model_copy(update={
+        "profile_state": "known",
+        "profile_component_id": profile,
+        "profile_component_type": profile_type,
+    })
+
+
+def live_cache_profiles_for_unwritten_caches(
+    boomi_client, components, conflict_policy="reuse", existing_ids=None, binding_unjudged=False
+) -> Optional[Tuple[StoredDocumentCacheProfileV1, ...]]:
+    """The stored profile of every document cache the request names and apply does NOT write (#186).
+
+    Asked of apply's own predicates, never re-derived: a cache apply writes
+    (`apply_writes_component_config`) is described by the configuration apply submits, and only
+    the others — a create apply reuses by its declared id or, where this route resolved bindings
+    with the account (``existing_ids``), by name, and a ``reference_only`` create — are read, at
+    the component apply binds them to (`_bound_existing_id`). Read ONCE per component, whichever
+    keys alias it. A cache with no bound component, or whose read fails, is recorded ``unknown``:
+    the account is the authority there and could not be consulted, which is not the same as an
+    unprofiled cache. Never raises — a profile-consuming write owns the refusal, and an unused
+    unreadable cache must block nothing. ``None`` with no client: nothing was read.
+
+    ``binding_unjudged``: the route consulted the account and its binding of the request's names
+    failed (`existing_ids` is then None). A cache create naming no id under ``reuse`` may still be
+    bound by name at apply, so it is recorded unknown too, flagged so the symbol table applies it
+    although the request appears to write the cache (ARCH-186-e1-02).
+    """
+    from ..categories.components._shared import component_get_xml
+    from ..categories.integration_builder import (
+        _bound_existing_id,
+        apply_writes_component_config,
+        canonical_component_id,
+    )
+
+    if boomi_client is None:
+        return None
+    readings = []
+    fetched_by_id: Dict[str, Any] = {}
+    for component in components or ():
+        key = getattr(component, "key", None)
+        if not isinstance(key, str) or not key or str(getattr(component, "type", "") or "").strip() != "documentcache":
+            continue
+        if apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids):
+            if (binding_unjudged and conflict_policy == "reuse"
+                    and getattr(component, "action", None) == "create"
+                    and _bound_existing_id(component, existing_ids) is None):
+                readings.append(StoredDocumentCacheProfileV1(
+                    component_key=key, profile_state="unknown", binding_unjudged=True))
+            continue
+        component_id = canonical_component_id(_bound_existing_id(component, existing_ids))
+        if component_id is None:
+            readings.append(StoredDocumentCacheProfileV1(component_key=key, profile_state="unknown"))
+            continue
+        if component_id not in fetched_by_id:
+            try:
+                fetched = component_get_xml(boomi_client, component_id)
+                fetched_by_id[component_id] = fetched.get("xml") if isinstance(fetched, dict) else None
+            except Exception:  # noqa: BLE001 - an unreadable cache states an unknown profile
+                fetched_by_id[component_id] = None
+        readings.append(stored_document_cache_profile(key, fetched_by_id[component_id], component_id))
+    return tuple(sorted(readings, key=lambda item: item.component_key))

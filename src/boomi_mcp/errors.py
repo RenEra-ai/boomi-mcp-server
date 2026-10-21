@@ -1326,10 +1326,12 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             summary=(
                 "The documents reaching a map_ref, a cache write, a Set Properties "
                 "profile source, a connector call's declared input or a process call "
-                "carry a profile other than the one that step requires, a required "
-                "profile is absent or unknown (its component is submitted as raw "
-                "config.xml), or an operation's profile reference names no "
-                "profile component."
+                "carry a profile other than the one that step requires — a reused "
+                "or reference-only document cache requires the profile its stored "
+                "component declares — a required profile is absent or unknown (its "
+                "component is submitted as raw config.xml, or a reused cache's stored "
+                "profile could not be read), or an operation's profile reference "
+                "names no profile component."
             ),
             owner="#140",
         ),

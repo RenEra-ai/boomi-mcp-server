@@ -1690,6 +1690,7 @@ def _validate_processes(
         submitted_xml_unsettled_summary,
     )
     from .connector_resolution_snapshot import (
+        live_cache_profiles_for_unwritten_caches,
         live_readings_for_declared_components,
         ConnectorIdentityError,
         assert_declared_matches_resolved,
@@ -1740,6 +1741,16 @@ def _validate_processes(
             live_component_xml=_declared_live or None,
             reused_keys=tuple(sorted(_snapshot_reused)),
             account_id=_client_account_id(boomi_client) if boomi_client else None,
+            # #186: the stored profile of every document cache apply does not write — reused by id,
+            # by a name the component plan bound, or named only by reference — read from the account
+            # at the binding apply acts on, NOT intersected with the explicit-id readings above.
+            cache_profiles=live_cache_profiles_for_unwritten_caches(
+                boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
+                existing_ids=existing_ids,
+                # The account is held but the component plan could not be built from it: a name
+                # binding is unjudged (ARCH-186-e1-02; the owner decision of 2026-09-14 keeps plan and
+                # compile degraded rather than refused, and typed apply refuses before any write).
+                binding_unjudged=boomi_client is not None and existing_ids is None),
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the

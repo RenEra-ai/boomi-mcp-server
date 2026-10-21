@@ -148,6 +148,26 @@ CALLER_WRITER = "caller-writer"
 #: property NOTHING here writes still has those caches to name (correction batch 21a round 3).
 #: Node ids are ``n<k>``, so no token collides with one.
 CALLER_CACHE_WRITER = "caller-cache:"
+#: #186: the requirement a passthrough child states for documents it stages into a document cache
+#: whose profile is UNKNOWN (`contracts.profiles_unknown`). Not None — None is a consumption nothing
+#: states, which every call skips — and not a profile ref: it resolves to no profile, so documents a
+#: caller proves to carry any profile contradict it, exactly as the flattened twin's Add to Cache
+#: refuses a proved profile into that cache. Documents whose profile nothing proves satisfy it, as
+#: they satisfy the twin.
+UNKNOWN_PROFILE_REQUIREMENT = "urn:boomi:unknown-profile"
+#: #186 (wave integration review r4): the prefix a child contract's `document_requirements` entry carries when it is
+#: the requirement of a cache WRITE of the handed documents into a cache declaring (or storing) the profile the ref
+#: names — never a consumer's. A write refuses only documents of a PROVED other profile, as the twin's Add to Cache
+#: does, while a consumer needs the profile itself; one channel for both made every call read a write as exact.
+#: `UNKNOWN_PROFILE_REQUIREMENT` is the write requirement of a cache of unknown profile.
+CACHE_WRITE_REQUIREMENT_PREFIX = "urn:boomi:cache-write:"
+
+
+def written_profile_ref(ref: Optional[str]) -> Optional[str]:
+    """The profile ref a cache-write requirement names, or None for a consumer's requirement (#186)."""
+    if isinstance(ref, str) and ref.startswith(CACHE_WRITE_REQUIREMENT_PREFIX):
+        return ref[len(CACHE_WRITE_REQUIREMENT_PREFIX):]
+    return None
 
 
 class _InheritedBinding(NamedTuple):
@@ -454,6 +474,12 @@ class _Stream(NamedTuple):
     #: every leg receives the same documents and a leg with none runs nothing
     #: (`_removal_runs_before_anything_after_it`). Defaults to False, the fail-closed side.
     leg_input: bool = False
+    #: #186 (architect evaluation 2): beside `caller_cache`, and set and dropped with it, what THIS
+    #: process's own writes stored in that cache before the retrieve — the profiles, or None for
+    #: documents nothing proves. The retrieved documents are those AND whatever a caller stored, so a
+    #: cache write of them is refused, as the twin's write is, only where the two together hold one
+    #: proved profile: a caller's documents of another profile, or of none, leave nothing proved.
+    retrieved_own: Optional[FrozenSet[Optional[Tuple[str, str]]]] = None
 
 
 def cache_content_judgement(stream: "_Stream", identity) -> Optional[bool]:
@@ -559,6 +585,20 @@ def state_visibility_rows() -> Tuple["Mapping[str, object]", ...]:
     )
 
 
+class _Staged(NamedTuple):
+    """The provenance of a content fact an Add to Cache of the HANDED documents recorded (#186, review r16): its
+    identity is the cache's declared profile, which only an exact requirement on the caller makes true. Truthy exactly
+    as the ``legacy_source`` flag it stands in for (`holds_only_legacy_source_documents`)."""
+
+    legacy: bool
+    #: The cache the handed documents were staged in — kept through every re-cache of them (review r19), so a consumer
+    #: of a copy relies on the original staging write.
+    source: str = ""
+
+    def __bool__(self) -> bool:
+        return self.legacy
+
+
 class _State:
     """What is established at one program point.
 
@@ -638,7 +678,8 @@ class _State:
         return _State(self.document, self.execution | {key}, self.content, self.cohorts,
                       self.sealed, (self.proved | {key}) if proved else self.proved)
 
-    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool]) -> "_State":
+    def with_content(self, cache_ref: str, identity, *, legacy_source: Optional[bool],
+                     staged: Optional[str] = None) -> "_State":
         """This cache may now also hold documents of ``identity`` (None: unknown).
 
         ``legacy_source`` says whether the write stored documents a legacy ``source`` endpoint
@@ -647,6 +688,8 @@ class _State:
         exemption by omission.
         """
         provenance = None if legacy_source is None else bool(legacy_source)
+        if staged and provenance is not None:
+            provenance = _Staged(provenance, staged)
         return _State(
             self.document, self.execution, self.content | {(cache_ref, identity, provenance)},
             self.cohorts, self.sealed, self.proved,
@@ -1043,7 +1086,7 @@ _STREAM_CARRIED_WITH_THE_PROPERTIES = frozenset({"retrieved_from", "retrieved_or
 #: DDP question and read `caller_cache`, so a property use behind a Message, a map or a connector
 #: call — documents that keep their properties — was reported as the child's own defect while the
 #: flattened twin charged the caller. The test module sweeps every read of the three markers.
-_STREAM_DROPPED_BY_A_REBUILD = frozenset({"caller_cache"})
+_STREAM_DROPPED_BY_A_REBUILD = frozenset({"caller_cache", "retrieved_own"})
 
 _STREAM_FIELD_CLASSES = (
     _STREAM_SET_BY_THE_STEP,
@@ -1469,21 +1512,40 @@ def _established_anywhere(
     Differs from `_written_anywhere` in excluding a fire-and-forget
     `process_call`'s declared writes — it may still be running, so it proves
     nothing to a reader — and in counting what a derived child contract guarantees
-    a call that waits and aborts on error (#184 amendment 1 rule 7).
+    a call that waits and aborts on error (#184 amendment 1 rule 7). Read off
+    `_keys_established_anywhere`, the one establishing-writer set.
     """
+    return key in _keys_established_anywhere(prepared, capabilities)
+
+
+def _keys_established_anywhere(
+    prepared: PreparedProcessValidationV1,
+    capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+) -> FrozenSet[StateKey]:
+    """Every key some node of this process — or a process it waits for — writes in a way that can ESTABLISH it.
+
+    THE writer set the execution-scoped "an establishing writer exists" rule is asked of
+    (`_established_anywhere`), and the one a child contract exports as its establishing
+    execution-state writes (`ChildEntryContractV1.establishing_execution_state_writes`), so a
+    caller and its flattened twin count the same writers by construction (#186). A waited call to
+    a derived child counts the child's own establishing execution-state writes, conditional ones
+    included — the twin holds those writers as its own nodes, which count wherever they stand —
+    and what the child guarantees a call that also aborts on error. A call nobody waits for counts
+    nothing: it may still be running.
+    """
+    established: Set[StateKey] = set()
     for node in prepared.cfg.nodes:
-        if key in _writes_of(node.semantic):
-            return True
+        established.update(_writes_of(node.semantic))
         if not _establishes_downstream(node.semantic):
             continue
         for effect in _trusted_effects(node.semantic, capabilities):
-            if key in [(k[0], k[1]) for k in effect.writes]:
-                return True
-        if node.semantic.semantic_kind == "process_call" and key in _awaited_guarantee(
-            node.semantic, capabilities.child_entry_contract(node.semantic.process_ref)
-        ):
-            return True
-    return False
+            established.update((k[0], k[1]) for k in effect.writes)
+        if node.semantic.semantic_kind == "process_call":
+            contract = capabilities.child_entry_contract(node.semantic.process_ref)
+            established.update(_awaited_guarantee(node.semantic, contract))
+            if contract is not None:
+                established.update((key[0], key[1]) for key in contract.establishing_execution_state_writes)
+    return frozenset(established)
 
 
 def _opaque_reason(
@@ -1512,6 +1574,20 @@ def _opaque_reason(
             if capabilities.script_effect(step.language, step.script) is None:
                 return "script"
     return None
+
+
+def _relied_on_writes_exact(refs, staged, read_caches) -> List[Optional[str]]:
+    """``refs`` with each write requirement of a staged cache this walk reads again made exact (#186, review r16).
+
+    The write records the declared profile as the cache's content, so a later read of the cache proves it; that proof
+    holds only if the handed documents carried that profile, so a read cache keeps the exact requirement it had before
+    the write marker existed. A cache never read is a write the twin judges by the write rule alone.
+    """
+    refs = list(refs)
+    for position, cache_ref, declared_ref in staged:
+        if cache_ref in read_caches and refs[position] == CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref:
+            refs[position] = declared_ref
+    return refs
 
 
 def _caches_a_call_may_write(cache_refs, contract) -> Tuple[str, ...]:
@@ -1811,6 +1887,7 @@ def _repetition_unstable_caches(contract, cache_refs, semantic) -> Tuple[Tuple[s
         required |= {
             (PROCESS_CALL_REPEAT_CAUSES.cache_retained_content, ref)
             for ref in {row[0] for row in contract.cache_requirements}
+            | {row[0] for row in contract.cache_write_requirements}
             | {row[0] for row in contract.cache_property_requirements}
         }
     if not (contract.state_known or contract.cache_writes_known):
@@ -1871,6 +1948,12 @@ class LineageWalkV1(NamedTuple):
     #: #184 amendment 1 rule 6: ``(cache ref, AUTHORED profile ref or None)`` for each
     #: consumer of documents read from a cache no write in this process reached.
     cache_requirement_refs: Tuple[Tuple[str, Optional[str]], ...] = ()
+    #: #186 (ARCH-186-e1-01, CDX-186-r3-01): ``(cache ref, profile ref or the unknown-profile requirement)``
+    #: for each cache write of documents retrieved from a cache only a caller can have filled — the
+    #: target cache's declared (or UNKNOWN) profile, which the documents the callers stored there must
+    #: not be PROVED to contradict. Unlike `cache_requirement_refs`, content whose profile nothing
+    #: states satisfies it, as it satisfies the write itself.
+    cache_write_requirement_refs: Tuple[Tuple[str, str, Optional[str]], ...] = ()
     #: #184: ``(pointer, property name, request profile ref)`` for each bound request
     #: path the binding rule found no writer for: this process's own binding at its
     #: ``/path_binding``, or one a call inherits from its passthrough child at the call's
@@ -1948,6 +2031,27 @@ class LineageWalkV1(NamedTuple):
     #: caller writer makes the read fail. The child contract measures these rows as
     #: `unestablished_cached_keys` are measured (`_caller_nonstrict_reads`).
     nonstrict_cached_reads: Tuple[Tuple[str, Optional[str], str], ...] = ()
+    #: #186: ``(pointer, property name, relation, origin)`` for each NON-strict read of a document
+    #: property on documents no retrieve handed on, unestablished there, in a process that writes
+    #: the property nowhere — the entry-document twin of `nonstrict_cached_reads`. The relation is
+    #: what the walk saw of the documents' own properties: ``entry`` — nothing on the path
+    #: discarded one the documents carried; ``drops`` — a step on the path discarded the property
+    #: the documents carried (only an entry seed can put one there in a process that writes it
+    #: nowhere) or a called child's row says it does; ``fresh`` — a called No Data child read it
+    #: off its own empty document. The child contract measures ``entry`` rows against an entry
+    #: seed (`_caller_entry_document_reads`).
+    nonstrict_document_reads: Tuple[Tuple[str, str, str, str], ...] = ()
+    #: #186: ``(pointer, property name, later-leg writer)`` for each NON-strict read of a process
+    #: property unestablished there, in a process with no establishing writer of it — itself, or a
+    #: called child's row passed on. The flag is the in-process later-leg rule's answer at the
+    #: read (`_written_in_a_later_leg`), OR the passed-on row's own flag.
+    nonstrict_process_reads: Tuple[Tuple[str, str, bool], ...] = ()
+    #: #186: ``(pointer, scope, name, later-leg writer)`` for each read recorded in
+    #: `unestablished_reads` — the same set, with the site and the in-process later-leg rule's
+    #: answer there. A child contract measures its document-property entry requirements against an
+    #: entry seed by pointer (`_entry_repairable_reads`), and exports the leg order of its
+    #: execution-scoped ones (`ChildEntryContractV1.required_read_leg_orders`).
+    unestablished_read_sites: Tuple[Tuple[str, str, str, bool], ...] = ()
     # #184 D12 withdrew ``truncated``. The walk had a depth bound of 256, and a
     # caller trusting the state sets had to treat a walk that hit it as no
     # answer. The controller is now iterative with no depth bound: every node of
@@ -2018,6 +2122,17 @@ def _walk_lineage(
     entry_requirements: List[Optional[Tuple[str, str]]] = []
     entry_requirement_refs: List[Optional[str]] = []
     cache_requirement_refs: List[Tuple[str, Optional[str]]] = []
+    #: #186: the rows `LineageWalkV1.cache_write_requirement_refs` returns.
+    cache_write_requirement_refs: List[Tuple[str, str, Optional[str]]] = []
+    #: #186 (Stage-2 review r16, integration review r5): where this walk staged the handed documents in a declaring
+    #: cache — the position of that write requirement in `entry_requirement_refs`, the cache and the declared ref — and
+    #: the staged caches whose recorded profile something RELIES on: a consumer that needs a profile receiving documents
+    #: retrieved over staged content (the retrieve nodes are `staged_retrieves`), or a called process stating a profile
+    #: requirement on the cache, or one nothing derives. A relied-on staging write keeps the exact requirement; any
+    #: other — a bare retrieve included — is a write requirement.
+    entry_staged: List[Tuple[int, str, str]] = []
+    staged_retrieves: Dict[Any, Tuple[str, ...]] = {}
+    read_caches: set = set()
     unestablished_bindings: List[Tuple[str, str, Optional[str]]] = []
     #: #184 amendment 3 §7-§8: the rows `LineageWalkV1.unestablished_cached_keys` returns.
     unestablished_cached_keys: List[Tuple[str, str, str, Optional[str], bool]] = []
@@ -2027,6 +2142,12 @@ def _walk_lineage(
     read_cache_origins: List[Tuple[str, str, str]] = []
     #: #184 correction batch 30: the rows `LineageWalkV1.nonstrict_cached_reads` returns.
     nonstrict_cached_reads: List[Tuple[str, Optional[str], str]] = []
+    #: #186: the rows `LineageWalkV1.nonstrict_document_reads` returns.
+    nonstrict_document_reads: List[Tuple[str, str, str, str]] = []
+    #: #186: the rows `LineageWalkV1.nonstrict_process_reads` returns.
+    nonstrict_process_reads: List[Tuple[str, str, bool]] = []
+    #: #186: the rows `LineageWalkV1.unestablished_read_sites` returns.
+    unestablished_read_sites: List[Tuple[str, str, str, bool]] = []
     #: #184 amendment 1 rules 7-8 (correction batch 21a round 4): caches a call that is NOT
     #: waited for may write, wherever it stands on the path. The lattice orders a call's
     #: possible writes where the call is authored, which is right for everything that reads
@@ -2063,7 +2184,7 @@ def _walk_lineage(
         | {
             cache_ref
             for row in capabilities.child_entry_contracts
-            for cache_ref, _profile in row.cache_requirements
+            for cache_ref, *_profile in tuple(row.cache_requirements) + tuple(row.cache_write_requirements)
         }
     )
     index = prepared.symbols.build_index()
@@ -2174,7 +2295,8 @@ def _walk_lineage(
         )
 
     def _classify_unmet_read(node, semantic, key, leg, extra=(), invalidated=frozenset(), cached_from=None,
-                             rides_on=None, upward=True, origins=(), nonstrict=False) -> None:
+                             rides_on=None, upward=True, origins=(), nonstrict=False, relation=None,
+                             later_leg=False) -> None:
         """Report ONE unestablished read under the sharpest code that fits.
 
         Shared by both read paths. The refinements below are what make a
@@ -2222,17 +2344,58 @@ def _walk_lineage(
         so a document property read on retrieved documents records what the callers must not
         do: one row per cache their documents could have carried it in (``cached_from`` and
         ``origins``, exactly the caches a strict read names), or one cache-less row where no
-        caller's document can reach the read — any caller writer then fails it. Asked only past
-        a triggered retrieve: the documents before one are this process's own or its entry's,
-        which the cached-property channel does not describe.
+        caller's document can reach the read — any caller writer then fails it. Past a triggered
+        retrieve only: the documents before one are this process's own or its entry's, which the
+        cached-property channel does not describe.
+
+        Before a retrieve (#186, SELF-184-73) the same non-strict DOCUMENT read records its
+        entry-document row instead (`LineageWalkV1.nonstrict_document_reads`), and a non-strict
+        PROCESS-property read records its leg-ordered row (`LineageWalkV1.nonstrict_process_reads`,
+        SELF-184-74): the two in-process rules a caller's writer can trip — the
+        different-document-copy rule below and the later-leg rule — and neither is a row the
+        cached-property channel can carry. ``relation`` is the row kind of a called child's
+        document read passed on at the call (None for a read of this process, or an ``inherits``
+        row, which reads the documents here exactly as an own read does); ``later_leg`` is a
+        passed-on process read's own flag, and decides the code below as the in-process later-leg
+        rule does.
         """
         scope, _name = key
+        if (not nonstrict and scope == DDP and relation is None and cached_from is None
+                and CACHE_TRANSFER_UNPROVED not in invalidated
+                and (node.source_path, key[1]) in capabilities.caller_judged_read_sites):
+            # #186 (ARCH-186-e1-04): a read whose twin code each caller's documents decide — a
+            # writer here makes it fail either way, as a read before write where they carried the
+            # property and a scope error where they did not — is recorded as the conditional row
+            # every caller judges with its own writer set, and reported by none of this process's
+            # own verdicts (`ProcessIRValidationCapabilitiesV1.caller_judged_read_sites`).
+            nonstrict = True
         if nonstrict:
-            if scope == DDP and CACHE_TRANSFER_UNPROVED in invalidated:
-                named = tuple(dict.fromkeys(
-                    ([] if cached_from is None else [cached_from]) + list(origins)))
-                for cache_ref in named or (None,):
-                    nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
+            # Which observation this is: the read's own, or the relation of the child row passed on here.
+            # Two observations of one property at one call pointer stay two (ARCH-186-e1-05).
+            origin = relation or "read"
+            if scope == DDP:
+                if relation == "fresh":
+                    # The child's own empty document: nothing on this path ever reaches it.
+                    nonstrict_document_reads.append((node.source_path, key[1], "fresh", origin))
+                elif relation == "drops":
+                    if CACHE_TRANSFER_UNPROVED in invalidated:
+                        # The retrieved documents' properties are discarded before the read, so
+                        # no caller's document can supply it: the cache-less row, which any
+                        # caller writer fails as a read before write — the twin's code there.
+                        nonstrict_cached_reads.append((node.source_path, None, key[1]))
+                    else:
+                        nonstrict_document_reads.append((node.source_path, key[1], "drops", origin))
+                elif CACHE_TRANSFER_UNPROVED in invalidated:
+                    named = tuple(dict.fromkeys(
+                        ([] if cached_from is None else [cached_from]) + list(origins)))
+                    for cache_ref in named or (None,):
+                        nonstrict_cached_reads.append((node.source_path, cache_ref, key[1]))
+                else:
+                    nonstrict_document_reads.append(
+                        (node.source_path, key[1], "drops" if key in invalidated else "entry", origin))
+            elif scope == DPP:
+                nonstrict_process_reads.append(
+                    (node.source_path, key[1], bool(later_leg or _written_in_a_later_leg(leg_writes, leg, key))))
             return
         # A read a typed contract vouches for an OUTSIDE writer of is not the
         # caller's obligation — an external system establishes it — so it is
@@ -2260,13 +2423,17 @@ def _walk_lineage(
         # read — every caller of one that re-cached what it read into a cache it had provably
         # emptied was refused, while the flattened graph ran (correction batch 21a round 2).
         of_retrieved_documents = scope == DDP and CACHE_TRANSFER_UNPROVED in invalidated
+        later = scope != DDP and bool(later_leg or _written_in_a_later_leg(leg_writes, leg, key))
         if cached_from is not None:
             # No caller state or document discharges it, only what a caller stored in
             # that cache, so it is recorded as the cache's requirement instead.
             unestablished_cached_keys.append((node.source_path, cached_from, key[1], None, False))
         elif not externally_satisfied and upward and not of_retrieved_documents:
             unmet.append(key)
-        if scope != DDP and _written_in_a_later_leg(leg_writes, leg, key):
+            # #186: where, and in which leg order — what a caller's entry seed is measured
+            # against, and the later-leg answer a caller's own report of it must give.
+            unestablished_read_sites.append((node.source_path, scope, key[1], later))
+        if later:
             # The write exists, in a LATER leg of the same Branch. Legs run
             # in order, so it has not happened yet. Saying "read before
             # write" here would send the author looking for a missing write
@@ -2620,6 +2787,30 @@ def _walk_lineage(
         """
         return _resolved_profile_identity(index, ref)
 
+    def _proved_profile(content):
+        """THE retrieve's proof rule: the one profile documents of ``content`` (identities, None for unknown)
+        prove — exactly one, and no unknown beside it — else None (#184 D2).
+
+        One function, read by the retrieve itself and by every judgment of what a retrieve hands on that a
+        call makes for its child (#186, architect evaluation 2): the twin's write of retrieved documents
+        refuses only a profile this rule proves, over everything the writes reaching the cache stored, so a
+        call judging it over the caller's documents and the child's together asks exactly this question."""
+        return next(iter(content)) if len(content) == 1 and None not in content else None
+
+    def _completable(content):
+        """Whether ``content`` leaves a retrieve's proof to what callers add: nothing stored, or one proved
+        profile. Anything else stays unproved whatever they add, so nothing they add is refused (#186)."""
+        return content is not None and (not content or _proved_profile(content) is not None)
+
+    def _ref_naming(identity):
+        """A profile ref naming ``identity``, or None for none (#186).
+
+        The identities a walk records are resolved from the refs this table names (`_identity`), so one of
+        them names it; the least, so the row is deterministic. A caller resolves it with the same table."""
+        if identity is None:
+            return None
+        return min(ref for ref in index if _identity(ref) == identity)
+
     def _requires(stream, identity, ref):
         """Record what a consumer needs of documents this process cannot prove.
 
@@ -2630,6 +2821,10 @@ def _walk_lineage(
         each call judges what it stored. Any other stream records nothing: the consumer is
         checked against it instead.
         """
+        if identity is not None and stream.origin_node in staged_retrieves:
+            # #186 (integration review r5): a consumer needing a profile of documents retrieved over staged content —
+            # directly, or through any re-cache of them (review r19).
+            read_caches.update(staged_retrieves[stream.origin_node])
         if stream.state == STREAM_CALLER_ENTRY:
             entry_requirements.append(identity)
             entry_requirement_refs.append(ref)
@@ -2717,10 +2912,41 @@ def _walk_lineage(
             # child whose entry cannot be derived, record an unknown requirement of this
             # stream too, so a forwarder hands its caller its child's unknown.
             contract = capabilities.child_entry_contract(semantic.process_ref)
+            # The documents as they ARRIVE at the call: a stated requirement below narrows a caller's
+            # documents to the profile it names, but the child's Branch hands every leg the arriving
+            # documents, so a requirement stated on another leg proves nothing to this one (#186,
+            # CDX-186-r1-01).
+            arriving = stream
             if checked:
                 for ref in _handed_document_requirements(contract, semantic.wait):
                     if ref is None:
                         _requires(stream, None, None)
+                        continue
+                    written = written_profile_ref(ref)
+                    if ref == UNKNOWN_PROFILE_REQUIREMENT or written is not None:
+                        # #186: a cache WRITE's requirement — into a cache of unknown profile, or one declaring
+                        # or storing ``written`` (wave integration review r4). Refused where the ARRIVING
+                        # documents' profile is proved and is not the target's, as the twin's Add to Cache is;
+                        # passed on unchanged where a caller's documents arrive, and never a narrowing of the
+                        # stream — a write consumes no profile.
+                        target = None if written is None else _identity(written)
+                        contradicted = arriving.identity is not None and (written is None or arriving.identity != target)
+                        if arriving.caller_cache is not None:
+                            # Documents retrieved from a cache a caller's documents may share: the
+                            # child's write of them is a cache WRITE of retrieved documents, judged as
+                            # the cache_put arm judges one — the retrieve's proof over everything the
+                            # writes there stored, refusing only a proved profile — never the exact
+                            # content requirement a consumer states (wave integration review r3).
+                            if checked and contradicted and not capabilities.called_by_a_root:
+                                mismatch(node, "/process_ref")
+                            if checked and _completable(arriving.retrieved_own):
+                                cache_write_requirement_refs.append((
+                                    arriving.caller_cache, UNKNOWN_PROFILE_REQUIREMENT if written is None else written,
+                                    _ref_naming(_proved_profile(arriving.retrieved_own))))
+                            continue
+                        _requires(arriving, None, ref)
+                        if contradicted and arriving.state in (STREAM_KNOWN, STREAM_CALLER_ENTRY):
+                            mismatch(node, "/process_ref")
                         continue
                     required = _identity(ref)
                     _requires(stream, required, ref)
@@ -2858,14 +3084,23 @@ def _walk_lineage(
             # (QA-184-w-r32-02) states none either, and contradicts any the caller proves.
             declared_ref = declared_refs[0] if len(identities) == 1 and not unknown else None
             declared = _identity(declared_ref) if declared_ref is not None else None
-            _requires(stream, declared, declared_ref)
+            # #186: an UNKNOWN cache states a requirement every proved profile contradicts — None
+            # would be skipped by every call, admitting a caller the twin refuses. A declared (or
+            # stored) profile is the requirement of a WRITE, which refuses only a proved other profile,
+            # so it is marked as one (wave integration review r4) — unless the cache is read again
+            # (resolved at the walk's end, Stage-2 review r16); an undeclared cache states nothing.
+            if declared_ref is not None and not unknown and stream.state == STREAM_CALLER_ENTRY:
+                entry_staged.append((len(entry_requirement_refs), semantic.cache_ref, declared_ref))
+            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else (
+                None if declared_ref is None else CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref))
             if checked and stream.identity is not None and (unknown or any(
                 identity is not None and identity != stream.identity for identity in identities
             )):
                 mismatch(node, "/cache_ref")
             # What the step hands on is the document-emission authority's, as for a removal.
             return (
-                state.with_content(semantic.cache_ref, declared, legacy_source=legacy),
+                state.with_content(semantic.cache_ref, declared, legacy_source=legacy,
+                                   staged=semantic.cache_ref if declared_ref is not None and not unknown else None),
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -2874,15 +3109,43 @@ def _walk_lineage(
             identity = stream.identity if stream.state == STREAM_KNOWN else None
             # An UNKNOWN cache profile (QA-184-w-r32-02) matches nothing: the documents are
             # checked against it exactly as against a declared profile, and never prove it.
-            if checked and identity is not None and (semantic.cache_ref in unknown_caches or any(
+            # #186 (architect evaluation 2): in a CALLED process, documents retrieved from a cache a
+            # caller's documents may share are judged at each call instead — beside a caller's
+            # documents of another profile, or of none, the twin's retrieve proves nothing and its
+            # write refuses nothing. A top-level process has no caller to add any, and is judged here.
+            deferred = stream.caller_cache is not None and capabilities.called_by_a_root
+            if checked and identity is not None and not deferred and (semantic.cache_ref in unknown_caches or any(
                 _identity(declared_ref) != identity
                 for declared_ref in cache_profiles.get(semantic.cache_ref, ())
             )):
                 mismatch(node, "/cache_ref")
+            if checked and stream.caller_cache is not None and _completable(stream.retrieved_own):
+                # #186 (ARCH-186-e1-01): a cache write consumes the documents that reach it. Where those
+                # were retrieved from a cache a caller's documents may share, the profile the target
+                # cache declares — or the UNKNOWN one — is what the callers' writes to that cache must
+                # not CONTRADICT, judged at each call as the twin's write is judged here: only a proved
+                # profile is refused, so documents whose profile nothing states pass (CDX-186-r3-01).
+                # Its own channel, `cache_write_requirement_refs`, because a map or a declared input
+                # needs the profile and a write needs only no other one. The row names what this
+                # process's own writes stored there, which the retrieve hands on beside a caller's
+                # (architect evaluation 2); own documents of no single proved profile leave nothing
+                # any caller could make proved, so they record none.
+                for declared_ref in cache_profiles.get(semantic.cache_ref, ()):
+                    cache_write_requirement_refs.append(
+                        (stream.caller_cache, declared_ref, _ref_naming(_proved_profile(stream.retrieved_own))))
+                if semantic.cache_ref in unknown_caches:
+                    cache_write_requirement_refs.append(
+                        (stream.caller_cache, UNKNOWN_PROFILE_REQUIREMENT, _ref_naming(_proved_profile(stream.retrieved_own))))
             # Add to Cache hands on no documents, as the document-emission authority
             # states: the path ends here.
+            # #186 (review r19): a re-cache of documents retrieved over staged content keeps the staging write each
+            # came from, so a later consumer of the copy relies on it.
+            restaged = staged_retrieves.get(stream.origin_node, ())
+            state = state.with_content(semantic.cache_ref, identity, legacy_source=legacy)
+            for source in restaged:
+                state = state.with_content(semantic.cache_ref, identity, legacy_source=legacy, staged=source)
             return (
-                state.with_content(semantic.cache_ref, identity, legacy_source=legacy),
+                state,
                 _Stream(STREAM_ABSENT) if kind in ZERO_EMISSION_SEMANTIC_KINDS else stream,
                 legacy,
             )
@@ -2897,6 +3160,10 @@ def _walk_lineage(
                 # An outside writer's content has no profile this process can see
                 # (D6); the declared cache profile is not a substitute for it.
                 state = state.with_content(cache_reads[0], None, legacy_source=False)
+            staged_sources = sorted({fact[2].source for fact in state.content
+                                     if fact[0] == cache_reads[0] and isinstance(fact[2], _Staged)})
+            if staged_sources:
+                staged_retrieves[node] = tuple(staged_sources)
             contents = state.content_of(cache_reads[0])
             # Whether a caller's documents may be among the ones retrieved, asked ONCE, here,
             # of the one authority. Both markers carry the same answer: a consumer records
@@ -2906,6 +3173,11 @@ def _walk_lineage(
             # the own content satisfies is still judged here while every call judges what it
             # stored (amendment 3 §7).
             shared = cache_reads[0] if _caller_documents_may_reach(state, cache_reads[0]) else None
+            # #186: what this process's OWN writes stored there — a caller's seeded content is not
+            # one (`legacy_source` None) — for a cache write of the retrieved documents, judged at
+            # each call against what that caller stored beside them (architect evaluation 2).
+            own = frozenset(fact[1] for fact in state.content if fact[0] == cache_reads[0] and fact[2] is not None) \
+                if shared is not None else None
             # ... and the caches the RETRIEVED documents came out of before this one, which the
             # cohorts stored here carry. They travel with the documents; this read neither adds
             # to them nor re-judges them.
@@ -2924,14 +3196,14 @@ def _walk_lineage(
             # requirement it records (correction batch 30, QA-184-s1-r29-02). Never turned ON
             # here: a path outside the scope stays outside it.
             legacy = legacy and state.holds_only_legacy_source_documents(cache_reads[0])
-            if len(contents) == 1 and None not in contents:
-                return state, _Stream(STREAM_KNOWN, next(iter(contents)), "cache", node,
+            if _proved_profile(contents) is not None:
+                return state, _Stream(STREAM_KNOWN, _proved_profile(contents), "cache", node,
                                       caller_cache=shared, retrieved_from=shared,
-                                      retrieved_origins=inherited), legacy
+                                      retrieved_origins=inherited, retrieved_own=own), legacy
             # Nothing here proves one profile: no write reaches the read, writes disagree, or
             # an outside writer's content is unknown. The consumer is refused here either way.
             return state, _Stream(STREAM_UNKNOWN, origin="cache", caller_cache=shared,
-                                  retrieved_from=shared, retrieved_origins=inherited), legacy
+                                  retrieved_from=shared, retrieved_origins=inherited, retrieved_own=own), legacy
 
         if kind == "cache_remove":
             # Whole-cache removal clears the cache's content, its cohorts and its
@@ -3079,6 +3351,16 @@ def _walk_lineage(
         """
         contract = capabilities.child_entry_contract(semantic.process_ref)
         form = contract.entry_form if contract is not None else None
+        # #186 (review r16, integration review r5): the caches whose profile this child relies on — a stated profile
+        # requirement, or every cache where nothing derives the child.
+        if contract is None or contract.entry_form == "unknown":
+            read_caches.update(cache_refs)
+        else:
+            relied = {row[0] for row in contract.cache_requirements if row[1] is not None}
+            read_caches.update(relied)
+            # ... and the staging writes those caches' documents came from, through any re-cache (integration r6).
+            read_caches.update(fact[2].source for fact in state.content
+                               if fact[0] in relied and isinstance(fact[2], _Staged))
         context, own = _call_prefix(prepared.ir, node.source_path)
         # Keyed on this parent's own entry form, read off its own CFG and never off a caller.
         predecessor = _prefix_predecessor(context, own, stream.native_kind, classify_entry(prepared.cfg))
@@ -3092,6 +3374,7 @@ def _walk_lineage(
         elif predecessor is not None and (
             not process_call_prefix_admitted(context, predecessor, form, semantic.wait)
             or None in contract.document_requirements
+            or UNKNOWN_PROFILE_REQUIREMENT in contract.document_requirements
         ):
             # Native work before a call is a verified hand-off: admitted only for an
             # attested evidence key, into a child that states everything it consumes.
@@ -3111,17 +3394,81 @@ def _walk_lineage(
                     rides_on=None if stream is None else stream.retrieved_from,
                     origins=() if stream is None else stream.retrieved_origins,
                 )
+        # #186: the leg order each execution-scoped requirement was found in, so the call reports
+        # the code the flattened twin's walk reports at the read: a later-leg writer the child or a
+        # process between it and the read holds is a Branch-order error there, whoever calls.
+        orders: Dict[StateKey, Set[bool]] = {}
+        for scope_, name_, later_ in contract.required_read_leg_orders:
+            orders.setdefault((scope_, name_), set()).add(bool(later_))
         for raw in contract.required_reads:
             key = (raw[0], raw[1])
             if state.establishes(key):
                 # Proved on documents that may carry a caller's cached value: still owed.
                 _owe_the_caches_behind(node.source_path, key, None, False, writers)
                 continue
-            _classify_unmet_read(
-                node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
-                invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
-                rides_on=stream.retrieved_from, origins=stream.retrieved_origins,
-            )
+            for later_ in sorted(orders.get(key, {False})):
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                    invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
+                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins, later_leg=later_,
+                )
+        # #186 (SELF-184-73): the child's NON-strict reads of a document property off documents no
+        # retrieve handed on, which it cannot fail itself, judged HERE by the in-process rule asked
+        # of THIS process (`_nonstrict_read_can_fail`) — the writer set the flattened twin's walk
+        # asks it of. The relation says which documents the twin's read sees:
+        #   - ``inherits``: the ones handed over, so the read is judged exactly as a read at the call;
+        #   - ``drops``: those, after a step discarded what they carried — a read before write when
+        #     the property is established on them, else what invalidation this path already holds;
+        #   - ``fresh``: a No Data child's own empty document, which nothing here reaches — a
+        #     different-document-copy scope error wherever a writer exists.
+        # Where nothing here writes the property the row passes on, in kind, to this process's
+        # callers. A scheduled child's rows are all ``fresh`` by derivation; the override keeps a
+        # call into one from reading the handed documents whatever a row says.
+        for name, relation in contract.nonstrict_document_reads:
+            key = (DDP, name)
+            relation = "fresh" if form == "scheduled" else relation
+            can_fail = _nonstrict_read_can_fail(prepared, key, capabilities)
+            if relation == "inherits":
+                if state.establishes(key):
+                    if can_fail:
+                        _owe_the_caches_behind(node.source_path, key, None, False, writers)
+                    continue
+                # Read off the handed documents as an own read at the call is: past a retrieve its
+                # passed-on form is the cached-property row a retrieved read records.
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),) if can_fail else (),
+                    invalidated=invalidated, cached_from=_caller_cached_origin(key, stream, invalidated),
+                    rides_on=stream.retrieved_from, origins=stream.retrieved_origins,
+                    nonstrict=not can_fail,
+                )
+            elif not can_fail:
+                _classify_unmet_read(node, semantic, key, leg, invalidated=invalidated, nonstrict=True,
+                                     relation=relation)
+            elif relation == "drops":
+                # Only a property the handed documents carried can be dropped; one they never
+                # carried keeps whatever this path already says of it.
+                _classify_unmet_read(
+                    node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                    invalidated=invalidated | ({key} if state.establishes(key) else frozenset()),
+                )
+            else:
+                _classify_unmet_read(node, semantic, key, leg, extra=(("effect_kind", "subprocess"),))
+        # #186 (SELF-184-74): the child's NON-strict reads of a process property it cannot fail
+        # itself. Established before the call, the twin's read is satisfied; otherwise a call whose
+        # process ESTABLISHES the property anywhere fails it as the twin does — a Branch-order error
+        # where a writer sits on a later leg (the row's own flag, or a later leg of this process's
+        # Branch than the one holding the call), else a read before write. Nothing establishing it
+        # here: the row passes on with the combined flag.
+        for name, child_later_leg in contract.nonstrict_process_reads:
+            key = (DPP, name)
+            if state.establishes(key):
+                continue
+            if _nonstrict_read_can_fail(prepared, key, capabilities):
+                _classify_unmet_read(node, semantic, key, leg, extra=(("effect_kind", "subprocess"),),
+                                     invalidated=invalidated, later_leg=child_later_leg)
+            else:
+                _classify_unmet_read(node, semantic, key, leg, invalidated=invalidated, nonstrict=True,
+                                     later_leg=child_later_leg)
         if profile_proof:
             # A cache the child reads holds what THIS execution stored there (capture
             # `cap184-shared-cache`), so the profile the child's consumers need must be
@@ -3152,6 +3499,35 @@ def _walk_lineage(
                     # still refuses such a caller, for the cache it never established.
                     continue
                 if contents != frozenset({_identity(profile_ref)}):
+                    _report(
+                        PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
+                        node,
+                        sub_path="/process_ref",
+                        phase=_PROFILE_PHASE,
+                    )
+            # #186 (CDX-186-r3-01): a write of what the child retrieves from a cache a caller fills is
+            # refused where THIS process's writes there stored documents of a PROVED profile other than
+            # the one the target cache declares (or any proved profile, for an UNKNOWN target) — the
+            # twin's write refuses only a proved profile — and passed on where a caller's own documents
+            # may be in the cache too.
+            #
+            # Architect evaluation 2: the documents the child retrieved are what THIS process stored
+            # there AND what the child's own writes stored before its retrieve (the row's third part).
+            # The twin's retrieve proves a profile only where the two together hold exactly one, so a
+            # mixture — of two profiles, or of one and documents nothing proves — is refused nowhere.
+            # Where documents of this process's callers may be there too, the row travels on with
+            # what this process adds, and a CALLED process leaves the judgment to its callers.
+            for cache_ref, profile_ref, own_ref in contract.cache_write_requirements:
+                together = state.content_of(cache_ref) | (
+                    frozenset() if own_ref is None else frozenset({_identity(own_ref)}))
+                if not _completable(together):
+                    continue
+                if _caller_documents_may_reach(state, cache_ref):
+                    cache_write_requirement_refs.append((cache_ref, profile_ref, _ref_naming(_proved_profile(together))))
+                    if capabilities.called_by_a_root:
+                        continue
+                required = None if profile_ref == UNKNOWN_PROFILE_REQUIREMENT else _identity(profile_ref)
+                if together and _proved_profile(together) != required:
                     _report(
                         PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
                         node,
@@ -3988,6 +4364,8 @@ def _walk_lineage(
     established = None
     for at_exit in normal_exits:
         established = at_exit if established is None else established.merged_with(at_exit)
+    # #186 (review r16): a staging write of a cache this walk reads again keeps its exact requirement.
+    entry_requirement_refs[:] = _relied_on_writes_exact(entry_requirement_refs, entry_staged, read_caches)
     return LineageWalkV1(
         findings=tuple(findings),
         unestablished_reads=tuple(sorted(set(unmet))),
@@ -3999,6 +4377,8 @@ def _walk_lineage(
         entry_requirements=tuple(entry_requirements),
         entry_requirement_refs=tuple(entry_requirement_refs),
         cache_requirement_refs=tuple(cache_requirement_refs),
+        cache_write_requirement_refs=tuple(sorted(
+            set(cache_write_requirement_refs), key=lambda row: (row[0], row[1], row[2] is not None, row[2] or ""))),
         unestablished_bindings=tuple(sorted(
             set(unestablished_bindings), key=lambda row: (row[0], row[1], row[2] or "")
         )),
@@ -4010,6 +4390,9 @@ def _walk_lineage(
         read_cache_origins=tuple(sorted(set(read_cache_origins))),
         nonstrict_cached_reads=tuple(sorted(
             set(nonstrict_cached_reads), key=lambda row: (row[0], row[1] or "", row[2]))),
+        nonstrict_document_reads=tuple(sorted(set(nonstrict_document_reads))),
+        nonstrict_process_reads=tuple(sorted(set(nonstrict_process_reads))),
+        unestablished_read_sites=tuple(sorted(set(unestablished_read_sites))),
         # The same meet, over the same exits, asked of the proof rather than the
         # establishment — so a key survives only where EVERY normal completion made the
         # write, and where one completion's write sat behind a possibly-empty step it does
@@ -4122,8 +4505,13 @@ def _leg_write_index(
             # #184 amendment 1 rule 7: what a derived child contract guarantees is a
             # write in the leg holding the call, asked without a path like the rest.
             if inner.semantic.semantic_kind == "process_call":
-                written.update(_awaited_guarantee(
-                    inner.semantic, capabilities.child_entry_contract(inner.semantic.process_ref)))
+                contract = capabilities.child_entry_contract(inner.semantic.process_ref)
+                written.update(_awaited_guarantee(inner.semantic, contract))
+                # #186: and every execution-state write the child — or a process it calls — makes
+                # anywhere, conditional or unwaited: the twin holds those writers in this leg, and
+                # this index LOCATES a write, it establishes nothing.
+                if contract is not None:
+                    written.update((key[0], key[1]) for key in contract.execution_state_writes)
         index[leg] = frozenset(written)
     return index
 
@@ -4173,6 +4561,12 @@ def _keys_written_anywhere(
             contract = capabilities.child_entry_contract(node.semantic.process_ref)
             if contract is not None:
                 written.update((DDP, name) for name in contract.document_property_writes)
+        # #186: its execution-state writes too, so the contract's `execution_state_writes` is read
+        # off this one set, transitively.
+        if node.semantic.semantic_kind == "process_call":
+            contract = capabilities.child_entry_contract(node.semantic.process_ref)
+            if contract is not None:
+                written.update((key[0], key[1]) for key in contract.execution_state_writes)
     return frozenset(written)
 
 

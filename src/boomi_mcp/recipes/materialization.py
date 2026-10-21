@@ -20,7 +20,8 @@ contribution snapshot. It refuses pickling for the same reason.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Sequence, Tuple
+import hashlib
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from ..errors import RECIPE_CONTRIBUTION_INVALID
 from ..models.integration_models import IntegrationComponentSpec
@@ -265,6 +266,52 @@ def _profile_facts(component, plan_keys, written=True) -> _ProfileFacts:
     return _ProfileFacts(None, None, None)
 
 
+#: #186: the ref prefix of an internal profile symbol standing for a STORED profile an unwritten
+#: document cache declares. Not a `$ref:` — no authored reference can name it, materialization never
+#: binds it, and nothing emits it: it exists so the profile identity rule
+#: (`connector_resolution._profile_identity`) can compare the stored profile with the documents.
+STORED_PROFILE_REF_PREFIX = "urn:boomi:stored-profile:"
+
+
+def _stored_cache_profile_facts(component, snapshot, facts):
+    """``(facts, internal profile symbol or None)`` for a document cache apply does NOT write (#186).
+
+    The request's configuration of such a cache is discarded, so it states nothing (`_profile_facts`);
+    what the cache accepts is what the account stores, read by a route that holds the account
+    (`StoredDocumentCacheProfileV1`). Known: an internal symbol whose identity is the stored profile
+    component and its type — a plan profile bound to the same component is the same profile, any
+    other is not. Absent (an unprofiled cache): no profile at all. Unknown, or no reading on a route
+    that read — a failed read, a binding nothing resolved: UNKNOWN, which matches no proved document
+    profile (fail-closed). A route that read nothing holds no account: it states no profile, the
+    limit its served rule states, and apply — which holds the account — judges the stored profile
+    before any write. Any other component keeps its facts.
+    """
+    if str(component.type or "").strip() != "documentcache":
+        return facts, None
+    from ..compiler.process_ir.contracts import ComponentSymbolV1
+
+    read = bool(getattr(snapshot, "cache_profiles_read", False))
+    reading = snapshot.lookup_cache(component.key) if read else None
+    if not read or (reading is not None and reading.profile_state == "absent"):
+        # No account on this route (the served rule states the limit: apply reads the stored
+        # profile before any write), or an unprofiled cache: no profile is stated.
+        return facts._replace(cache_profile=None, unknown=False), None
+    if reading is None or reading.profile_state != "known":
+        return facts._replace(cache_profile=None, unknown=True), None
+    digest = hashlib.sha256("{0}|{1}".format(
+        reading.profile_component_id, reading.profile_component_type).encode("utf-8")).hexdigest()
+    symbol = ComponentSymbolV1(
+        ref=STORED_PROFILE_REF_PREFIX + digest,
+        component_id=reading.profile_component_id,
+        component_type=reading.profile_component_type,
+        connector_type=None,
+        action_type=None,
+        connection_ref=None,
+        bound_component_id=reading.profile_component_id,
+    )
+    return facts._replace(cache_profile=symbol.ref, unknown=False), symbol
+
+
 def build_symbol_table(
     components: Sequence[IntegrationComponentSpec],
     *,
@@ -374,6 +421,8 @@ def build_symbol_table(
         ).items()
         if bound not in placeholders
     }
+    # #186: one internal profile symbol per stored profile an unwritten cache declares.
+    stored_profiles: List[Any] = []
     # #184: every symbol is described by its own spec. A written component is named by its
     # writer alone (refused above otherwise), and specs naming a component nothing in the
     # request writes each describe it as the account stores it.
@@ -410,10 +459,19 @@ def build_symbol_table(
         # profile a call hands on and accepts, what a map transforms, what a cache
         # declares it holds. The listener's inbound request profile keeps precedence
         # for the listener operation, which is what #158 carries in the same field.
-        facts = _profile_facts(
-            component, plan_keys,
-            written=apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids),
-        )
+        written = apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids)
+        facts = _profile_facts(component, plan_keys, written=written)
+        unjudged = (getattr(connector_resolution_snapshot, "cache_profiles_read", False)
+                    and getattr(connector_resolution_snapshot.lookup_cache(component.key), "binding_unjudged", False))
+        if unjudged:
+            # #186 (ARCH-186-e1-02): the account was consulted and could not bind this cache's name, so
+            # apply may reuse it: its requested configuration describes nothing known — unknown.
+            facts = facts._replace(cache_profile=None, unknown=True)
+        elif not written:
+            # #186: a cache apply does not write declares what the ACCOUNT stores.
+            facts, stored_symbol = _stored_cache_profile_facts(component, connector_resolution_snapshot, facts)
+            if stored_symbol is not None and stored_symbol.ref not in {item.ref for item in stored_profiles}:
+                stored_profiles.append(stored_symbol)
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,
@@ -442,6 +500,13 @@ def build_symbol_table(
                 ),
             )
         )
+
+    # #186: the stored profiles unwritten caches declare, after every component and with refs no
+    # authored `$ref:` can spell, so no request reference resolves to one and none collides.
+    for stored in stored_profiles:
+        if stored.ref in {symbol.ref for symbol in symbols}:
+            raise ValueError("stored cache profile symbol collides with " + stored.ref)
+        symbols.append(stored)
 
     # Canonical process roots. Appended after the components and de-duplicated
     # against them: the two tuples share one key namespace, so a key appearing in
