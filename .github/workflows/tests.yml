@@ -71,7 +71,11 @@ jobs:
     # tests outgrew it — its first preflight (run 35571464519) was cancelled at 60 min
     # having finished 44% of the suite. The cap exists to kill a hung job, not to bound
     # a healthy suite; 120 does the first while leaving room for the rest of M12.
-    timeout-minutes: 120
+    # #186 outgrew 120 (raised with the owner's approval): its preflight (run 39531483740)
+    # was cancelled at 120 min, and the same suite on Python 3.11 locally took 114.6 min
+    # (14,507 passed, 20 skipped) against #184's 52.5 min. 240 kills a hung job and leaves
+    # headroom; the suite-time growth itself is a separate follow-up.
+    timeout-minutes: 240
 
     env:
       PYTHONPATH: src
