@@ -75,7 +75,11 @@ jobs:
     # was cancelled at 120 min, and the same suite on Python 3.11 locally took 114.6 min
     # (14,507 passed, 20 skipped) against #184's 52.5 min. 240 kills a hung job and leaves
     # headroom; the suite-time growth itself is a separate follow-up.
-    timeout-minutes: 240
+    # 240 was not enough either: runner speed varies ~1.6x between runs — run 39544667083
+    # finished the suite in 192 min, run 39567844156 reached 45% at 216 min and was cancelled
+    # at 240 (one module between 45% and 46% alone took 85 min on the faster runner). 360
+    # covers the slower runner with headroom while still killing a hung job.
+    timeout-minutes: 360
 
     env:
       PYTHONPATH: src
