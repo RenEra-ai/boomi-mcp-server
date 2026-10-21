@@ -417,5 +417,41 @@ them.
 
 | Gate | Evidence (quoted output / run URL / archived round) | SHA |
 | --- | --- | --- |
+| L1 — Stage-1 live QA | rounds r1–r17 live through the public tool boundary; the final source tree is covered by the affected round r16 and the wave's live round r17 (one end-to-end scenario per changed capability class, executions COMPLETE) | `609ee8e` = `3819723` source |
+| L2 — Stage-2 repo commit review | `CLOSE-CLEAN` at 2 / 2; then the support review of every later correction, ending with r21 clean over `e15a0d4..609ee8e` (`cdx-review.hEy9GF`) | `609ee8e` |
+| L3 — architect implementation review | three evaluations, the cap (`cdx-gate-review.Gt863E`, `cdx-gate-review.QYDM7Z`, `cdx-gate-review.OoZL0p`); evaluation 3's correction (batches 8–9) reviewed clean (r10), then the loop ended by the owner rule | `eeb1e09` (its delta then covered by L2 and L4) |
+| L4 — composite wave gate | run 3 completed (`wave-186-r3.3819723`: 14,507 passed, 20 skipped; 80 goldens byte-exact; plan fingerprint checked); integration review round 7 over `46100b7..d4b22c7` with its one finding deferred to #187; wave live round r17 clean; blast radius against `e22b8fa` — 216-cell matrix 0 moved, x29 universe 4,872 cells 0 moved and 0 violations, six corpora (89,444 requests) with no admission becoming a refusal and no refusal an admission (totals identical to the implementation-time comparison) | `3819723` |
+| L5 — terminal correction loop | not needed | — |
 
 ## Final report
+
+**Status: COMPLETE.** Every required gate is current on the final source tree `609ee8e` (`3819723` and the records
+commits after it change no source) on `codex/issue-186`. Baseline and landing base `46100b7`; comparison tree `e22b8fa`.
+No critical finding exists; every standard finding is fixed or deferred to #187, filed with the owner's authorization
+and slotted after #186, before #159.
+
+**The loop roster, every loop closed.**
+
+| Loop | Evaluations | Outcome |
+| --- | --- | --- |
+| 1 — Stage-1 QA | rounds r1–r17 | every round clean; each correction's affected cells re-run |
+| 2 — Stage-2 repo commit review | 21 rounds | `CLOSE-CLEAN` at 2 / 2, then clean as the support gate of every correction (r21 last) |
+| 3 — architect implementation review | 3 (the owner cap) | ended by the cap after evaluation 3's correction was reviewed clean |
+| 4 — composite wave gate | 12 | owner decisions at evaluations 3 (remove the cache-content channel, defer to #187), 6 (structural write-requirement fix) and 9 (validate, defer further fail-closed edges); `DEFER-STANDARD-AND-PROCEED` at 12, then every wave part current |
+| 5 — terminal correction loop | not needed | — |
+
+**Findings.** Read off the finding table (one revision row superseding one original): 44 distinct findings, **42 `fixed`,
+2 `deferred`** — ARCH-186-e3-01 and CDX-186-w7-01 to #187, `blocked-by-mechanism`, M12 after #186 before #159, each
+enumerated in #187's description. No `window-exhausted` deferral; no finding deferred twice.
+
+**Owner decisions taken during the slice** (each on its row or checkpoint): both child entry forms; `CONTINUE` at the
+architect loop's evaluation 2; at the wave loop — remove the child cache-content channel and file #187 (evaluation 3),
+the structural write-requirement fix (evaluation 6), validate batch 18 and defer further fail-closed edges of the
+staging-write rule to #187 (evaluation 9); undeploying six stale September deployments to free the TEST licenses.
+
+**Process deviations, recorded rather than hidden.** Several checkpoint rows were written after the next batch's edits
+had begun (each marked on its row); correction batch 16 was committed although its corpus rebuild had refused to write
+(CDX-186-r17-01, fixed in batch 17); the first composite wave run's log was lost with `/tmp` (recorded on its gate row).
+
+**Residuals** (fail-closed, identical at `e22b8fa`): the sibling-writer writer-missing cells, the unknown property cohort
+of a sibling's write, and the classes listed under "Recorded residuals".
