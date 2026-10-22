@@ -126,6 +126,16 @@ docs/*
 # Test files (local only, except anywhere under tests/)
 test_*.py
 !tests/**/test_*.py
+# Evidence trees are checksummed archives, so every tracked file in them must ALSO reach
+# the gcloud build-context upload (the same invariant as the *.log and *_liveness.json
+# re-inclusions, enforced by `test_no_tracked_file_dropped_from_build_context`). Two rules
+# above reach into them: `test_*.py` matches at every depth in git and gcloud alike, and
+# gcloudignore (unlike git) applies the root `docs/*` rule to NESTED `docs/` directories as
+# well — measured with `gcloud meta list-files-for-upload` on the canvas-arrange handoff,
+# which lost `tests/test_autoformat.py`, `docs/arrange_rules.md` and
+# `docs/arrange_observations.md` from the upload while git tracked all three.
+!docs/architecture/evidence/**/test_*.py
+!docs/architecture/evidence/**/docs/*
 # Root-level scratch analysis scripts only. MUST stay anchored (leading /): an
 # unanchored analyze_*.py matched the tracked package module
 # src/boomi_mcp/categories/components/analyze_component.py at any depth, which
