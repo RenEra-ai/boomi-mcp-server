@@ -37,7 +37,7 @@ from boomi_mcp.connector_replay.ingest import (  # noqa: E402
     verify_archive,
 )
 
-ARCHIVE = ROOT / "docs/architecture/evidence/issue-155"
+ARCHIVE = ROOT / "tests/fixtures/boomi/connector_replay"
 CAPTURES = ARCHIVE / "captures"
 REGISTRY = ROOT / "src/boomi_mcp/connector_replay/registry_v1.json"
 

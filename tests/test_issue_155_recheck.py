@@ -470,7 +470,7 @@ def test_a_static_record_authorises_only_the_routes_it_enumerates():
 
     caps = (
         _pathlib.Path(__file__).resolve().parents[1]
-        / "docs/architecture/evidence/issue-155/captures"
+        / "tests/fixtures/boomi/connector_replay/captures"
     )
     conn_xml = (caps / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml").read_text()
     op_xml = sorted(caps.rglob("operation_component.xml"))[0].read_text()

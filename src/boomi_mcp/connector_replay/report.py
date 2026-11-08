@@ -23,7 +23,7 @@ __all__ = ["REPORT_RELATIVE_PATH", "parse", "projection_category_fingerprint",
            "render", "write_report"]
 
 #: Where the tracked report lives, relative to the repository root.
-REPORT_RELATIVE_PATH: Final[str] = "docs/evidence/connector-replay-captures.md"
+REPORT_RELATIVE_PATH: Final[str] = "reference/connector-replay-captures.md"
 
 _HEADER: Final[str] = "# Connector replay evidence"
 

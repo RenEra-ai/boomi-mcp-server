@@ -22,7 +22,7 @@ from boomi_mcp.connector_replay.models import (
 from boomi_mcp.connector_replay.registry import ReplayRegistry
 
 _REPO = Path(__file__).resolve().parents[1]
-_ROOT = _REPO / "docs" / "architecture" / "evidence" / "issue-155"
+_ROOT = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay"
 _C = _ROOT / "captures"
 _REAL = "execution-1957bb8f-9a89-4254-b169-9ddbf41fddf8-2026.08.26"
 

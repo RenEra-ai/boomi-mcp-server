@@ -5649,7 +5649,7 @@ def test_every_served_surface_that_states_rule_eight_states_its_gate():
     from test_issue_184_child_entries import _entry_by_id
 
     entry = _entry_by_id(process_ir_authoring_revision_payload(), "node.process_call")
-    doc_text = (_ROOT / "docs" / "architecture" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
+    doc_text = (_ROOT / "specs" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
     assert "wait=true and abort_on_error=true" in message
     assert "wait=true and abort_on_error=true" in " ".join(entry["ordering_facts"])
     assert "wait and abort on error" in doc_text
@@ -6252,7 +6252,7 @@ def test_the_three_surfaces_state_the_predicate_the_code_evaluates():
     served = findings.finding(
         PROCESS_IR_CAPABILITY_PROCESS_CALL_REPEATED_RUN_UNSTABLE, "error", "capability", "/body")
     paragraphs = " ".join(_served("node.process_call")["ordering_facts"])
-    document = (_ROOT / "docs" / "architecture" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
+    document = (_ROOT / "specs" / "PROCESS_IR_V1.md").read_text(encoding="utf-8")
     for surface, text in (("finding", served.message + " " + served.remediation),
                           ("node.process_call", paragraphs), ("PROCESS_IR_V1.md", document)):
         assert "may write that cache" in text or "may write it" in text, surface

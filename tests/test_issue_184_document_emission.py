@@ -114,7 +114,7 @@ from _process_ir_entrypoint_differential import measure_entrypoints  # noqa: E40
 
 _NODE = TypeAdapter(ProcessNodeV1)
 _SRC = _ROOT / "src"
-_ARCHIVE = _ROOT / "docs/architecture/evidence/issue-184"
+_ARCHIVE = _ROOT / "tests/fixtures/boomi/process_ir/issue184"
 _INDEX_PATH = _ARCHIVE / "document_emission/CAPTURE_INDEX.json"
 _INDEX_SCRIPT = _ARCHIVE / "document_emission/build_capture_index.py"
 

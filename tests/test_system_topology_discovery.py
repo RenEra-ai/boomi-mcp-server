@@ -969,7 +969,7 @@ def _scanned_files():
     roots = (
         _project_root / "src" / "boomi_mcp" / "compiler" / "system_topology",
         _project_root / "src" / "boomi_mcp" / "models",
-        _project_root / "docs" / "architecture",
+        _project_root / "specs",
     )
     for root in roots:
         for path in sorted(root.rglob("*")):
@@ -1030,7 +1030,7 @@ def test_the_scan_visits_the_module_the_claim_came_from():
         / "system_topology"
         / "capabilities.py",
         _project_root / "src" / "boomi_mcp" / "models" / "system_topology.py",
-        _project_root / "docs" / "architecture" / "SYSTEM_TOPOLOGY_V1.md",
+        _project_root / "specs" / "SYSTEM_TOPOLOGY_V1.md",
     ):
         assert required.resolve() in scanned, required.name
 

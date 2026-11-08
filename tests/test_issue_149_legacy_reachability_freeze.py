@@ -14,7 +14,7 @@ Re-baselining after an INTENTIONAL change (the same doctrine as
         --write tests/fixtures/m12_12/legacy_reachability_inventory.json
 
 then update the matching section-11 rows in
-`docs/architecture/M12_COMPATIBILITY_INVENTORY.md` in the SAME change. Both the
+`specs/M12_COMPATIBILITY_INVENTORY.md` in the SAME change. Both the
 pin and the ledger move together or the two-way test fails.
 """
 

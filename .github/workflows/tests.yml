@@ -45,7 +45,7 @@
 # committed floor and a committed set of required node ids before it believes
 # any result.
 #
-# See `docs/architecture/ENDGAME_VERIFICATION_GATE.md`.
+# See `specs/ENDGAME_VERIFICATION_GATE.md`.
 name: Python tests
 
 on:

@@ -4485,7 +4485,7 @@ def emit_section_11_markdown(document: Dict[str, Any]) -> Dict[str, str]:
 # Ledger parsing (the two-way completeness check)
 # ======================================================================
 
-INVENTORY_DOC = "docs/architecture/M12_COMPATIBILITY_INVENTORY.md"
+INVENTORY_DOC = "specs/M12_COMPATIBILITY_INVENTORY.md"
 
 _LEDGER_ID = re.compile(r"^\|\s*(LG-[0-9a-f]{8})\s*\|")
 _ROUTE_ID = re.compile(r"^\|\s*(WRT-[a-z0-9-]+)\s*\|")

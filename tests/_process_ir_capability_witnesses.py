@@ -115,7 +115,7 @@ PROVENANCE_KINDS = frozenset(
 #: so the claim is checkable rather than asserted.
 LIVE_ANCHOR_PROVENANCE = {
     "error_handling/scoped_try_catch_notify_terminal_process_call.json": (
-        "docs/architecture/evidence/issue-156/captures/oracle-graphs/B2_shapes.xml "
+        "tests/fixtures/boomi/process_ir/issue156/captures/oracle-graphs/B2_shapes.xml "
         "(legacy builder at b07babe, deployed and executed on renera 2026-09-06)"
     ),
     "error_handling/serialized_connector_regions_notify_dlq.json": (
@@ -1289,7 +1289,7 @@ def _capability_witness_client():
     from unittest.mock import MagicMock
 
     derivation = (_p.Path(__file__).resolve().parents[1]
-                  / "docs/architecture/evidence/issue-155/captures"
+                  / "tests/fixtures/boomi/connector_replay/captures"
                   / "cap155-e9-patch-operation-record/record_derivation.json")
     account = json.loads(derivation.read_text(encoding="utf-8"))[
         "account_scope_hash"]["account_id"]
@@ -1336,7 +1336,7 @@ def _w_verified_write_replay_safety():
     connection = record.connection_identity
     captures = (
         pathlib.Path(__file__).resolve().parents[1]
-        / "docs/architecture/evidence/issue-155/captures"
+        / "tests/fixtures/boomi/connector_replay/captures"
         / "cap155-e9-patch-operation-record"
     )
 

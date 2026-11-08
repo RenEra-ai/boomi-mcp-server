@@ -1,4 +1,4 @@
-# The issue-evidence archives are byte-exact collector artifacts whose SHA-256
-# manifest (SHA256SUMS) is a checkout-time contract: no line-ending conversion,
-# ever, or a core.autocrlf=true clone fails its own checksum verification.
-docs/architecture/evidence/** -text
+# The Boomi fixture trees are byte-exact captures whose SHA-256 manifests (SHA256SUMS)
+# are a checkout-time contract: no line-ending conversion, ever, or a core.autocrlf=true
+# clone fails its own checksum verification.
+tests/fixtures/boomi/** -text

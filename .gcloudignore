@@ -1,7 +1,7 @@
 # .gcloudignore — controls what `gcloud builds submit` uploads as the Cloud Build context.
 #
 # It INHERITS .gitignore via `#!include:.gitignore` so every local-only path git already
-# ignores (.mcp.json, .env/secrets, caches, venvs, docs/archive, agents/, tasks/,
+# ignores (.mcp.json, .env/secrets, caches, venvs, the local-only docs/, agents/, tasks/,
 # setup scripts, incident bundles, ...) is kept out of the `gcloud builds submit` UPLOAD
 # context. Inheriting avoids keeping a second copy of git's exclusions that can drift.
 #

@@ -153,7 +153,7 @@ def test_a_consumer_downstream_of_a_producer_is_not_refused_for_cardinality(payl
 
 def test_the_branch_point_compiled_the_absent_stream_probes():
     """The 'before' half, read from the archived pre-baseline measurement."""
-    probe = _ROOT / "docs/architecture/evidence/issue-184/predicates/probe_cbab28f.jsonl"
+    probe = _ROOT / "tests/fixtures/boomi/process_ir/issue184/predicates/probe_cbab28f.jsonl"
     rows = {json.loads(line)["form"]: json.loads(line) for line in probe.read_text().splitlines() if line}
     for form in ("absent_stream_maps_in_legs", "absent_stream_map_put"):
         assert rows[form].get("compile") == "ok+emit", rows[form]

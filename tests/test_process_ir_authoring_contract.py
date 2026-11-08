@@ -1637,7 +1637,7 @@ _REPO_DOC_NAMES = tuple(
     sorted(
         path.stem
         for path in (
-            Path(__file__).resolve().parent.parent / "docs" / "architecture"
+            Path(__file__).resolve().parent.parent / "specs"
         ).glob("*.md")
     )
 )

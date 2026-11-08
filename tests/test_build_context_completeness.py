@@ -27,13 +27,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 # .gcloudignore self-excludes (standard gcloud behavior) and is not needed in the build.
 _UPLOAD_ALLOWLIST = {".gcloudignore"}
 
-# Tracked-directory prefixes intentionally excluded from the Cloud Build upload.
-# ``docs/plans/`` is gitignored by design (local planning artifacts), but the
-# /auto-issue workflow force-adds the architect plan JSON there as a durable
-# source-of-truth. Those planning docs are NOT runtime assets and legitimately do
-# not belong in the Cloud Run image — so a drop here is expected, not the
-# dropped-source-file regression this guard exists to catch.
-_UPLOAD_ALLOWLIST_PREFIXES = ("docs/plans/",)
+# No tracked directory is excluded from the upload: docs/ is not tracked at all (it is
+# the maintainer's local-only folder), which the test below pins.
+_UPLOAD_ALLOWLIST_PREFIXES = ()
 
 
 def _lines(args):
@@ -84,3 +80,25 @@ def test_no_tracked_file_dropped_from_build_context():
         ".gitignore/.gcloudignore pattern is dropping them, so they would be MISSING "
         f"from locally-submitted (`gcloud builds submit`) images: {dropped}"
     )
+
+
+def test_the_public_repository_tracks_nothing_under_docs():
+    """docs/ is a local-only folder; nothing under it may be tracked here again.
+
+    Development records (plans, review archives, audit trails) live outside this
+    repository. Product specifications are in specs/, captured fixtures in
+    tests/fixtures/boomi/, generated reference pages in reference/. Both git calls
+    must succeed: a failed `ls-files` must not read as an empty result.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "--", "docs"],
+        cwd=_ROOT, capture_output=True, text=True,
+    )
+    assert listed.returncode == 0, listed.stderr
+    assert listed.stdout.split() == [], (
+        "files under docs/ are tracked: {0}".format(listed.stdout.split()[:5])
+    )
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "docs/"], cwd=_ROOT, capture_output=True, text=True,
+    )
+    assert ignored.returncode == 0, "docs/ is not ignored: {0}".format(ignored.stderr)

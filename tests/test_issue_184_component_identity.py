@@ -2431,7 +2431,7 @@ from test_issue_158_listener_deployment import (  # noqa: E402
 )
 
 _ENTRY_CONTEXT = "PROCESS_IR_CAPABILITY_ENTRY_CONTEXT_UNSUPPORTED"
-_CAPTURES = _ROOT / "docs" / "architecture" / "evidence" / "issue-184" / "captures" / "cap184-dpp-both-ways"
+_CAPTURES = _ROOT / "tests" / "fixtures" / "boomi" / "process_ir" / "issue184" / "captures" / "cap184-dpp-both-ways"
 
 
 def _captured_stored(name):

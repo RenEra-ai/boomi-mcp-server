@@ -2,7 +2,7 @@
 
 Every admission here was refused at the branch point `cbab28f`, with the code and
 pointer recorded in the issue's own "Current predicates" table and re-measured in
-`docs/architecture/evidence/issue-184/predicates/probe_cbab28f.jsonl`. Each positive
+`tests/fixtures/boomi/process_ir/issue184/predicates/probe_cbab28f.jsonl`. Each positive
 case sits beside a negative neighbour that stays refused.
 
 The attested prefix table is bound, in both directions, to the live capture
@@ -34,8 +34,8 @@ from boomi_mcp.errors import (  # noqa: E402
 from boomi_mcp.models import process_ir as model  # noqa: E402
 from boomi_mcp.models.process_ir import ProcessIRValidationError, parse_process_ir_v1  # noqa: E402
 
-_CAPTURE = _ROOT / "docs/architecture/evidence/issue-184/captures/cap184-prefix-predecessors/MANIFEST.json"
-_PROBE = _ROOT / "docs/architecture/evidence/issue-184/predicates/probe_cbab28f.jsonl"
+_CAPTURE = _ROOT / "tests/fixtures/boomi/process_ir/issue184/captures/cap184-prefix-predecessors/MANIFEST.json"
+_PROBE = _ROOT / "tests/fixtures/boomi/process_ir/issue184/predicates/probe_cbab28f.jsonl"
 
 #: The capture names its runs `pfx_<kind>_<br|dec>`; these map a run's names onto the
 #: authored vocabulary. A retrieve row covers both authored cache-read kinds, which

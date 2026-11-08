@@ -34,7 +34,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "tests/fixtures/m12_12/legacy_reachability_inventory.json"
-DOCUMENT = ROOT / "docs/architecture/M12_COMPATIBILITY_INVENTORY.md"
+DOCUMENT = ROOT / "specs/M12_COMPATIBILITY_INVENTORY.md"
 EMITTER = ROOT / "tests/_m12_12_legacy_inventory.py"
 
 #: `tests/_revision_corpus.py::DEFER_ENV`, spelled again because this script runs standalone;

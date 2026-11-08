@@ -193,7 +193,7 @@ def test_the_issue_probe_is_refused_as_a_read_before_write():
 
 def test_the_branch_point_compiled_the_probe():
     """The 'before' half of the pair, read from the archived pre-baseline measurement."""
-    probe = _ROOT / "docs/architecture/evidence/issue-184/predicates/probe_cbab28f.jsonl"
+    probe = _ROOT / "tests/fixtures/boomi/process_ir/issue184/predicates/probe_cbab28f.jsonl"
     rows = {json.loads(line)["form"]: json.loads(line) for line in probe.read_text().splitlines() if line}
     assert rows["stale_ddp_after_cacheget"].get("compile") == "ok+emit", rows["stale_ddp_after_cacheget"]
 

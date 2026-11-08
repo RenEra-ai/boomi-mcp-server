@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 FIXTURE = "tests/fixtures/connector_replay/digest_parity.json"
-CAPTURES = "docs/architecture/evidence/issue-155/captures"
+CAPTURES = "tests/fixtures/boomi/connector_replay/captures"
 CONNECTION = "cap155-e1-conn-readback/rest-conn-c4281346.xml"
 
 

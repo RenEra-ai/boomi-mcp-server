@@ -12,23 +12,13 @@ A production-ready Model Context Protocol (MCP) server that enables Claude Code 
 
 ---
 
-## Contributing: the completion workflow
+## Contributing
 
-Development in this repository follows a QA + code-review completion workflow whose per-slice
-mechanics live in `CLAUDE.md` / `AGENTS.md`. **Those two files are gitignored**, so a fresh clone
-does not receive them — they are provisioned locally.
-
-Standing amendments that must govern EVERY slice, in every checkout, are therefore tracked here:
-
-- **[`docs/architecture/COMPLETION_WORKFLOW_RULES.md`](docs/architecture/COMPLETION_WORKFLOW_RULES.md)**
-  — currently: the architect implementation review is capped at three evaluations, and the closing
-  gate is a clean Stage-2 commit review over the third round's correction; and the development-only
-  revision-freshness deferral (`BOOMI_DEFER_REVISION_GATES=1`), which local correction runs may use
-  and every gate, CI run and artifact producer refuses.
-
-If you are setting up a local `CLAUDE.md` or `AGENTS.md`, it must cite that file;
-`tests/test_completion_workflow_rules_are_discoverable.py` enforces the citation whenever those
-files are present.
+Development records (plans, review notes, audit trails) are kept outside this repository.
+What the code and the tests need is here: product specifications in `specs/`, captured
+Boomi fixtures in `tests/fixtures/boomi/` (see its README), and generated reference pages
+in `reference/`. The required CI check is `Python 3.11 non-KB`; it runs
+`scripts/wave_gate.py ci`, described in `specs/ENDGAME_VERIFICATION_GATE.md`.
 
 ## Features
 
@@ -652,8 +642,8 @@ The check is named **`Python 3.11 non-KB`**, and since
 actors). So the gate now **prevents** as well as detects: a push whose head commit
 lacks a successful check is refused, including one that suppressed its own run with
 `[skip ci]`. That was settled by measurement rather than prediction — both controls
-of spec §10's experiment passed, and the raw push transcripts are archived under
-`docs/architecture/evidence/issue-172/rulesets/`.
+of spec §10's experiment passed (the raw push transcripts are kept in the maintainer's
+local development records).
 
 **The practical consequence: every `dev` landing must first earn a green check on a
 `scratch/**` preflight push** ([#171](https://github.com/RenEra-ai/boomi-mcp-server/issues/171)'s
@@ -665,7 +655,7 @@ removes the workflow from discovery still starts no run — and now cannot be pu
 `dev` either, since the check it needs never appears. On branches the rule does not
 cover, `[skip ci]` still means no run. Spec §10 enumerates the known gaps — and says
 plainly that the list is not claimed exhaustive. Full specification:
-[`docs/architecture/ENDGAME_VERIFICATION_GATE.md`](docs/architecture/ENDGAME_VERIFICATION_GATE.md).
+[`specs/ENDGAME_VERIFICATION_GATE.md`](specs/ENDGAME_VERIFICATION_GATE.md).
 
 ---
 
@@ -690,7 +680,8 @@ boomi-mcp-server/
 ├── static/                    # Web UI static assets
 ├── tests/                     # Unit + integration tests (incl. tests/kb)
 │   └── fixtures/wave_gate/    # Append-only test-node + golden manifests
-├── docs/                      # Specs, plans, runbooks
+├── specs/                     # Product specifications
+├── reference/                 # Generated reference pages
 ├── agents/                    # Subagent configs (boomi-qa-tester, ...)
 ├── examples/                  # Usage examples
 ├── scripts/                   # Operational scripts

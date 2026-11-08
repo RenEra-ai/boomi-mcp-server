@@ -137,7 +137,7 @@ def _capture():
     from boomi_mcp.connector_replay.models import SideEffectV1
 
     root = Path(__file__).resolve().parents[1]
-    directory = (root / "docs/architecture/evidence/issue-155/captures"
+    directory = (root / "tests/fixtures/boomi/connector_replay/captures"
                  / "cap155-e5-patch-attested")
     return _capture_reference(summarize(directory, method_hint="PATCH"),
                               SideEffectV1.WRITE)
@@ -159,7 +159,7 @@ def _route_digest():
     from boomi_mcp.connector_replay.digests import route_digest_v1
 
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures")
+                / "tests/fixtures/boomi/connector_replay/captures")
     return route_digest_v1(
         (captures / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml")
         .read_text(encoding="utf-8"),
@@ -521,7 +521,7 @@ def test_the_compile_route_can_place_a_record_for_a_component_the_author_names()
     # test exercise the path a caller takes rather than a shape only a test
     # produces.
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
@@ -679,7 +679,7 @@ def test_an_authored_reference_only_reuse_compiles_a_retried_evidenced_write():
     record = load_registry().operation_records[0]
     operation, connection = record.operation_identity, record.connection_identity
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
@@ -818,7 +818,7 @@ def test_the_evidenced_write_survives_the_wet_apply_route_not_only_compile():
 
     record, operation, connection, request = _evidenced_reference_only_request()
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
@@ -932,7 +932,7 @@ def test_an_unreadable_live_component_refuses_rather_than_trusting_the_caller():
     record = load_registry().operation_records[0]
     operation, connection = record.operation_identity, record.connection_identity
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
 

@@ -22,7 +22,7 @@ from boomi_mcp.connector_replay.digests import (
 )
 
 _REPO = Path(__file__).resolve().parents[1]
-_CAPTURES = _REPO / "docs" / "architecture" / "evidence" / "issue-155" / "captures"
+_CAPTURES = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay" / "captures"
 _CONNECTION = _CAPTURES / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml"
 
 

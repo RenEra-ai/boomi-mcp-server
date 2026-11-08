@@ -73,8 +73,8 @@ setup_claude_code.sh
 .codex/
 agents/
 tasks/
-docs/plans/
-docs/archive/
+# docs/ is a local-only folder (not tracked); it never enters an image.
+docs/
 mcp-streamable-http/
 boomi-python/
 

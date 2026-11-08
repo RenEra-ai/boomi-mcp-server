@@ -418,7 +418,7 @@ def capture_account_id():
     import pathlib
 
     derivation = (pathlib.Path(__file__).resolve().parents[1]
-                  / "docs/architecture/evidence/issue-155/captures"
+                  / "tests/fixtures/boomi/connector_replay/captures"
                   / ingested_operation_capture() / "record_derivation.json")
     return json.loads(derivation.read_text(encoding="utf-8"))[
         "account_scope_hash"]["account_id"]
@@ -479,7 +479,7 @@ def appliable_op_matching_the_capture() -> dict:
     import re
 
     captures = (pathlib.Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     op = copy.deepcopy(APPLIABLE_OP)

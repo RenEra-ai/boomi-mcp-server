@@ -363,7 +363,7 @@ def test_the_canonical_sink_comparison_is_currently_TAUTOLOGICAL():
 # --- slice C: the comparison against the LIVE component (the non-tautological half)
 
 
-_CAPTURES = "docs/architecture/evidence/issue-155/captures"
+_CAPTURES = "tests/fixtures/boomi/connector_replay/captures"
 
 
 def _live_xml(scenario):
@@ -1504,7 +1504,7 @@ def test_every_archived_platform_capture_still_reads():
     from pathlib import Path
 
     captures = Path(__file__).resolve().parents[1] / (
-        "docs/architecture/evidence/issue-155/captures"
+        "tests/fixtures/boomi/connector_replay/captures"
     )
     if not captures.is_dir():  # pragma: no cover - the archive is tracked
         pytest.skip("evidence archive absent")
@@ -4487,7 +4487,7 @@ def test_the_plan_surface_compares_the_declared_route_against_the_account():
     )
 
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")
@@ -4576,7 +4576,7 @@ def test_compile_serves_the_failure_s_own_field_and_remediation():
     )
 
     captures = (Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / ingested_operation_capture())
     operation_xml = (captures / "component_op_tgt.xml").read_text(encoding="utf-8")
     connection_xml = (captures / "component_connection.xml").read_text(encoding="utf-8")

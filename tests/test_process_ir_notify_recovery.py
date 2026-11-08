@@ -1772,7 +1772,7 @@ def test_the_recovery_golden_matches_the_archived_live_capture():
     import re
 
     capture = (
-        _ROOT / "docs" / "architecture" / "evidence" / "issue-156" / "captures"
+        _ROOT / "tests" / "fixtures" / "boomi" / "process_ir" / "issue156" / "captures"
         / "oracle-graphs" / "B2_shapes.xml"
     )
     if not capture.is_file():  # pragma: no cover - the archive is committed

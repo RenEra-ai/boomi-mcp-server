@@ -23,7 +23,7 @@ from boomi_mcp.connector_replay.models import (
 )
 
 _REPO = Path(__file__).resolve().parents[1]
-_CAPTURES = _REPO / "docs" / "architecture" / "evidence" / "issue-155" / "captures"
+_CAPTURES = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay" / "captures"
 _EXEC_ID = re.compile(r"execution-[0-9a-fA-F-]+-\d{4}\.\d{2}\.\d{2}")
 
 

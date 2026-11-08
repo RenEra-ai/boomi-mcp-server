@@ -1356,7 +1356,7 @@ def _issue184_case(name, symbols_factory=None):
     ``issue155_symbols()`` on purpose: the replacement survivor's expected bytes are
     cut from the live #155 capture with its platform ids substituted by THESE symbol
     ids (``RCONN``/``ROP`` on the GET, ``CONN-UUID``/``OP-UUID`` on the PATCH —
-    ``docs/architecture/evidence/issue-184/oracle/source_dynamic_path_dpp.MANIFEST.json``),
+    ``tests/fixtures/boomi/process_ir/issue184/oracle/source_dynamic_path_dpp.MANIFEST.json``),
     so the case must resolve through the same table.
     """
     def render():
@@ -1587,7 +1587,7 @@ def _recovery_case(anchor):
     forced to fail, the recovery child ran once carrying its run nonce, a success
     control showed the child did NOT run, and an abort control showed a failing
     child turning the PARENT to ERROR under `wait=true`/`abort=true`. The archive
-    is `docs/architecture/evidence/issue-156/captures/`, and
+    is `tests/fixtures/boomi/process_ir/issue156/captures/`, and
     `test_process_ir_notify_recovery.py` pins this graph's emitted shapes against
     that capture with component ids blinded.
     """
@@ -2027,7 +2027,7 @@ def _build_registry():
         # #184 amendment 3 §6: the safe replacements for the retired cache-successor
         # goldens. Expected bytes come from the pristine branch-point compiler, each
         # cache and Exception shape checked against an executed or platform-authored
-        # capture (`docs/architecture/evidence/issue-184/oracle/terminal_cache_canonical.MANIFEST.json`).
+        # capture (`tests/fixtures/boomi/process_ir/issue184/oracle/terminal_cache_canonical.MANIFEST.json`).
         "issue184:cache_remove_terminal_branch": (
             "process-xml-v1", _issue184_case("cache_remove_terminal_branch", symbols_factory=error_symbols)
         ),

@@ -1030,7 +1030,7 @@ def test_the_public_action_returns_a_candidate_over_real_component_xml():
     record = load_registry().operation_records[0]
     operation, connection = record.operation_identity, record.connection_identity
     captures = (pathlib.Path(__file__).resolve().parents[1]
-                / "docs/architecture/evidence/issue-155/captures"
+                / "tests/fixtures/boomi/connector_replay/captures"
                 / "cap155-e9-patch-operation-record")
     xml = {operation.component_id: (captures / "component_op_tgt.xml").read_text(),
            connection.component_id: (captures / "component_connection.xml").read_text()}

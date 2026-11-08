@@ -9,7 +9,7 @@ import pytest
 from boomi_mcp.connector_replay.capture import CaptureRefused, summarize
 
 _REPO = Path(__file__).resolve().parents[1]
-_CAPTURES = _REPO / "docs" / "architecture" / "evidence" / "issue-155" / "captures"
+_CAPTURES = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay" / "captures"
 
 #: The verb each read-verb capture is about. Used to attribute a log line when a
 #: capture's log carries more than one request.

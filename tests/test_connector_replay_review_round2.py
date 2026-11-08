@@ -18,7 +18,7 @@ from boomi_mcp.connector_replay.capture import CaptureRefused, summarize
 from boomi_mcp.connector_replay.ingest import IngestRefused, ingest
 
 _REPO = Path(__file__).resolve().parents[1]
-_ROOT = _REPO / "docs" / "architecture" / "evidence" / "issue-155"
+_ROOT = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay"
 _C = _ROOT / "captures"
 
 

@@ -140,7 +140,7 @@ def test_the_parity_script_fails_when_a_digest_moves():
     with tempfile.TemporaryDirectory() as tmp:
         clone = Path(tmp) / "repo"
         for rel in ("scripts", "src", "tests/fixtures/connector_replay",
-                    "docs/architecture/evidence/issue-155/captures"):
+                    "tests/fixtures/boomi/connector_replay/captures"):
             shutil.copytree(_REPO / rel, clone / rel)
         fixture = clone / "tests/fixtures/connector_replay/digest_parity.json"
         payload = json.loads(fixture.read_text())

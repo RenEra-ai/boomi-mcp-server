@@ -375,7 +375,7 @@ def test_the_cache_content_fact_is_load_bearing(monkeypatch):
 def _probe_rows():
     import json
 
-    probe = _ROOT / "docs/architecture/evidence/issue-184/predicates/probe_cbab28f.jsonl"
+    probe = _ROOT / "tests/fixtures/boomi/process_ir/issue184/predicates/probe_cbab28f.jsonl"
     return {
         row["form"]: row
         for row in (json.loads(line) for line in probe.read_text().splitlines() if line)

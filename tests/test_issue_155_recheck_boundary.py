@@ -147,7 +147,7 @@ def test_an_apply_that_carries_no_evidence_pays_nothing_for_the_recheck():
 #: that checks a comparison over it.
 _CAPTURES = (
     Path(__file__).resolve().parents[1]
-    / "docs" / "architecture" / "evidence" / "issue-155" / "captures"
+    / "tests" / "fixtures" / "boomi" / "connector_replay" / "captures"
 )
 _CONNECTION_XML = (_CAPTURES / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml").read_text()
 _OPERATION_XML = sorted(_CAPTURES.rglob("operation_component.xml"))[0].read_text()

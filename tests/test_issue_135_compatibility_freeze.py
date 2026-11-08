@@ -27,7 +27,7 @@ ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
 
 These are freeze tests: if one fails after an intentional M12 change, the
 owning issue must update BOTH this pin and the compatibility inventory
-(docs/architecture/M12_COMPATIBILITY_INVENTORY.md) — never silently.
+(specs/M12_COMPATIBILITY_INVENTORY.md) — never silently.
 
 The ``IntegrationSpecV1`` / ``IntegrationComponentSpec`` envelope pins that this
 suite used to carry now live in tests/test_integration_models.py: they cover the

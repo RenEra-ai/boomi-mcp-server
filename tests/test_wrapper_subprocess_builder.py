@@ -413,7 +413,7 @@ def test_wrapper_build_bypass_raises_on_malformed_process_extensions():
 
 _PREFIX_GOLDEN = (
     Path(__file__).resolve().parent.parent
-    / "docs" / "architecture" / "evidence" / "issue-175"
+    / "tests" / "fixtures" / "boomi" / "process_ir" / "issue175"
     / "prefix-goldens" / "processcall_standalone_parent.xml"
 )
 

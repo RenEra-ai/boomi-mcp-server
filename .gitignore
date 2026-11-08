@@ -65,15 +65,8 @@ credentials.db
 # Logs
 *.log
 logs/
-# ...EXCEPT archived CI evidence. #171 commits the RAW GitHub Actions logs for its
-# acceptance runs, and `*.log` silently swallowed them: the checksums listed files a
-# clean checkout did not have, so the archive scanner would have failed on CI while
-# passing locally. `git add -f` fixes tracking but NOT this file's match, and a tracked
-# path that .gitignore still matches is dropped from the gcloud build-context upload
-# (.gcloudignore does `#!include:.gitignore`) — which
-# `test_no_tracked_file_dropped_from_build_context` refuses. Scoped negation keeps both
-# invariants true at once.
-!docs/architecture/evidence/**/*.log
+# ...except captured execution logs inside the checksummed Boomi fixture tree.
+!tests/fixtures/boomi/**/*.log
 
 # MCP
 mcp-server.log
@@ -111,40 +104,21 @@ TRADING_PARTNER_VERIFICATION.md
 *_ANALYSIS.md
 OAUTH_DISCONNECT_ANALYSIS.md
 
-# Documentation stays local, not in the remote repo — except docs/architecture/,
-# which holds tracked ADRs (#135 requires the ADR and compatibility inventory
-# to be tracked). A gitignored parent directory can't be re-included, so ignore
-# docs/* children individually and carve out the architecture subdirectory.
-docs/*
-!docs/architecture/
-# ...and the derived replay-evidence report, which is a TRACKED artifact: it is
-# generated from the packaged registry and its whole purpose is to be reviewable
-# in the repository. A report that existed only in a working tree would let the
-# registry and its published summary drift with nobody able to see it.
-!docs/evidence/
+# Documentation and development records are NOT part of this public repository: docs/
+# is a local-only folder on the maintainer's machine. Product specifications live in
+# specs/, test fixtures in tests/fixtures/, generated reference pages in reference/.
+# Anchored, so it never reaches a nested docs/ directory elsewhere in the tree.
+/docs/
 
 # Test files (local only, except anywhere under tests/)
 test_*.py
 !tests/**/test_*.py
-# Evidence trees are checksummed archives, so every tracked file in them must ALSO reach
-# the gcloud build-context upload (the same invariant as the *.log and *_liveness.json
-# re-inclusions, enforced by `test_no_tracked_file_dropped_from_build_context`). Two rules
-# above reach into them: `test_*.py` matches at every depth in git and gcloud alike, and
-# gcloudignore (unlike git) applies the root `docs/*` rule to NESTED `docs/` directories as
-# well — measured with `gcloud meta list-files-for-upload` on the canvas-arrange handoff,
-# which lost `tests/test_autoformat.py`, `docs/arrange_rules.md` and
-# `docs/arrange_observations.md` from the upload while git tracked all three.
-!docs/architecture/evidence/**/test_*.py
-!docs/architecture/evidence/**/docs/*
 # Root-level scratch analysis scripts only. MUST stay anchored (leading /): an
 # unanchored analyze_*.py matched the tracked package module
 # src/boomi_mcp/categories/components/analyze_component.py at any depth, which
 # gcloud (via .gitignore-derived upload exclusions) then dropped from local
 # `gcloud builds submit` contexts, silently disabling 4 tool categories.
 /analyze_*.py
-
-# Plans (local only)
-docs/plans/
 
 # Agents (local only)
 agents/
@@ -168,18 +142,9 @@ incident-*/
 scripts/provision_qa_noop_fixture.py
 scripts/.qa_noop_fixture_pins.json*
 
-# Live-account inventory dumps written by QA capture runs. Ignored at EVERY depth,
-# then re-included under the checksummed evidence tree only.
-#
-# Both halves are load-bearing and each was got wrong once. Unanchored alone also
-# swallowed docs/architecture/evidence/**/account_liveness.json, which a capture's
-# own SHA256SUMS requires — staging a manifest without its payload, the
-# listed-but-untracked archive failure this repository already knows about.
-# Root-anchoring alone fixed that and reopened the other side: a dump written to
-# any nested NON-evidence directory became committable again by a stage-all.
-# The recursive ignore plus a targeted re-inclusion is what covers both.
-#
-# The re-inclusion works because `!docs/architecture/` above already re-includes
-# that directory; git cannot re-include a file whose parent directory is excluded.
+# Live-account inventory dumps written by QA capture runs. Ignored at EVERY depth, then
+# re-included under the checksummed Boomi fixture tree only (a capture's SHA256SUMS lists
+# them, and .gcloudignore inherits these rules, so a force-add alone would still drop them
+# from the build-context upload).
 *_liveness.json
-!docs/architecture/evidence/**/*_liveness.json
+!tests/fixtures/boomi/**/*_liveness.json

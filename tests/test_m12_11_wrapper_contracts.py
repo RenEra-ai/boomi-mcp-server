@@ -239,7 +239,7 @@ def test_the_workflow_doc_still_describes_all_eight_steps():
 
     doc = (
         Path(__file__).resolve().parent.parent
-        / "docs" / "architecture" / "AUTHORING_WORKFLOW_V1.md"
+        / "specs" / "AUTHORING_WORKFLOW_V1.md"
     ).read_text()
     for step in range(1, 9):
         assert f"| {step} |" in doc, step

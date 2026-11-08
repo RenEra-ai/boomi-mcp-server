@@ -4,7 +4,7 @@ What this file pins, and against what:
 
 * the two SOAP-target anchors are byte-identical to the evidence captured from
   the LEGACY renderer at the step-0 baseline, before either routing gate changed
-  (``docs/architecture/evidence/issue-158/preflip/``) — the only independent
+  (``tests/fixtures/boomi/listeners/issue158/preflip/``) — the only independent
   source of those bytes;
 * every WSS spelling the builder accepts adapts to the same canonical bytes the
   legacy renderer emits for it;
@@ -71,7 +71,7 @@ from boomi_mcp.recipes.materialization import build_symbol_table
 import _wave_gate_golden_corpus as corpus
 
 _ROOT = Path(__file__).resolve().parent.parent
-_PREFLIP = _ROOT / "docs" / "architecture" / "evidence" / "issue-158" / "preflip"
+_PREFLIP = _ROOT / "tests" / "fixtures" / "boomi" / "listeners" / "issue158" / "preflip"
 _GOLDEN = _ROOT / "tests" / "fixtures" / "golden_xml"
 
 

@@ -282,7 +282,7 @@ def test_narrative_keys_are_refused_not_tolerated():
 
 def test_the_prose_that_was_removed_still_exists_somewhere_readable():
     """Removing narrative from a contract must not destroy the reasoning."""
-    notes = _REPO / "docs" / "evidence" / "connector-replay-registry-notes.md"
+    notes = _REPO / "reference" / "connector-replay-registry-notes.md"
     assert notes.is_file(), "the registry's rationale has no home"
     body = notes.read_text()
     # the three facts that were in the JSON

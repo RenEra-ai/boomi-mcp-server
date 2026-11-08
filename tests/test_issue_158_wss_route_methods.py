@@ -8,7 +8,7 @@ five methods on both routes. This file reads THAT capture and derives every
 expectation from its status codes; nothing here restates a method by hand.
 
 Evidence (committed, checksummed):
-``docs/architecture/evidence/issue-158/captures/cap158-r3-wss-method-matrix/``
+``tests/fixtures/boomi/listeners/issue158/captures/cap158-r3-wss-method-matrix/``
 (renera, 2026-09-11; fixtures from the baseline ``3a8469e`` tools and raw
 component XML, never the implementation under test).
 """
@@ -37,7 +37,7 @@ from boomi_mcp.categories.components.builders.connector_builder import (  # noqa
 
 _CAPTURE = (
     _ROOT
-    / "docs/architecture/evidence/issue-158/captures/cap158-r3-wss-method-matrix"
+    / "tests/fixtures/boomi/listeners/issue158/captures/cap158-r3-wss-method-matrix"
     / "r3-wss-method-evidence.json"
 )
 _EVIDENCE = json.loads(_CAPTURE.read_text(encoding="utf-8"))

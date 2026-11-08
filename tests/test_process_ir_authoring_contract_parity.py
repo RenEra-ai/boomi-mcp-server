@@ -1301,8 +1301,7 @@ def test_the_published_capability_table_matches_the_registry_exactly():
     """
     doc = (
         Path(__file__).resolve().parents[1]
-        / "docs"
-        / "architecture"
+        / "specs"
         / "PROCESS_IR_V1.md"
     ).read_text()
 
@@ -1336,8 +1335,7 @@ def test_the_capability_table_guard_sees_a_state_that_drifts():
     """
     doc = (
         Path(__file__).resolve().parents[1]
-        / "docs"
-        / "architecture"
+        / "specs"
         / "PROCESS_IR_V1.md"
     ).read_text()
 
@@ -1378,8 +1376,7 @@ def test_the_capability_table_guard_fails_closed_on_a_restructured_table():
     """
     doc = (
         Path(__file__).resolve().parents[1]
-        / "docs"
-        / "architecture"
+        / "specs"
         / "PROCESS_IR_V1.md"
     ).read_text()
 

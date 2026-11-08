@@ -10,7 +10,7 @@ Expected codes and pointers come from the plan of record (Claude plan D12: "No d
 cutoff. A visit counter above len(cfg.nodes) raises PROCESS_IR_COMPILE_INTERNAL")
 and from the stream-profile rule the pointers are already pinned by
 (`tests/test_issue_184_stream_profiles.py`). The before/after differential over every
-committed IR fixture is archived under `docs/architecture/evidence/issue-184/sweeps/`.
+committed IR fixture is archived under `tests/fixtures/boomi/process_ir/issue184/sweeps/`.
 """
 
 from __future__ import annotations

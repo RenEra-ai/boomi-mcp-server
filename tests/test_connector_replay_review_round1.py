@@ -26,7 +26,7 @@ from boomi_mcp.connector_replay.ingest import IngestRefused, classify, verify_ar
 from boomi_mcp.connector_replay.models import RetrySafetyV1, SideEffectV1
 
 _REPO = Path(__file__).resolve().parents[1]
-_ROOT = _REPO / "docs" / "architecture" / "evidence" / "issue-155"
+_ROOT = _REPO / "tests" / "fixtures" / "boomi" / "connector_replay"
 _C = _ROOT / "captures"
 _CONN = (_C / "cap155-e1-conn-readback" / "rest-conn-c4281346.xml").read_text()
 _OP = '<Operation><field id="path" value="/z"/></Operation>'

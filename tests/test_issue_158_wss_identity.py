@@ -20,7 +20,7 @@ Fixture provenance (causally independent of the code under test):
   hand-typed here.
 * **Live-readback envelope**: the XML prolog, root-element attributes and the
   trailing ``bns:GlobalVariableReferences`` of a real platform GET — the archived
-  capture ``docs/architecture/evidence/issue-155/captures/cap155-e2-post/
+  capture ``tests/fixtures/boomi/connector_replay/captures/cap155-e2-post/
   operation_component.xml`` — with the builder's ``bns:object`` spliced in and
   the subtype set to ``wss``. So the reader sees the envelope the platform
   actually serves, around the body the platform actually stores.
@@ -118,7 +118,7 @@ _REFUSAL_ONLY_SPELLINGS = ("wssserver", "listener")
 #: The archived platform GET whose envelope wraps the builder's body.
 _READBACK_CAPTURE = (
     Path(__file__).resolve().parents[1]
-    / "docs/architecture/evidence/issue-155/captures/cap155-e2-post/operation_component.xml"
+    / "tests/fixtures/boomi/connector_replay/captures/cap155-e2-post/operation_component.xml"
 )
 
 #: A literal profile component id: outside any symbol table, so it cannot be
