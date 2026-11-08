@@ -1903,23 +1903,33 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
             if kill is not None:
                 kill()
 
-    for child in children:
-        child["proc"] = subprocess.Popen(
-            child["argv"], cwd=str(repo), env=_pytest_env(),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-        )
-    if len(children) == 1:
-        pump(children[0], "")
-    else:
-        threads = [threading.Thread(target=pump, args=(child, "[pytest {0}/{1}] ".format(
-            child["index"], len(children)))) for child in children]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-    sys.stderr.flush()
-    for child in children:
-        child["status"] = child["proc"].wait()
+    # ONE cleanup boundary around launch, streaming and reaping. A launch that fails part
+    # way (process or descriptor exhaustion), a reader thread that cannot start, or an
+    # interrupt would otherwise leave the children already started running past the gate's
+    # own cleanup — still executing tests while the scratch is disposed and the worktree
+    # fingerprint is taken. Whatever escapes, every launched child is killed and reaped
+    # before it propagates.
+    try:
+        for child in children:
+            child["proc"] = subprocess.Popen(
+                child["argv"], cwd=str(repo), env=_pytest_env(),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            )
+        if len(children) == 1:
+            pump(children[0], "")
+        else:
+            threads = [threading.Thread(target=pump, args=(child, "[pytest {0}/{1}] ".format(
+                child["index"], len(children)))) for child in children]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        sys.stderr.flush()
+        for child in children:
+            child["status"] = child["proc"].wait()
+    except BaseException:
+        _reap(child["proc"] for child in children if "proc" in child)
+        raise
 
     def where(child):
         return "" if len(children) == 1 else "pytest child {0}/{1}: ".format(
@@ -2035,6 +2045,22 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
         _emit("wave_gate: suite ran as {0} pytest children ({1})".format(
             len(children), ", ".join(str(len(child["nodes"])) for child in children)))
     return summary
+
+
+def _reap(procs):
+    """Kill and wait for every process given, swallowing what a dead one raises — this runs
+    on the way out of a failure, which must keep its own exception."""
+    procs = list(procs)
+    for proc in procs:
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001 - already gone, or not ours to explain here
+            pass
+    for proc in procs:
+        try:
+            proc.wait()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _refuse_replaced_selection(tmpdir, child):

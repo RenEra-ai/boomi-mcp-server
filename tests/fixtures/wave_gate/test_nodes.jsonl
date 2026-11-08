@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14596, "minimum_collected": 14596, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14597, "minimum_collected": 14597, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14697,3 +14697,4 @@
 {"kind": "test", "id": "pytest-014696", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_whose_output_cannot_be_read_is_killed_and_fails_the_suite", "state": "active"}
 {"kind": "test", "id": "pytest-014697", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_split_module_is_cut_into_contiguous_runs_of_its_order", "state": "active"}
 {"kind": "test", "id": "pytest-014698", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_kb_node_never_reaches_a_selection", "state": "active"}
+{"kind": "test", "id": "pytest-014699", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_failed_later_launch_kills_and_reaps_the_children_already_started", "state": "active"}

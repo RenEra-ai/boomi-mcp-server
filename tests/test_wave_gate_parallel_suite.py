@@ -426,6 +426,44 @@ def test_a_child_whose_output_cannot_be_read_is_killed_and_fails_the_suite(tmp_p
     assert killed == [True]
 
 
+def test_a_failed_later_launch_kills_and_reaps_the_children_already_started(tmp_path, monkeypatch):
+    """CDX review r1: if the second launch raised, the first child kept running past the
+    gate's cleanup, neither killed nor waited for. Every started child is now reaped and the
+    launch error propagates."""
+    started = []
+
+    class _Started:
+        def __init__(self):
+            self.stdout = iter(())
+            self.killed = self.waited = False
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            self.waited = True
+            return 0
+
+    def popen(argv, **kwargs):
+        if started:
+            raise OSError(24, "Too many open files")
+        started.append(_Started())
+        return started[-1]
+
+    monkeypatch.setattr(gate.subprocess, "Popen", popen)
+    collected = gate.CollectedNodes(_order({"test_a": 4, "test_b": 4}))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    scratch = gate.make_scratch_dir(str(repo))
+    try:
+        with pytest.raises(OSError):
+            gate.run_suite(str(repo), _manifest(collected), collected, scratch,
+                           processes=2, weights={})
+    finally:
+        scratch.dispose()
+    assert len(started) == 1 and started[0].killed and started[0].waited
+
+
 def test_a_split_run_without_the_scratch_directory_is_refused():
     collected = gate.CollectedNodes(_order({"test_a": 2}))
     with pytest.raises(gate.GateFailure) as excinfo:
