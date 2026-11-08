@@ -635,7 +635,7 @@ def test_no_served_remediation_cites_an_unserved_repository_artifact():
         None, "p", _process_ir_request(SOURCE, {"kind": "not_a_real_kind"})
     )
     blob = json.dumps(payload)
-    for artifact in (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES"):
+    for artifact in (".codex/", "docs/architecture", "specs/", "PROCESS_IR_V1_CAPABILITIES"):
         assert artifact not in blob, artifact
 
 
@@ -931,7 +931,7 @@ def test_no_served_selector_anywhere_cites_an_unfetchable_repository_path():
         except Exception:  # noqa: BLE001 — a selector that cannot build is not a leak
             continue
         blob = json.dumps(payload, default=str)
-        for artifact in (".codex/", "docs/architecture/"):
+        for artifact in (".codex/", "docs/architecture/", "specs/"):
             if artifact in blob:
                 leaks.setdefault(name, []).append(artifact)
     assert leaks == {}, leaks

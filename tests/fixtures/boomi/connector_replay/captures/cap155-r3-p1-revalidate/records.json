@@ -21,8 +21,8 @@
   "file": "p1_stored_process.xml",
   "utc": "2026-08-26T04:17:13.897999+00:00",
   "account_id": "traininghlibbochkarov-JKIY2X",
-  "sha256": "4302b91b966e0fb9791d1df0d1146699275ce5a0534c67422f109f729b68348c",
-  "byte_length": 3531,
+  "sha256": "d8d6e7e7a0376610b1d672eb2539d4b983bc31bc0527db7523dab0d3af9e6190",
+  "byte_length": 3551,
   "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_stored_process.xml",
   "kind": "Component XML readback",
   "component_id": "81285e01-6107-4c3e-9a08-6b452a230279"
@@ -55,8 +55,8 @@
   "file": "p1_deploy.json",
   "utc": "2026-08-26T04:17:15.950628+00:00",
   "account_id": "traininghlibbochkarov-JKIY2X",
-  "sha256": "3073ca6addb6834622c61d0e5921f833c0aafaef145a64b5a0d97f36e758f5d4",
-  "byte_length": 978,
+  "sha256": "b1955806e94dbe6f42e513cca461150f96f448649f94450dc9d188204c38fc08",
+  "byte_length": 998,
   "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r3-p1-revalidate/p1_deploy.json",
   "kind": "deploy envelope"
  },
@@ -175,7 +175,7 @@
     "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
     "package_version": "1.0.0",
     "deployed_date": "2026-08-26T04:17:14Z",
-    "deployed_by": "gleb@renera.ai",
+    "deployed_by": "redacted@example.invalid",
     "active": true,
     "version": 1
    },

@@ -1231,7 +1231,7 @@
 {"kind": "test", "id": "pytest-001230", "node_id": "tests/test_connector_call_resolution.py::test_database_send_is_the_only_non_producing_row", "state": "active"}
 {"kind": "test", "id": "pytest-001231", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[database-Upsert]", "state": "active"}
 {"kind": "test", "id": "pytest-001232", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[database_v2-Send]", "state": "active"}
-{"kind": "test", "id": "pytest-001233", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "active"}
+{"kind": "test", "id": "pytest-001233", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-001234", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-DELETE]", "state": "active"}
 {"kind": "test", "id": "pytest-001235", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-POST]", "state": "active"}
 {"kind": "test", "id": "pytest-001236", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[web_services_server-LISTEN]", "state": "active"}
@@ -1252,7 +1252,7 @@
 {"kind": "test", "id": "pytest-001251", "node_id": "tests/test_connector_call_resolution.py::test_the_unsupported_path_points_at_the_authored_action_when_there_is_one", "state": "active"}
 {"kind": "test", "id": "pytest-001252", "node_id": "tests/test_connector_call_resolution.py::test_unresolved_operation_ref", "state": "active"}
 {"kind": "test", "id": "pytest-001253", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[database_v2-Send]", "state": "active"}
-{"kind": "test", "id": "pytest-001254", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "active"}
+{"kind": "test", "id": "pytest-001254", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-001255", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[rest-POST]", "state": "active"}
 {"kind": "test", "id": "pytest-001256", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[soap_client-Send]", "state": "active"}
 {"kind": "test", "id": "pytest-001257", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[wss-LISTEN]", "state": "active"}
@@ -14699,3 +14699,5 @@
 {"kind": "test", "id": "pytest-014698", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_kb_node_never_reaches_a_selection", "state": "active"}
 {"kind": "test", "id": "pytest-014699", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_failed_later_launch_kills_and_reaps_the_children_already_started", "state": "active"}
 {"kind": "test", "id": "pytest-014700", "node_id": "tests/test_build_context_completeness.py::test_the_public_repository_tracks_nothing_under_docs", "state": "active"}
+{"kind": "test", "id": "pytest-014701", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[exampleoemprod-X0TEST-example-dev-PATCH]", "state": "active"}
+{"kind": "test", "id": "pytest-014702", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[exampleoemprod-X0TEST-example-dev-PATCH]", "state": "active"}

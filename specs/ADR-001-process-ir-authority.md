@@ -4,7 +4,7 @@
 - **Date:** 2026-07-13
 - **References:** #134 (M12 epic — Canonical Integration Authoring IR and Process Compiler Consolidation), #135 (M12.0 — this decision), [M12 Compatibility Inventory](./M12_COMPATIBILITY_INVENTORY.md) (measured baseline and migration ledger, same directory)
 
-This is the repository's first Architecture Decision Record and establishes the `ADR-NNN` naming convention under `docs/architecture/`. It is the rollout authority for the M12 milestone: it fixes which representation is authoritative for process semantics, where the compiler boundary sits, who owns each error family, and in what order the M12 issues land.
+This is the repository's first Architecture Decision Record and establishes the `ADR-NNN` naming convention under `specs/`. It is the rollout authority for the M12 milestone: it fixes which representation is authoritative for process semantics, where the compiler boundary sits, who owns each error family, and in what order the M12 issues land.
 
 **Merging this ADR changes and deprecates nothing.** No runtime module, model, schema, XML emitter, error code, dependency, or MCP behavior changes in #135. Every authority status below that describes a *future* contract (ProcessIRV1, the semantic CFG, the deterministic emission plan, `SystemTopologySpecV1`) is documented here so later M12 issues implement against a fixed decision, not so anything changes today.
 
@@ -337,7 +337,7 @@ Every authoring capability sits in exactly one of four states:
 
   The canvas leg — reported in issue #175 from manual UI inspection, and recorded as INCONCLUSIVE
   through three QA rounds while browser automation was unavailable — is now measured too, in both
-  directions (`docs/architecture/evidence/issue-175/live-ui/`). A pre-fix control planted through
+  directions (the issue-175 live UI captures, kept in the local development archive). A pre-fix control planted through
   the direct Component API renders three shapes and ONE edge: the trailing Stop has no inbound
   connection despite a stored `shape2 -> shape3` dragpoint. The post-fix component authored through
   the MCP boundary renders two shapes, both attached. The same readback settles what the report

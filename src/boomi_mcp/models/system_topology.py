@@ -39,7 +39,7 @@ runtime belongs. Naming the roles (``caller_process``/``callee_process``,
 documented expectation, which is what lets ``TOPOLOGY_REFERENCE_TYPE_MISMATCH``
 be decided structurally.
 
-Evidence bounds encoded here (see docs/architecture/SYSTEM_TOPOLOGY_V1.md)
+Evidence bounds encoded here (see specs/SYSTEM_TOPOLOGY_V1.md)
 -------------------------------------------------------------------------
 The schema deliberately omits several fields the issue's prose gestures at,
 because the capture behind this contract found no evidence for them:
@@ -673,11 +673,11 @@ _MESSAGES: Dict[str, str] = {
 _REMEDIATION: Dict[str, str] = {
     TOPOLOGY_SCHEMA_UNKNOWN_OBJECT: (
         "Use one of the documented topology object kinds "
-        "(see docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "(see specs/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_SCHEMA_UNKNOWN_RELATION: (
         "Use one of the documented topology relation kinds "
-        "(see docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "(see specs/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_SCHEMA_UNKNOWN_FIELD: (
         "Remove the field — topology models are strict and carry opaque "

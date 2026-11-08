@@ -16,11 +16,11 @@ readers/writers, its validation/lowering owner, defaults and aliases, measured u
 behavior, existing error codes, its fixture/test coverage with honest assertion strength, its
 adapter issue, and the migration gate that must close before its behavior may change.
 
-**Checkout scope.** Per the repository convention (`.gitignore`: `docs/*` is local-only *except*
-`docs/architecture/`, established by commit `56ae84e "chore: exclude docs folder from remote repo"`),
+**Checkout scope.** Per the repository convention (`.gitignore`: `docs/` is local-only; since
+2026-11-08 the public specifications live in `specs/`, captured fixtures in `tests/fixtures/boomi/`),
 [ADR-001](ADR-001-process-ir-authority.md) and this inventory are the **checkout-authoritative** M12
 records and cite only tracked sources (`src/…`, `tests/…`, `examples/…`). The M12 refreshes to
-`docs/INTEGRATION_AUTHORING_ROADMAP.md` and `docs/MCP_TOOL_DESIGN.md` land in those local design docs,
+integration authoring roadmap and the MCP tool design notes land in those local design docs,
 which remain outside the tracked checkout by that convention — so this inventory grounds every claim in
 tracked code/tests rather than in the local docs.
 
@@ -613,7 +613,7 @@ from that same copy behind the `EmissionPlanV1` boundary. Compatibility facts:
   `ProcessFlowBuilder`).
 - No public schema/request/default/error/dispatch/plan/apply/verification behavior changed; the
   legacy builder keeps its external error contract. See
-  `docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.
+  `specs/PROCESS_EMITTER_REGISTRY_V1.md`.
 
 ## #139 M12.4 — legacy adapters and golden parity (first slice, #139A)
 
@@ -1003,7 +1003,7 @@ strict surface has leaked into V1.
 **Publication.** `get_schema_template(schema_name="IntegrationSpecV1")` and the `build_integration`
 entry of `list_capabilities` both carry an `authority_versions` record (default/strict, selector path,
 strict-only input form, `v1_deprecated: false`); the generated JSON schema independently shows
-`enum: ["1.0","1.1"]` with `default: "1.0"`. `docs/MCP_TOOL_DESIGN.md` carries the full outcome table.
+`enum: ["1.0","1.1"]` with `default: "1.0"`. The MCP tool design notes (kept in the local development archive) carry the full outcome table.
 **V1 is not deprecated and emits no warning** — ADR-001 §9 permits this slice precisely because it
 withdraws no V1 acceptance.
 
@@ -1255,11 +1255,11 @@ pre-existing XML golden is byte-identical; the only regenerated fixture is
 | `database` | continuation after `Send` | **gated** | official: a Send "does not return any data to the process for further processing" |
 | WSS `LISTEN` | — | **gated** | no `start_listen` emitter key; the fused legacy entry is unrepresentable |
 | Database **V2** | any | **gated** | different connector, no verified builder/emitter contract; never aliased to legacy `database` |
-| OEM / unrecognized subtypes | any | **gated** | e.g. the live `intappoemprod-…` REST subtype — a family is an opaque account-scoped string |
+| OEM / unrecognized subtypes | any | **gated** | e.g. a live account-scoped OEM REST subtype — a family is an opaque account-scoped string |
 | REST `POST`/`PUT`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE` | — | **gated** | no checkout-pinned process binding + cardinality capture |
 | dynamic-path / parameter-bound steps | — | **gated** | only the simple binding is enabled |
 
-Capture ledger: `.codex/plans/issue-140-live-captures.md` (read-only probes + official documentation).
+Capture ledger: the issue-140 live-capture record (kept in the local development archive) (read-only probes + official documentation).
 
 **The one place #140 departs from its own issue text, and why.** The issue's representative flow is
 `REST GET → Map → SOAP EXECUTE → DB Send → REST PATCH → terminal`. Official Boomi documentation states
@@ -1364,7 +1364,7 @@ schema and description — exported-to-the-compiler and visible-to-an-LLM are se
 
 **Reservations retained.** Listener error scopes, queue/Event-Streams topology, nested Try/Catch and
 failure-trigger selection all stay out; see PROCESS_IR_V1 §8 for which are `gated` ("not yet") and
-which are `unsupported` ("never"), and `.codex/plans/issue-142-live-captures.md` for the evidence
+which are `unsupported` ("never"), and the issue-142 live-capture record (kept in the local development archive) for the evidence
 behind each.
 
 
@@ -1784,7 +1784,7 @@ Completes the classification the M12 research gate calls for: every archetype,
 composition, pattern, primitive, planner, guidance and capability-registry surface is
 now labelled, and the label decides what the surface is *allowed to do*.
 
-Contract detail lives in `docs/architecture/TYPED_RECIPE_CONTRIBUTIONS_V1.md`. This
+Contract detail lives in `specs/TYPED_RECIPE_CONTRIBUTIONS_V1.md`. This
 section is the inventory.
 
 ## 9.1 Pattern infrastructure and archetypes
@@ -1827,8 +1827,8 @@ section is the inventory.
 | `categories/marketplace.py::search_marketplace_recipes` | ADVISORY — public reference patterns; never installed, registered or executed |
 | `categories/integration_import.py` | COMPATIBILITY ADAPTER — read-only migration planner; now carries `selected_recipe_ref` for the two migrated presets, `null` otherwise |
 | `models/pipeline_models.py`, `IntegrationSpecV1.pipeline` | COMPATIBILITY ADAPTER / inert view |
-| `docs/companion/**` | ADVISORY — vendored reference |
-| `docs/archive/**` | DEPRECATED-DEAD |
+| `docs/companion/**` (local-only since 2026-11-08) | ADVISORY — vendored reference |
+| `docs/archive/**` (local-only since 2026-11-08) | DEPRECATED-DEAD |
 | `meta_tools::_PROCESS_CREATE_REMOVED` | DEPRECATED-DEAD — must never be revived as a recipe |
 
 ## 9.4 Canonical authorities (unchanged by this issue)

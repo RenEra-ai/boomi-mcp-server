@@ -23,7 +23,7 @@ The five states
 Absence is denial: a subject with no registration is not "probably fine", it is
 a coverage failure that raises at import.
 
-Live evidence as of the #144 capture (see docs/architecture/SYSTEM_TOPOLOGY_V1.md)
+Live evidence as of the #144 capture (see specs/SYSTEM_TOPOLOGY_V1.md)
 ----------------------------------------------------------------------------------
 Four captures bound what may be claimed here, and each is why a specific row
 below is weaker than the issue's prose suggested:

@@ -583,7 +583,7 @@ test-only** (imported directly, never through this package's `__all__`; no MCP t
 builder invokes it) until #139's production cutover. Contract, the 17-key manifest, the fail-closed
 diagnostic mapping (the five new `PROCESS_IR_COMPILE_*` codes + the reused
 `PROCESS_IR_COMPILE_INTERNAL`, plus the `xml_emission`/`post_emission_verification` phases), and the
-byte-parity evidence: **`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`**.
+byte-parity evidence: **`specs/PROCESS_EMITTER_REGISTRY_V1.md`**.
 
 ## 11. #141 M12.6 — rich Branch/Decision bodies (shipped dark)
 
@@ -759,7 +759,7 @@ one generic action covers every operation a service exposes.
 `EXECUTE` and Database `Send` are all `unverified`: the knowledge base returns no authoritative
 retry-safety answer for any of them, and the one on-point official statement makes the *caller*
 responsible for ensuring retries are safe rather than promising the connector is
-(`.codex/plans/issue-142-live-captures.md` §G4). Those two branches are exercised by **synthetic
+(the issue-142 live-capture record (kept in the local development archive) §G4). Those two branches are exercised by **synthetic
 rows in tests only** — which is honest about coverage rather than shipping an unbacked claim.
 
 Evidence **discharges an obligation; it never grants permission.** The `_NEVER_RETRYABLE` check runs

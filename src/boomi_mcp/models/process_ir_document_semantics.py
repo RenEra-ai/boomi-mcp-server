@@ -20,7 +20,7 @@ Each row separates three things an emitter's outgoing-edge count used to stand i
 
 Evidence status is recorded per row. Only the cache rows and the scheduled start
 were measured by #184. Their deciding captures are bound, rule by rule, in
-``docs/architecture/evidence/issue-184/document_emission/CAPTURE_INDEX.json``. Every
+``tests/fixtures/boomi/process_ir/issue184/document_emission/CAPTURE_INDEX.json``. Every
 other row restates behaviour already shipped and verified elsewhere, and is labelled
 ``established``, never ``measured``. Connector output stays with the connector
 capability authority, which resolves ``operation_dependent`` per operation.

@@ -9,7 +9,7 @@
       "component_version": 1,
       "branch_name": "main",
       "notes": "cap155-e1-source-dynamic-path 20260826002312",
-      "created_by": "gleb@renera.ai",
+      "created_by": "redacted@example.invalid",
       "created_date": "2026-08-26T00:23:42Z"
     },
     "hint": "Use action='deploy' with the returned package_id to deploy to an environment."
@@ -24,7 +24,7 @@
       "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
       "package_version": "1.0.0",
       "deployed_date": "2026-08-26T00:23:42Z",
-      "deployed_by": "gleb@renera.ai",
+      "deployed_by": "redacted@example.invalid",
       "active": true,
       "version": 1
     }

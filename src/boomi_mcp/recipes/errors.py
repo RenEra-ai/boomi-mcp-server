@@ -215,7 +215,7 @@ def recipe_diagnostic(
         cause_codes=tuple(sorted(set(cause_codes))),
         message=_MESSAGES.get(code, "recipe processing failed"),
         remediation=_REMEDIATIONS.get(
-            code, "Consult docs/architecture/TYPED_RECIPE_CONTRIBUTIONS_V1.md."
+            code, "Consult specs/TYPED_RECIPE_CONTRIBUTIONS_V1.md."
         ),
     )
 

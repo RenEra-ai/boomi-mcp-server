@@ -15,7 +15,7 @@ Because the schema is SERVED, every ``description`` in this module is published
 contract text read by an LLM caller. Two rules follow, both pinned by tests:
 
 - No description may cite a repository artifact (a ``.codex/`` capture ledger, a
-  ``docs/architecture/`` page, or "the PROCESS_IR_V1_CAPABILITIES manifest").
+  ``docs/`` or ``specs/`` page, or "the PROCESS_IR_V1_CAPABILITIES manifest").
   None of them is fetchable through any MCP tool, so a caller sent there is sent
   nowhere. Cite a ``process_ir_authoring`` contract entry id instead; the
   evidence pointers stay in comments, which are not served.
@@ -2168,7 +2168,7 @@ PROCESS_CALL_PREFIX_CONTEXTS: FrozenSet[str] = frozenset({"branch_leg", "decisio
 #: #184 D10, amendment 3 §8. The ADMITTED prefix compositions, as the whole
 #: evidence key `(context, direct predecessor kind, child entry form, wait)`.
 #: Evidence, not a guess: every row is a run in
-#: `docs/architecture/evidence/issue-184/captures/cap184-prefix-predecessors/` whose
+#: `tests/fixtures/boomi/process_ir/issue184/captures/cap184-prefix-predecessors/` whose
 #: child request carried the parent's token, bound to that capture in both
 #: directions by `tests/test_issue_184_native_sequences.py`. The capture's child is a
 #: Data Passthrough child called with wait=true, so only that form and that wait are
@@ -4161,7 +4161,7 @@ _PLACEMENT_HAND_OFF_MESSAGE = (
 # Every remediation below is SERVED — it reaches a caller through
 # ``build_integration(action="plan"|"compile")`` and through the typed request
 # rejection. So none of them may point at a repository artifact: a
-# ``docs/architecture/`` page and the capability manifest's Python name are both
+# ``docs/`` or ``specs/`` page and the capability manifest's Python name are both
 # unfetchable through any MCP tool, and a caller sent there is sent nowhere.
 # They cite ``process_ir_authoring`` entry ids instead, which resolve through
 # ``get_schema_template``.

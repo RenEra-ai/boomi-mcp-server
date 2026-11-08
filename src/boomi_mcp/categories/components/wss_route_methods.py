@@ -5,7 +5,7 @@ A leaf module with no package imports, so a caller that must stay importable
 without the builders package (``categories.meta_tools`` serves these texts at
 import time) can read them. ``builders._api_service_paths`` applies them and
 re-exports them. Evidence and derivation: that module's docstring and
-``docs/architecture/evidence/issue-158/captures/cap158-r3-wss-method-matrix/``.
+``tests/fixtures/boomi/listeners/issue158/captures/cap158-r3-wss-method-matrix/``.
 """
 
 from __future__ import annotations

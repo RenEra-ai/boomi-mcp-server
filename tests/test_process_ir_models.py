@@ -1611,7 +1611,7 @@ def test_no_served_description_cites_an_unserved_repository_artifact():
     ``process_ir_authoring`` entry ids instead.
     """
     blob = json.dumps(process_ir_v1_json_schema())
-    for artifact in (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES"):
+    for artifact in (".codex/", "docs/architecture", "specs/", "PROCESS_IR_V1_CAPABILITIES"):
         assert artifact not in blob, artifact
 
 

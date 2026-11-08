@@ -1,7 +1,7 @@
 """Issue #135 (M12.0) — compatibility-freeze characterization tests.
 
 Pins the CURRENT measured behavior of the authoring boundaries that the M12
-ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
+ProcessIR consolidation (ADR-001, specs/) will migrate:
 
 - ``PipelineSpec`` / ``StageSpec`` / ``PipelineEdgeSpec`` strictness
   (``extra="forbid"``; ``StageSpec.config`` stays open),

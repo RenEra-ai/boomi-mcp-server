@@ -230,7 +230,7 @@ def test_lookup_is_case_insensitive_on_the_action_only():
         ("wss", "LISTEN"),
         ("web_services_server", "LISTEN"),
         ("database_v2", "Send"),
-        ("intappoemprod-X3ABOD-intapp-dev", "PATCH"),  # a live OEM REST subtype
+        ("exampleoemprod-X0TEST-example-dev", "PATCH"),  # a live OEM REST subtype
         (caps.REST_FAMILY, "POST"),
         (caps.REST_FAMILY, "DELETE"),
         (caps.SOAP_FAMILY, "Send"),
@@ -431,7 +431,7 @@ def test_no_pre_140_symbol_can_reach_the_connection_family_requirement():
     [
         ("wss", "LISTEN"),
         ("database_v2", "Send"),
-        ("intappoemprod-X3ABOD-intapp-dev", "PATCH"),
+        ("exampleoemprod-X0TEST-example-dev", "PATCH"),
         ("rest", "POST"),
         ("soap_client", "Send"),
     ],

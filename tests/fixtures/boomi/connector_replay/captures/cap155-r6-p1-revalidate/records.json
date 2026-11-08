@@ -21,8 +21,8 @@
   "file": "p1_stored_process.xml",
   "utc": "2026-08-26T08:27:22.972098+00:00",
   "account_id": "traininghlibbochkarov-JKIY2X",
-  "sha256": "e83d92a8e42c1a451bca7aeeceea37441a330668683941de86c7164b362d599a",
-  "byte_length": 3531,
+  "sha256": "c8cd188fbba96c231822072579c389bb9a6f1e65f98f3f43551f79608e46a3b0",
+  "byte_length": 3551,
   "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r6-p1-revalidate/p1_stored_process.xml",
   "kind": "Component XML readback",
   "component_id": "ddb4db05-25af-4755-8c74-b9eaf9152fec"
@@ -55,8 +55,8 @@
   "file": "p1_deploy.json",
   "utc": "2026-08-26T08:27:25.189449+00:00",
   "account_id": "traininghlibbochkarov-JKIY2X",
-  "sha256": "3c96ed65cb0ff0171e91832496498d728891a31c6746c9888a975a0e2fe8b36c",
-  "byte_length": 978,
+  "sha256": "4d7ffe2d2c41bf22d6624f4b596a96ed5a8140750eb8c927a5160ff5b094279a",
+  "byte_length": 998,
   "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r6-p1-revalidate/p1_deploy.json",
   "kind": "deploy envelope"
  },
@@ -112,8 +112,8 @@
   "file": "p2_stored_process.xml",
   "utc": "2026-08-26T08:29:59.200954+00:00",
   "account_id": "traininghlibbochkarov-JKIY2X",
-  "sha256": "030daafdf9d5a73782e1b5ec3a9dd040692d2890ba30f810bb0821244c9d475b",
-  "byte_length": 3662,
+  "sha256": "a3e6260c8dce38d08f7ffa1962350c677739557485661a1e457dfafd7898dbab",
+  "byte_length": 3682,
   "archive_path": "/Users/gleb/Documents/Projects/Renera/boomi-mcp-server/.claude/agent-memory/boomi-qa-tester/evidence/issue-155/cap155-r6-p1-revalidate/p2_stored_process.xml",
   "kind": "Component XML readback",
   "component_id": "67a1307d-c2cf-4269-81b7-76d9a29d7d7a"
@@ -203,7 +203,7 @@
     "environment_id": "c8d9140d-6d34-4ca6-91ff-bfd263556d5b",
     "package_version": "1.0.0",
     "deployed_date": "2026-08-26T08:27:24Z",
-    "deployed_by": "gleb@renera.ai",
+    "deployed_by": "redacted@example.invalid",
     "active": true,
     "version": 1
    },

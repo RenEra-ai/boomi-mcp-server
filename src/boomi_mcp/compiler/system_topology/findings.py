@@ -77,11 +77,11 @@ _MESSAGES: Dict[str, str] = {
 _REMEDIATION: Dict[str, str] = {
     TOPOLOGY_SCHEMA_UNKNOWN_OBJECT: (
         "Use one of the documented topology object kinds "
-        "(see docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "(see specs/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_SCHEMA_UNKNOWN_RELATION: (
         "Use one of the documented topology relation kinds "
-        "(see docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "(see specs/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_SCHEMA_UNKNOWN_FIELD: (
         "Remove the field — topology models carry opaque references only."
@@ -120,7 +120,7 @@ _REMEDIATION: Dict[str, str] = {
         "or declare the object with the kind matching what the component "
         "actually is. On a relation, reference an object of the kind the role "
         "accepts (see the endpoint matrix in "
-        "docs/architecture/SYSTEM_TOPOLOGY_V1.md)."
+        "specs/SYSTEM_TOPOLOGY_V1.md)."
     ),
     TOPOLOGY_RELATION_UNSUPPORTED: (
         "Use the supported lifecycle shape for this relation, or remove it: a "

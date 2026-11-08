@@ -222,7 +222,7 @@ GATED_CONNECTOR_CALL_REASONS: Mapping[str, str] = MappingProxyType(
             "verified operation/emitter contract here; it is never aliased to 'database'."
         ),
         # #146: these two strings are SERVED, so neither may cite a repository
-        # page — a caller cannot fetch `docs/architecture/` through any MCP tool.
+        # page — a caller cannot fetch `docs/` or `specs/` through any MCP tool.
         # They name the fetchable contract selector instead.
         "unverified_action": (
             "This connector family/action pair has no verified operation, emitter and "

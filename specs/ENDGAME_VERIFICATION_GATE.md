@@ -8,7 +8,7 @@ Issue #152 (M12.13). Owner: repository.
 > the landing run passed on Python 3.11.15 with the full non-KB suite. Its ability
 > to FAIL was proven by seeded defects on scratch branches — four produced the
 > diagnostic the plan expected and one produced a different, correct one; see the
-> rollout evidence in [`ISSUE_152_AUDIT_LEDGER.md`](ISSUE_152_AUDIT_LEDGER.md).
+> rollout evidence in `ISSUE_152_AUDIT_LEDGER.md` (local development archive).
 >
 > **Since #171 there are TWO routes, one gate.** A push to `dev` is DETECTION on
 > the pushed tip. A push to `scratch/**` that STARTS a run is a PREFLIGHT on a
@@ -16,7 +16,7 @@ Issue #152 (M12.13). Owner: repository.
 > required to descend from it. There is deliberately **no `pull_request`
 > trigger** — a PR run validates the synthetic merge tree rather than the commit
 > that would land, and this repo does not use pull requests
-> ([`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md)).
+> (`ISSUE_171_AUDIT_LEDGER.md` (local development archive)).
 >
 > **Since #172 the check is REQUIRED on `dev`** — a ruleset with one
 > `required_status_checks` rule naming `Python 3.11 non-KB`, `enforcement: active`,
@@ -59,6 +59,18 @@ python scripts/wave_gate.py manifests (--base COMMIT | --github-event PATH) [--b
 `ci` — baseline → manifest format → transition → tree self-consistency →
 collection (floor, then required nodes, then reconciliation) → the full non-KB
 suite → worktree unchanged.
+
+The full non-KB suite runs as **four pytest children** (`SUITE_PROCESSES` in
+`scripts/wave_gate.py`, a committed constant, never derived from the host). The
+partition is a pure function of the collection order and the committed weights
+(`tests/fixtures/wave_gate/suite_weights.json`, used only for balance): every
+collected node goes to exactly one child, a module heavier than half a share is
+cut into contiguous runs of its nodes, and the children's results are reconciled
+against the collection by node identity, so a child that ran a node twice, ran a
+node assigned elsewhere or lost one fails the suite. The skip cap applies to the
+whole suite, not per child, and a failed launch reaps the children already
+started. `wave` uses the same split. Measured on the hosted runner (2026-11-08):
+the required check fell from about 5 h 50 min to 3 h 04 min.
 
 `ci` takes **exactly one** baseline selector, the same shape `manifests` uses:
 `--github-event` is the workflow's `dev` arm (the platform supplies the
@@ -277,7 +289,7 @@ bytes in a child where every `test_*` module is unimportable. Import cost is mea
 not estimated: the bare corpus import is 0.02–0.03 s (production imports are lazy inside
 the factories); a full render of every case active at the time (60 of them) in one child is
 0.43 s (a measurement, so it keeps its count; raw outputs
-in `docs/architecture/evidence/issue-165/measurements/`).
+in the issue-165 measurements (kept in the local development archive)).
 
 **Worktree hygiene is a cross-check, not the guarantee.** The gate's read-only
 property is STRUCTURAL and ENFORCED, not merely asserted: the scratch directory's
@@ -596,7 +608,7 @@ case input in the tree. Invocation arguments — component name, folder, which
 variant — are pinned byte-for-byte by the committed golden. The bare corpus
 import costs 0.02–0.03 s (all production imports are lazy inside the
 factories); rendering every case active at the time (60 of them) in one child cost 0.43 s (measured —
-`docs/architecture/evidence/issue-165/measurements/`).
+the issue-165 measurements (kept in the local development archive)).
 
 Renderers must **emit**, never read: no renderer touches `expected_file`, and
 `test_wave_gate_goldens.py` asserts the renderer half of the module never
@@ -750,7 +762,7 @@ the code in exact agreement in both directions.
 
 One variable is deliberately NOT set, and its presence is refused:
 **`BOOMI_DEFER_REVISION_GATES`**, the development-only revision-freshness deferral
-(`docs/architecture/COMPLETION_WORKFLOW_RULES.md`). A pytest run carrying it skips the
+(the completion workflow rules, kept in the local development archive). A pytest run carrying it skips the
 `revision_freshness` comparisons and records absent corpus inputs as pending instead of
 failing, so a gate run under it would certify what nothing checked. Every subcommand
 refuses it with `REVISION_DEFERRAL_PRESENT` before running git or pytest, whatever its
@@ -826,7 +838,7 @@ and the push is refused rather than landing silently.
    to predict whether one was viable. **#172 measured it: the required check REFUSES
    such a tip** (`GH013 … Required status check "Python 3.11 non-KB" is expected.`,
    push declined, branch unmoved — captured in
-   [`evidence/issue-172/rulesets/negative-control-push.txt`](evidence/issue-172/rulesets/negative-control-push.txt)).
+   `evidence/issue-172/rulesets/negative-control-push.txt` (local development archive)).
    *(Provenance: measured here. The skip behaviour itself is GitHub-documented; what
    is measured is that the rule refuses the resulting unchecked tip.)* The hole
    remains open anywhere the rule does not apply — every branch other than `dev`,
@@ -857,7 +869,7 @@ and the push is refused rather than landing silently.
    itself, baselined on the exact fetched `origin/dev` and required to descend from it — no pull request
    involved. *(Provenance: the trigger and the gate's local behaviour are measured
    here; whether a real Actions run has been observed RED and GREEN on that route is
-   recorded in [`ISSUE_171_AUDIT_LEDGER.md`](ISSUE_171_AUDIT_LEDGER.md), which is the
+   recorded in `ISSUE_171_AUDIT_LEDGER.md` (local development archive), which is the
    single place that claim lives.)* The `pull_request` trigger has been
    REMOVED (criterion 7a): it validated the synthetic **merge** tree rather than
    the branch tip, so even setting the no-PR convention aside it never told you
@@ -877,8 +889,8 @@ mechanism: asserting platform behaviour instead of running it. The experiment sp
 here has now been performed, and what follows is its result rather than its prediction.
 Raw captures (pre-state, the created rule, both push transcripts with exit codes, and the
 after-state) are archived under
-[`evidence/issue-172/rulesets/`](evidence/issue-172/rulesets/); the audit record is
-[`ISSUE_172_AUDIT_LEDGER.md`](ISSUE_172_AUDIT_LEDGER.md).
+`evidence/issue-172/rulesets/` (local development archive); the audit record is
+`ISSUE_172_AUDIT_LEDGER.md` (local development archive).
 
 Method: a ruleset with one `required_status_checks` rule naming the context
 `Python 3.11 non-KB` and `integration_id` 15368, `enforcement: active`, **no bypass
@@ -949,7 +961,7 @@ on `scratch/ruleset-experiment`; the `dev` rule is byte-identical in its require
 and was verified live via `rules/branches/dev`. When that paragraph was first written no push to
 `dev` had yet occurred under the rule, and it said so. **That measurement has since been
 taken** (`measured here`, transcript archived as
-[`criterion5-dev-fastforward.txt`](evidence/issue-172/rulesets/criterion5-dev-fastforward.txt)):
+`criterion5-dev-fastforward.txt` (local development archive)):
 this slice's own landing commit `290b646` earned a green `Python 3.11 non-KB` check on a
 `scratch/**` preflight and was then fast-forwarded onto `dev` — `ffae2a1..290b646`, exit
 code 0.

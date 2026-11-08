@@ -472,7 +472,7 @@ def non_emittable_registered_codes() -> Tuple[str, ...]:
 
     ``PROCESS_IR_SEMANTIC_LINEAGE_AMBIGUOUS_LAST_WRITE`` is registered against
     the convergence analysis documented at
-    ``docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md``; ProcessIR v1
+    ``specs/PROCESS_IR_SEMANTIC_VALIDATION_V1.md``; ProcessIR v1
     emits no join, so no node has two writers to disambiguate and the rule has no
     reachable case yet.
     """

@@ -420,7 +420,7 @@ def test_the_projection_is_deterministic():
 
 def test_no_served_entry_cites_an_unserved_repository_artifact():
     blob = json.dumps(process_ir_authoring_revision_payload())
-    for artifact in (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES"):
+    for artifact in (".codex/", "docs/architecture", "specs/", "PROCESS_IR_V1_CAPABILITIES"):
         assert artifact not in blob, artifact
 
 

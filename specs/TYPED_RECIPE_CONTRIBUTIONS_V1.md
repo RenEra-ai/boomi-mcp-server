@@ -22,7 +22,7 @@ registration API, or any weakening of an existing validator.
 ## 2. Surface classification
 
 Every archetype, composition, pattern, planner, guidance and capability surface is now
-classified. The full inventory lives in `docs/architecture/M12_COMPATIBILITY_INVENTORY.md`;
+classified. The full inventory lives in `specs/M12_COMPATIBILITY_INVENTORY.md`;
 the four categories are:
 
 | Classification | Meaning | May execute? |
@@ -1009,7 +1009,7 @@ parity case — the same six steps the three migrated surfaces took.
 Recorded here because a deviation nobody wrote down is indistinguishable from a constraint
 that was dropped. Each states what changed and why.
 
-**`.codex/plans/issue-145.md` is deliberately NOT edited to match.** That file is the architect's
+**The issue-145 architect plan (kept in the local development archive) is deliberately NOT edited to match.** That file is the architect's
 design plan as written before implementation; rewriting it to agree with the outcome would destroy
 the only record of what was originally intended and make every future "did we deviate?" question
 unanswerable. The plan's own wording at `:297`, `:384` and `:568` stands as the historical statement
@@ -1160,8 +1160,8 @@ intent.
 
 ## 13. Related documents
 
-* `docs/architecture/ADR-001` — authority model, §6 (no duplicate authority), §7 (error
+* `specs/ADR-001-process-ir-authority.md` — authority model, §6 (no duplicate authority), §7 (error
   families), §11 (secret boundary)
-* `docs/architecture/M12_COMPATIBILITY_INVENTORY.md` — the full surface classification
-* `docs/architecture/SYSTEM_TOPOLOGY_V1.md` — the topology contract (#144)
-* `docs/INTEGRATION_AUTHORING_ROADMAP.md` — migration policy
+* `specs/M12_COMPATIBILITY_INVENTORY.md` — the full surface classification
+* `specs/SYSTEM_TOPOLOGY_V1.md` — the topology contract (#144)
+* the integration authoring roadmap (kept in the local development archive) — migration policy

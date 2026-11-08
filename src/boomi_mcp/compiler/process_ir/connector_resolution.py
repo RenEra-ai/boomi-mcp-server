@@ -858,7 +858,7 @@ def _walk_paths(cfg: SemanticCfgV1, index, binding_by_node) -> None:
                 # path even when nothing upstream produced one, because the
                 # platform hands the failed document to the recovery path (live
                 # evidence: a retried process routed one error document to its
-                # catch leg — docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md).
+                # catch leg — the issue-91 capstone recipe evidence in the local record archive).
                 # ``saw_call`` additionally keeps an UNBRACKETED catch map failing
                 # closed through the existing "a call ran upstream but is not this
                 # map's immediate predecessor" rule, rather than being silently

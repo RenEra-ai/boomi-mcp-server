@@ -19,7 +19,7 @@ Live grounding (#133 recon, 2026-07-04, renera):
 * The HTTP method is never stored on the WSS operation, and the two routes
   derive it differently (#158 QA-158-r2-01, measured live 2026-09-11 over all
   seven operation types x {none, singlejson} x five methods — evidence
-  ``docs/architecture/evidence/issue-158/captures/cap158-r3-wss-method-matrix/``):
+  ``tests/fixtures/boomi/listeners/issue158/captures/cap158-r3-wss-method-matrix/``):
 
   - bare ``/ws/simple`` ignores the operation type: ``none`` input answers
     GET/POST/PUT/DELETE, a document-bearing input answers POST/PUT/DELETE and

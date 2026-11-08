@@ -9,7 +9,7 @@ contexts, collectors and policy hooks stay private: they are compiler
 internals, and exporting them would let a caller assemble a context the
 validator never checked.
 
-See ``docs/architecture/PROCESS_IR_SEMANTIC_VALIDATION_V1.md`` (slice 10) for the
+See ``specs/PROCESS_IR_SEMANTIC_VALIDATION_V1.md`` (slice 10) for the
 normative phase order and diagnostic schema.
 """
 

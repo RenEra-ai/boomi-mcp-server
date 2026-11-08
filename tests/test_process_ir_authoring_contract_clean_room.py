@@ -66,7 +66,7 @@ _FORBIDDEN_IMPORT_PREFIXES = (
 
 #: Repository artifacts a served response may not cite, because no MCP tool can
 #: fetch them.
-_UNSERVED_ARTIFACTS = (".codex/", "docs/architecture", "PROCESS_IR_V1_CAPABILITIES")
+_UNSERVED_ARTIFACTS = (".codex/", "docs/architecture", "specs/", "PROCESS_IR_V1_CAPABILITIES")
 
 #: The ONLY top-level modules a clean-room test may import: the stdlib pieces it
 #: needs, pytest, and `server` — the public entry point a caller has.

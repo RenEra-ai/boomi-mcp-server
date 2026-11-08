@@ -144,7 +144,7 @@ Sequence rules (local/structural — the CFG-aware checks are #137/#143):
 ```
 
 - **`operation_ref` is the only reference authored.** `connection_ref` is deliberately absent: no
-  connector-action component declares its own connection (live capture, `.codex/plans/issue-140-live-captures.md`
+  connector-action component declares its own connection (live capture, the issue-140 live-capture record (kept in the local development archive)
   FINDING 1; the repo's own operation builders state "Boomi binds the connection at the process
   connector step, not in the operation XML"), so the operation→connection edge is a fact of the
   **component plan**. The compiler receives it as resolution context on
@@ -175,7 +175,7 @@ against the model unions in both directions. **Absence is denial** — there is 
 | `decision_false_arm.step` | the linear set, `connector_call` |
 | `decision_false_arm.terminal` | `stop`, `exception`, `branch`, `decision` |
 
-Every admitted placement is live-attested in `.codex/plans/issue-141-live-captures.md`.
+Every admitted placement is live-attested in the issue-141 live-capture record (kept in the local development archive).
 Deliberate exclusions, all fail-closed on absent evidence: **`branch` as a Branch-leg terminal**
 (nested control in a leg is attested only as a *Decision*), **`process_call` on a FALSE arm**
 (attested on TRUE outcomes only, in EITHER slot), and `return_documents` anywhere in a body.
@@ -282,7 +282,7 @@ steps — both do something on their own.
 **Retry.** `retry.count` is an integer `0..5`, and that bound is the platform's own: the Try/Catch
 step documents exactly that range together with a fixed wait schedule — `0` none, `1` immediate,
 then 10s / 30s / 60s / 120s — and auto-retries are skipped entirely in test runs
-(`.codex/plans/issue-142-live-captures.md` §G1). **The schedule is platform-owned and not
+(the issue-142 live-capture record (kept in the local development archive) §G1). **The schedule is platform-owned and not
 authorable**; there is no wire field for a delay or a backoff curve, so `retry_backoff_authoring` is
 `unsupported` rather than gated. An absent `retry` and an explicit `{"count": 0}` are the same thing
 and compile to identical bytes.
@@ -295,7 +295,7 @@ and compile to identical bytes.
    not read off the authored `scope`, so a mutated document whose scope disagrees with its shape
    cannot smuggle an unsafe region through. Live evidence: a real process with process-wide retry 2
    reran its entire Get→Map→Send chain on each attempt
-   (`docs/archive/2026-06-19-issue-91-capstone-recipe-evidence.md`), and official guidance
+   (the issue-91 capstone recipe evidence, kept in the local development archive), and official guidance
    independently advises against a Try/Catch at the start of a process or before a query
    (capture §G7). In practice this means **positive retry is a connector-scope construct**.
 2. *Replay safety.* Every retried `connector_call` must sit on a connector-registry row whose
@@ -586,4 +586,4 @@ serializers extracted into `process_emitters/` and emits XML byte-identical to t
 all 17 pre-#142 emitter kinds (`catcherrors`, key 18, is covered by #142's own anchors — see §3c).
 There is still **no MCP/runtime adapter** — the registry is imported directly,
 never exported, and invoked by no tool or production builder; #139 owns the production cutover. See
-`docs/architecture/PROCESS_EMITTER_REGISTRY_V1.md`.
+`specs/PROCESS_EMITTER_REGISTRY_V1.md`.

@@ -39,7 +39,7 @@ synthetic shapes, ``shapeN`` identities, geometry, dragpoints, and resolved
 symbols. A caller can therefore never author reachability, wiring, or a
 synthetic node, which is exactly what issue #137 set out to make impossible.
 
-See ``docs/architecture/PROCESS_IR_COMPILER_V1.md``.
+See ``specs/PROCESS_IR_COMPILER_V1.md``.
 """
 
 from typing import List
