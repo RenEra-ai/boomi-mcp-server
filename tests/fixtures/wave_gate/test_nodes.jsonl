@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14561, "minimum_collected": 14561, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14596, "minimum_collected": 14596, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -14662,3 +14662,38 @@
 {"kind": "test", "id": "pytest-014661", "node_id": "tests/test_wave_gate.py::test_no_gate_child_inherits_the_revision_deferral_switch", "state": "active"}
 {"kind": "test", "id": "pytest-014662", "node_id": "tests/test_revision_freshness_deferral.py::test_the_plugin_reads_the_environment_only_through_its_funnel", "state": "active"}
 {"kind": "test", "id": "pytest-014663", "node_id": "tests/test_revision_freshness_deferral.py::test_a_deferred_child_runs_locally_even_when_its_parent_runs_under_ci", "state": "active"}
+{"kind": "test", "id": "pytest-014664", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_partition_assigns_every_node_exactly_once_in_collection_order", "state": "active"}
+{"kind": "test", "id": "pytest-014665", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_light_module_runs_whole_and_is_selected_by_its_path", "state": "active"}
+{"kind": "test", "id": "pytest-014666", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_module_heavier_than_half_a_share_is_split_into_its_nodes", "state": "active"}
+{"kind": "test", "id": "pytest-014667", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_partition_is_a_pure_function_of_order_weights_and_count", "state": "active"}
+{"kind": "test", "id": "pytest-014668", "node_id": "tests/test_wave_gate_parallel_suite.py::test_more_processes_than_work_yields_fewer_children_not_empty_ones", "state": "active"}
+{"kind": "test", "id": "pytest-014669", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_split_balances_by_weight", "state": "active"}
+{"kind": "test", "id": "pytest-014670", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_committed_suite_partition_constants_are_the_contract", "state": "active"}
+{"kind": "test", "id": "pytest-014671", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_committed_weights_file_parses", "state": "active"}
+{"kind": "test", "id": "pytest-014672", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[not-json]", "state": "active"}
+{"kind": "test", "id": "pytest-014673", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[missing-weights]", "state": "active"}
+{"kind": "test", "id": "pytest-014674", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[wrong-kind]", "state": "active"}
+{"kind": "test", "id": "pytest-014675", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[wrong-schema-version]", "state": "active"}
+{"kind": "test", "id": "pytest-014676", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[weights-not-an-object]", "state": "active"}
+{"kind": "test", "id": "pytest-014677", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[key-not-a-node-id]", "state": "active"}
+{"kind": "test", "id": "pytest-014678", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[negative-weight]", "state": "active"}
+{"kind": "test", "id": "pytest-014679", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[string-weight]", "state": "active"}
+{"kind": "test", "id": "pytest-014680", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[boolean-weight]", "state": "active"}
+{"kind": "test", "id": "pytest-014681", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[nan-weight]", "state": "active"}
+{"kind": "test", "id": "pytest-014682", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_malformed_weights_file_is_refused[duplicate-key]", "state": "active"}
+{"kind": "test", "id": "pytest-014683", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_missing_weights_file_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-014684", "node_id": "tests/test_wave_gate_parallel_suite.py::test_an_honest_split_run_is_accounted_as_one_suite", "state": "active"}
+{"kind": "test", "id": "pytest-014685", "node_id": "tests/test_wave_gate_parallel_suite.py::test_skips_are_capped_over_the_whole_suite_not_per_child", "state": "active"}
+{"kind": "test", "id": "pytest-014686", "node_id": "tests/test_wave_gate_parallel_suite.py::test_one_failing_child_fails_the_suite", "state": "active"}
+{"kind": "test", "id": "pytest-014687", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_that_reports_failures_but_exits_zero_fails_the_suite", "state": "active"}
+{"kind": "test", "id": "pytest-014688", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_with_no_summary_fails_the_suite", "state": "active"}
+{"kind": "test", "id": "pytest-014689", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_that_ran_one_node_twice_and_another_never_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-014690", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_that_ran_a_node_assigned_elsewhere_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-014691", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_that_lost_a_node_is_refused_even_with_matching_counts", "state": "active"}
+{"kind": "test", "id": "pytest-014692", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_rewritten_selection_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-014693", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_split_run_without_the_scratch_directory_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-014694", "node_id": "tests/test_wave_gate_parallel_suite.py::test_collection_remembers_the_order_pytest_collected_in", "state": "active"}
+{"kind": "test", "id": "pytest-014695", "node_id": "tests/test_wave_gate_parallel_suite.py::test_real_pytest_children_run_exactly_their_shares", "state": "active"}
+{"kind": "test", "id": "pytest-014696", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_child_whose_output_cannot_be_read_is_killed_and_fails_the_suite", "state": "active"}
+{"kind": "test", "id": "pytest-014697", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_split_module_is_cut_into_contiguous_runs_of_its_order", "state": "active"}
+{"kind": "test", "id": "pytest-014698", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_kb_node_never_reaches_a_selection", "state": "active"}

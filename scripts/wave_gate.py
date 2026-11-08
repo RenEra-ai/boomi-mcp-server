@@ -1497,7 +1497,22 @@ def parse_collection_output(stdout):
             "collection summary says {0} tests but {1} node lines were parsed; "
             "the output does not reconcile".format(summaries[0], len(nodes)),
         )
-    return unique
+    return CollectedNodes(nodes)
+
+
+class CollectedNodes(set):
+    """The collected node-id set, remembering the order pytest collected it in.
+
+    Every check treats it as the plain set it is. The order is kept for one consumer:
+    the parallel suite (:func:`plan_suite_partition`) hands each pytest child its nodes
+    in COLLECTION order, so a child runs a module's tests in the sequence the
+    single-process run did.
+    """
+
+    def __init__(self, ordered=()):
+        ordered = tuple(ordered)
+        super().__init__(ordered)
+        self.order = ordered
 
 
 def check_collection(nodes_manifest, collected):
@@ -1569,10 +1584,10 @@ def _junit_projection(node_id):
     return (classname, parts[-1] + suffix)
 
 
-def _refuse_unowned_report(tmpdir, report_fd):
+def _refuse_unowned_report(tmpdir, report_fd, name="junit.xml"):
     """The report READ must be the file that was CREATED."""
     try:
-        named = os.stat("junit.xml", dir_fd=tmpdir.fd, follow_symlinks=False)
+        named = os.stat(name, dir_fd=tmpdir.fd, follow_symlinks=False)
         held = os.fstat(report_fd)
     except OSError as exc:
         raise _invalid(
@@ -1608,7 +1623,180 @@ def _executed_projections(report_fd):
     )
 
 
-def run_suite(repo, nodes_manifest, collected, tmpdir=None):
+#: How many pytest children the full suite is split across. A CONSTANT, committed here,
+#: never derived from the host (`os.cpu_count()`) or taken from a flag: the partition is
+#: then a function of the committed tree alone, so every runner, and a developer's
+#: machine, groups the same tests into the same processes. Four is the hosted runner's
+#: vCPU count for a public repository (`ubuntu-24.04`: 4 vCPU, 16 GB); one child of this
+#: suite peaks under 1 GB.
+SUITE_PROCESSES = 4
+
+#: Measured per-node durations, in seconds, used ONLY to balance the partition. Nothing
+#: about what runs or what is accepted depends on it: every collected node is assigned to
+#: exactly one child whatever the weights say, and the union is reconciled against the
+#: collection by identity. A stale or partial file makes the split uneven, never smaller.
+SUITE_WEIGHTS = "tests/fixtures/wave_gate/suite_weights.json"
+SUITE_WEIGHTS_KIND = "suite-weights"
+
+#: The weight of a node the file does not list (it lists only nodes measured at or above
+#: this value, so the default is the ceiling of everything it leaves out).
+_DEFAULT_NODE_WEIGHT = 0.05
+
+
+def load_suite_weights(repo):
+    """``{node id: seconds}`` from :data:`SUITE_WEIGHTS`, fail-closed on its format.
+
+    Strict even though the weights cannot change what runs: a file that silently stopped
+    parsing would degrade every run to an unbalanced split with nothing saying why.
+    """
+    path = os.path.join(repo, SUITE_WEIGHTS)
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        raise _contract("MANIFEST_MISSING", "cannot read {0}: {1}".format(SUITE_WEIGHTS, exc))
+    if os.path.islink(path):
+        raise _contract("MANIFEST_FORMAT_INVALID", "{0} is a symlink".format(SUITE_WEIGHTS))
+    _refuse_symlinked_ancestor(repo, SUITE_WEIGHTS, "MANIFEST_FORMAT_INVALID", "manifests")
+    return parse_suite_weights(raw)
+
+
+def parse_suite_weights(raw):
+    def bad(detail):
+        return _contract("MANIFEST_FORMAT_INVALID", "{0}: {1}".format(SUITE_WEIGHTS, detail))
+
+    try:
+        document = _strict_json_loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise bad("not strict UTF-8 JSON ({0})".format(exc))
+    if not isinstance(document, dict) or sorted(document) != ["kind", "schema_version", "weights"]:
+        raise bad("expected exactly the keys kind, schema_version, weights")
+    if document["kind"] != SUITE_WEIGHTS_KIND or document["schema_version"] != SCHEMA_VERSION:
+        raise bad("kind must be {0!r} and schema_version {1}".format(SUITE_WEIGHTS_KIND, SCHEMA_VERSION))
+    weights = document["weights"]
+    if not isinstance(weights, dict):
+        raise bad("weights must be an object")
+    for node, value in weights.items():
+        if not _NODE_LINE_RE.match(node):
+            raise bad("{0!r} is not a node id".format(node))
+        if type(value) not in (int, float) or not 0 <= value < 1e6:
+            raise bad("{0}: weight {1!r} is not a finite non-negative number".format(node, value))
+    return dict(weights)
+
+
+def _node_module(node_id):
+    return node_id.split("::", 1)[0]
+
+
+def plan_suite_partition(order, weights, processes):
+    """Split the collected nodes ``order`` into at most ``processes`` pytest children.
+
+    Returns one ``{"args": [...], "nodes": [...]}`` per non-empty child. ``nodes`` is the
+    child's share in collection order; ``args`` is what selects exactly that share — a
+    module PATH for a module the child runs whole, the node ids for a module that is split.
+
+    A module is the unit wherever it can be, so a module runs whole, in its own order,
+    in one interpreter, exactly as in the single-process run. Only a module heavier than
+    half a child's fair share is split — otherwise that one module bounds the wall clock —
+    and then into contiguous chunks of its collection order, so most neighbouring tests
+    still share an interpreter. The assignment is longest-processing-time-first with every tie broken
+    by name, so it is a pure function of ``order`` and ``weights``.
+
+    A PARTITION by construction, and asserted anyway: every node is in exactly one child.
+    The suite run then reconciles what each child EXECUTED against its ``nodes`` by
+    identity, so the split can make a child slower, never make a node disappear.
+    """
+    order = list(order)
+    modules = {}
+    for node in order:
+        modules.setdefault(_node_module(node), []).append(node)
+
+    def weight(node):
+        return weights.get(node, _DEFAULT_NODE_WEIGHT)
+
+    total = sum(weight(node) for node in order)
+    threshold = total / (2.0 * max(processes, 1))
+    # A split module is cut into CONTIGUOUS runs of its own collection order, each about
+    # half the split threshold, never into single nodes: neighbouring tests then still
+    # share an interpreter, in their original sequence, except at the few cut points.
+    # A node heavier than a chunk forms a chunk of its own.
+    chunk_target = threshold / 2.0
+    items = []  # (weight, sort key, module, nodes or None for the whole module)
+    for module, nodes in modules.items():
+        module_weight = sum(weight(node) for node in nodes)
+        if processes > 1 and module_weight > threshold and len(nodes) > 1:
+            chunk, chunk_weight = [], 0.0
+            for node in nodes:
+                chunk.append(node)
+                chunk_weight += weight(node)
+                if chunk_weight >= chunk_target:
+                    items.append((chunk_weight, chunk[0], module, chunk))
+                    chunk, chunk_weight = [], 0.0
+            if chunk:
+                items.append((chunk_weight, chunk[0], module, chunk))
+        else:
+            items.append((module_weight, module, module, None))
+    items.sort(key=lambda item: (-item[0], item[1]))
+
+    loads = [0.0] * processes
+    owner_of_module, owner_of_node = {}, {}
+    for item_weight, _key, module, nodes in items:
+        child = min(range(processes), key=lambda index: (loads[index], index))
+        loads[child] += item_weight
+        if nodes is None:
+            owner_of_module[module] = child
+        else:
+            for node in nodes:
+                owner_of_node[node] = child
+
+    children = [{"args": [], "nodes": []} for _ in range(processes)]
+    for module, nodes in modules.items():
+        if module in owner_of_module:
+            child = children[owner_of_module[module]]
+            child["args"].append(module)
+            child["nodes"].extend(nodes)
+            continue
+        for node in nodes:
+            child = children[owner_of_node[node]]
+            child["args"].append(node)
+            child["nodes"].append(node)
+
+    # `--ignore` does NOT apply to a node id given explicitly (measured: a selection naming
+    # `tests/kb/...::test` runs it), so the KB suite is kept out HERE, not by the flag.
+    ignored = sorted(node for node in order if node.startswith(PYTEST_IGNORE + "/"))
+    if ignored:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "{0} node(s) under {1} reached the suite partition; the non-KB suite never "
+            "runs them. First 5: {2}".format(len(ignored), PYTEST_IGNORE, ignored[:5]),
+        )
+    assigned = [node for child in children for node in child["nodes"]]
+    if len(assigned) != len(order) or set(assigned) != set(order):
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "the suite partition does not assign every collected node exactly once "
+            "({0} assigned, {1} collected)".format(len(assigned), len(order)),
+        )
+    return [child for child in children if child["nodes"]]
+
+
+def _child_argv(args_file):
+    """One child of the parallel suite: exactly the nodes its args file selects.
+
+    No `PYTEST_TARGET` here: the args file lists module paths and node ids under
+    `tests/`, and adding the directory would run the whole suite in every child.
+    `--ignore` stays for a module PATH; it does not stop an explicit node id, which is why
+    :func:`plan_suite_partition` refuses any node under `PYTEST_IGNORE` before a selection
+    is written.
+    """
+    return [
+        sys.executable, "-m", "pytest", "@" + args_file,
+        "--ignore={0}".format(PYTEST_IGNORE),
+        "-p", "no:cacheprovider", "--color=no", "-q", "-rs",
+    ]
+
+
+def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights=None):
     """Run the suite and account for what actually EXECUTED.
 
     The exit code alone is not evidence. A required node id proves a test still
@@ -1629,61 +1817,140 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
     is true locally and false on ubuntu-24.04. The cap is set well above that
     (measured 18 here, ~19 expected on a bare runner) and far below any
     mass-skip.
+
+    ``processes > 1`` splits the collected nodes across that many concurrent pytest
+    children (:func:`plan_suite_partition`). Every check below then binds to the WHOLE:
+    each child must exit 0 with exactly one parseable summary and no failure, the
+    counts are summed before the cap, the floor and the accounting identity are
+    applied, and each child's junit report must equal, by identity, the nodes it was
+    assigned — so the union of what ran is reconciled against the collection exactly
+    as one process's report is. A child that is lost, ran a different selection, or
+    ran a node twice fails the run.
     """
-    report_path = None
-    report_fd = None
-    if tmpdir is not None:
-        # The child opens this by NAME, so the gate cannot hand it a descriptor —
-        # but it can still own the artifact. `open_for_write` creates it
-        # EXCLUSIVELY (`O_EXCL|O_NOFOLLOW`), which defeats a pre-planted symlink,
-        # and a descriptor is held so the file that is READ can be proven to be
-        # the file that was CREATED. Claiming the name alone would let a sibling
-        # replace the report between the run and the parse, forging the very
-        # execution evidence this check exists to establish.
-        report_fd = tmpdir.create_owned("junit.xml")
-        report_path = os.path.join(tmpdir, "junit.xml")
-    argv = _pytest_argv("-q", "-rs")
-    if report_path is not None:
-        argv = argv + ["--junit-xml", report_path]
-    proc = subprocess.Popen(
-        argv, cwd=str(repo), env=_pytest_env(),
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-    )
-    tail = []
+    if processes > 1:
+        if tmpdir is None:
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "a split suite needs the gate's scratch directory for its selections "
+                "and execution reports",
+            )
+        order = getattr(collected, "order", None) or sorted(collected)
+        plan = plan_suite_partition(order, weights or {}, processes)
+    else:
+        plan = [{"args": None, "nodes": list(collected)}]
+
+    children = []
+    for index, share in enumerate(plan, 1):
+        child = {"index": index, "nodes": share["nodes"], "report_fd": None,
+                 "report_name": None, "summaries": [], "tail": []}
+        if share["args"] is None:
+            argv = _pytest_argv("-q", "-rs")
+        else:
+            # The selection goes through an args file the gate OWNS (pytest reads
+            # `@file` one argument per line), not the command line: 14,000 node ids
+            # exceed what a command line carries, and the file is held by descriptor
+            # and proved unreplaced after the run, like the junit report.
+            child["args_name"] = "selection-{0}.txt".format(index)
+            child["args_fd"] = tmpdir.create_owned(child["args_name"])
+            child["args_bytes"] = ("\n".join(share["args"]) + "\n").encode("utf-8")
+            os.write(child["args_fd"], child["args_bytes"])
+            argv = _child_argv(os.path.join(tmpdir, child["args_name"]))
+        if tmpdir is not None:
+            # The child opens this by NAME, so the gate cannot hand it a descriptor —
+            # but it can still own the artifact. `create_owned` creates it
+            # EXCLUSIVELY (`O_EXCL|O_NOFOLLOW`), which defeats a pre-planted symlink,
+            # and a descriptor is held so the file that is READ can be proven to be
+            # the file that was CREATED. Claiming the name alone would let a sibling
+            # replace the report between the run and the parse, forging the very
+            # execution evidence this check exists to establish.
+            child["report_name"] = "junit.xml" if len(plan) == 1 else "junit-{0}.xml".format(index)
+            child["report_fd"] = tmpdir.create_owned(child["report_name"])
+            argv = argv + ["--junit-xml", os.path.join(tmpdir, child["report_name"])]
+        child["argv"] = argv
+        children.append(child)
+
     # Summary candidates are counted WHILE STREAMING, never from `tail`. The tail
     # is a bounded ring for error context; applying the one-summary rule to it
     # made the rule enforceable against a DERIVED view rather than the authority.
     # An `atexit` handler emitting 400+ lines after pytest's genuine summary
     # evicts that summary from the ring, leaving the fabricated one alone in the
     # buffer — exactly one summary, zero skips, and a mass-skipped suite passes.
-    summaries = []
     # Streamed, not captured: a 13-minute silent step is unreadable in a CI log,
     # and buffering the whole run to parse it at the end would produce exactly
-    # that.
-    for line in proc.stdout:
-        sys.stderr.write(line)
-        stripped = line.strip().strip("=").strip()
-        if _is_summary_line(stripped):
-            summaries.append(stripped)
-        tail.append(line)
-        if len(tail) > 400:
-            del tail[0]
-    sys.stderr.flush()
-    status = proc.wait()
-    summary = _summary_from_candidates(summaries)
+    # that. A split run prefixes each line with its child, so the interleaved log
+    # still says which process printed what.
+    import threading
 
-    if status != 0:
-        raise _invalid(
-            "PYTEST_FAILED",
-            "the non-KB suite exited {0} ({1})".format(status, summary),
+    lock = threading.Lock()
+
+    def pump(child, prefix):
+        # A reader that dies (an undecodable byte, say) stops draining its child's pipe,
+        # and the child then blocks forever on a full pipe — a hang, not a verdict. So
+        # the failure is recorded, the child is killed, and the run fails below.
+        try:
+            for line in child["proc"].stdout:
+                stripped = line.strip().strip("=").strip()
+                with lock:
+                    sys.stderr.write(prefix + line)
+                    if _is_summary_line(stripped):
+                        child["summaries"].append(stripped)
+                child["tail"].append(line)
+                if len(child["tail"]) > 400:
+                    del child["tail"][0]
+        except Exception as exc:  # noqa: BLE001 - re-raised as a gate failure below
+            child["reader_error"] = exc
+            kill = getattr(child["proc"], "kill", None)
+            if kill is not None:
+                kill()
+
+    for child in children:
+        child["proc"] = subprocess.Popen(
+            child["argv"], cwd=str(repo), env=_pytest_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
-    if summary["failed"] or summary["errors"]:
-        raise _invalid(
-            "PYTEST_FAILED",
-            "the non-KB suite exited 0 but reported {0} failed / {1} errors".format(
-                summary["failed"], summary["errors"]
-            ),
-        )
+    if len(children) == 1:
+        pump(children[0], "")
+    else:
+        threads = [threading.Thread(target=pump, args=(child, "[pytest {0}/{1}] ".format(
+            child["index"], len(children)))) for child in children]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    sys.stderr.flush()
+    for child in children:
+        child["status"] = child["proc"].wait()
+
+    def where(child):
+        return "" if len(children) == 1 else "pytest child {0}/{1}: ".format(
+            child["index"], len(children))
+
+    summary = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+    for child in children:
+        if "reader_error" in child:
+            raise _invalid(
+                "PYTEST_FAILED",
+                "{0}the suite's output could not be read ({1}: {2}); its result cannot be "
+                "accounted for".format(where(child), type(child["reader_error"]).__name__,
+                                       child["reader_error"]),
+            )
+        counts = _summary_from_candidates(child["summaries"])
+        if child["status"] != 0:
+            detail = "" if len(children) == 1 else "\n" + "".join(child["tail"][-40:])
+            raise _invalid(
+                "PYTEST_FAILED",
+                "{0}the non-KB suite exited {1} ({2}){3}".format(
+                    where(child), child["status"], counts, detail),
+            )
+        if counts["failed"] or counts["errors"]:
+            raise _invalid(
+                "PYTEST_FAILED",
+                "{0}the non-KB suite exited 0 but reported {1} failed / {2} errors".format(
+                    where(child), counts["failed"], counts["errors"]
+                ),
+            )
+        for key in summary:
+            summary[key] += counts[key]
 
     cap = nodes_manifest.header["maximum_skipped"]
     if summary["skipped"] > cap:
@@ -1707,18 +1974,18 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
     # with a second copy of node A keeps `passed + skipped == len(collected)`
     # exactly true while B — which fails — never executes. So the multiset of
     # what junit says RAN must equal the multiset projected from what was
-    # COLLECTED; that catches a missing node and a doubled one alike.
-    if report_path is not None:
-        _refuse_unowned_report(tmpdir, report_fd)
-        executed = _executed_projections(report_fd)
-        expected = sorted(_junit_projection(n) for n in collected)
+    # COLLECTED; that catches a missing node and a doubled one alike. A split run
+    # applies it per child, against the nodes that child was assigned: the shares
+    # partition the collection, so equality in every child is equality of the union.
+    if tmpdir is not None:
+        expected_all = sorted(_junit_projection(n) for n in collected)
         # The projection must be INJECTIVE over what was collected, or "identity"
         # is not what is being compared: `tests/a.py::B::test_x` and
         # `tests/a/B.py::test_x` both project to `('tests.a.B', 'test_x')`, so
         # omitting one and running the other twice leaves the multisets equal.
         # Measured on this suite: 0 collisions among 9,782 active node ids — so
         # this is a fail-closed assertion, not a restriction on anything real.
-        if len(set(expected)) != len(expected):
+        if len(set(expected_all)) != len(expected_all):
             seen, collided = set(), set()
             for node_id in sorted(collected):
                 key = _junit_projection(node_id)
@@ -1730,17 +1997,23 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
                 "distinct node ids share a junit identity {0}; execution cannot "
                 "be reconciled by identity while they do".format(sorted(collided)[:5]),
             )
-        if executed != expected:
-            missing = sorted(set(expected) - set(executed))
-            extra = sorted(set(executed) - set(expected))
-            raise _invalid(
-                "PYTEST_EXECUTION_UNRECONCILED",
-                "the tests that RAN do not match the tests that were COLLECTED "
-                "({0} executed records vs {1} collected). Missing: {2}. "
-                "Unexpected: {3}.".format(
-                    len(executed), len(expected), missing[:10], extra[:10]
-                ),
-            )
+        for child in children:
+            _refuse_unowned_report(tmpdir, child["report_fd"], child["report_name"])
+            if "args_fd" in child:
+                _refuse_replaced_selection(tmpdir, child)
+            executed = _executed_projections(child["report_fd"])
+            expected = sorted(_junit_projection(n) for n in child["nodes"])
+            if executed != expected:
+                missing = sorted(set(expected) - set(executed))
+                extra = sorted(set(executed) - set(expected))
+                raise _invalid(
+                    "PYTEST_EXECUTION_UNRECONCILED",
+                    "{0}the tests that RAN do not match the tests that were COLLECTED "
+                    "({1} executed records vs {2} collected). Missing: {3}. "
+                    "Unexpected: {4}.".format(
+                        where(child), len(executed), len(expected), missing[:10], extra[:10]
+                    ),
+                )
 
     # ACCOUNTING IDENTITY: every collected test is either a pass or a permitted
     # skip. Without it a collected-but-never-executed test simply vanishes from
@@ -1758,7 +2031,28 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None):
                 len(collected), accounted, summary["passed"], summary["skipped"]
             ),
         )
+    if len(children) > 1:
+        _emit("wave_gate: suite ran as {0} pytest children ({1})".format(
+            len(children), ", ".join(str(len(child["nodes"])) for child in children)))
     return summary
+
+
+def _refuse_replaced_selection(tmpdir, child):
+    """The selection a child READ must be the one the gate WROTE: same inode, same bytes."""
+    _refuse_unowned_report(tmpdir, child["args_fd"], child["args_name"])
+    os.lseek(child["args_fd"], 0, os.SEEK_SET)
+    held = b""
+    while True:
+        chunk = os.read(child["args_fd"], 1 << 20)
+        if not chunk:
+            break
+        held += chunk
+    if held != child["args_bytes"]:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "the selection {0} was rewritten during the run; what the child was told to "
+            "run cannot be established".format(child["args_name"]),
+        )
 
 
 # A pytest summary is a comma-separated list of `<n> <outcome>` clauses, then
@@ -2698,7 +2992,8 @@ def execute(args):
         check_collection(current["pytest-nodes"], collected)
         _emit("wave_gate: collection ok ({0} tests)".format(len(collected)))
 
-        summary = run_suite(repo, current["pytest-nodes"], collected, tmpdir)
+        summary = run_suite(repo, current["pytest-nodes"], collected, tmpdir,
+                            processes=SUITE_PROCESSES, weights=load_suite_weights(repo))
         _emit(
             "wave_gate: non-KB suite green ({0} passed, {1} skipped, cap {2})".format(
                 summary["passed"], summary["skipped"],
