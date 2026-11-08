@@ -1741,8 +1741,12 @@ def test_every_collected_node_is_pinned_by_the_manifest():
     candidates = (paths("diff", "--name-only", _SLICE_BASELINE, "HEAD")
                   + paths("diff", "--name-only", _SLICE_BASELINE)
                   + paths("ls-files", "--others", "--exclude-standard"))
+    # tests/fixtures/ holds FROZEN inputs, including captured Python scripts that were
+    # never meant to be imported (some open sockets or provision accounts at import
+    # time); naming them to pytest explicitly would collect them. Only test code counts.
     files = sorted({f for f in candidates
-                    if f.startswith("tests/") and f.endswith(".py") and (root / f).is_file()})
+                    if f.startswith("tests/") and f.endswith(".py")
+                    and not f.startswith("tests/fixtures/") and (root / f).is_file()})
     assert files, "the slice changed no test file; this check would be vacuous"
 
     collected = subprocess.run(
