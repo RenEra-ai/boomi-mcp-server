@@ -43,3 +43,32 @@ itself, and `.gitattributes` disables line-ending conversion for this tree.
   `processcall processId` values (demo-account processes), and generator-chosen `userlabel` words.
   None of them feeds the layout: the emulator reads shape names, shape types, dragpoint order,
   `toShape`, and the prior `y` of shapes with unset dragpoints.
+
+## Shape matrix (`shape_matrix/`) — recorded 2026-11-11 for #188
+
+The handoff's lab corpus did not cover every shape type the server emits. These 9 pairs close
+that gap; the emulator reproduces every one of them exactly, so no per-type offset was added.
+
+| Pair | Covers |
+|---|---|
+| `m1_shape_types` | `connectoraction`, `map`, `dataprocess`, `doccacheload`, `doccacheretrieve`, `doccacheremove` — each with an empty caption (row 0), a long caption that wraps over several lines (branch path 1) and a short caption (branch path 2); a Branch; Stop with and without a caption; 22 shapes |
+| `s_noaction`, `s_noaction_long` | Start — No Data, empty and long caption |
+| `s_passthrough`, `s_passthrough_long` | Start — Data Passthrough |
+| `s_wss`, `s_wss_long` | Start — Web Services Server Listen (connector Start, `actionType="Listen"`) |
+| `s_connector`, `s_connector_long` | Start — REST connector Get (connector Start with a connection) |
+
+**How they were recorded.**
+- The `before/` bodies were generated with scattered coordinates and created in the disposable demo
+  account (folder `AutoFormat Lab 188`) directly through the Component API — not through this
+  server — so their bytes are exactly as written. Boomi validates references on create, so the
+  map, document cache, JSON profile, WSS Listen operation, REST connection and REST operation they
+  point at are real components in that account.
+- Each was opened in the Build editor (in-app browser, signed in by the account owner), **Arrange**
+  was clicked once the canvas had rendered every shape, the unsaved-changes prompt was answered
+  **Don't Save**, and the process was saved (version 1 → 2), with the handoff's recording helper.
+- `before/` is the stored version 1 and `after/` the stored version 2, both read back through the
+  Component API. `after/` is therefore the platform's own Arrange output.
+
+**Scrubbed before vendoring** (layout data untouched): `createdBy`/`modifiedBy` (the account's API
+login) → `demo-api-user@example.invalid`; `folderFullPath`'s account-name segment → `Demo-Account`.
+Component ids, folder id, branch id, dates and versions are as recorded.

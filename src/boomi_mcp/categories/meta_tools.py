@@ -10346,7 +10346,8 @@ def list_capabilities_action(
                 "profile": "str (required)",
                 "action": "str (required) — create | update | clone | delete",
                 "component_id": "str (optional) — required for update/clone/delete",
-                "config": "JSON str (optional) — action-specific config (XML for create, fields for update)",
+                "config": "JSON str (optional) — action-specific config (XML for create, fields for update)."
+                          "#188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; root key 'layout' = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write. Metadata-only updates never move shapes.",
             },
             "examples": [
                 'manage_component(profile="prod", action="clone", component_id="abc-123", config=\'{"name": "My Clone"}\')',
@@ -10368,7 +10369,8 @@ def list_capabilities_action(
                 "profile": "str (required)",
                 "action": "str (required) — where_used | dependencies | compare_versions | merge",
                 "component_id": "str (required)",
-                "config": "JSON str (optional) — action-specific config. where_used/dependencies type filter: DEPENDENT or INDEPENDENT",
+                "config": "JSON str (optional) — action-specific config. where_used/dependencies type filter: DEPENDENT or INDEPENDENT."
+                          " merge: #188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; root key 'layout' = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write. The merge diff shows the submitted bytes.",
             },
             "examples": [
                 'analyze_component(profile="prod", action="where_used", component_id="abc-123")',
@@ -10398,7 +10400,8 @@ def list_capabilities_action(
             "parameters": {
                 "profile": "str (required)",
                 "component_id": "str (required)",
-                "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?}; metadata config = partial edit, body config = full builder config; raw config.xml is rejected",
+                "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?, \"layout\"?}; metadata config = partial edit, body config = full builder config; raw config.xml is rejected."
+                         " #188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; patch.layout = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write. The diff and token cover the arranged bytes; metadata patches never move shapes.",
                 "max_diff_lines": "int (optional, default 200)",
             },
             "examples": [
@@ -10416,7 +10419,7 @@ def list_capabilities_action(
             "parameters": {
                 "profile": "str (required)",
                 "component_id": "str (required)",
-                "patch": "JSON str (required) — the same patch previewed by prepare_component_edit",
+                "patch": "JSON str (required) — the same patch previewed by prepare_component_edit (#188: apply writes exactly the previewed bytes; a pre-#188 token or a changed patch.layout is refused, COMPONENT_EDIT_TOKEN_INVALID)",
                 "confirmation_token": "str (required) — from prepare_component_edit",
                 "confirm_apply": "bool (required to commit; defaults false)",
                 "max_diff_lines": "int (optional, default 200)",
@@ -10435,7 +10438,8 @@ def list_capabilities_action(
                 "profile": "str (required)",
                 "action": "str (required) — list_types | get_type | list | get | create | update | delete",
                 "component_id": "str (optional) — for get, update, delete",
-                "config": "JSON str (optional) — action-specific config/filters",
+                "config": "JSON str (optional) — action-specific config/filters."
+                          " create/update with config.xml of a process component: #188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; root key 'layout' = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write.",
             },
             "examples": [
                 'manage_connector(profile="prod", action="list_types")',
@@ -11070,7 +11074,12 @@ def list_capabilities_action(
                     "recorded_intents) is authored on each unit's envelope and "
                     "resolved before fingerprinting; recipe intents take "
                     "process_envelopes; flows is derived-only on both compiling "
-                    "intents."
+                    "intents. #188 adds one write-time control at the config root, "
+                    "'layout' = 'arrange' (default) | 'preserve': consumed before any "
+                    "action (never part of a plan, fingerprint or compile hash), it lays "
+                    "out every process apply writes with Boomi's own Arrange layout and "
+                    "is reported per process as results.<key>.layout; PROCESS_LAYOUT_* "
+                    "codes refuse before any write."
                 ),
             },
             "authority_versions": _AUTHORITY_VERSIONS,

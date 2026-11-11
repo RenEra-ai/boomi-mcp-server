@@ -34,7 +34,11 @@ from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
     paginate_metadata, _create_component_raw, _extract_api_error_msg,
     ComponentGetDeadlineExceeded, component_get_deadline_envelope,
-    submits_raw_component_xml,
+    submits_raw_component_xml, with_folder_id,
+)
+from ...arrange import (
+    DEFAULT_LAYOUT_MODE, ProcessLayoutError, arrange_process_body, layout_refusal,
+    resolve_layout_control,
 )
 from .builders.connector_builder import (
     BuilderValidationError,
@@ -372,8 +376,12 @@ def create_connector(
     config: Dict[str, Any],
     *,
     folder_id: Optional[str] = None,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Create a new connector component.
+
+    #188: raw XML whose root is a process component is arranged
+    (``layout_mode``) after placement, immediately before the create.
 
     Two paths:
     1. Raw XML — if config["xml"] provided, POST directly (any connector type)
@@ -387,8 +395,10 @@ def create_connector(
     try:
         # Path 1: raw XML
         if submits_raw_component_xml(config):
-            result = _create_component_raw(boomi_client, config['xml'], folder_id=folder_id)
-            return {
+            xml = with_folder_id(config['xml'], folder_id)
+            xml, layout_report = arrange_process_body(xml, layout_mode)
+            result = _create_component_raw(boomi_client, xml)
+            created = {
                 "_success": True,
                 "message": f"Created connector '{result['name']}'",
                 "component_id": result['component_id'],
@@ -397,6 +407,9 @@ def create_connector(
                 "sub_type": result['sub_type'],
                 "profile": profile,
             }
+            if layout_report["reason"] != "not_process":
+                created["layout"] = layout_report
+            return created
 
         # Path 2: builder
         connector_type = config.get('connector_type')
@@ -526,6 +539,8 @@ def create_connector(
             "profile": profile,
         }
 
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except BuilderValidationError as e:
         return {
             "_success": False,
@@ -553,8 +568,14 @@ def update_connector(
     profile: str,
     component_id: str,
     config: Dict[str, Any],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Update an existing connector component.
+
+    #188: raw XML whose root is a process component is arranged
+    (``layout_mode``) immediately before the push; the metadata smart-merge keeps
+    the live body's geometry.
 
     Two paths:
     1. Raw XML — if config["xml"] provided, full replacement.
@@ -565,13 +586,17 @@ def update_connector(
     try:
         # Path 1: raw XML replacement
         if submits_raw_component_xml(config):
-            boomi_client.component.update_component_raw(component_id, config['xml'])
-            return {
+            xml, layout_report = arrange_process_body(config['xml'], layout_mode)
+            boomi_client.component.update_component_raw(component_id, xml)
+            updated = {
                 "_success": True,
                 "message": f"Updated connector '{component_id}' with provided XML",
                 "component_id": component_id,
                 "profile": profile,
             }
+            if layout_report["reason"] != "not_process":
+                updated["layout"] = layout_report
+            return updated
 
         # Path 2: smart merge — component-level metadata only.
         current = component_get_xml(boomi_client, component_id)
@@ -618,6 +643,8 @@ def update_connector(
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except ApiError as e:
         return {
             "_success": False,
@@ -675,10 +702,23 @@ def manage_connector_action(
     boomi_client: Boomi,
     profile: str,
     action: str,
+    *,
+    layout_mode: Optional[str] = None,
     **params,
 ) -> Dict[str, Any]:
-    """Route manage_connector actions."""
+    """Route manage_connector actions.
+
+    #188: the root ``config.layout`` control is consumed HERE, before builder
+    dispatch, for create/update (it applies when the raw XML is a process).
+    """
     try:
+        if action in ("create", "update"):
+            if isinstance(params.get("config"), dict):
+                params["config"], layout_mode = resolve_layout_control(
+                    params["config"], explicit=layout_mode
+                )
+            else:
+                _, layout_mode = resolve_layout_control({}, explicit=layout_mode)
         if action == "list_types":
             return list_connector_types(boomi_client)
 
@@ -732,7 +772,7 @@ def manage_connector_action(
                         'Or provide raw XML as config.xml.'
                     ),
                 }
-            return create_connector(boomi_client, profile, config)
+            return create_connector(boomi_client, profile, config, layout_mode=layout_mode)
 
         elif action == "update":
             component_id = params.get("component_id")
@@ -756,7 +796,9 @@ def manage_connector_action(
                         "XML via config={\"xml\": \"<bns:Component ...full XML...>\"}."
                     ),
                 }
-            return update_connector(boomi_client, profile, component_id, config)
+            return update_connector(
+                boomi_client, profile, component_id, config, layout_mode=layout_mode
+            )
 
         elif action == "delete":
             component_id = params.get("component_id")
@@ -775,6 +817,8 @@ def manage_connector_action(
                 "hint": "Valid actions are: list_types, get_type, list, get, create, update, delete",
             }
 
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except Exception as e:
         return {
             "_success": False,

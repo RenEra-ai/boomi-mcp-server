@@ -1774,6 +1774,20 @@ if manage_component_action:
             delete - Delete a component:
                 component_id="abc-123-def"
 
+        Process layout (#188):
+            Every process body this tool writes is laid out with Boomi's own Arrange
+            (Auto Format) layout, exactly where the Build editor's Arrange button puts
+            it; only shape and dragpoint x/y change. Applies to create/update with
+            config.xml and to clone; the control is config.layout
+            = "arrange" (default) | "preserve" (submit the given coordinates unchanged).
+            Metadata-only updates (name/description/folder) never move shapes.
+            Arrange is one operation, not a fixed point: unset dragpoints keep their
+            shape's pre-Arrange height, so re-arranging can move them again.
+            Results carry layout: {applied, mode, reason, columns, rows,
+            estimated_extent, warnings}. Refused before anything is written:
+            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
+            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
+
         Returns:
             Action result with success status and component data
         """
@@ -1871,6 +1885,19 @@ if analyze_component_action:
             - Use manage_account action="list_branches" to find branch IDs
             - Use query_components action="get" to find a component's current version
 
+        Process layout (#188):
+            Every process body this tool writes is laid out with Boomi's own Arrange
+            (Auto Format) layout, exactly where the Build editor's Arrange button puts
+            it; only shape and dragpoint x/y change. Applies to merge; the reported
+            diff compares the target with the bytes submitted. Control: config.layout
+            = "arrange" (default) | "preserve" (submit the given coordinates unchanged).
+            Arrange is one operation, not a fixed point: unset dragpoints keep their
+            shape's pre-Arrange height, so re-arranging can move them again.
+            Results carry layout: {applied, mode, reason, columns, rows,
+            estimated_extent, warnings}. Refused before anything is written:
+            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
+            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
+
         Returns:
             Action result with success status and analysis data
         """
@@ -1966,10 +1993,26 @@ if prepare_component_edit_action:
                   Use get_schema_template(resource_type='component', operation='create',
                   component_type=...) to see the full config a type needs.
                 Raw config.xml is rejected (use manage_component for full XML replace).
+                patch.layout (patch root, beside config): see Process layout below.
             max_diff_lines: Cap the returned unified diff (default 200).
 
+        Process layout (#188):
+            Every process body this tool writes is laid out with Boomi's own Arrange
+            (Auto Format) layout, exactly where the Build editor's Arrange button puts
+            it; only shape and dragpoint x/y change. Applies to a body patch on a
+            process; the diff and the token cover the arranged bytes. Control: patch.layout
+            = "arrange" (default) | "preserve" (submit the given coordinates unchanged).
+            A metadata patch never moves shapes. Tokens issued before #188 are
+            refused (COMPONENT_EDIT_TOKEN_INVALID): re-run prepare.
+            Arrange is one operation, not a fixed point: unset dragpoints keep their
+            shape's pre-Arrange height, so re-arranging can move them again.
+            Results carry layout: {applied, mode, reason, columns, rows,
+            estimated_extent, warnings}. Refused before anything is written:
+            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
+            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
+
         Returns:
-            diff, confirmation_token, base_version, update_mode, and no_change flag.
+            diff, confirmation_token, base_version, update_mode, layout, and no_change flag.
         """
         try:
             patch_data = json.loads(patch)
@@ -2032,8 +2075,13 @@ if apply_component_edit_action:
             confirm_apply: Must be true to commit. Defaults to false (no-op gate).
             max_diff_lines: Cap any fallback diff in the response (default 200).
 
+        Process layout (#188): apply writes exactly the bytes prepare previewed —
+            the token binds patch.layout's effective mode and the previewed digest;
+            a token from before #188, a changed mode, or different bytes is refused
+            with no write (COMPONENT_EDIT_TOKEN_INVALID / COMPONENT_EDIT_DRIFT_DETECTED).
+
         Returns:
-            base_version, new_version, version_comparison, and update_mode.
+            base_version, new_version, version_comparison, update_mode, and layout.
         """
         try:
             patch_data = json.loads(patch)
@@ -2131,6 +2179,19 @@ if manage_connector_action:
 
             delete - Delete connector:
                 component_id="abc-123-def"
+
+        Process layout (#188):
+            Every process body this tool writes is laid out with Boomi's own Arrange
+            (Auto Format) layout, exactly where the Build editor's Arrange button puts
+            it; only shape and dragpoint x/y change. Applies to create/update when
+            config.xml is a process component. Control: config.layout
+            = "arrange" (default) | "preserve" (submit the given coordinates unchanged).
+            Arrange is one operation, not a fixed point: unset dragpoints keep their
+            shape's pre-Arrange height, so re-arranging can move them again.
+            Results carry layout: {applied, mode, reason, columns, rows,
+            estimated_extent, warnings}. Refused before anything is written:
+            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
+            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
 
         Returns:
             Action result with success status and connector data
@@ -2363,7 +2424,8 @@ if build_integration_action:
             Fetch its exact schema with
             get_schema_template(schema_name="AuthoringRequestV1").
 
-            config.authoring_request is the ONLY new config key. The three
+            config.authoring_request is the ONLY typed authoring key (the other
+            #188 root key, config.layout, is a write-time control, below). The three
             binding values are fields OF that object (they are AuthoringRequestV1
             fields), not siblings of it — placed at the config root they are
             ignored and a typed apply fails with
@@ -2402,6 +2464,23 @@ if build_integration_action:
             sending both is rejected rather than silently resolved by precedence.
             (conflict_policy is the consequential one: at the config root it
             would be silently replaced by the typed intent's own value.)
+
+        Process layout (#188):
+            Every process body this tool writes is laid out with Boomi's own Arrange
+            (Auto Format) layout, exactly where the Build editor's Arrange button puts
+            it; only shape and dragpoint x/y change. config.layout is a WRITE-TIME
+            control at the config root, consumed before any action runs (plan, compile,
+            fingerprints and compile hashes never see it); apply uses it for every process
+            it creates or updates. A per-component config.layout is not a control. Values
+            = "arrange" (default) | "preserve" (submit the given coordinates unchanged).
+            Per-process results (results.<key>.layout) report what was applied.
+            Arrange is one operation, not a fixed point: unset dragpoints keep their
+            shape's pre-Arrange height, so re-arranging can move them again.
+            Results carry layout: {applied, mode, reason, columns, rows,
+            estimated_extent, warnings}. Refused before anything is written:
+            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
+            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
+
 
         Actions:
             plan:

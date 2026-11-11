@@ -34,6 +34,10 @@ from ._shared import (
     component_get_deadline_envelope,
     _component_get_deadline_seconds,
 )
+from ...arrange import (
+    DEFAULT_LAYOUT_MODE, ProcessLayoutError, arrange_process_body, layout_refusal,
+    resolve_layout_control,
+)
 from .builders._api_service_paths import (
     effective_api_service_route,
     route_refuses_its_input,
@@ -625,9 +629,15 @@ def merge_versions(
     boomi_client: Boomi,
     profile: str,
     component_id: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Merge component content across branches or versions.
+
+    #188: a merged process body is arranged (``layout_mode``) immediately before
+    the write, and the reported diff compares the target with the bytes actually
+    submitted — arranged coordinates included.
 
     Supports two modes:
     - Branch merge: source_branch + target_branch (uses componentId~branchId API format)
@@ -674,16 +684,6 @@ def merge_versions(
         target_xml = target_meta['xml']
         target_root = ET.fromstring(target_xml)
 
-        # Compare source and target
-        source_lines = source_xml.splitlines(keepends=True)
-        target_lines = target_xml.splitlines(keepends=True)
-        diff = list(difflib.unified_diff(
-            target_lines, source_lines,
-            fromfile=target_label,
-            tofile=source_label,
-            lineterm=""
-        ))
-
         # Apply source content onto target: preserve target's version metadata
         target_version_attr = target_root.attrib.get('version', '')
         target_current_version = target_root.attrib.get('currentVersion', '')
@@ -702,6 +702,17 @@ def merge_versions(
             merged_root.set('branchId', target_branch)
 
         merged_xml = ET.tostring(merged_root, encoding='unicode')
+        merged_xml, layout_report = arrange_process_body(merged_xml, layout_mode)
+
+        # The diff is target vs the bytes about to be SUBMITTED (#188): an
+        # arranged merge moves coordinates, and the caller must see that churn.
+        diff = list(difflib.unified_diff(
+            target_xml.splitlines(keepends=True),
+            merged_xml.splitlines(keepends=True),
+            fromfile=target_label,
+            tofile=f"{source_label} (merged, as submitted)",
+            lineterm=""
+        ))
 
         # Perform the update (target branch context)
         boomi_client.component.update_component_raw(component_id, merged_xml)
@@ -726,11 +737,15 @@ def merge_versions(
         if source_branch:
             result["source_branch"] = source_branch
             result["target_branch"] = target_branch or "main"
+        if layout_report["reason"] != "not_process":
+            result["layout"] = layout_report
 
         return result
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except ApiError as e:
         return {
             "_success": False,
@@ -891,9 +906,14 @@ def analyze_component_action(
     boomi_client: Boomi,
     profile: str,
     action: str,
+    *,
+    layout_mode: Optional[str] = None,
     **params
 ) -> Dict[str, Any]:
-    """Route analyze_component actions."""
+    """Route analyze_component actions.
+
+    #188: the root ``config.layout`` control is consumed HERE for ``merge``.
+    """
     try:
         if action == "where_used":
             component_id = params.get("component_id")
@@ -939,6 +959,8 @@ def analyze_component_action(
                     "error": "component_id is required for 'merge' action",
                 }
             config = params.get("config", {})
+            if isinstance(config, dict):
+                config, layout_mode = resolve_layout_control(config, explicit=layout_mode)
             if not config:
                 return {
                     "_success": False,
@@ -946,7 +968,10 @@ def analyze_component_action(
                     "hint": 'Branch merge: {"source_branch": "branch-id", "target_branch": "branch-id"}\n'
                             'Version merge: {"source_version": 1, "target_version": 2}',
                 }
-            return merge_versions(boomi_client, profile, component_id, config)
+            return merge_versions(
+                boomi_client, profile, component_id, config,
+                layout_mode=layout_mode or DEFAULT_LAYOUT_MODE,
+            )
 
         else:
             return {
@@ -955,6 +980,8 @@ def analyze_component_action(
                 "hint": "Valid actions are: where_used, dependencies, compare_versions, merge",
             }
 
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except ApiError as e:
         return {
             "_success": False,

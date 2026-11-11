@@ -51,6 +51,10 @@ from .component_update_preservation import merge_for_update
 from .builders import BuilderValidationError
 from .analyze_component import compare_versions
 from ..integration_builder import build_structured_update_xml
+from ...arrange import (
+    DEFAULT_LAYOUT_MODE, ProcessLayoutError, arrange_process_body, layout_refusal,
+    layout_report_for, resolve_layout_control,
+)
 from ...models.integration_models import IntegrationComponentSpec
 
 
@@ -81,8 +85,15 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: #188: the token now also binds the effective layout mode and the digest of the
+#: exact bytes prepare previewed. A token without this policy (issued before #188)
+#: is refused with a re-prepare hint rather than applied under the new layout.
+TOKEN_POLICY = 2
+
+
 def _make_confirmation_token(
-    component_id: str, version: int, base_xml_sha256: str, patch_sha256: str
+    component_id: str, version: int, base_xml_sha256: str, patch_sha256: str,
+    *, layout_mode: str = DEFAULT_LAYOUT_MODE, proposed_xml_sha256: str = "",
 ) -> str:
     # The token is a stateless workflow + integrity FINGERPRINT, not an auth
     # secret or capability grant: the caller of apply already holds the profile
@@ -101,6 +112,9 @@ def _make_confirmation_token(
         "version": version,
         "base_xml_sha256": base_xml_sha256,
         "patch_sha256": patch_sha256,
+        "token_policy": TOKEN_POLICY,
+        "layout_mode": layout_mode,
+        "proposed_xml_sha256": proposed_xml_sha256,
     })
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
 
@@ -246,12 +260,16 @@ def _compute_merged_xml(
     component_type: str,
     config: Dict[str, Any],
     map_context: Optional[Dict[str, Any]],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Build the merged XML for ``config`` against ``current`` — no push.
 
-    Returns {"_success": True, "merged_xml": str, "update_mode": str} or a
-    structured error envelope. Deterministic for a given (current, patch) so the
-    prepare preview and the apply write produce byte-identical XML.
+    Returns {"_success": True, "merged_xml": str, "update_mode": str, "layout":
+    report-or-None} or a structured error envelope. Deterministic for a given
+    (current, patch, layout_mode) so the prepare preview and the apply write
+    produce byte-identical XML. A body patch on a process is arranged here
+    (#188), once, after the merge; a metadata patch keeps the live geometry.
     """
     current_xml = current["xml"]
     config_keys = set(config.keys())
@@ -282,6 +300,7 @@ def _compute_merged_xml(
             "_success": True,
             "merged_xml": merged_xml,
             "update_mode": "metadata_smart_merge",
+            "layout": layout_report_for(merged_xml),
         }
 
     # Body patch -> structured builder + #45/#50 preservation merge. The builder
@@ -324,10 +343,15 @@ def _compute_merged_xml(
         merged_xml = merge_for_update(current_xml, prep["built_xml"], prep["policy"])
     except BuilderValidationError as exc:
         return _builder_validation_envelope(exc)
+    try:
+        merged_xml, layout_report = arrange_process_body(merged_xml, layout_mode)
+    except ProcessLayoutError as exc:
+        return {**layout_refusal(exc), "boomi_mutation": False}
     return {
         "_success": True,
         "merged_xml": merged_xml,
         "update_mode": "read_merge_write",
+        "layout": None if layout_report["reason"] == "not_process" else layout_report,
     }
 
 
@@ -341,16 +365,26 @@ def prepare_component_edit_action(
     component_id: str,
     patch: Dict[str, Any],
     max_diff_lines: int = 200,
+    *,
+    layout_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Read-only: pull the component, preview a structured patch, return diff + token.
 
     Performs NO Boomi mutation. The returned ``confirmation_token`` must be
     passed back to ``apply_component_edit_action`` to commit the change.
+
+    #188: ``patch.layout`` ("arrange" default | "preserve") selects the layout of
+    a process body patch (an internal caller may pass ``layout_mode``); the diff
+    and the token cover the arranged bytes.
     """
     shape_error = _validate_patch_shape(patch)
     if shape_error is not None:
         shape_error.setdefault("boomi_mutation", False)
         return shape_error
+    try:
+        _, effective_layout = resolve_layout_control(patch, explicit=layout_mode)
+    except ProcessLayoutError as exc:
+        return {**layout_refusal(exc), "boomi_mutation": False}
     config = patch.get("config") or {}
     if not config:
         return {
@@ -379,7 +413,8 @@ def prepare_component_edit_action(
     component_type = type_result["component_type"]
 
     merged = _compute_merged_xml(
-        boomi_client, current, component_type, config, patch.get("map_context")
+        boomi_client, current, component_type, config, patch.get("map_context"),
+        layout_mode=effective_layout,
     )
     if not merged.get("_success"):
         merged.setdefault("boomi_mutation", False)
@@ -390,7 +425,8 @@ def prepare_component_edit_action(
     base_xml_sha256 = _sha256(current["xml"])
     patch_sha256 = _sha256(_canonical_json(patch))
     token = _make_confirmation_token(
-        component_id, base_version, base_xml_sha256, patch_sha256
+        component_id, base_version, base_xml_sha256, patch_sha256,
+        layout_mode=effective_layout, proposed_xml_sha256=_sha256(merged_xml),
     )
     diff_lines, truncated = _unified_diff(current["xml"], merged_xml, max_diff_lines)
 
@@ -406,6 +442,7 @@ def prepare_component_edit_action(
         "no_change": not diff_lines,
         "diff": diff_lines,
         "diff_truncated": truncated,
+        "layout": merged.get("layout"),
         "confirmation_token": token,
         "next_step": (
             "Review the diff, then call apply_component_edit with the same patch, "
@@ -426,8 +463,14 @@ def apply_component_edit_action(
     confirmation_token: str,
     confirm_apply: bool = False,
     max_diff_lines: int = 200,
+    *,
+    layout_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Confirmed write: re-fetch, abort on drift, push the merged XML, compare versions.
+
+    #188: the token binds the effective layout mode and the digest of the bytes
+    prepare previewed; apply recomputes the same bytes and refuses (no write) if
+    they differ, so the write is exactly the previewed diff.
 
     Requires ``confirm_apply=True`` and the ``confirmation_token`` from prepare.
     Aborts (no mutation) if the patch changed since prepare, the token is
@@ -492,6 +535,35 @@ def apply_component_edit_action(
             "boomi_mutation": False,
         }
 
+    if token_data.get("token_policy") != TOKEN_POLICY:
+        return {
+            "_success": False,
+            "error_code": "COMPONENT_EDIT_TOKEN_INVALID",
+            "error": (
+                "confirmation_token was issued before server-side canvas Arrange "
+                "(#188) and does not bind the layout of the previewed bytes."
+            ),
+            "field": "confirmation_token",
+            "hint": "Re-run prepare_component_edit to obtain a fresh token.",
+            "boomi_mutation": False,
+        }
+    try:
+        _, effective_layout = resolve_layout_control(patch, explicit=layout_mode)
+    except ProcessLayoutError as exc:
+        return {**layout_refusal(exc), "boomi_mutation": False}
+    if token_data.get("layout_mode") != effective_layout:
+        return {
+            "_success": False,
+            "error_code": "COMPONENT_EDIT_TOKEN_INVALID",
+            "error": (
+                f"confirmation_token was issued for layout {token_data.get('layout_mode')!r}, "
+                f"not {effective_layout!r}."
+            ),
+            "field": "confirmation_token",
+            "hint": "Re-run prepare_component_edit with the layout you mean to apply.",
+            "boomi_mutation": False,
+        }
+
     patch_sha256 = _sha256(_canonical_json(patch))
     if token_data.get("patch_sha256") != patch_sha256:
         return {
@@ -542,12 +614,26 @@ def apply_component_edit_action(
     component_type = type_result["component_type"]
 
     merged = _compute_merged_xml(
-        boomi_client, current, component_type, config, patch.get("map_context")
+        boomi_client, current, component_type, config, patch.get("map_context"),
+        layout_mode=effective_layout,
     )
     if not merged.get("_success"):
         merged.setdefault("boomi_mutation", False)
         return merged
     merged_xml = merged["merged_xml"]
+    if token_data.get("proposed_xml_sha256") != _sha256(merged_xml):
+        return {
+            "_success": False,
+            "error_code": "COMPONENT_EDIT_DRIFT_DETECTED",
+            "error": (
+                "The bytes this apply would write differ from the ones "
+                "prepare_component_edit previewed; the edit was aborted."
+            ),
+            "component_id": component_id,
+            "field": "confirmation_token",
+            "hint": "Re-run prepare_component_edit and review the new diff.",
+            "boomi_mutation": False,
+        }
 
     try:
         boomi_client.component.update_component_raw(component_id, merged_xml)
@@ -568,6 +654,7 @@ def apply_component_edit_action(
         "preserves_unknown_xml": True,
         "boomi_mutation": True,
         "message": f"Updated component {component_id!r} via {merged['update_mode']}.",
+        "layout": merged.get("layout"),
     }
 
     # Expose version comparison after write (acceptance criterion). Best-effort:

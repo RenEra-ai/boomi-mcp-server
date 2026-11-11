@@ -18,6 +18,11 @@ from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
     _create_component_raw, _extract_api_error_msg,
     ComponentGetDeadlineExceeded, component_get_deadline_envelope,
+    with_folder_id,
+)
+from ...arrange import (
+    DEFAULT_LAYOUT_MODE, ProcessLayoutError, arrange_process_body, consume_receipt,
+    layout_refusal, layout_report_for, resolve_layout_control,
 )
 from .builders import (
     BuilderValidationError,
@@ -41,8 +46,15 @@ def create_component(
     config: Dict[str, Any],
     *,
     folder_id: Optional[str] = None,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
+    _layout_receipt: Any = None,
 ) -> Dict[str, Any]:
     """Create a new component.
+
+    #188 LAYOUT. A raw-XML process body is arranged here (``layout_mode``) after
+    placement and immediately before the create. A caller that already arranged
+    and digested the final bytes passes its private ``_layout_receipt`` instead,
+    and the bytes are then submitted unchanged — never arranged twice.
 
     Two paths:
     1. Builder — for known component_type + profile_type pairs (e.g. profile.db
@@ -180,8 +192,15 @@ def create_component(
 
         # Path 2: raw XML
         if config.get('xml'):
-            result = _create_component_raw(boomi_client, config['xml'], folder_id=folder_id)
-            return {
+            # Placement first (the final body), then the one arrangement, then
+            # the create — which then sends these exact bytes.
+            xml = with_folder_id(config['xml'], folder_id)
+            if _layout_receipt is not None:
+                layout_report = consume_receipt(_layout_receipt, xml, layout_mode)
+            else:
+                xml, layout_report = arrange_process_body(xml, layout_mode)
+            result = _create_component_raw(boomi_client, xml)
+            created = {
                 "_success": True,
                 "message": f"Created component '{result['name']}'",
                 "component_id": result['component_id'],
@@ -189,6 +208,9 @@ def create_component(
                 "type": result['type'],
                 "profile": profile,
             }
+            if layout_report["reason"] != "not_process":
+                created["layout"] = layout_report
+            return created
 
         # No XML provided - cannot create without valid component XML
         return {
@@ -208,6 +230,8 @@ def create_component(
             ),
         }
 
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except BuilderValidationError as e:
         return {
             "_success": False,
@@ -235,25 +259,33 @@ def update_component(
     boomi_client: Boomi,
     profile: str,
     component_id: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Update an existing component.
 
-    If config contains 'xml', does full XML replacement.
-    Otherwise, updates metadata fields (name, description) in existing XML.
+    If config contains 'xml', does full XML replacement — a process body is
+    arranged first (#188, ``layout_mode``).
+    Otherwise, updates metadata fields (name, description) in existing XML; that
+    re-submits the live body with its geometry untouched (#188 exemption).
     """
     try:
         if config.get('xml'):
-            # Full XML replacement
+            # Full XML replacement, arranged once immediately before the push.
+            xml, layout_report = arrange_process_body(config['xml'], layout_mode)
             result = boomi_client.component.update_component_raw(
-                component_id, config['xml']
+                component_id, xml
             )
-            return {
+            updated = {
                 "_success": True,
                 "message": f"Updated component '{component_id}' with provided XML",
                 "component_id": component_id,
                 "profile": profile,
             }
+            if layout_report["reason"] != "not_process":
+                updated["layout"] = layout_report
+            return updated
 
         # Issue #133 M6.1: typed webservice (API Service Component) structured
         # update — read-merge-write with the builder's preservation policy
@@ -314,15 +346,23 @@ def update_component(
             component_id, modified_xml
         )
 
-        return {
+        updated = {
             "_success": True,
             "message": f"Updated component '{current['name']}'",
             "component_id": component_id,
             "profile": profile,
         }
+        # #188: a metadata-only update keeps the canvas geometry (a rename must
+        # not move shapes); a process says so in its layout report.
+        metadata_layout = layout_report_for(modified_xml)
+        if metadata_layout is not None:
+            updated["layout"] = metadata_layout
+        return updated
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except BuilderValidationError as e:
         # Issue #133: the typed webservice update path surfaces the builder's
         # structured validation envelope (same shape as create).
@@ -352,9 +392,15 @@ def clone_component(
     boomi_client: Boomi,
     profile: str,
     component_id: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Clone an existing component with a new name.
+
+    #188: a process clone is arranged (``layout_mode``) after every metadata
+    change, immediately before the create; ``"preserve"`` keeps the source's
+    coordinates.
 
     PLACEMENT: pass ``folder_id``. The clone copies the source document and
     sets whichever folder attributes the config names, and this platform reads
@@ -397,9 +443,10 @@ def clone_component(
             set_description_element(root, config['description'])
 
         new_xml = ET.tostring(root, encoding='unicode')
+        new_xml, layout_report = arrange_process_body(new_xml, layout_mode)
         result = _create_component_raw(boomi_client, new_xml)
 
-        return {
+        cloned = {
             "_success": True,
             "message": f"Cloned '{source['name']}' as '{new_name}'",
             "component_id": result['component_id'],
@@ -408,9 +455,14 @@ def clone_component(
             "source_component_id": component_id,
             "profile": profile,
         }
+        if layout_report["reason"] != "not_process":
+            cloned["layout"] = layout_report
+        return cloned
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except ApiError as e:
         return {
             "_success": False,
@@ -468,10 +520,24 @@ def manage_component_action(
     boomi_client: Boomi,
     profile: str,
     action: str,
+    *,
+    layout_mode: Optional[str] = None,
     **params
 ) -> Dict[str, Any]:
-    """Route manage_component actions."""
+    """Route manage_component actions.
+
+    #188: the root ``config.layout`` control ("arrange" | "preserve") is consumed
+    HERE, before any builder dispatch, for create/update/clone; an internal caller
+    may pass ``layout_mode`` instead.
+    """
     try:
+        if action in ("create", "update", "clone"):
+            if isinstance(params.get("config"), dict):
+                params["config"], layout_mode = resolve_layout_control(
+                    params["config"], explicit=layout_mode
+                )
+            else:
+                _, layout_mode = resolve_layout_control({}, explicit=layout_mode)
         if action == "create":
             config = params.get("config", {})
             if not config:
@@ -480,7 +546,7 @@ def manage_component_action(
                     "error": "config is required for 'create' action",
                     "hint": 'Provide config: {"xml": "<Component ...>"} with valid Boomi XML. Use query_components get action on an existing component to obtain an XML template.',
                 }
-            return create_component(boomi_client, profile, config)
+            return create_component(boomi_client, profile, config, layout_mode=layout_mode)
 
         elif action == "update":
             component_id = params.get("component_id")
@@ -496,7 +562,9 @@ def manage_component_action(
                     "error": "config is required for 'update' action",
                     "hint": 'Provide config with fields to update: {"name": "New Name"}',
                 }
-            return update_component(boomi_client, profile, component_id, config)
+            return update_component(
+                boomi_client, profile, component_id, config, layout_mode=layout_mode
+            )
 
         elif action == "clone":
             component_id = params.get("component_id")
@@ -512,7 +580,9 @@ def manage_component_action(
                     "error": "config with 'name' is required for 'clone' action",
                     "hint": 'Provide config: {"name": "Cloned Component Name"}',
                 }
-            return clone_component(boomi_client, profile, component_id, config)
+            return clone_component(
+                boomi_client, profile, component_id, config, layout_mode=layout_mode
+            )
 
         elif action == "delete":
             component_id = params.get("component_id")
@@ -530,6 +600,8 @@ def manage_component_action(
                 "hint": "Valid actions are: create, update, clone, delete",
             }
 
+    except ProcessLayoutError as e:
+        return {**layout_refusal(e), "profile": profile}
     except ApiError as e:
         return {
             "_success": False,

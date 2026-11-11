@@ -599,3 +599,36 @@ def test_every_active_golden_arranges_without_error():
         out, report = arrange_process_body(xml)
         processes += report["reason"] != "not_process"
     assert processes, "no active golden is a process"
+
+
+# ------------------------------------------------------------------ #188: shape-matrix captures
+
+MATRIX = FIXTURES / "shape_matrix"
+MATRIX_CASES = sorted(p.stem for p in (MATRIX / "after").glob("*.xml"))
+
+
+def test_the_shape_matrix_covers_every_unrecorded_shape_type_and_start_variant():
+    assert MATRIX_CASES == ["m1_shape_types", "s_connector", "s_connector_long", "s_noaction",
+                            "s_noaction_long", "s_passthrough", "s_passthrough_long", "s_wss",
+                            "s_wss_long"]
+    types = set()
+    starts = set()
+    for name in MATRIX_CASES:
+        xml = (MATRIX / "before" / f"{name}.xml").read_text(encoding="utf-8")
+        types |= {s.shapetype for s in parse(xml)}
+        root = ET.fromstring(xml.encode("utf-8"))
+        start = next(el for el in root.iter() if isinstance(el.tag, str) and local(el.tag) == "shape"
+                     and el.get("shapetype") == "start")
+        config = next(iter(start.find("configuration")))
+        starts.add(local(config.tag) + ":" + (config.get("actionType") or ""))
+    assert {"connectoraction", "map", "dataprocess", "doccacheload", "doccacheretrieve",
+            "doccacheremove"} <= types
+    assert starts == {"noaction:", "passthroughaction:", "connectoraction:Listen", "connectoraction:GET"}
+
+
+@pytest.mark.parametrize("name", MATRIX_CASES)
+def test_the_emulator_matches_boomi_on_the_shape_matrix(name):
+    before = (MATRIX / "before" / f"{name}.xml").read_text(encoding="utf-8")
+    after = (MATRIX / "after" / f"{name}.xml").read_text(encoding="utf-8")
+    assert before != after
+    assert compare(autoformat_xml(before), after) == []

@@ -226,6 +226,14 @@ from .components.builders.transform_function_wrapper_builder import (
     get_transform_function_wrapper_builder,
 )
 from .components.component_update_preservation import merge_for_update
+from ..arrange import (
+    DEFAULT_LAYOUT_MODE,
+    ProcessLayoutError,
+    arrange_for_submission,
+    arrange_process_body,
+    layout_refusal,
+    resolve_layout_control,
+)
 from pydantic import ValidationError
 
 from ..errors import (
@@ -3221,8 +3229,14 @@ def _apply_structured_update(
     built_xml: str,
     policy: Optional[PreservationPolicy],
     on_pre_push=None,
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Read-merge-write one component, with a hook at the push itself.
+
+    #188: a process body is arranged (``layout_mode``) EXACTLY here — after the merge,
+    before the digest, ``on_pre_push`` and the transport — so the digest describes the
+    arranged bytes and a layout refusal is a free, written-nothing refusal.
 
     ``on_pre_push`` runs immediately before the platform call and may return a
     refusal envelope to abort the push. It exists because an update does real work
@@ -3288,6 +3302,13 @@ def _apply_structured_update(
         if exc.details:
             envelope["details"] = exc.details
         return envelope
+    try:
+        merged_xml, layout_report = arrange_process_body(merged_xml, layout_mode)
+    except ProcessLayoutError as exc:
+        return layout_refusal(exc)
+    layout_fields = (
+        {} if layout_report["reason"] == "not_process" else {"layout": layout_report}
+    )
     # Digested immediately BEFORE the push (§6 AR1-05c): the attestation must
     # describe the bytes as they left this process, not a value recomputed after
     # the platform answered.
@@ -3334,6 +3355,7 @@ def _apply_structured_update(
             # here now, for the arm where it actually matters.
             "submitted_xml": merged_xml,
             "submitted_xml_digest": submitted_xml_digest,
+            **layout_fields,
         }
     return {
         "write_attempted": True,
@@ -3354,6 +3376,7 @@ def _apply_structured_update(
         # bytes the platform never received. Additive: no existing caller reads it.
         "submitted_xml": merged_xml,
         "submitted_xml_digest": submitted_xml_digest,
+        **layout_fields,
     }
 
 
@@ -3744,6 +3767,7 @@ def _execute_component(
     literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
     selected_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
     placement: Optional["_ComponentPlacement"] = None,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Execute ONE component step.
 
@@ -3860,7 +3884,8 @@ def _execute_component(
                 }
             if comp.action == "create":
                 return create_component(
-                    boomi_client, profile, {"xml": xml}, folder_id=folder_id
+                    boomi_client, profile, {"xml": xml}, folder_id=folder_id,
+                    layout_mode=layout_mode,
                 )
             if not target_id:
                 return {
@@ -3877,6 +3902,7 @@ def _execute_component(
                 comp,
                 xml,
                 getattr(builder_cls, "PRESERVATION_POLICY", None),
+                layout_mode=layout_mode,
             )
 
         # No process_kind: legacy freeform process JSON authoring has been
@@ -3935,7 +3961,8 @@ def _execute_component(
                 }
         if comp.action == "create":
             return create_connector(
-                boomi_client, profile, payload, folder_id=folder_id
+                boomi_client, profile, payload, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {"_success": False, "error": f"Missing component_id for update of connector '{comp.key}'"}
@@ -4012,7 +4039,9 @@ def _execute_component(
                     "folder_name, folder_id) for a smart-merge update."
                 ),
             }
-        return update_connector(boomi_client, profile, target_id, payload)
+        return update_connector(
+            boomi_client, profile, target_id, payload, layout_mode=layout_mode
+        )
 
     if comp.type == "trading_partner":
         if comp.action == "create":
@@ -4505,11 +4534,14 @@ def _execute_component(
 
     if comp.action == "create":
         return create_component(
-            boomi_client, profile, payload, folder_id=folder_id
+            boomi_client, profile, payload, folder_id=folder_id,
+            layout_mode=layout_mode,
         )
     if not target_id:
         return {"_success": False, "error": f"Missing component_id for update of component '{comp.key}'"}
-    return update_component(boomi_client, profile, target_id, payload)
+    return update_component(
+        boomi_client, profile, target_id, payload, layout_mode=layout_mode
+    )
 
 
 def _first_nonblank_str(*values: Any) -> Optional[str]:
@@ -9066,6 +9098,9 @@ def _execute_canonical_process(
     #: afterwards. Both arms now refuse in the window where a refusal still
     #: costs nothing.
     on_pre_push=None,
+    #: #188: the write-time layout of the root's body ("arrange" | "preserve"). The
+    #: body is arranged once, after placement and before the digest, on both arms.
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
 ) -> Dict[str, Any]:
     """Materialize and apply ONE canonical ProcessIR root, and attest it.
 
@@ -9329,6 +9364,7 @@ def _execute_canonical_process(
             xml,
             PROCESS_PRESERVATION_POLICY,
             on_pre_push=on_pre_push,
+            layout_mode=layout_mode,
         )
     else:
         # THE PLACEMENT IS BOUND HERE, ON THE CREATE, AND NOWHERE EARLIER
@@ -9344,6 +9380,18 @@ def _execute_canonical_process(
         # An UPDATE deliberately gets none of this: update preservation keeps
         # the component where it already lives.
         xml = with_folder_id(xml, resolved_folder_id)
+        # #188: ARRANGED ONCE, HERE — after placement (the final body) and before
+        # the digest, so the attested digest is over the arranged bytes. The
+        # receipt tells the raw create below that these bytes are already
+        # arranged, so it submits them unchanged instead of arranging again.
+        try:
+            layout_receipt = arrange_for_submission(xml, layout_mode)
+        except ProcessLayoutError as exc:
+            layout_receipt = None
+            layout_refusal_result = layout_refusal(exc)
+        else:
+            layout_refusal_result = None
+            xml = layout_receipt.xml
         # Digested immediately BEFORE the raw create call (§6 AR1-05c, plan §4
         # recording point 2). The raw create path sends the XML unchanged, so
         # these are the exact UTF-8 bytes the platform receives.
@@ -9372,12 +9420,21 @@ def _execute_canonical_process(
         # process half-applied. The failure path below already knows how to
         # serve a `write_attempted: False` exec result: it reports `refused`,
         # not `failed`, and lifts the error code onto the envelope.
-        _refusal = on_pre_push() if on_pre_push is not None else None
-        if _refusal is not None:
-            _refusal.setdefault("write_attempted", False)
-            exec_result = _refusal
+        if layout_refusal_result is not None:
+            # A layout refusal precedes the pre-push check and the create: it is
+            # stamped `write_attempted: False`, so it is served as `refused`.
+            exec_result = layout_refusal_result
+            precomputed_digest = None
         else:
-            exec_result = create_component(boomi_client, profile, {"xml": xml})
+            _refusal = on_pre_push() if on_pre_push is not None else None
+            if _refusal is not None:
+                _refusal.setdefault("write_attempted", False)
+                exec_result = _refusal
+            else:
+                exec_result = create_component(
+                    boomi_client, profile, {"xml": xml},
+                    layout_mode=layout_mode, _layout_receipt=layout_receipt,
+                )
 
     component_id = _extract_component_id(exec_result) or (
         target_id if action == "update" else None
@@ -9481,6 +9538,9 @@ def _execute_canonical_process(
         result=exec_result,
         _success=succeeded,
     )
+    # #188: the layout report of the one arrangement this root's body received.
+    if isinstance(exec_result, dict) and "layout" in exec_result:
+        result["layout"] = exec_result["layout"]
     # The step's OWN diagnosis travels, exactly as the component arm lifts it.
     # Hard-setting `error_code: None` buried the real code — measured:
     # `UPDATE_PRESERVATION_FETCH_FAILED` sitting one level down at
@@ -9861,7 +9921,13 @@ def _placement_warning(subject: str, key: str, step: Dict[str, Any]) -> str:
     )
 
 
-def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_plan(
+    boomi_client: Boomi,
+    profile: str,
+    config: Dict[str, Any],
+    *,
+    layout_mode: str = DEFAULT_LAYOUT_MODE,
+) -> Dict[str, Any]:
     dry_run = bool(config.get("dry_run", True))
 
     # --- Typed apply gate (issue #146) ---------------------------------------
@@ -10863,6 +10929,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                         if _root_replay_grants and not dry_run
                         else None
                     ),
+                    layout_mode=layout_mode,
                 )
                 results[key] = outcome["result"]
                 if outcome.get("applied_name") and outcome.get("requested_name") and (
@@ -11203,6 +11270,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 literal_indexes=literal_profile_indexes,
                 selected_indexes=selected_profile_indexes,
                 placement=_placement,
+                layout_mode=layout_mode,
             )
 
             component_id = _extract_component_id(exec_result)
@@ -11244,6 +11312,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 "name": _created_component_name(exec_result, comp),
                 "result": exec_result,
             }
+            # #188: the layout report of the one arrangement a process body got.
+            if isinstance(exec_result, dict) and "layout" in exec_result:
+                results[key]["layout"] = exec_result["layout"]
 
             # THE SAME PLACEMENT HONESTY THE ROOT HAS CARRIED SINCE #153, on the
             # components the fan-out places (QA-157-r1-01). The root was attested
@@ -12785,16 +12856,28 @@ def build_integration_action(
     profile: str,
     action: str,
     config: Optional[Dict[str, Any]] = None,
+    *,
+    layout_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Route integration builder actions.
 
     Issue #146 adds ``compile`` — additively. ``plan``, ``apply`` and ``verify``
     keep their existing contracts, and a request with no ``authoring_request``
     key stays on the legacy branches unchanged.
+
+    #188: the root ``config.layout`` control ("arrange" default | "preserve") is
+    a WRITE-TIME control. It is validated and removed HERE, before any action
+    dispatch, so plan, compile, verify, fingerprints and compile bindings never
+    see it; ``apply`` threads the effective mode to every process write. An
+    internal caller may pass ``layout_mode`` instead.
     """
     cfg = config or {}
     if not isinstance(cfg, dict):
         return {"_success": False, "error": "config must be a JSON object"}
+    try:
+        cfg, layout_mode = resolve_layout_control(cfg, explicit=layout_mode)
+    except ProcessLayoutError as exc:
+        return {**layout_refusal(exc), "profile": profile}
 
     # Resolved BEFORE the try: the refusal arms below decorate an apply-route
     # envelope with the typed apply fields, and a name bound inside the try is
@@ -12819,7 +12902,7 @@ def build_integration_action(
             result["profile"] = profile
             return result
         if normalized_action == "apply":
-            result = _apply_plan(boomi_client, profile, cfg)
+            result = _apply_plan(boomi_client, profile, cfg, layout_mode=layout_mode)
             # A TYPED apply must answer in the typed envelope even when the
             # legacy machinery is what refused it. Without this, a refusal by
             # the bound conflict_policy came back as the legacy shape with no
