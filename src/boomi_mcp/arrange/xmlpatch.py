@@ -6,7 +6,7 @@ element stack, so only the canvas shapes and their dragpoints change (see apply(
 
 Vendored from the canvas-Arrange handoff (#188). Changes from the handoff: the canvas is the
 element at the PATH :func:`model.read` selected (not the first ``process/shapes``); attribute
-values are decoded by XML rules (not ``html.unescape``); and every target in the position maps
+values (and namespace declarations) are decoded by XML rules (not ``html.unescape``); and every target in the position maps
 must be patched exactly once, or :class:`PatchCoverageError` is raised before any text is returned.
 """
 import re
@@ -57,19 +57,28 @@ def _scan_tag(text: str, i: int):
     raise ValueError(f"malformed tag {name!r} at offset {i}")
 
 
-def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple[str, ...]) -> str:
+def _element_uri(name: str, nsmap: dict) -> str:
+    prefix = name.split(":", 1)[0] if ":" in name else ""
+    return nsmap.get(prefix, "")
+
+
+def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple) -> str:
     """shape_pos: {shape name: (x, y)}; dp_pos: {(shape name, dragpoint index): (x, y)}.
 
-    Only the canvas is touched: the element whose path of local names from the document root is
-    ``canvas_path`` (the path :func:`model.read` selected) and, inside it, its direct <shape>
-    children and their direct <dragpoints>/<dragpoint> children.
+    Only the canvas is touched: the element whose path of ``(namespace, local name)`` pairs
+    from the document root is ``canvas_path`` (the path :func:`model.read` selected — the
+    tokenizer resolves ``xmlns`` declarations exactly as the parser does) and, inside it, its
+    direct <shape> children and their direct <dragpoints>/<dragpoint> children in the
+    canvas's own namespace.
     """
     out, i, n = [], 0, len(xml_text)
-    stack: list = []
+    stack: list = []      # (namespace uri, local name, in-scope prefix map) per open element
     canvas = None         # stack depth of the canvas <shapes> once open; "done" after it closes
+    canvas_uri = None
     shape = None          # name of the canvas shape whose tag is open
     dp_index = 0
     patched_shapes, patched_dps = set(), set()
+    target_path = tuple(tuple(q) for q in canvas_path)
     while i < n:
         lt = xml_text.find("<", i)
         if lt < 0:
@@ -95,7 +104,7 @@ def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple[str, 
             local = _local(name)
             depth = len(stack)
             if closing:
-                if stack and stack[-1] == local:
+                if stack and stack[-1][1] == local:
                     stack.pop()
                 if isinstance(canvas, int):
                     if len(stack) == canvas - 1:
@@ -105,10 +114,16 @@ def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple[str, 
                 out.append(tag)
                 i = end
                 continue
+            nsmap = dict(stack[-1][2]) if stack else {"xml": "http://www.w3.org/XML/1998/namespace"}
+            for vs, ve, attr, _ in attrs:
+                if attr == "xmlns" or attr.startswith("xmlns:"):
+                    nsmap["" if attr == "xmlns" else attr[6:]] = _attr_value(xml_text, [(vs, ve, attr, None)], attr)
+            uri = _element_uri(name, nsmap)
             target = None
-            if canvas is None and tuple(stack) + (local,) == tuple(canvas_path):
+            if canvas is None and tuple((u, l) for u, l, _ in stack) + ((uri, local),) == target_path:
                 canvas = "done" if empty else depth + 1
-            elif isinstance(canvas, int):
+                canvas_uri = uri
+            elif isinstance(canvas, int) and uri == canvas_uri:
                 if local == "shape" and depth == canvas:
                     shape = _attr_value(xml_text, attrs, "name")
                     dp_index = 0
@@ -120,7 +135,7 @@ def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple[str, 
                     if empty:
                         shape = None
                 elif (local == "dragpoint" and shape is not None and depth == canvas + 2
-                      and stack[-1] == "dragpoints"):
+                      and stack[-1][1] == "dragpoints" and stack[-1][0] == canvas_uri):
                     key = (shape, dp_index)
                     dp_index += 1
                     if key in dp_pos:
@@ -130,7 +145,7 @@ def apply(xml_text: str, shape_pos: dict, dp_pos: dict, canvas_path: Tuple[str, 
                 tag = _rewrite(xml_text, lt, end, attrs, close_at, target)
             out.append(tag)
             if not empty:
-                stack.append(local)
+                stack.append((uri, local, nsmap))
             i = end
     missing_shapes = set(shape_pos) - patched_shapes
     missing_dps = set(dp_pos) - patched_dps

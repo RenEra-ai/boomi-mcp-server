@@ -11078,8 +11078,11 @@ def list_capabilities_action(
                     "'layout' = 'arrange' (default) | 'preserve': consumed before any "
                     "action (never part of a plan, fingerprint or compile hash), it lays "
                     "out every process apply writes with Boomi's own Arrange layout and "
-                    "is reported per process as results.<key>.layout; PROCESS_LAYOUT_* "
-                    "codes refuse before any write."
+                    "is reported per process as results.<key>.layout. "
+                    "PROCESS_LAYOUT_MODE_INVALID refuses the whole call before any write; "
+                    "the other PROCESS_LAYOUT_* codes refuse that one process before it is "
+                    "submitted, while components written earlier in the same apply stay "
+                    "accounted for in partial_results (read mutation_status)."
                 ),
             },
             "authority_versions": _AUTHORITY_VERSIONS,

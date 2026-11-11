@@ -2477,9 +2477,12 @@ if build_integration_action:
             Arrange is one operation, not a fixed point: unset dragpoints keep their
             shape's pre-Arrange height, so re-arranging can move them again.
             Results carry layout: {applied, mode, reason, columns, rows,
-            estimated_extent, warnings}. Refused before anything is written:
-            PROCESS_LAYOUT_MODE_INVALID, PROCESS_LAYOUT_XML_INVALID (also 
-            under preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE, PROCESS_LAYOUT_INTERNAL_ERROR
+            estimated_extent, warnings}. PROCESS_LAYOUT_MODE_INVALID refuses the
+            whole call before any write. PROCESS_LAYOUT_XML_INVALID (also under
+            preserve), PROCESS_LAYOUT_CANVAS_UNSUPPORTED, PROCESS_LAYOUT_UNARRANGEABLE
+            and PROCESS_LAYOUT_INTERNAL_ERROR refuse that ONE process before it is
+            submitted; components written earlier in the same apply stay accounted
+            for in partial_results (mutation_status says whether anything was written).
 
 
         Actions:

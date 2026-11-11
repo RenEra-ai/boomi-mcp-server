@@ -398,7 +398,8 @@ def test_the_component_canvas_is_selected_by_path():
     src = component(START + STOP).replace("<bns:object>", "<bns:description>" + decoy
                                           + "</bns:description><bns:object>")
     canvas = _model.read(src)
-    assert canvas.path == ("Component", "object", "process", "shapes")
+    bns = "http://api.platform.boomi.com/"
+    assert canvas.path == ((bns, "Component"), (bns, "object"), ("", "process"), ("", "shapes"))
     out, report = arrange_process_body(src)
     assert decoy in out
     assert xy(out, "t") == (240.0, 48.0)
@@ -408,7 +409,7 @@ def test_the_component_canvas_is_selected_by_path():
 @pytest.mark.parametrize("src", [
     component(START + STOP, extra_object='<process><shapes/></process>'),            # two processes
     component(START + STOP).replace("</shapes>", "</shapes><shapes/>"),              # two canvases
-    '<bns:Component xmlns:bns="u"><bns:object/><bns:object/></bns:Component>',
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/"><bns:object/><bns:object/></bns:Component>',
 ])
 def test_an_ambiguous_or_unsupported_canvas_is_refused(src):
     with pytest.raises(ProcessLayoutError) as caught:
@@ -638,3 +639,58 @@ def test_the_emulator_matches_boomi_on_the_shape_matrix(name):
     after = (MATRIX / "after" / f"{name}.xml").read_text(encoding="utf-8")
     assert before != after
     assert compare(autoformat_xml(before), after) == []
+
+
+# ------------------------------------------------------------------ #188 architect review: namespaces, encodings
+
+def test_foreign_namespace_siblings_are_neither_counted_nor_arranged():
+    """A foreign ``x:object`` beside the real one does not make the canvas ambiguous, and a
+    foreign ``x:process`` (same local names, other namespace) is never rewritten."""
+    foreign = ('<x:process xmlns:x="urn:other"><x:shapes>'
+               '<x:shape name="s" shapetype="start" x="7" y="7"/></x:shapes></x:process>')
+    src = component(START + STOP).replace("<bns:object>", "<x:object xmlns:x='urn:other'/><bns:object>" + foreign)
+    out, report = arrange_process_body(src)
+    assert report["reason"] == "arranged"
+    assert foreign in out
+    assert xy(out, "t") == (240.0, 48.0)
+
+
+def test_a_process_only_in_a_foreign_namespace_is_not_a_process():
+    src = ('<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="connector-settings">'
+           '<bns:object><x:process xmlns:x="urn:other"><x:shapes>' + START + STOP
+           + '</x:shapes></x:process></bns:object></bns:Component>')
+    out, report = arrange_process_body(src)
+    assert out == src and report["reason"] == "not_process"
+
+
+def test_a_component_in_the_default_namespace_is_selected_like_a_prefixed_one():
+    src = component(START + STOP).replace("bns:", "").replace('xmlns:bns=', 'xmlns=')
+    out, report = arrange_process_body(src)
+    assert report["reason"] == "arranged" and xy(out, "t") == (240.0, 48.0)
+
+
+def test_a_redeclared_prefix_is_resolved_like_the_parser_does():
+    """The tokenizer tracks xmlns scopes: the same prefix bound to a foreign namespace on an
+    inner element is not the component's ``object``."""
+    src = ('<b:Component xmlns:b="http://api.platform.boomi.com/"><b:object>'
+           '<process><shapes>' + START + STOP + '</shapes></process></b:object></b:Component>')
+    out, _ = arrange_process_body(src)
+    assert xy(out, "t") == (240.0, 48.0)
+    shadow = src.replace("<b:object>", "<b:object><b:object xmlns:b='urn:other'/>", 1)
+    out2, _ = arrange_process_body(shadow)
+    assert xy(out2, "t") == (240.0, 48.0)
+
+
+@pytest.mark.parametrize("encoding", ["ISO-8859-1", "UTF-8", "windows-1252"])
+def test_a_decoded_string_is_not_decoded_again_under_its_declaration(encoding):
+    src = (f'<?xml version="1.0" encoding="{encoding}"?>'
+           + proc(START.replace('name="s"', 'name="s\u00e9"').replace('toShape="t"', 'toShape="unset"')))
+    out, report = arrange_process_body(src)
+    assert report["reason"] == "arranged"
+    assert parse(out)[0].name == "s\u00e9" and xy(out, "s\u00e9") == (48.0, 46.0)
+
+
+def test_a_utf16_declared_non_process_string_passes_through():
+    src = '<?xml version="1.0" encoding="UTF-16"?><bns:Component xmlns:bns="u" type="x"/>'
+    out, report = arrange_process_body(src)
+    assert out == src and report["reason"] == "not_process"

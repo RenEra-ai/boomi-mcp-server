@@ -4006,6 +4006,7 @@ def _execute_component(
                     comp,
                     built_xml,
                     getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+                    layout_mode=layout_mode,
                 )
             # Codex r11 P2: non-metadata connector update for an
             # unsupported connector_type/operation_mode (e.g. http,
@@ -4128,7 +4129,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "transform.function"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4144,6 +4146,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(wrapper_cls, "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #41: structured script.mapping routes through ScriptMappingBuilder.
@@ -4173,7 +4176,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "script.mapping"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4189,6 +4193,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(builder_class, "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #131 M11.7: structured processproperty routes through
@@ -4219,7 +4224,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "processproperty"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4235,6 +4241,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(builder_class, "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #122 M11.3: structured documentcache routes through
@@ -4263,7 +4270,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "documentcache"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4279,6 +4287,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(builder_class, "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #133 M6.1: structured webservice (API Service Component) routes
@@ -4310,7 +4319,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "webservice"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4326,6 +4336,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(builder_class, "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #26 + #45: profile.db update path. Like profile.json/.xml below,
@@ -4382,6 +4393,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #26: generated profile.json / profile.xml route through the
@@ -4414,7 +4426,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": comp.type}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4430,6 +4443,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     # Issue #26: transform.map routes through the direct-map builder. Source
@@ -4514,7 +4528,8 @@ def _execute_component(
         envelope = {"xml": built_xml, "component_type": "transform.map"}
         if comp.action == "create":
             return create_component(
-                boomi_client, profile, envelope, folder_id=folder_id
+                boomi_client, profile, envelope, folder_id=folder_id,
+                layout_mode=layout_mode,
             )
         if not target_id:
             return {
@@ -4530,6 +4545,7 @@ def _execute_component(
             comp,
             built_xml,
             getattr(type(map_builder_instance), "PRESERVATION_POLICY", None),
+            layout_mode=layout_mode,
         )
 
     if comp.action == "create":

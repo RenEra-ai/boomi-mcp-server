@@ -46,8 +46,12 @@ class Shape:
 @dataclass
 class Canvas:
     kind: str
-    path: Tuple[str, ...]
+    path: Tuple[Tuple[str, str], ...]
     shapes: List[Shape]
+
+
+#: The Boomi Component API namespace: the only one whose ``Component``/``object`` is a component.
+BNS = "http://api.platform.boomi.com/"
 
 
 def local(tag: str) -> str:
@@ -55,58 +59,73 @@ def local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
 
 
+def qname(tag: str) -> Tuple[str, str]:
+    """``(namespace uri, local name)`` of an ElementTree tag; ``""`` for no namespace."""
+    if tag.startswith("{"):
+        uri, name = tag[1:].split("}", 1)
+        return uri, name
+    return "", tag
+
+
+def _children_q(el, uri: str, name: str):
+    return [c for c in el if isinstance(c.tag, str) and qname(c.tag) == (uri, name)]
+
+
 def _children(el, name):
-    return [c for c in el if isinstance(c.tag, str) and local(c.tag) == name]
+    """Children with this local name IN THE PARENT'S OWN NAMESPACE (canvas internals)."""
+    return _children_q(el, qname(el.tag)[0], name)
 
 
 def _contains_process(el) -> bool:
     return any(isinstance(d.tag, str) and local(d.tag) == "process" for d in el.iter())
 
 
-def _process_canvas(process_el, prefix: Tuple[str, ...]):
-    shapes = _children(process_el, "shapes")
+def _process_canvas(process_el, prefix: Tuple[Tuple[str, str], ...]):
+    pq = qname(process_el.tag)
+    shapes = _children_q(process_el, pq[0], "shapes")
     if not shapes:
         return None, "empty_canvas", prefix
     if len(shapes) > 1:
         raise CanvasUnsupported("the process holds more than one <shapes> element")
-    return shapes[0], "canvas", prefix + ("shapes",)
+    return shapes[0], "canvas", prefix + ((pq[0], "shapes"),)
 
 
 def select_canvas(root):
-    """(shapes element or None, kind, path of local names from the root to the canvas).
+    """(shapes element or None, kind, path of ``(namespace, local name)`` from the root to the canvas).
 
-    | root        | selection                                                                  |
-    |-------------|----------------------------------------------------------------------------|
-    | Component   | its one ``object`` child's one ``process`` child's one ``shapes`` child      |
-    | process     | its one ``shapes`` child                                                    |
-    | shapes      | itself                                                                      |
-    | anything    | not a process, unless it holds ``process`` markup (then unsupported)        |
+    | root                       | selection                                                     |
+    |----------------------------|---------------------------------------------------------------|
+    | Component (Boomi API ns)   | its one ``object`` (API ns) → one ``process`` (no ns or API ns) → one ``shapes`` (the process's ns) |
+    | process                    | its one ``shapes`` (same namespace)                           |
+    | shapes                     | itself                                                        |
+    | anything                   | not a process, unless it holds ``process`` markup (then unsupported) |
 
-    A Component with no ``object/process`` is not a process, unless it declares
-    ``type="process"`` (then an empty canvas: there is nothing to arrange). The declared type
-    never hides a body: ``object/process`` is arranged whatever ``type`` says.
+    Elements in any other namespace are not part of the component (a foreign ``x:object`` or
+    ``x:process`` is neither counted nor arranged). A Component with no ``object/process`` is not a
+    process, unless it declares ``type="process"`` (then an empty canvas: nothing to arrange). The
+    declared type never hides a body: ``object/process`` is arranged whatever ``type`` says.
     """
-    name = local(root.tag)
-    if name == "shapes":
-        return root, "canvas", ("shapes",)
-    if name == "process":
-        return _process_canvas(root, ("process",))
-    if name == "Component":
-        objects = _children(root, "object")
+    rq = qname(root.tag)
+    if rq[1] == "shapes":
+        return root, "canvas", (rq,)
+    if rq[1] == "process":
+        return _process_canvas(root, (rq,))
+    if rq == (BNS, "Component"):
+        objects = _children_q(root, BNS, "object")
         if len(objects) > 1:
             raise CanvasUnsupported("the component holds more than one <object> element")
-        processes = _children(objects[0], "process") if objects else []
+        processes = [c for o in objects for uri in ("", BNS) for c in _children_q(o, uri, "process")]
         if len(processes) > 1:
             raise CanvasUnsupported("the component object holds more than one <process> element")
         if not processes:
             # A declared type="process" with no body has nothing to arrange; it is passed
             # through as an empty canvas. A body under ANY declared type is found and arranged.
             if root.get("type") == "process":
-                return None, "empty_canvas", ("Component", "object")
+                return None, "empty_canvas", (rq, (BNS, "object"))
             return None, "not_process", ()
-        return _process_canvas(processes[0], ("Component", "object", "process"))
+        return _process_canvas(processes[0], (rq, (BNS, "object"), qname(processes[0].tag)))
     if _contains_process(root):
-        raise CanvasUnsupported(f"process markup inside an unsupported <{name}> wrapper")
+        raise CanvasUnsupported(f"process markup inside an unsupported <{rq[1]}> wrapper")
     return None, "not_process", ()
 
 
@@ -146,7 +165,9 @@ def read(xml_text) -> Canvas:
     if isinstance(xml_text, bytes):
         xml_text = xml_text.decode("utf-8")
     _reject_doctype(xml_text)
-    root = ET.fromstring(xml_text.encode("utf-8"))
+    # Parsed AS A STRING: the text is already decoded, so re-encoding it under its own
+    # declaration (encoding="ISO-8859-1", "UTF-16", ...) would decode it a second time.
+    root = ET.fromstring(xml_text)
     shapes_el, kind, path = select_canvas(root)
     if shapes_el is None:
         return Canvas(kind, path, [])

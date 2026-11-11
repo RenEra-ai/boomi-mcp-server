@@ -634,3 +634,116 @@ def test_every_hook_accepts_an_explicit_internal_preserve(monkeypatch):
         assert result["layout"]["mode"] == "preserve", name
     # _apply_structured_update, _execute_canonical_process, _execute_component, safe edit and
     # build_integration_action are covered above with layout_mode="preserve".
+
+
+# ---- #188 architect review, evaluation 1
+
+
+def test_a_canonical_create_whose_transport_fails_was_arranged_once_and_attests_the_sent_bytes():
+    """Exactly-once and the digest on the FAILURE arm, through the real create_component and
+    its receipt (the earlier canonical-failure tests replace create_component entirely)."""
+    import hashlib as _hashlib
+
+    sent = []
+
+    def raw_create_fails(_client, xml, **_kw):
+        sent.append(xml)
+        raise RuntimeError("connection reset after the body left")
+
+    calls = []
+    real_layout_arrange = _arrange_layout.arrange
+
+    def count_layout(shapes):
+        calls.append(1)
+        return real_layout_arrange(shapes)
+
+    emitted = []
+    real_submission = ib.arrange_for_submission
+
+    def spy(xml, mode):
+        emitted.append(xml)
+        return real_submission(xml, mode)
+
+    counter = {"n": 0}
+
+    def other(*_a, **_k):
+        counter["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % counter["n"]}
+
+    ib._BUILD_REGISTRY.clear()
+    config = {"authoring_request": _typed_payload(), "dry_run": False}
+    with patch.object(ib, "paginate_metadata", return_value=[]), \
+            patch.object(ib, "_execute_component", side_effect=other), \
+            patch.object(ib, "component_get_xml", side_effect=lambda *a, **k: {"type": "x", "xml": "<x/>"}), \
+            patch.object(ib, "arrange_for_submission", side_effect=spy), \
+            patch.object(_arrange_layout, "arrange", side_effect=count_layout), \
+            patch.object(_mc, "_create_component_raw", side_effect=raw_create_fails):
+        result = ib.build_integration_action(MagicMock(), "p", "apply", config=config)
+    assert result["_success"] is False
+    (submitted,) = sent
+    assert submitted == arrange_process_body(emitted[0])[0] and len(calls) == 1
+    assert result["mutation_status"] != "none"  # dependencies were written; the root's write is uncertain
+    partial = result.get("partial_results") or {}
+    assert partial["proc"]["status"] == "failed"
+    # the write note of an unidentified, mutation-uncertain submission carries the digest of
+    # the bytes that left — the arranged ones
+    notes = (result.get("process_writes") or []) + (result.get("process_mutations") or [])
+    digests = {n.get("submitted_xml_digest") for n in notes}
+    assert "sha256:" + _hashlib.sha256(submitted.encode()).hexdigest() in digests, notes
+
+
+def _write_calls_without_layout_mode(source: str):
+    """Names of component-write calls inside ``_execute_component`` that do not forward
+    ``layout_mode`` (trading partners take a typed model, not a component body)."""
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(source))
+    func = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_execute_component")
+    writes = {"create_component", "update_component", "create_connector", "update_connector",
+              "_apply_structured_update"}
+    missing = []
+    for node in ast.walk(func):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in writes:
+            if not any(k.arg == "layout_mode" for k in node.keywords):
+                missing.append((node.func.id, node.lineno))
+    return missing
+
+
+def test_every_component_write_in_execute_component_forwards_the_layout_mode():
+    import inspect
+    assert _write_calls_without_layout_mode(inspect.getsource(ib._execute_component)) == []
+
+
+def test_the_forwarding_check_catches_a_dropped_layout_mode():
+    """Non-vacuity: the exact defect architect evaluation 1 found (a structured connector
+    update dropping the mode) is caught."""
+    import inspect
+    source = inspect.getsource(ib._execute_component)
+    broken = source.replace("layout_mode=layout_mode,", "", 1)
+    assert broken != source
+    assert _write_calls_without_layout_mode(broken)
+
+
+def test_a_structured_connector_update_keeps_preserve_for_a_process_sibling(monkeypatch):
+    """Architect evaluation 1, finding 1: a structured connector update whose merged body
+    carries an ``object/process`` sibling must honour ``preserve``."""
+    with_process = PROCESS  # stands in for the merged body
+    monkeypatch.setattr(ib, "merge_for_update", lambda current, built, policy: with_process)
+    seen = []
+    real = ib._apply_structured_update
+
+    def spy(*a, **k):
+        seen.append(k.get("layout_mode"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(ib, "_apply_structured_update", spy)
+    comp = ib.IntegrationComponentSpec(
+        key="conn", type="connector-settings", action="update", name="REST",
+        config={"connector_type": "rest", "component_name": "REST", "base_url": "https://api.example.com",
+                "auth": "NONE"})
+    client = _Client()
+    client.connector = MagicMock()  # connector-type validation reads the account's catalog
+    result = ib._execute_component(client, "p", comp, comp.config, target_id="x", layout_mode="preserve")
+    assert seen == ["preserve"], (seen, result)
+    assert _sent(client) == [PROCESS]
