@@ -351,6 +351,13 @@ def test_the_structured_update_preserves_on_request(monkeypatch):
 def test_build_integration_refuses_an_invalid_layout_before_dispatch():
     result = ib.build_integration_action(object(), "p", "apply", {"layout": "sideways"})
     assert result["error_code"] == "PROCESS_LAYOUT_MODE_INVALID" and result["write_attempted"] is False
+    # the apply contract's accounting fields, as on every other apply refusal (CDX-188-r1-01)
+    assert (result["action"], result["mutation_status"], result["mutation_performed"]) == ("apply", "none", False)
+    typed = ib.build_integration_action(object(), "p", "apply",
+                                        {"layout": "sideways", "authoring_request": {"contract_version": "2"}})
+    assert (typed["mutation_status"], typed["mutation_performed"]) == ("none", False)
+    plan = ib.build_integration_action(object(), "p", "plan", {"layout": "sideways"})
+    assert plan["error_code"] == "PROCESS_LAYOUT_MODE_INVALID" and "mutation_status" not in plan
     result = ib.build_integration_action(object(), "p", "apply", {"layout": "arrange"}, layout_mode="preserve")
     assert result["error_code"] == "PROCESS_LAYOUT_MODE_INVALID"
 

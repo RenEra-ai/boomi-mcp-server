@@ -12874,15 +12874,20 @@ def build_integration_action(
     cfg = config or {}
     if not isinstance(cfg, dict):
         return {"_success": False, "error": "config must be a JSON object"}
-    try:
-        cfg, layout_mode = resolve_layout_control(cfg, explicit=layout_mode)
-    except ProcessLayoutError as exc:
-        return {**layout_refusal(exc), "profile": profile}
 
     # Resolved BEFORE the try: the refusal arms below decorate an apply-route
     # envelope with the typed apply fields, and a name bound inside the try is
     # unbound in the handler if the very first statement is what raised.
     normalized_action = str(action or "").strip().lower()
+
+    try:
+        cfg, layout_mode = resolve_layout_control(cfg, explicit=layout_mode)
+    except ProcessLayoutError as exc:
+        # A no-write refusal; on the apply route it carries the accounting fields
+        # the apply contract tells callers to branch on, like every other refusal.
+        envelope = {**layout_refusal(exc), "profile": profile}
+        _decorate_refusal_route(envelope, normalized_action)
+        return envelope
 
     try:
         if normalized_action == "plan":
