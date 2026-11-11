@@ -4596,8 +4596,8 @@ _SELF_FILLING_USES = {
 
 @pytest.mark.parametrize("use", sorted(_SELF_FILLING_USES))
 def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_unknown_possibility(use):
-    """B21A-OVR-01, a DELIBERATE refusal: an admission of 5b5038c (masked there by finding O) that
-    this batch turns into a refusal, listed and pinned here so the verdict is a decision.
+    """B21A-OVR-01, a DELIBERATE refusal of the property uses — and, since #187, an admission of the
+    ``content`` use, which replays the child's own walk at each call and earns the twin's verdict.
 
     Two waited calls into a child that fills CACHE2 and uses what it retrieves; the same with a
     WRITER child that fills CACHE2 first; and the same with the parent filling CACHE2 between the
@@ -4617,15 +4617,15 @@ def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_u
     use_leg = {"steps": [_READ2] + after, "terminal": _STOP}
     child = _legs(fill, use_leg)
     twice = [("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", child)]
-    assert _both_routes(twice, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    assert _both_routes(twice, "PARENT") == ([] if use == "content" else [(code, "/body/steps/0/legs/1/terminal" + suffix)])
     assert _both_routes(twice, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(fill, use_leg, fill, use_leg))], "PARENT") == []
     writer_first = [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
                     ("WRITER", _legs(fill, _STORES_NOTHING)), ("CACHE_CHILD", child)]
-    assert _both_routes(writer_first, "PARENT") == [(code, "/body/steps/0/legs/1/terminal" + suffix)]
+    assert _both_routes(writer_first, "PARENT") == ([] if use == "content" else [(code, "/body/steps/0/legs/1/terminal" + suffix)])
     parent_fills_between = [("PARENT", _legs(_waited("CACHE_CHILD"), fill, _waited("CACHE_CHILD"))),
                             ("CACHE_CHILD", child)]
-    assert _both_routes(parent_fills_between, "PARENT") == [(code, "/body/steps/0/legs/2/terminal" + suffix)]
+    assert _both_routes(parent_fills_between, "PARENT") == ([] if use == "content" else [(code, "/body/steps/0/legs/2/terminal" + suffix)])
     empties_first = _legs(_EMPTIES2, fill, use_leg)
     for roots in ([("PARENT", _legs(_waited("CACHE_CHILD"), _waited("CACHE_CHILD"))), ("CACHE_CHILD", empties_first)],
                   [("PARENT", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
@@ -4635,7 +4635,7 @@ def test_a_later_waited_call_meets_what_an_earlier_child_may_have_stored_as_an_u
 
 @pytest.mark.parametrize("caller", ("stores_the_profile", "stores_nothing"))
 def test_a_middle_that_calls_a_cache_writer_before_a_self_filling_consumer_meets_an_unknown_possibility(caller):
-    """SOUND-21a-02, a DELIBERATE refusal, listed and pinned like the one above. A middle calls a
+    """SOUND-21a-02, re-decided by #187 against its twin (admitted): it was a DELIBERATE refusal. A middle calls a
     WRITER child that stores P2 in CACHE, then a child that stores P2 in CACHE itself and consumes
     what it retrieves. The middle is refused PROFILE_MISMATCH at its second call while the
     flattened graph is admitted: the writer's content crosses the call as unknown (amendment 3
@@ -4651,7 +4651,7 @@ def test_a_middle_that_calls_a_cache_writer_before_a_self_filling_consumer_meets
     roots = [("PARENT", _legs(caller_leg, _waited("MID"))),
              ("MID", _legs(_waited("WRITER"), _waited("CACHE_CHILD"))),
              ("WRITER", _legs(stores_p2, _STORES_NOTHING)), ("CACHE_CHILD", _legs(stores_p2, consumes))]
-    assert _both_routes(roots, "MID") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+    assert _both_routes(roots, "MID") == []  # #187: the WRITER call replays, so MID earns the twin's admission
     assert _both_routes(roots, "CACHE_CHILD") == []
     assert _errors([("PARENT", _legs(caller_leg, stores_p2, _STORES_NOTHING, stores_p2, consumes))], "PARENT") == []
     without_the_writer = [("PARENT", _legs(caller_leg, _waited("MID"))),
@@ -10583,7 +10583,7 @@ def test_a_childs_write_of_what_its_caller_cached_is_judged_against_the_target_c
     assert _b28_verdict(roots, "CACHE_CHILD", True)[0] == []
 
 
-def test_the_target_cache_left_out_of_its_consumers_re_admits_the_caller(monkeypatch):
+def test_the_target_cache_left_out_of_its_consumers_re_admits_the_caller(monkeypatch, _no_replay):
     from boomi_mcp.errors import PROCESS_IR_SEMANTIC_PROFILE_MISMATCH
 
     monkeypatch.setattr(sys.modules[__name__], "_symbols", lambda: _b186_cache2_symbols(cache_profile_ref="$ref:P2"))
@@ -10969,7 +10969,7 @@ def test_a_restaged_write_is_judged_on_everything_the_retrieve_hands_on(monkeypa
         assert composed == twin == expected, (label, composed, twin)
 
 
-def test_the_callers_content_judged_alone_re_refuses_a_mixture(monkeypatch):
+def test_the_callers_content_judged_alone_re_refuses_a_mixture(monkeypatch, _no_replay):
     """Mutant: the call judges only what the caller stored, without the child's own content — the caller's unprofiled
     documents beside the child's own P1 are admitted either way, but a caller storing nothing beside the child's own
     P1 is admitted where the twin refuses."""
@@ -10982,7 +10982,7 @@ def test_the_callers_content_judged_alone_re_refuses_a_mixture(monkeypatch):
     assert verdicts["nothing_beside_own_p1_into_p2"][0] == set() != verdicts["nothing_beside_own_p1_into_p2"][1]
 
 
-def test_a_mixture_refused_as_any_proved_profile_re_refuses_what_the_twin_admits(monkeypatch):
+def test_a_mixture_refused_as_any_proved_profile_re_refuses_what_the_twin_admits(monkeypatch, _no_replay):
     """Mutant: the pre-evaluation-2 rule — refuse wherever any proved profile other than the target's is among the
     documents — refuses the caller's P1 and P2 together, which the twin admits."""
     _lineage_with_source(
@@ -11012,7 +11012,7 @@ def test_a_called_child_judging_its_own_restaged_write_refuses_what_its_caller_u
     assert verdicts["unprofiled_beside_own_p1_into_p2"][1] == set()
 
 
-def test_reliance_measured_against_no_seed_promotes_a_seed_that_only_unproves(monkeypatch):
+def test_reliance_measured_against_no_seed_promotes_a_seed_that_only_unproves(monkeypatch, _no_replay):
     """Mutant: reliance measured against the unseeded walk, as before evaluation 2 — the seed clearing the child's
     own write refusal by leaving the retrieved documents unproved counts as reliance, so the row becomes an exact
     requirement and the caller's unprofiled documents are refused where the twin admits."""
@@ -11287,15 +11287,16 @@ def _b186_sibling_writer_verdicts():
     return verdicts
 
 
-def test_a_sibling_writers_stored_profile_is_a_recorded_limit():
-    """ARCH-186-e3-01, deferred to #187 (`blocked-by-mechanism`). A call adds documents of no proved profile to every
-    cache its child may write, so a sibling's P1 beside the caller's P1 makes an unproved mixture and the restage into
-    the P2 cache is admitted where the twin, holding the sibling's P1, refuses — the `e22b8fa` behaviour, pinned here
-    so it changes only deliberately. Over every caller content times every sibling content times three targets,
-    directly and through a forwarding middle: 286 cells exact; these 8 fail-open; and, where the caller stores nothing,
-    `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` (a sibling's write behind a producer guarantees no establishment
-    across a call) — beside the twin's codes in 34 cells, in place of the twin's profile mismatch in 8, both sides
-    refusing. The witness fails the moment #187 closes the limit."""
+def test_a_sibling_writers_stored_profile_crosses_the_call():
+    """ARCH-186-e3-01, closed by #187: a covered call replays its child's own walk from the caller's caches, so a
+    sibling writer's P1 beside the caller's P1 is P1, and the restage into the P2 cache is refused as the twin refuses
+    it. Over every caller content times every sibling content times three targets, directly and through a forwarding
+    middle: 294 cells exact and none fail-open. The recorded class keeps its actual refusals: where the caller stores
+    nothing, `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` — a sibling's write behind a producer establishes
+    nothing across a call (#184 amendment 1 rule 7: a completion that skipped the write is still normal), which a
+    replay leaves to the contract — beside the twin's codes in all 42 (the twin admits by its in-process rule in
+    34, so the composition is the stricter side; in 8 both refuse, the composition with the twin's code too).
+    Fail-closed in every cell; the fail-open list is the witness that #187 closed the limit."""
     missing = "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
     verdicts = _b186_sibling_writer_verdicts()
     exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
@@ -11304,13 +11305,12 @@ def test_a_sibling_writers_stored_profile_is_a_recorded_limit():
     instead = [cell for cell, (composed, twin) in verdicts.items()
                if not cell[1] and composed == {missing} and twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}]
     fail_open = sorted(cell for cell, (composed, twin) in verdicts.items()
-                       if composed == set() and twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
-    assert len(verdicts) == 336 and (len(exact), len(beside), len(instead)) == (286, 34, 8), [
+                       if not composed and twin)
+    assert len(verdicts) == 336 and (len(exact), len(beside), len(instead)) == (294, 42, 0), [
         (cell, verdicts[cell]) for cell in set(verdicts) - set(exact) - set(beside) - set(instead) - set(fail_open)]
-    assert fail_open == sorted(
-        (target, (shared,), (shared,), depth)
-        for target, shared in (("p1", "p2"), ("p2", "p1"), ("unknown", "p1"), ("unknown", "p2"))
-        for depth in ("grandchild", "sibling")), fail_open
+    assert fail_open == [], fail_open
+    assert len(exact) + len(beside) + len(instead) == 336, "every cell is exact or in the recorded class"
+    assert all(composed for cell, (composed, twin) in verdicts.items() if cell in beside or cell in instead)
 
 
 def _b186_two_relation_roots(supplied):
@@ -11424,7 +11424,7 @@ def test_a_forwarded_write_into_an_unknown_cache_keeps_the_write_rule(monkeypatc
         assert _b186_composed(roots) == expected, stage
 
 
-def test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixture(monkeypatch):
+def test_a_forwarded_unknown_write_kept_as_a_content_requirement_refuses_a_mixture(monkeypatch, _no_replay):
     """Mutant: the forwarded unknown-target write stays an exact content requirement, as before the fix — the caller's
     P1 and P2 together are refused, where the twin admits them."""
     _lineage_with_source(monkeypatch, "                        if arriving.caller_cache is not None:\n",
@@ -11485,7 +11485,7 @@ def test_a_staged_cache_the_child_reads_again_keeps_the_exact_requirement(monkey
         assert _b186_composed(roots) == expected, stage
 
 
-def test_a_reread_staged_cache_kept_as_a_write_requirement_admits_the_mixture(monkeypatch):
+def test_a_reread_staged_cache_kept_as_a_write_requirement_admits_the_mixture(monkeypatch, _no_replay):
     """Mutant: a staged cache stays a write requirement though the child reads it again — the declared P1 the write
     recorded proves the mixture P1 to the map, and the caller's P1 and P2 are admitted where the twin refuses."""
     _lineage_with_source(monkeypatch, "        if cache_ref in read_caches and refs[position] == CACHE_WRITE_REQUIREMENT_PREFIX + declared_ref:\n",
@@ -11569,7 +11569,7 @@ def test_a_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement(monkey
         assert _b186_composed(roots) == expected, stage
 
 
-def test_a_recache_dropping_the_staged_source_admits_the_mixture(monkeypatch):
+def test_a_recache_dropping_the_staged_source_admits_the_mixture(monkeypatch, _no_replay):
     """Mutant: a re-cache drops the staging write its documents came from, as batch 18 had it — the map over the copy
     reads as relying on nothing, and the caller's P1 and P2 are admitted where the twin refuses them."""
     _lineage_with_source(monkeypatch, "            restaged = staged_retrieves.get(stream.origin_node, ())\n",
@@ -11604,7 +11604,7 @@ def test_a_called_consumer_of_a_recached_staged_copy_keeps_the_exact_requirement
             PROCESS_IR_SEMANTIC_PROFILE_MISMATCH not in _b186_composed(roots), stage
 
 
-def test_a_call_ignoring_the_staged_sources_admits_the_mixture(monkeypatch):
+def test_a_call_ignoring_the_staged_sources_admits_the_mixture(monkeypatch, _no_replay):
     """Mutant: a call marks only the cache its child requires, not the staging writes behind it — the caller's P1 and
     P2 are admitted where the twin refuses them."""
     _lineage_with_source(monkeypatch,
@@ -11612,3 +11612,324 @@ def test_a_call_ignoring_the_staged_sources_admits_the_mixture(monkeypatch):
                          "                               if False)\n")
     monkeypatch.setattr(sys.modules[__name__], "_symbols", _b186_cache3_symbols)
     assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH not in _b186_composed(_b186_staged_recached_then_called_roots(("p1", "p2"))[0])
+
+
+@pytest.fixture
+def _no_replay(monkeypatch):
+    """#187: every call falls back to its child's contract — the population a replay does not cover: a call that does
+    not wait or abort on error, one with a cache write in flight, one into an opaque, cyclic or unsubmitted child. The
+    #186 contract-channel mutants that use it prove their rule load-bearing there, where it still decides; a covered
+    call is judged by the replay (`test_a_covered_call_earns_its_twins_verdict`)."""
+    from boomi_mcp.authoring import process_ir_effects
+
+    monkeypatch.setattr(process_ir_effects, "_with_lineage_programs",
+                        lambda process_roots, per_root, *_args, **_kwargs: dict(per_root))
+
+
+# --- #187: a covered call replays its child's own walk from the caller's caches ---------------------------------------
+#
+# A call into a submitted child outside every call cycle, that waits and aborts on error, with no cache write in flight,
+# leaves in the caller's caches what the child's own walk leaves there when it starts from them — the flattened twin's
+# state by construction. Every #186 finding of the removed summary channel is a regression cell below, rebuilt from the
+# #186 ledger's verbatim summaries, and each earns its twin's verdict; each rule of the replay has a source mutant.
+
+
+def _c187_symbols(cache2=None):
+    from test_issue_184_child_entries import _symbols as entry_symbols
+
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    symbols = [symbol.model_copy(update={"cache_profile_ref": "$ref:" + cache2})
+               if symbol.ref == "$ref:CACHE2" and cache2 else symbol for symbol in entry_symbols().symbols]
+    return SymbolTableV1(symbols=tuple(symbols) + tuple(
+        ComponentSymbolV1(ref="$ref:" + ref, component_id=ref, component_type="documentcache") for ref in ("AAA", "ZZZ")))
+
+
+def _c187_put(cache):
+    return {"kind": "cache_put", "cache_ref": "$ref:" + cache}
+
+
+def _c187_get(cache):
+    return {"kind": "cache_get", "cache_ref": "$ref:" + cache}
+
+
+_C187_GETP1 = {"kind": "connector_call", "operation_ref": "$ref:GETP1"}
+_C187_TO_P2 = {"kind": "map_ref", "map_ref": "$ref:M12"}
+_C187_USES_P2 = {"kind": "map_ref", "map_ref": "$ref:M22"}
+
+
+def _c187_p1(cache):
+    return {"steps": [_C187_GETP1], "terminal": _c187_put(cache)}
+
+
+def _c187_p2(cache):
+    return {"steps": [_C187_GETP1, _C187_TO_P2], "terminal": _c187_put(cache)}
+
+
+def _c187_copy(source, target):
+    return {"steps": [_c187_get(source)], "terminal": _c187_put(target)}
+
+
+def _c187_empty(cache):
+    return {"steps": [], "terminal": {"kind": "cache_remove", "cache_ref": "$ref:" + cache}}
+
+
+def _c187_uses_p1(cache):
+    return {"steps": [_c187_get(cache), _C187_TO_P2], "terminal": _STOP}
+
+
+def _c187_uses_p2(cache):
+    return {"steps": [_c187_get(cache), _C187_USES_P2], "terminal": _STOP}
+
+
+def _c187_call(key, wait=True, abort=True):
+    return {"steps": [], "terminal": _call(key, wait=wait, abort_on_error=abort)}
+
+
+def _c187_legs_of(document):
+    return document["body"]["steps"][-1]["legs"]
+
+
+def _c187_cells():
+    """``{name: (roots, twin or None, symbols, expected)}``; ``expected`` is ``"twin"`` (the composition's codes equal
+    the twin's) or a set of codes the composition must serve where no twin can state the shape (a failure or a write
+    still in flight after the call)."""
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    cells = {}
+
+    def cell(name, roots, twin, symbols=None, expected="twin"):
+        cells[name] = (roots, twin, symbols or _c187_symbols(), expected)
+
+    # ARCH-186-e3-01: a sibling writer's P1 beside the caller's P1, restaged into the P2 cache.
+    reader = _legs({"steps": [_c187_get("CACHE")], "terminal": _c187_put("CACHE_P2")}, noop)
+    cell("e3-01", [("PARENT", _legs(_c187_p1("CACHE"), _c187_call("WRITER"), _c187_call("CACHE_CHILD"))),
+                   ("WRITER", _legs(_c187_p1("CACHE"), noop)), ("CACHE_CHILD", reader)],
+         _legs(_c187_p1("CACHE"), _c187_p1("CACHE"), noop, *_c187_legs_of(reader)))
+    # CDX-186-r9-01: the child writes P2, removes the cache, writes P1. Only a waited, aborting call meets the end.
+    child = _legs(_c187_p2("CACHE"), _c187_empty("CACHE"), _c187_p1("CACHE"), noop)
+    for wait, abort in ((True, True), (True, False), (False, True), (False, False)):
+        expected = "twin" if wait and abort else {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+        cell("r9-01 wait={0} abort={1}".format(wait, abort),
+             [("PARENT", _legs(_c187_call("CACHE_CHILD", wait, abort), _c187_p1("CACHE"), _c187_uses_p1("CACHE"))),
+              ("CACHE_CHILD", child)],
+             _legs(*_c187_legs_of(child), _c187_p1("CACHE"), _c187_uses_p1("CACHE")), expected=expected)
+    # CDX-186-w1-01: an unwaited grandchild's P1 may land after the child's removal; and the caller's own.
+    child = _legs(_c187_call("WRITER", False, False), _c187_empty("CACHE"), _c187_p2("CACHE"))
+    cell("w1-01", [("PARENT", _legs(_c187_call("CACHE_CHILD"), _c187_p2("CACHE"), _c187_uses_p2("CACHE"))),
+                   ("CACHE_CHILD", child), ("WRITER", _legs(_c187_p1("CACHE"), noop))],
+         None, expected={PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
+    cell("w1-01 caller-pending",
+         [("PARENT", _legs(_c187_call("WRITER", False, False), _c187_call("CACHE_CHILD"), _c187_p2("CACHE"),
+                           _c187_uses_p2("CACHE"))),
+          ("CACHE_CHILD", _legs(_c187_empty("CACHE"), _c187_p2("CACHE"))), ("WRITER", _legs(_c187_p1("CACHE"), noop))],
+         None, expected={PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
+    # CDX-186-w1-02: the caller's P2 is copied beside the child's P1.
+    child = _legs(_c187_p1("CACHE"), _c187_copy("CACHE", "CACHE2"))
+    cell("w1-02", [("PARENT", _legs(_c187_p2("CACHE"), _c187_call("CACHE_CHILD"), _c187_p1("CACHE2"),
+                                    _c187_uses_p1("CACHE2"))), ("CACHE_CHILD", child)],
+         _legs(_c187_p2("CACHE"), *_c187_legs_of(child), _c187_p1("CACHE2"), _c187_uses_p1("CACHE2")))
+    # CDX-186-r11-01: every document P1, the copy restaged into the P2 cache.
+    child = _legs(_c187_p1("CACHE"), _c187_copy("CACHE", "CACHE2"))
+    cell("r11-01", [("PARENT", _legs(_c187_p1("CACHE"), _c187_p1("CACHE2"), _c187_call("CACHE_CHILD"),
+                                     _c187_copy("CACHE2", "CACHE_P2"))), ("CACHE_CHILD", child)],
+         _legs(_c187_p1("CACHE"), _c187_p1("CACHE2"), *_c187_legs_of(child), _c187_copy("CACHE2", "CACHE_P2")))
+    # CDX-186-r11-02: a proved removal ends the copy's dependence; a removal behind a producer does not.
+    for name, removal in (("r11-02", _c187_empty("CACHE2")),
+                          ("r11-02 unproved removal", {"steps": [_GET], "terminal": {"kind": "cache_remove",
+                                                                                     "cache_ref": "$ref:CACHE2"}})):
+        child = _legs(_c187_copy("CACHE", "CACHE2"), removal, _c187_p2("CACHE2"))
+        cell(name, [("PARENT", _legs(_c187_p1("CACHE"), _c187_call("CACHE_CHILD"), _c187_p2("CACHE2"),
+                                     _c187_uses_p2("CACHE2"))), ("CACHE_CHILD", child)],
+             _legs(_c187_p1("CACHE"), *_c187_legs_of(child), _c187_p2("CACHE2"), _c187_uses_p2("CACHE2")))
+    # CDX-186-r12-01: chained copies, whatever the destination is called.
+    for last in ("AAA", "ZZZ"):
+        child = _legs(_c187_p2("CACHE"), _c187_copy("CACHE", "CACHE2"), _c187_copy("CACHE2", last))
+        cell("r12-01 " + last, [("PARENT", _legs(_c187_p1("CACHE"), _c187_call("CACHE_CHILD"), _c187_p2(last),
+                                                 _c187_uses_p2(last))), ("CACHE_CHILD", child)],
+             _legs(_c187_p1("CACHE"), *_c187_legs_of(child), _c187_p2(last), _c187_uses_p2(last)))
+    # CDX-186-r12-02: a sealed intermediate holding the caller's documents, copied on by a grandchild.
+    for variant in ("sealed", "unsealed"):
+        grandchild = _legs(_c187_copy("CACHE2", "AAA"), noop)
+        mid = [_c187_p1("CACHE")] + ([_c187_empty("CACHE2")] if variant == "sealed" else []) + [
+            _c187_copy("CACHE", "CACHE2")]
+        cell("r12-02 " + variant,
+             [("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID"), _c187_p1("AAA"), _c187_uses_p1("AAA"))),
+              ("MID", _legs(*mid, _c187_call("CACHE_CHILD"))), ("CACHE_CHILD", grandchild)],
+             _legs(_c187_p2("CACHE"), *mid, *_c187_legs_of(grandchild), _c187_p1("AAA"), _c187_uses_p1("AAA")))
+    # CDX-186-w7-01: the handed documents staged in the P1 cache, retrieved, written to the P2 cache.
+    for stage in ("p1 and p2", "p1"):
+        child = _doc(_ENTRY, {"kind": "branch", "legs": [{"steps": [], "terminal": _c187_put("CACHE2")},
+                                                          _c187_copy("CACHE2", "CACHE_P2")]})
+        staged = [_c187_p1("CACHE")] + ([_c187_p2("CACHE")] if stage == "p1 and p2" else [])
+        cell("w7-01 " + stage,
+             [("PARENT", _legs(*staged, {"steps": [_c187_get("CACHE")],
+                                         "terminal": _call("CACHE_CHILD", wait=True, abort_on_error=True)})),
+              ("CACHE_CHILD", child)],
+             _legs(*staged, {"steps": [_c187_get("CACHE")], "terminal": _c187_put("CACHE2")},
+                   _c187_copy("CACHE2", "CACHE_P2")), symbols=_c187_symbols(cache2="P1"))
+    # A removal in the child takes the caller's documents out, as the twin's does.
+    child = _legs(_c187_empty("CACHE"), _c187_p1("CACHE"))
+    cell("child removal clears the caller's documents",
+         [("PARENT", _legs(_c187_p2("CACHE"), _c187_call("CACHE_CHILD"), _c187_p1("CACHE"), _c187_uses_p1("CACHE"))),
+          ("CACHE_CHILD", child)],
+         _legs(_c187_p2("CACHE"), *_c187_legs_of(child), _c187_p1("CACHE"), _c187_uses_p1("CACHE")))
+    # Two calls into one child from different caller states replay separately.
+    child = _legs(_c187_copy("CACHE", "CACHE2"), noop)
+    cell("two calls, two caller states",
+         [("PARENT", _legs(_c187_p1("CACHE"), _c187_call("CACHE_CHILD"), _c187_p2("CACHE"), _c187_call("CACHE_CHILD"),
+                           _c187_p1("CACHE2"), _c187_uses_p1("CACHE2"))), ("CACHE_CHILD", child)],
+         _legs(_c187_p1("CACHE"), *_c187_legs_of(child), _c187_p2("CACHE"), *_c187_legs_of(child),
+               _c187_p1("CACHE2"), _c187_uses_p1("CACHE2")))
+    # A grandchild's copy reads what its caller stored just before calling it.
+    grandchild = _legs(_c187_copy("CACHE", "AAA"), noop)
+    cell("nested copy", [("PARENT", _legs(_c187_call("MID"), _c187_p2("AAA"), _c187_uses_p2("AAA"))),
+                         ("MID", _legs(_c187_p2("CACHE"), _c187_call("CACHE_CHILD"))), ("CACHE_CHILD", grandchild)],
+         _legs(_c187_p2("CACHE"), *_c187_legs_of(grandchild), _c187_p2("AAA"), _c187_uses_p2("AAA")))
+    return cells
+
+
+def _c187_codes(roots, symbols):
+    module = sys.modules[__name__]
+    saved = module._symbols
+    module._symbols = lambda: symbols
+    try:
+        if len(roots) == 1:
+            return _b30_codes(_b28_verdict(roots, roots[0][0], True)[0])
+        return _b186_composed(roots)
+    finally:
+        module._symbols = saved
+
+
+def _c187_holds(name):
+    roots, twin, symbols, expected = _c187_cells()[name]
+    composed = _c187_codes(roots, symbols)
+    return composed == (_c187_codes([("PARENT", twin)], symbols) if expected == "twin" else expected), composed
+
+
+@pytest.mark.parametrize("name", sorted(_c187_cells()))
+def test_a_covered_call_earns_its_twins_verdict(name):
+    """#187: each #186 regression cell, and the neighbours that pin a replay rule, earns its twin's verdict — or, where
+    the call may fail or a write is still in flight, keeps the conservative refusal the twin cannot state."""
+    holds, composed = _c187_holds(name)
+    assert holds, (name, composed)
+
+
+def test_the_replay_is_the_cache_effect(monkeypatch):
+    """#187 source mutant — replay authority: without it a sibling writer's P1 crosses as no proved profile: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '        replay = _replay_call(semantic, state, stream, legacy)\n', '        replay = None\n')
+    holds, composed = _c187_holds('e3-01')
+    assert not holds, composed
+
+
+def test_a_replay_receives_the_arriving_documents(monkeypatch):
+    """#187 source mutant — the arriving stream: a replayed passthrough entry stages the declared profile again: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '            if _entry is not None and _entry[1] is not None:\n', '            if False:\n')
+    holds, composed = _c187_holds('w7-01 p1 and p2')
+    assert not holds, composed
+
+
+def test_a_replay_starts_from_the_callers_documents(monkeypatch):
+    """#187 source mutant — caller dependence: a replay that starts from empty caches loses the caller's P2: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '            content=caller.content,\n', '            content=frozenset(),\n')
+    holds, composed = _c187_holds('w1-02')
+    assert not holds, composed
+
+
+def test_a_replay_replaces_the_callers_cache_content(monkeypatch):
+    """#187 source mutant — path sensitivity: keeping the caller's content past the child's proved removal: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '    return _State(state.document, state.execution, after.content, state.cohorts, state.sealed, state.proved)\n', '    return _State(state.document, state.execution, state.content | after.content, state.cohorts, state.sealed, state.proved)\n')
+    holds, composed = _c187_holds("child removal clears the caller's documents")
+    assert not holds, composed
+
+
+def test_a_nested_replay_starts_where_its_call_stands(monkeypatch):
+    """#187 source mutant — transitivity: a grandchild replayed from its caller's ENTRY state misses the copy before the call: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '            return _replay_once(_session, program_id, child, replay_capabilities, state, None, False, standalone)\n', '            return _replay_once(_session, program_id, child, replay_capabilities, entry_state, None, False, standalone)\n')
+    holds, composed = _c187_holds('nested copy')
+    assert not holds, composed
+
+
+def test_a_call_that_continues_after_failure_is_not_replayed(monkeypatch):
+    """#187 source mutant — gate: a call that does not abort on error meets the child's normal end: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '        if not (_waits_and_aborts(semantic) and stream.state != STREAM_ABSENT', "        if not (getattr(semantic, 'wait', False) and stream.state != STREAM_ABSENT")
+    holds, composed = _c187_holds('r9-01 wait=True abort=False')
+    assert not holds, composed
+
+
+def test_a_callers_pending_write_stops_the_replay(monkeypatch):
+    """#187 source mutant — quiescence: the caller's own unwaited writer may land after the child's removal: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '        if unwaited_cache_writes or unwaited_writes_of_an_unknown_cache:\n            return None\n', '')
+    holds, composed = _c187_holds('w1-01 caller-pending')
+    assert not holds, composed
+
+
+def test_a_childs_pending_write_stops_the_replay(monkeypatch):
+    """#187 source mutant — quiescence: the child's unwaited grandchild may land after its removal: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '    if walk.profile_proof and not walk.unwaited_cache_writes and not walk.unwaited_writes_of_an_unknown_cache:\n', '    if walk.profile_proof:\n')
+    holds, composed = _c187_holds('w1-01')
+    assert not holds, composed
+
+
+def test_a_replay_is_memoized_on_the_callers_content(monkeypatch):
+    """#187 source mutant — memo isolation: a key without the caller cache facts conflates two calls: the cell leaves its twin's verdict."""
+    _lineage_with_source(monkeypatch, '        key = (program_id, replay_capabilities.called_by_a_root, state.execution, state.proved, state.content,\n               state.cohorts, state.sealed, stream, legacy)\n', '        key = (program_id, replay_capabilities.called_by_a_root, stream, legacy)\n')
+    holds, composed = _c187_holds('two calls, two caller states')
+    assert not holds, composed
+
+
+def _c187_intrinsic_roots():
+    """A child whose own write is refused whatever its caller stores: P1 into the P2 cache."""
+    return [("PARENT", _legs(_c187_p1("CACHE"), _c187_call("CACHE_CHILD"))),
+            ("CACHE_CHILD", _legs(_c187_p1("CACHE_P2"), {"steps": [_MSG], "terminal": _STOP}))]
+
+
+def test_a_childs_own_refusal_is_not_repeated_at_its_callers():
+    """#187: a profile mismatch the child's own validation reports is the child's, served once at its own pointer; a
+    covered call reports only what its replay finds beyond it."""
+    roots = _c187_intrinsic_roots()
+    assert _both_routes(roots, "CACHE_CHILD") == [(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/0/terminal/cache_ref")]
+    assert _both_routes(roots, "PARENT") == []
+
+
+def test_a_replay_that_ignores_the_childs_own_refusals_repeats_them(monkeypatch):
+    """#187 source mutant — the standalone difference: without it the child's intrinsic refusal is served at the call."""
+    _lineage_with_source(monkeypatch, "            item.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH and item.dedup_key() not in standalone\n",
+                         "            item.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH\n")
+    assert _both_routes(_c187_intrinsic_roots(), "PARENT") == [
+        (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
+
+
+def test_a_derivation_never_replays(monkeypatch):
+    """#187: contracts are derived by the abstract walk alone (`walk_lineage`), so every row a fallback call reads is the
+    one it read before replays existed; only a validation run (`collect_lineage_findings`) replays."""
+    calls = []
+    real = lineage._replay_once
+    monkeypatch.setattr(lineage, "_replay_once", lambda *args: calls.append(args) or real(*args))
+    roots, _twin, symbols, _expected = _c187_cells()["e3-01"]
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok and calls == []
+    capabilities = resolution.capabilities_by_root["PARENT"]
+    assert dict(capabilities.child_lineage_calls).keys() == {"$ref:WRITER", "$ref:CACHE_CHILD"}
+    assert len(capabilities.child_lineage_programs) == 2
+    assert resolution.capabilities_by_root["WRITER"] is None
+    lineage.collect_lineage_findings(prepare_validation_context(dict(parsed)["PARENT"], symbols), capabilities)
+    assert calls, "a validation run replays the covered calls"
+
+
+def test_the_replay_programs_are_material_only_where_a_call_binds_one():
+    """#187: a context with no program hashes exactly the material it did before programs existed; one that binds a
+    program records and replays it like every other server-derived capability."""
+    from boomi_mcp.authoring.process_materialization import _canonical_capabilities, iter_lineage_program_refs
+    from boomi_mcp.authoring.revision_corpus import decode_value, encode_value
+
+    bare = DEFAULT_VALIDATION_CAPABILITIES.model_copy(update={"called_by_a_root": True})
+    assert "child_lineage_calls" not in _canonical_capabilities(bare)
+    assert "child_lineage_programs" not in _canonical_capabilities(bare)
+    roots, _twin, symbols, _expected = _c187_cells()["e3-01"]
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    capabilities = resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed}).capabilities_by_root["PARENT"]
+    assert decode_value(encode_value(capabilities)) == capabilities
+    assert {ref for _path, ref in iter_lineage_program_refs(capabilities)} == {"$ref:GETP1", "$ref:CACHE", "$ref:CACHE_P2"}

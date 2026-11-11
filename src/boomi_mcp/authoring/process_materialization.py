@@ -223,7 +223,7 @@ def _iter_envelope_refs(envelope: ProcessComponentEnvelopeV1):
         )
 
 
-def iter_plan_component_refs(envelope: ProcessComponentEnvelopeV1, process_ir):
+def iter_plan_component_refs(envelope: ProcessComponentEnvelopeV1, process_ir, capabilities=None):
     """Every component reference the PLAN carries — envelope AND ProcessIR.
 
     THE single enumeration authority (§6 review, AR1-02/AR1-03). Two consumers
@@ -240,6 +240,27 @@ def iter_plan_component_refs(envelope: ProcessComponentEnvelopeV1, process_ir):
     yield from _iter_envelope_refs(envelope)
     for path, ref in iter_component_refs(process_ir, "process_ir"):
         yield path.lstrip("/"), ref
+    # #187: a covered call replays its child's ProcessIR, carried in the plan's recorded context; its
+    # references are bound like the root's own, so the apply-time recompile replays the child against
+    # the same identities the plan's compile did.
+    for path, ref in iter_lineage_program_refs(capabilities):
+        yield path, ref
+
+
+def iter_lineage_program_refs(capabilities):
+    """Every component reference a recorded context's replay programs carry (#187), by the schema's own
+    enumeration (`iter_component_refs`) of each program's ProcessIR."""
+    if capabilities is None:
+        return
+    import json
+
+    from ..models.process_ir import iter_component_refs, parse_process_ir_v1
+
+    for index, program in enumerate(getattr(capabilities, "child_lineage_programs", ()) or ()):
+        child = parse_process_ir_v1(json.loads(program.ir_canonical_json))
+        prefix = "effect_capabilities/child_lineage_programs/{0}/process_ir".format(index)
+        for path, ref in iter_component_refs(child, prefix):
+            yield path.lstrip("/"), ref
 
 
 def envelope_relocatability_offenders(
@@ -383,7 +404,7 @@ class ProcessComponentMaterializationPlanV1(_PlanModel):
         """
         expected = {
             (path, ref)
-            for path, ref in iter_plan_component_refs(self.envelope, self.process_ir)
+            for path, ref in iter_plan_component_refs(self.envelope, self.process_ir, self.effect_capabilities)
             if ref.startswith(_REF_PREFIX)
         }
         recorded = {(slot.slot_id, str(slot.ref)) for slot in self.unresolved_symbol_slots}
@@ -452,7 +473,14 @@ def _canonical_capabilities(capabilities: Any) -> Any:
         key: (sorted(value, key=canonical_json_bytes)
               if isinstance(value, list) else value)
         for key, value in dumped.items()
+        # #187: the replay programs are material only where a call binds one, so a plan
+        # without one hashes exactly the material it did before they existed.
+        if not (key in _LINEAGE_PROGRAM_FIELDS and not value)
     }
+
+
+#: #187: the capability fields that carry replayable child programs.
+_LINEAGE_PROGRAM_FIELDS = frozenset({"child_lineage_calls", "child_lineage_programs"})
 
 
 def _dump(value: Any) -> Any:
@@ -581,7 +609,7 @@ def placeholder_backed_symbols(symbols):
 
 
 def derive_symbol_slots(
-    envelope: ProcessComponentEnvelopeV1, process_ir: ProcessIRV1, symbols
+    envelope: ProcessComponentEnvelopeV1, process_ir: ProcessIRV1, symbols, capabilities=None
 ) -> Tuple[ProcessComponentSymbolSlotV1, ...]:
     """The plan's unresolved-symbol-slot inventory, DERIVED — never authored.
 
@@ -614,7 +642,7 @@ def derive_symbol_slots(
     """
     by_ref = {symbol.ref: symbol for symbol in symbols.symbols}
     slots = []
-    for path, ref in iter_plan_component_refs(envelope, process_ir):
+    for path, ref in iter_plan_component_refs(envelope, process_ir, capabilities):
         if not ref.startswith(_REF_PREFIX):
             continue  # a literal id is the relocatability validator's finding
         symbol = by_ref.get(ref)
@@ -762,7 +790,7 @@ def build_materialization_plan(
         # validators entirely).
         unresolved_symbol_slots=tuple(
             sorted(
-                derive_symbol_slots(envelope, process_ir, relocatable_symbols),
+                derive_symbol_slots(envelope, process_ir, relocatable_symbols, capabilities),
                 key=lambda slot: slot.slot_id,
             )
         ),

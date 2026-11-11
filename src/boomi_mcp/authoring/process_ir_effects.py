@@ -1622,6 +1622,110 @@ _PERMISSIVE_FIELDS: Tuple[str, ...] = (
 )
 
 
+def _canonical_json(value: Any) -> str:
+    """Sorted keys, no whitespace: the canonical text a #187 program is identified by."""
+    import json
+
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _call_graph(process_roots, symbols) -> Tuple[Dict[str, Dict[str, Optional[str]]], List[str]]:
+    """``(calls, ordered)``: each root's authored ``process_ref`` spellings and the submitted root each names (or
+    None), and the roots in an order where every root follows every root it calls — which leaves out exactly the
+    members of a call cycle and every root that reaches one. The one authority both a child's derived contract
+    (`_entry_contract_bindings`) and its replayable program (#187, `_with_lineage_programs`) read."""
+    roots = dict(process_roots)
+
+    def _child_key(ref):
+        for alias in sorted(_aliases(symbols, ref)):
+            bare = alias[len("$ref:"):] if alias.startswith("$ref:") else alias
+            if bare in roots:
+                return bare
+        return None
+
+    calls = {
+        key: {ref: _child_key(ref) for ref in sorted(_occurrences(ir)["process_ref"])}
+        for key, ir in process_roots
+    }
+    ordered: List[str] = []
+    progressed = True
+    while progressed:
+        progressed = False
+        for key in sorted(roots):
+            targets = {child for child in calls[key].values() if child is not None}
+            if key not in ordered and targets <= set(ordered):
+                ordered.append(key)
+                progressed = True
+    return calls, ordered
+
+
+def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset()) -> Dict[str, Any]:
+    """#187: each root's capabilities with the programs its covered calls replay.
+
+    A program is a submitted, non-opaque root outside every call cycle and reaching none (`_call_graph`'s order)
+    — the child's ProcessIR and its OWN per-root validation context, as canonical JSON, built bottom-up so a
+    child's program names its own children's. A call TO an opaque root, or to one this request does not carry,
+    binds no program and keeps its contract; a root that calls nothing binds none and is returned unchanged, so a
+    call-free request is exactly what it was."""
+    import hashlib
+
+    from ..compiler.process_ir.semantic_validation.contracts import (
+        ChildLineageProgramV1,
+        ProcessIRValidationCapabilitiesV1,
+    )
+
+    calls, ordered = _call_graph(process_roots, symbols)
+    roots = dict(process_roots)
+    eligible = [key for key in ordered if key not in opaque]
+    programs: Dict[str, Any] = {}
+    closure: Dict[str, Dict[str, Any]] = {}
+
+    def _bindings(key):
+        return tuple(sorted(
+            (ref, programs[child].program_id) for ref, child in calls[key].items() if child in programs))
+
+    for key in eligible:
+        own = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
+        own = own.model_copy(update={"child_lineage_calls": _bindings(key), "child_lineage_programs": ()})
+        ir_json = _canonical_json(roots[key].model_dump(mode="json", warnings=False))
+        capabilities_json = _canonical_json(_canonical_capabilities_payload(own))
+        program_id = "sha256:" + hashlib.sha256(
+            _canonical_json({"ir": ir_json, "capabilities": capabilities_json}).encode("utf-8")).hexdigest()
+        programs[key] = ChildLineageProgramV1(
+            program_id=program_id, ir_canonical_json=ir_json, capabilities_canonical_json=capabilities_json)
+        reach = {program_id: programs[key]}
+        for child in calls[key].values():
+            if child in closure:
+                reach.update(closure[child])
+        closure[key] = reach
+
+    result = dict(per_root)
+    for key, _ir in process_roots:
+        if key in opaque:
+            continue
+        bindings = _bindings(key)
+        if not bindings:
+            continue
+        reach: Dict[str, Any] = {}
+        for child in calls[key].values():
+            if child in closure:
+                reach.update(closure[child])
+        base = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
+        result[key] = base.model_copy(update={
+            "child_lineage_calls": bindings,
+            "child_lineage_programs": tuple(reach[pid] for pid in sorted(reach)),
+        })
+    return result
+
+
+def _canonical_capabilities_payload(capabilities) -> Any:
+    """A capabilities dump in an ORDER-INDEPENDENT shape — list-valued fields sorted by their canonical bytes — so
+    a program's id does not depend on the order a resolver happened to build its rows in (#180 Stage-2 P2)."""
+    dumped = capabilities.model_dump(mode="json")
+    return {key: (sorted(value, key=_canonical_json) if isinstance(value, list) else value)
+            for key, value in dumped.items()}
+
+
 def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None, opaque=frozenset()) -> Dict[str, tuple]:
     """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds, judged by callers, caller-judged reads)``.
 
@@ -1650,27 +1754,7 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
     )
 
     roots = dict(process_roots)
-
-    def _child_key(ref):
-        for alias in sorted(_aliases(symbols, ref)):
-            bare = alias[len("$ref:"):] if alias.startswith("$ref:") else alias
-            if bare in roots:
-                return bare
-        return None
-
-    calls = {
-        key: {ref: _child_key(ref) for ref in sorted(_occurrences(ir)["process_ref"])}
-        for key, ir in process_roots
-    }
-    ordered: List[str] = []
-    progressed = True
-    while progressed:
-        progressed = False
-        for key in sorted(roots):
-            targets = {child for child in calls[key].values() if child is not None}
-            if key not in ordered and targets <= set(ordered):
-                ordered.append(key)
-                progressed = True
+    calls, ordered = _call_graph(process_roots, symbols)
     facts: Dict[str, Dict[str, Any]] = {}
 
     def _rows(key):
@@ -1967,14 +2051,14 @@ def resolve_process_ir_effect_declarations(
     if declarations is None:
         entry_bindings = _entry_contract_bindings(process_roots, symbols, symbols_for, opaque=opaque_roots)
         return EffectResolutionV1(
-            {
+            _with_lineage_programs(process_roots, {
                 key: (
                     _with_entry_contracts(ProcessIRValidationCapabilitiesV1(), entry_bindings[key])
                     if _binds(entry_bindings[key])
                     else None
                 )
                 for key, _ir in process_roots
-            },
+            }, symbols, opaque_roots),
             (),
             (),
         )
@@ -2293,7 +2377,7 @@ def resolve_process_ir_effect_declarations(
             established_at_entry=tuple(sorted(entry_state.get(key, ()))),
         )
         per_root[key] = _with_entry_contracts(per_root[key], entry_bindings[key])
-    return EffectResolutionV1(per_root, (), inert)
+    return EffectResolutionV1(_with_lineage_programs(process_roots, per_root, symbols, opaque_roots), (), inert)
 
 
 def effect_authority_rows() -> Tuple[Tuple[str, str], ...]:

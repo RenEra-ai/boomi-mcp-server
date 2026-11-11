@@ -1319,9 +1319,120 @@ def _awaited_guarantee(semantic, contract) -> Tuple[StateKey, ...]:
     """
     if contract is None or contract.entry_form not in _DERIVED_ENTRY_FORMS:
         return ()
-    if not (getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False)):
+    if not _waits_and_aborts(semantic):
         return ()
     return tuple((key[0], key[1]) for key in contract.guaranteed_state)
+
+
+def _waits_and_aborts(semantic) -> bool:
+    """Whether the caller runs on only after the child completed NORMALLY (#184 amendment 1 rule 7).
+
+    The one predicate behind both the awaited guarantee and the #187 replay gate: a call that does not
+    wait may still be running, and one that continues after the child fails may have left anything the
+    child wrote before failing."""
+    return bool(getattr(semantic, "wait", False) and getattr(semantic, "abort_on_error", False))
+
+
+class _ReplaySession:
+    """#187: one validation run's replay state — a plain container, so a source mutant's walk uses it as is.
+
+    ``programs``: program id -> `ChildLineageProgramV1`, off the walked root's capabilities. ``loaded``: program id
+    -> (prepared child, its own validation context in canonical cache spelling). ``standalone``: program id -> the
+    dedup keys of the profile findings the child's own validation reports. ``results``: a completed replay, by its
+    complete input. No program calls back into one being replayed: programs exist only for roots outside every call
+    cycle (`process_ir_effects._call_graph`).
+    """
+
+    __slots__ = ("programs", "loaded", "standalone", "results")
+
+    def __init__(self, capabilities) -> None:
+        self.programs = {item.program_id: item for item in capabilities.child_lineage_programs}
+        self.loaded: Dict[str, tuple] = {}
+        self.standalone: Dict[str, FrozenSet] = {}
+        self.results: Dict[tuple, object] = {}
+
+
+class _ReplayOutcome(NamedTuple):
+    """What one covered call adds (#187): the state the child's walk left, and whether that walk found a
+    profile mismatch its own validation does not report — one that exists because of THIS caller's facts."""
+
+    after: "_State"
+    new_profile_mismatch: bool
+
+
+#: #187: the caller-assumption seeds a replay context clears — a replay starts from the caller's actual state.
+_CALLER_SEEDS = ("established_at_entry", "caller_supplied_writers", "caller_cache_contents",
+                 "caller_cache_cohorts", "caller_judged_read_sites")
+
+
+def _load_replay_program(session: "_ReplaySession", program_id: str, symbols) -> Optional[tuple]:
+    """``(prepared child, its own validation context)`` for a program, prepared against the WALKED table, or None.
+
+    None — the call falls back to its contract — when a reference of the child does not resolve in that table:
+    a replay never guesses an identity."""
+    if program_id in session.loaded:
+        return session.loaded[program_id]
+    import json
+
+    from ....models.process_ir import iter_component_refs, parse_process_ir_v1
+    from .context import prepare_validation_context
+
+    program = session.programs[program_id]
+    loaded = None
+    child_ir = parse_process_ir_v1(json.loads(program.ir_canonical_json))
+    known = {symbol.ref for symbol in symbols.symbols}
+    if all(ref in known for _path, ref in iter_component_refs(child_ir, "process_ir") if ref.startswith("$ref:")):
+        child = prepare_validation_context(child_ir, symbols)
+        own = ProcessIRValidationCapabilitiesV1.model_validate_json(program.capabilities_canonical_json)
+        loaded = (child, canonical_cache_capabilities(own, canonical_cache_refs(child.symbols)))
+    session.loaded[program_id] = loaded
+    return loaded
+
+
+def _apply_replay(state: "_State", after: "_State") -> "_State":
+    """The caller's state after a covered call (#187): its caches HOLD what the child's walk left in them.
+
+    ``content`` is the child continuation's — REPLACED, not unioned, so a removal the child proved runs is seen
+    exactly as the twin sees it. Nothing else is taken from the replay: which caches are ESTABLISHED (#184
+    amendment 1 rule 7), the property cohorts a cache may hold and whether this path sealed it stay the contract's,
+    applied by `_discharge_child_contract` exactly as for a call that is not replayed — a child's cohorts name
+    writers by node ids of its own walk, and a cohort cannot tell a child's write from the caller's entry."""
+    return _State(state.document, state.execution, after.content, state.cohorts, state.sealed, state.proved)
+
+
+def _replay_once(session, program_id, child, replay_capabilities, state, stream, legacy, standalone):
+    """One run of a child's walk from the caller's state, memoized on its complete input; None when the run is
+    not one a caller may trust (#187 post-gate): its profile proof stood down, or it left a write in flight."""
+    key = None
+    try:
+        key = (program_id, replay_capabilities.called_by_a_root, state.execution, state.proved, state.content,
+               state.cohorts, state.sealed, stream, legacy)
+        hash(key)
+    except TypeError:
+        key = None
+    if key is not None and key in session.results:
+        return session.results[key]
+    continuation: List[_State] = []
+    walk = _walk_lineage(child, replay_capabilities, _session=session, _entry=(state, stream, legacy),
+                         _continuation=continuation)
+    outcome = None
+    if walk.profile_proof and not walk.unwaited_cache_writes and not walk.unwaited_writes_of_an_unknown_cache:
+        outcome = _ReplayOutcome(continuation[-1], any(
+            item.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH and item.dedup_key() not in standalone
+            for item in walk.findings))
+    if key is not None:
+        session.results[key] = outcome
+    return outcome
+
+
+def _standalone_profile_keys(session, program_id, child, own_capabilities) -> FrozenSet:
+    """The profile findings the child's OWN validation reports (#187): a replay reports at the call only what it
+    finds beyond these, so a child's intrinsic finding is never repeated at its callers."""
+    if program_id not in session.standalone:
+        walk = _walk_lineage(child, own_capabilities, _session=session)
+        session.standalone[program_id] = frozenset(
+            item.dedup_key() for item in walk.findings if item.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH)
+    return session.standalone[program_id]
 
 
 def _child_guarantee(semantic, contract, stream) -> Tuple[StateKey, ...]:
@@ -2083,6 +2194,9 @@ _ABNORMAL_EXIT_ROLES = frozenset({"exception"})
 def _walk_lineage(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
+    _session: "Optional[_ReplaySession]" = None,
+    _entry: "Optional[Tuple[_State, Optional[_Stream], bool]]" = None,
+    _continuation: "Optional[List[_State]]" = None,
 ) -> LineageWalkV1:
     """Walk the CFG, tracking established state, and report unproven reads.
 
@@ -2962,6 +3076,11 @@ def _walk_lineage(
             return state, stream, legacy
 
         if kind == "passthrough":
+            if _entry is not None and _entry[1] is not None:
+                # #187: a replay receives the documents as they ARRIVE at the call — what the flattened
+                # twin's next step sees — so a staging write stores their actual profile, not the one its
+                # cache declares (CDX-186-w7-01).
+                return state, _entry[1], legacy
             # The caller's documents, as one group the gate at that call proved non-empty:
             # the one place non-emptiness is established rather than carried.
             return state, _Stream(STREAM_CALLER_ENTRY, provably_nonempty=True), legacy
@@ -3341,7 +3460,7 @@ def _walk_lineage(
                     cache_ref, name, request_profile_ref if bound else None, bound,
                 ))
 
-    def _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream):
+    def _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream, replay=None):
         """Everything ONE call owes its child's entry contract (#184 amendment 3 §8).
 
         Each call discharges its own row, so two parents' facts never combine. The
@@ -3498,7 +3617,7 @@ def _walk_lineage(
                     # fills itself was refused. A child that reads the cache BEFORE filling it
                     # still refuses such a caller, for the cache it never established.
                     continue
-                if contents != frozenset({_identity(profile_ref)}):
+                if replay is None and contents != frozenset({_identity(profile_ref)}):
                     _report(
                         PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
                         node,
@@ -3527,7 +3646,7 @@ def _walk_lineage(
                     if capabilities.called_by_a_root:
                         continue
                 required = None if profile_ref == UNKNOWN_PROFILE_REQUIREMENT else _identity(profile_ref)
-                if together and _proved_profile(together) != required:
+                if replay is None and together and _proved_profile(together) != required:
                     _report(
                         PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
                         node,
@@ -3620,7 +3739,19 @@ def _walk_lineage(
                         ("repeat_cause", cause) for cause in sorted(causes)),
                     phase=_CAPABILITY_PHASE,
                 )
-        state = _child_may_write_caches(state, contract)
+        if replay is not None:
+            # #187: the caches HOLD what the child's own walk left in them, run from this caller's — its
+            # removals, joins, copies and grandchildren included, in the order they run. A profile mismatch
+            # that walk found and the child's own validation does not report exists because of THIS caller's
+            # documents, and is reported here, once.
+            state = _apply_replay(state, replay.after)
+            if profile_proof and replay.new_profile_mismatch:
+                _report(PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, node, sub_path="/process_ref", phase=_PROFILE_PHASE)
+            # What the child may store carries properties and writers this process cannot see, as for any call.
+            for ref in _caches_a_call_may_write(cache_refs, contract):
+                state = state.with_cohort(ref, UNKNOWN_COHORT)
+        else:
+            state = _child_may_write_caches(state, contract)
         # Amendment 3 §8: a cache this child may have emptied is no longer established,
         # whatever filled it before the call — a later read of it would retrieve nothing.
         # Applied BEFORE the guarantee below, so a child that removes a cache and then
@@ -3638,6 +3769,57 @@ def _walk_lineage(
         for key in _child_guarantee(semantic, contract, stream):
             state = state.with_write(key, proved=True)
         return state
+
+    def _replay_call(semantic, state, stream, legacy) -> "Optional[_ReplayOutcome]":
+        """#187: what a call leaves in this execution's caches, by running its child's own walk from them.
+
+        The ONE decision whether a call is covered, taken before anything the call does is applied, so a
+        covered call never also applies the summary channels it replaces. Covered: a validation run (a
+        derivation never replays, so contracts and every fallback stay as they were); a submitted child
+        outside every call cycle; a derived entry form; a call that waits and aborts on error, on a path that
+        carries documents; profile proof standing on both sides; and no cache write still in flight — this
+        process's own earlier unwaited calls here, or the child's, which its replayed walk itself reports
+        (`_replay_once`). Otherwise None, and the call falls back to its contract exactly as before.
+
+        A Data Passthrough child runs once over the arriving group, so ONE run from the arriving stream. A
+        No Data child runs once per arriving document: one run where exactly one arrives, else the runs are
+        iterated to a fixed point from the joined state — zero runs included, since the join keeps the state
+        before the call."""
+        if _session is None or semantic.semantic_kind != "process_call":
+            return None
+        program_id = capabilities.child_lineage_program(semantic.process_ref)
+        if program_id is None or program_id not in _session.programs:
+            return None
+        contract = capabilities.child_entry_contract(semantic.process_ref)
+        if contract is None or contract.entry_form not in _DERIVED_ENTRY_FORMS:
+            return None
+        if not (_waits_and_aborts(semantic) and stream.state != STREAM_ABSENT and profile_proof):
+            return None
+        if unwaited_cache_writes or unwaited_writes_of_an_unknown_cache:
+            return None
+        loaded = _load_replay_program(_session, program_id, prepared.symbols)
+        if loaded is None:
+            return None
+        child, own = loaded
+        replay_capabilities = own.model_copy(update=dict(
+            {name: () for name in _CALLER_SEEDS}, called_by_a_root=capabilities.called_by_a_root))
+        standalone = _standalone_profile_keys(_session, program_id, child, own)
+        if contract.entry_form == "passthrough":
+            return _replay_once(_session, program_id, child, replay_capabilities, state, stream, legacy, standalone)
+        if stream.count == COUNT_ONE:
+            return _replay_once(_session, program_id, child, replay_capabilities, state, None, False, standalone)
+        current, mismatch_found = state, False
+        for _round in range(len(child.cfg.nodes) * (len(cache_refs) + 1) + 2):
+            outcome = _replay_once(_session, program_id, child, replay_capabilities, current, None, False, standalone)
+            if outcome is None:
+                return None
+            mismatch_found = mismatch_found or outcome.new_profile_mismatch
+            joined = current.merged_with(_apply_replay(current, outcome.after))  # content: the union of the runs
+            if (joined.execution, joined.proved, joined.content, joined.cohorts, joined.sealed) == (
+                    current.execution, current.proved, current.content, current.cohorts, current.sealed):
+                return _ReplayOutcome(joined, mismatch_found)
+            current = joined
+        return None
 
     def _transfer(node, state, leg, writers, on_documents, invalidated, stream, legacy):
         """Everything ONE node does to the facts carried on its path, in order.
@@ -3685,6 +3867,9 @@ def _walk_lineage(
         removal_runs = _removal_runs_before_anything_after_it(stream)
 
         semantic = node.semantic
+        # #187: whether this call's cache effect is its child's replayed walk, decided once, before the reads
+        # below and every channel that would otherwise add what the child may store as unknown.
+        replay = _replay_call(semantic, state, stream, legacy)
 
         # --- reads, checked against what is established HERE ----------------
         for key, has_default, strict in _reads_of(semantic):
@@ -3780,7 +3965,7 @@ def _walk_lineage(
             # downstream: a fire-and-forget child may still have written by the
             # time a later read runs, and this is a MAY set.
             for key in effect.writes:
-                if key[0] == CACHE:
+                if key[0] == CACHE and replay is None:
                     state = state.with_content(key[1], None, legacy_source=False)
                     # Not `ours`: documents this walk cannot see enter the cache here, so a
                     # removal before it no longer proves the cache holds this process's own.
@@ -3905,7 +4090,7 @@ def _walk_lineage(
 
         # --- a child's entry contract, discharged by THIS call (#184 amendment 3 §8)
         if semantic.semantic_kind == "process_call":
-            state = _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream)
+            state = _discharge_child_contract(node, semantic, state, leg, writers, invalidated, stream, replay)
             called = capabilities.child_entry_contract(semantic.process_ref)
             if not getattr(semantic, "wait", False) and not (
                     called is not None and (called.state_known or called.cache_writes_known)):
@@ -4062,6 +4247,21 @@ def _walk_lineage(
         return stream
 
     entry_state = _State()
+    if _entry is not None:
+        # #187: a replay starts from the CALLER's caches — what the flattened twin's walk holds when the
+        # child's first leg runs — and from nothing else: the replay context carries no caller seed.
+        caller = _entry[0]
+        entry_state = _State(
+            execution=frozenset(key for key in caller.execution if key[0] == CACHE),
+            content=caller.content,
+            # A cohort names its writers by node id, which is local to the walk that ran them, so the caller's
+            # cohorts enter as one unknown cohort per cache that holds any: emptiness, the one cohort fact a
+            # profile judgment reads (`_call_stores_nothing_in`), survives, and no token is read in a walk that
+            # does not own it. Property precision is unchanged (#187 scope).
+            cohorts=frozenset((ref, UNKNOWN_COHORT) for ref, _cohort in caller.cohorts),
+            sealed=caller.sealed,
+            proved=frozenset(key for key in caller.proved if key[0] == CACHE),
+        )
     entry_documents = set()
     for key in capabilities.established_at_entry:
         entry_state = entry_state.with_write((key[0], key[1]))
@@ -4107,7 +4307,7 @@ def _walk_lineage(
     returned = entry_state
     work = [("visit", prepared.cfg.entry_node_id, (
         entry_state, None, dict(entry_writers), frozenset(entry_documents), frozenset(),
-        _Stream(STREAM_EMPTY_ENTRY, count=COUNT_ONE), False,
+        _Stream(STREAM_EMPTY_ENTRY, count=COUNT_ONE), False if _entry is None else _entry[2],
     ))]
     while work:
         frame = work.pop()
@@ -4366,6 +4566,8 @@ def _walk_lineage(
         established = at_exit if established is None else established.merged_with(at_exit)
     # #186 (review r16): a staging write of a cache this walk reads again keeps its exact requirement.
     entry_requirement_refs[:] = _relied_on_writes_exact(entry_requirement_refs, entry_staged, read_caches)
+    if _continuation is not None:
+        _continuation.append(returned)
     return LineageWalkV1(
         findings=tuple(findings),
         unestablished_reads=tuple(sorted(set(unmet))),
@@ -4422,8 +4624,12 @@ def collect_lineage_findings(
     prepared: PreparedProcessValidationV1,
     capabilities: ProcessIRValidationCapabilitiesV1 = DEFAULT_VALIDATION_CAPABILITIES,
 ) -> Tuple[ValidationDiagnosticV1, ...]:
-    """The validation phase's view of the walk: its diagnostics."""
-    return _walk_lineage(prepared, capabilities).findings
+    """The validation phase's view of the walk: its diagnostics.
+
+    The one entry that replays a covered call's child (#187): a derivation (`walk_lineage`) never does, so every
+    contract and every call that falls back to one is exactly what it was."""
+    session = _ReplaySession(capabilities) if capabilities.child_lineage_programs else None
+    return _walk_lineage(prepared, capabilities, _session=session).findings
 
 
 def walk_lineage(

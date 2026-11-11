@@ -652,6 +652,21 @@ class ChildEntryContractV1(_ValidationModel):
         return self
 
 
+class ChildLineageProgramV1(_ValidationModel):
+    """#187: a called child's walk, as plain data a caller's validation replays.
+
+    A call adds to the caller's caches exactly what the child's own lineage walk leaves there when it starts
+    from the caller's caches — the flattened twin's state, by construction, rather than a summary of it (#186
+    tried three summaries; each drew a new defect in the same class). The program is the child's ProcessIR and
+    the child root's own per-root validation context, both as canonical JSON, so it records, fingerprints and
+    replays like every other server-derived capability. ``program_id`` is the SHA-256 of the two.
+    """
+
+    program_id: str
+    ir_canonical_json: str
+    capabilities_canonical_json: str
+
+
 class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     """The trusted context a validation run is given.
 
@@ -717,6 +732,32 @@ class ProcessIRValidationCapabilitiesV1(_ValidationModel):
     #: read its contract states (`ChildEntryContractV1.nonstrict_document_reads`), and not here:
     #: validated once, this process cannot serve a code that differs per caller.
     caller_judged_read_sites: Tuple[Tuple[str, str], ...] = ()
+    #: #187: ``(authored process_ref spelling, program_id)`` for each call this process makes into a child whose
+    #: walk a validation run may replay — a submitted, non-opaque root outside every call cycle and reaching none.
+    child_lineage_calls: Tuple[Tuple[str, str], ...] = ()
+    #: #187: every program those calls reach, transitively, once each (`ChildLineageProgramV1`).
+    child_lineage_programs: Tuple[ChildLineageProgramV1, ...] = ()
+
+    @field_validator("child_lineage_calls")
+    @classmethod
+    def _lineage_calls_are_unique(cls, value):
+        if len({spelling for spelling, _program in value}) != len(value):
+            raise ValueError("duplicate child lineage call spelling")
+        return value
+
+    @field_validator("child_lineage_programs")
+    @classmethod
+    def _lineage_programs_are_unique(cls, value):
+        if len({item.program_id for item in value}) != len(value):
+            raise ValueError("duplicate child lineage program")
+        return value
+
+    def child_lineage_program(self, process_ref: str) -> Optional[str]:
+        """The program id a call to ``process_ref`` replays, or None (#187)."""
+        for spelling, program_id in self.child_lineage_calls:
+            if spelling == process_ref:
+                return program_id
+        return None
 
     def writes_cache_externally(self, cache_ref: str) -> bool:
         """Whether a typed contract vouches for an outside writer of this cache."""
