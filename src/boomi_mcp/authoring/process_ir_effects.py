@@ -2058,7 +2058,7 @@ def resolve_process_ir_effect_declarations(
                     else None
                 )
                 for key, _ir in process_roots
-            }, symbols, opaque_roots),
+            }, symbols, opaque=opaque_roots),
             (),
             (),
         )
@@ -2377,7 +2377,7 @@ def resolve_process_ir_effect_declarations(
             established_at_entry=tuple(sorted(entry_state.get(key, ()))),
         )
         per_root[key] = _with_entry_contracts(per_root[key], entry_bindings[key])
-    return EffectResolutionV1(_with_lineage_programs(process_roots, per_root, symbols, opaque_roots), (), inert)
+    return EffectResolutionV1(_with_lineage_programs(process_roots, per_root, symbols, opaque=opaque_roots), (), inert)
 
 
 def effect_authority_rows() -> Tuple[Tuple[str, str], ...]:

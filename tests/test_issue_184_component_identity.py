@@ -2861,6 +2861,8 @@ _W3_SINKS = {
     "resolve_root_context": "opaque_roots",
     "derive_root_capabilities": "opaque_roots",
     "_entry_contract_bindings": "opaque",
+    # #187: a replayable child program is a submitted-body fact too.
+    "_with_lineage_programs": "opaque",
     "_standalone_entry_records_of": "opaque_roots",
     "_standalone_entry_records": "opaque_roots",
     "_authoring_build_provenance": "opaque_roots",
@@ -2870,7 +2872,9 @@ _W3_AUTHORITY = "canonical_roots_not_run_as_submitted"
 #: resolver builds (and the keywords that construct one), a plan's recorded context, and the
 #: build's standalone-entry record.
 _W3_FACT_NAMES = {"effect_capabilities", "entry_contract", "child_entry_contracts", "child_entry_contract",
-                  "subprocess_summaries", "capabilities_by_root"}
+                  "subprocess_summaries", "capabilities_by_root",
+                  # #187: the replayable child programs and the calls that bind them.
+                  "child_lineage_calls", "child_lineage_programs", "child_lineage_program"}
 _W3_RECORD_KEYS = {"standalone_entry", "submitted_body_runs"}
 
 #: EVERY site in `src/boomi_mcp` that reads, constructs, records or routes such a fact, and why it
@@ -2906,6 +2910,19 @@ _W3_DISPOSITIONS = {
         "re-spells a handed context's cache refs; derives nothing",
     ("compiler/process_ir/semantic_validation/contracts.py", "ProcessIRValidationCapabilitiesV1.child_entry_contract"):
         "lookup in a handed context",
+    # -- #187: the replayable child programs (`process_ir_effects._with_lineage_programs`, a routed sink: no opaque
+    #    root is a program, and a call to one binds none)
+    ("compiler/process_ir/semantic_validation/contracts.py", "ProcessIRValidationCapabilitiesV1.child_lineage_program"):
+        "lookup in a handed context",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_ReplaySession.__init__"):
+        "indexes a handed context's programs; derives nothing",
+    ("compiler/process_ir/semantic_validation/lineage.py", "collect_lineage_findings"):
+        "opens a replay session over a handed context's programs",
+    ("compiler/process_ir/semantic_validation/lineage.py", "_walk_lineage._replay_call"):
+        "replays a call's program from a handed context; a call that binds none keeps its contract",
+    ("authoring/process_materialization.py",
+     "ProcessComponentMaterializationPlanV1._slots_agree_with_the_references_they_inventory"):
+        "inventories a recorded context's program references for late binding; derives nothing",
     ("compiler/process_ir/semantic_validation/contracts.py", "ProcessIRValidationCapabilitiesV1.subprocess_effect"):
         "lookup in a handed context",
     ("compiler/process_ir/semantic_validation/lineage.py", "_established_anywhere"): "reads a handed context",
@@ -3647,6 +3664,11 @@ def test_the_unknown_requirement_spelled_as_none_re_admits_the_caller(monkeypatc
     the caller whose documents a map proves is no longer refused the profile its twin is refused."""
     from test_issue_184_child_state_transfer import _lineage_with_source as with_source
 
+    from boomi_mcp.authoring import process_ir_effects
+
+    # #187: the staging arm this token lives in decides only for a call no replay covers (a covered call's child
+    # receives the arriving documents), so the mutant is measured there.
+    monkeypatch.setattr(process_ir_effects, "_with_lineage_programs", lambda roots, per_root, *a, **k: dict(per_root))
     symbols = _b186_unknown_cache_symbols()
     roots, _twin = _b186_staging([{"kind": "map_ref", "map_ref": "$ref:M12"}])
     with_source(monkeypatch, "            _requires(stream, declared, UNKNOWN_PROFILE_REQUIREMENT if unknown else (\n",

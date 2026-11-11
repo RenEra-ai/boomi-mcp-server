@@ -90,6 +90,25 @@ STRICT_BY_DESIGN = {
         "needs the context-aware verdict it builds its own capabilities and "
         "passes them, in the same loop."
     ),
+    (
+        "src/boomi_mcp/authoring/governance.py",
+        "iter_plan_component_refs",
+    ): (
+        "#187: the governance closure of what THIS root owns. A recorded "
+        "context's replay programs are other submitted process roots, which "
+        "own their own governance, and the closure stops at another process "
+        "root by rule, so their references are not this root's to inherit."
+    ),
+    (
+        "src/boomi_mcp/authoring/process_materialization.py",
+        "iter_plan_component_refs",
+    ): (
+        "#187: the relocatability rule over the envelope and the root's own "
+        "ProcessIR. Every replay program is a submitted root whose own plan "
+        "runs this same rule over its ProcessIR, and the program's references "
+        "are bound through the slot inventory, which the plan model checks "
+        "WITH its recorded context."
+    ),
 }
 
 

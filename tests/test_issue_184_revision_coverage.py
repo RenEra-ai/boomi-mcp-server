@@ -25,6 +25,9 @@ for _p in (str(_ROOT), str(_ROOT / "src")):
 
 from boomi_mcp.authoring import contract as authoring_contract  # noqa: E402
 from boomi_mcp.authoring import process_ir_effects  # noqa: E402
+
+#: #187: the call graph before any perturbation, for the one that drops its order.
+_REAL_CALL_GRAPH = process_ir_effects._call_graph
 from boomi_mcp.compiler.process_ir.semantic_validation import lineage  # noqa: E402
 
 #: Per source module: ``(module, the functions the set starts from, whether they are members)``.
@@ -164,6 +167,16 @@ def _perturbations():
         ("lineage", "_trusted_effects"): lambda semantic, capabilities: (),
         ("lineage", "_establishes_downstream"): lambda semantic: False,
         ("lineage", "_awaited_guarantee"): without_the_abort_gate,
+        # #187: a call that continues after its child fails is replayed as though it aborted.
+        ("lineage", "_waits_and_aborts"): lambda semantic: bool(getattr(semantic, "wait", False)),
+        # #187: a covered call's replayed content is dropped — the caller keeps what it held before the call.
+        ("lineage", "_apply_replay"): lambda state, after: state,
+        # #187: no program loads, so every call falls back to its contract.
+        ("lineage", "_load_replay_program"): lambda session, program_id, symbols: None,
+        # #187: no replay is trusted, so every call falls back to its contract.
+        ("lineage", "_replay_once"): lambda *args: None,
+        # #187: the child's own refusals are repeated at each covered call.
+        ("lineage", "_standalone_profile_keys"): lambda session, program_id, child, own: frozenset(),
         ("lineage", "_child_guarantee"):
             lambda semantic, contract, stream: lineage._awaited_guarantee(semantic, contract),
         ("lineage", "_caller_cached_origin"): lambda key, stream, invalidated: None,
@@ -265,6 +278,8 @@ def _perturbations():
         opaque=frozenset(): {
             key: ((), (), (), None, "unknown", (), (), False, ()) for key, _ir in process_roots},
         ("effects", "_binds"): lambda binding: False,
+        # #187: no root is ordered, so every child is derived as a call-cycle member and binds no program.
+        ("effects", "_call_graph"): lambda process_roots, symbols: (_REAL_CALL_GRAPH(process_roots, symbols)[0], []),
         ("effects", "_with_entry_contracts"): lambda capabilities, binding: capabilities,
         ("effects", "_aliases"): lambda symbols, ref: frozenset({ref}),
         ("effects", "_symbol"): lambda symbols, ref: None,
