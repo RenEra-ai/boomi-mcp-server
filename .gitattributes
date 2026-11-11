@@ -2,3 +2,5 @@
 # are a checkout-time contract: no line-ending conversion, ever, or a core.autocrlf=true
 # clone fails its own checksum verification.
 tests/fixtures/boomi/** -text
+# #188: recorded Boomi Arrange pairs, same byte contract (tests/fixtures/arrange/SHA256SUMS).
+tests/fixtures/arrange/** -text
