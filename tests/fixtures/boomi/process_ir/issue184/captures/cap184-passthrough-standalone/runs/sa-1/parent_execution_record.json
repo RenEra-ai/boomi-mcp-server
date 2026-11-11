@@ -1,7 +1,7 @@
 {
   "@type": "ExecutionRecord",
   "executionId": "execution-1ac692d3-3b79-4b99-9fbd-734285c618e3-2026.09.13",
-  "account": "trainingglebbochkarov-16926N",
+  "account": "retiredaccountb-RETB01",
   "executionTime": "2026-09-13T06:47:48Z",
   "status": "COMPLETE",
   "executionType": "exec_manual",

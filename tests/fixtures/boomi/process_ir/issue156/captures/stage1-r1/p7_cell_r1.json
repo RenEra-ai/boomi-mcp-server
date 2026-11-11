@@ -47,7 +47,7 @@
   "execution_record": {
     "@type": "ExecutionRecord",
     "executionId": "execution-3c0017fa-4d09-49a8-a373-3647eb19b7fd-2026.09.06",
-    "account": "trainingglebbochkarov-16926N",
+    "account": "retiredaccountb-RETB01",
     "executionTime": "2026-09-06T07:23:02Z",
     "status": "COMPLETE",
     "executionType": "exec_manual",

@@ -21,7 +21,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p1/execution_record.json",
-       "sha256": "556d0da28d425c31b9c904bb99f1b3b1258d43fdd32b4099416484919e23d20c"
+       "sha256": "4210928efc36aea07ec420052106b63055f341eb55f0c19ca63ec4231c42067f"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p1/mock_access_log_window.txt",
@@ -41,7 +41,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
@@ -66,7 +66,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p2/execution_record.json",
-       "sha256": "5c559e74b1a73e14b2d50c435bf94b5758323a1235f41daff91a1cda9bda281f"
+       "sha256": "d25f19d32e3177c781313c5f3142ac750c2eaa780b97c668323015a3dc571c09"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p2/mock_access_log_window.txt",
@@ -86,7 +86,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
@@ -109,7 +109,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p3/execution_record.json",
-       "sha256": "7578b32cac813a9b68ff23599b92d586542637296abbc9b5dcf7f0e9af4acf2c"
+       "sha256": "8c190472755cb83d65912610cfffef59c3a36a7e8b281e60e6ae4c798bb2e082"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p3/mock_access_log_window.txt",
@@ -129,7 +129,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "REFUTED: the catch path ran (the protected 404 request is on the wire), then 'Document Cache Load\t\tNo documents found. Skipping execution for the E1 deliberate exception step.'. The Exception never fired and the execution reads COMPLETE: the caught error is swallowed.",
@@ -152,7 +152,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p3c/execution_record.json",
-       "sha256": "26a0e21d180ec6a469a4e45cf0bd6f260cb4f8c0487fea68881f55e5f48f1142"
+       "sha256": "36516897caabc8fdae91e0a871312e27ab805a1297762e5d65f95acae85bcc06"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p3c/mock_access_log_window.txt",
@@ -172,7 +172,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "ERROR, record message: 'Process terminating -- some documents reached an exception which is set to halt all documents: caught E11840913073745-p3c: [404] Not Found' \u2014 proves the Exception shape fires when reached, so p3's COMPLETE is the Add to Cache emitting nothing, not an inert Exception.",
@@ -212,7 +212,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_execution_record.json",
-       "sha256": "eb6db0928c72258b34e5cc3b0aa94df1a01d0a3cff99ce73e3ac03b408dc8cb9"
+       "sha256": "d775cddcb079d16c2e0511512e95f2236a5f5e3db732db621ae24d799f31c974"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_process_log.txt",
@@ -232,7 +232,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}']; UI rendering not observed (browser extension not connected)",
@@ -265,7 +265,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_execution_record.json",
-       "sha256": "4fd9eb0ff52970854c89bb4d786fc3c34e6da2c4dadf3679267c810f2c06e00c"
+       "sha256": "c07144674ddd0e960e8338002a93fe160adbc0bae64cffda49bf62758f5440d9"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_process_log.txt",
@@ -285,7 +285,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}']; UI rendering not observed (browser extension not connected)",
@@ -309,7 +309,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
-       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+       "sha256": "908cfa690faaebe24e74ceaf7f2b5c0a9aae7ebda8023b2aa0864a6238c2eaa5"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
@@ -329,7 +329,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
@@ -375,7 +375,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/parent_execution_record.json",
-       "sha256": "8bd4acd2e08f0aa8ad8fff3aedc6dfcda5616a512bc8cd5f5f8553464d689d5c"
+       "sha256": "cfa00149a8345767e24a8fec38672a34096290d7f0894c0c815d2dd2ec84f44d"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_br-1/parent_process_log.txt",
@@ -395,7 +395,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
@@ -429,7 +429,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/parent_execution_record.json",
-       "sha256": "28c3fa78a842f685b29a363191ea42342762c5b5cc3c92fae40bdd36f9c2edd8"
+       "sha256": "f39081da5ab2e7fccd5465d4672eacbaf3b67a436ca3c52fdc61213e9e1a06ac"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_dec-1/parent_process_log.txt",
@@ -449,7 +449,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
@@ -483,7 +483,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/parent_execution_record.json",
-       "sha256": "1245da281038eeccf9b319ce748afa7e0d7f2bc3790a30853ffcaca5ed580ce8"
+       "sha256": "aee5723bb7c57978c6cd6a257759a7cd1ab1b491b7d6d1c62a5781a5135c70ef"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_br-1/parent_process_log.txt",
@@ -503,7 +503,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
@@ -537,7 +537,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/parent_execution_record.json",
-       "sha256": "604d4d32cae88fd06e339c927ec84489cac066ddeca3cd008bf1f46b5d13a674"
+       "sha256": "25f3e429f27571d3f2b00f63f759683be12aee223cf843e271c89489809bdb50"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_remove_primed_dec-1/parent_process_log.txt",
@@ -557,7 +557,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "REFUTED: 'Executing Remove from Cache Shape with 1 document(s)' -> 'Successfully Removed Documents from Cache' -> 'No documents found. Skipping execution for the Process Call step.'; parent COMPLETE with outbound 0; no counterparty request. The process reads green while the call never runs.",
@@ -589,7 +589,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/parent_execution_record.json",
-       "sha256": "9721c2ad88d8a2394305a6ba6f36498661cfb20bf7d3c658328d9e811081c0e1"
+       "sha256": "62d8666ee651e1504b465ba5046ef9c5ae75fda86693b0427dd550d3bad83a92"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/xr-remove-successor-1/parent_process_log.txt",
@@ -609,7 +609,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "REFUTED: Remove from Cache emitted zero documents and the platform skipped the connector; the parent reads COMPLETE while the step after the remove never runs.",
@@ -633,7 +633,7 @@
       },
       {
        "file": "captures/cap184-cache-remove-read/runs/rr/execution_record.json",
-       "sha256": "52ca3fcf8c5e03d09357cc53d0fb49dd46bd5771c142b43672fe6c4b158f2dd4"
+       "sha256": "bf18d0fbe46aff66e0edcb7bba69d3f93f2fbb0e7604a29d2e2019472bd3bc1a"
       },
       {
        "file": "captures/cap184-cache-remove-read/runs/rr/mock_access_log_window.txt",
@@ -653,7 +653,7 @@
       },
       {
        "file": "captures/cap184-cache-remove-read/MANIFEST.json",
-       "sha256": "e9046481548c1bb5b5683e9a36d95ec7a5974a3a2a94df106472b5d989aa143a"
+       "sha256": "efa9707c72ac4a9700f63e08818c6959d6da16adc1f255635dfb44cc591fdca2"
       }
      ],
      "observation": "REFUTED: 'Document Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.'.",
@@ -685,7 +685,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p1/execution_record.json",
-       "sha256": "556d0da28d425c31b9c904bb99f1b3b1258d43fdd32b4099416484919e23d20c"
+       "sha256": "4210928efc36aea07ec420052106b63055f341eb55f0c19ca63ec4231c42067f"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p1/mock_access_log_window.txt",
@@ -705,7 +705,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
@@ -730,7 +730,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p2/execution_record.json",
-       "sha256": "5c559e74b1a73e14b2d50c435bf94b5758323a1235f41daff91a1cda9bda281f"
+       "sha256": "d25f19d32e3177c781313c5f3142ac750c2eaa780b97c668323015a3dc571c09"
       },
       {
        "file": "captures/cap184-cache-put-successor/runs/p2/mock_access_log_window.txt",
@@ -750,7 +750,7 @@
       },
       {
        "file": "captures/cap184-cache-put-successor/MANIFEST.json",
-       "sha256": "36336d926e85c62c88568b7f972af3c128795a6f4e0c422730389c898e218990"
+       "sha256": "be4431fa45e6b3940c203136da436d7bcaab9358ffa1b57852173412f5c796cc"
       }
      ],
      "observation": "REFUTED: 'Document Cache Load\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.' \u2014 neither the retrieve nor the connector ran; the process read COMPLETE; the witness posted in the same execution.",
@@ -774,7 +774,7 @@
       },
       {
        "file": "captures/cap184-cache-remove-read/runs/rr/execution_record.json",
-       "sha256": "52ca3fcf8c5e03d09357cc53d0fb49dd46bd5771c142b43672fe6c4b158f2dd4"
+       "sha256": "bf18d0fbe46aff66e0edcb7bba69d3f93f2fbb0e7604a29d2e2019472bd3bc1a"
       },
       {
        "file": "captures/cap184-cache-remove-read/runs/rr/mock_access_log_window.txt",
@@ -794,7 +794,7 @@
       },
       {
        "file": "captures/cap184-cache-remove-read/MANIFEST.json",
-       "sha256": "e9046481548c1bb5b5683e9a36d95ec7a5974a3a2a94df106472b5d989aa143a"
+       "sha256": "efa9707c72ac4a9700f63e08818c6959d6da16adc1f255635dfb44cc591fdca2"
       }
      ],
      "observation": "REFUTED: 'Document Cache Remove\t\tNo documents found. Skipping execution for the Document Cache Retrieve step.'.",
@@ -825,7 +825,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_execution_record.json",
-       "sha256": "f7b950401f0a4f8299ddbfc20a1036917f699065c49aace1cb69957a792d3ea4"
+       "sha256": "a2e1febecadb20369e3041c3fc4fcdacccb9fb82124530cd779f85d0a52104c9"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_process_log.txt",
@@ -849,7 +849,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_execution_record.json",
-       "sha256": "245907a4ac38bca22c022d69cf1a9104f73f82b4d0a777a2b167c6f382d0d86a"
+       "sha256": "576aba00651fd888a69c0acdf2a42c8b0f8d4c6438f86f7ced9ed02a27d8b9d6"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_process_log.txt",
@@ -873,7 +873,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_execution_record.json",
-       "sha256": "b3027bb7d1063c7ebb3d695a569854ceff31993d11e1e721878153f2dba69e12"
+       "sha256": "4298df9f25d0e2bbff81e3c7721465c546f3df0661ac1d9a68dc8a08cce56d7a"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_process_log.txt",
@@ -885,7 +885,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/MANIFEST.json",
-       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+       "sha256": "6b0a366b977600242b0264113fa44e009861af9bfa64b065b7757e9423531638"
       }
      ],
      "observation": "Standalone runs: 'No documents found. Skipping execution for the Connector step.', zero counterparty lines; the control run executed right after posted its line (channel live).",
@@ -923,7 +923,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_execution_record.json",
-       "sha256": "f7b950401f0a4f8299ddbfc20a1036917f699065c49aace1cb69957a792d3ea4"
+       "sha256": "a2e1febecadb20369e3041c3fc4fcdacccb9fb82124530cd779f85d0a52104c9"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-pt/parent_process_log.txt",
@@ -947,7 +947,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_execution_record.json",
-       "sha256": "245907a4ac38bca22c022d69cf1a9104f73f82b4d0a777a2b167c6f382d0d86a"
+       "sha256": "576aba00651fd888a69c0acdf2a42c8b0f8d4c6438f86f7ced9ed02a27d8b9d6"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-nd/parent_process_log.txt",
@@ -971,7 +971,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_execution_record.json",
-       "sha256": "b3027bb7d1063c7ebb3d695a569854ceff31993d11e1e721878153f2dba69e12"
+       "sha256": "4298df9f25d0e2bbff81e3c7721465c546f3df0661ac1d9a68dc8a08cce56d7a"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-sa-control/parent_process_log.txt",
@@ -983,7 +983,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/MANIFEST.json",
-       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+       "sha256": "6b0a366b977600242b0264113fa44e009861af9bfa64b065b7757e9423531638"
       }
      ],
      "observation": "Standalone runs: 'No documents found. Skipping execution for the Connector step.', zero counterparty lines; the control run executed right after posted its line (channel live).",
@@ -1013,7 +1013,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/child_execution_records.json",
-       "sha256": "609dc23a77f58a5d88091a26bb7996c48da0fa97162a97af125b6a20bf3376e9"
+       "sha256": "56013dfe44d9ac0702d2826f8a374204230645dfbabdfa2a6ee11c1c6c1d253b"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/execute.json",
@@ -1025,7 +1025,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/parent_execution_record.json",
-       "sha256": "5b43217b87d801f7103263e0a38086a6bff1f237bc2437d51b12765fdb4d3155"
+       "sha256": "39d9a306aaca75dc72c16b3b1143a3859834f5450418bd8a91638818575bfe09"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/parent_process_log.txt",
@@ -1037,7 +1037,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/MANIFEST.json",
-       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+       "sha256": "6b0a366b977600242b0264113fa44e009861af9bfa64b065b7757e9423531638"
       }
      ],
      "observation": "Child passthrough (passed 1 doc 'callpt') -> retrieve-all -> 3 requests with the parent's cached c1..c3.",
@@ -1059,7 +1059,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/child_execution_records.json",
-       "sha256": "609dc23a77f58a5d88091a26bb7996c48da0fa97162a97af125b6a20bf3376e9"
+       "sha256": "56013dfe44d9ac0702d2826f8a374204230645dfbabdfa2a6ee11c1c6c1d253b"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/execute.json",
@@ -1071,7 +1071,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/parent_execution_record.json",
-       "sha256": "5b43217b87d801f7103263e0a38086a6bff1f237bc2437d51b12765fdb4d3155"
+       "sha256": "39d9a306aaca75dc72c16b3b1143a3859834f5450418bd8a91638818575bfe09"
       },
       {
        "file": "captures/cap184-shared-cache/runs/cache-1/parent_process_log.txt",
@@ -1083,7 +1083,7 @@
       },
       {
        "file": "captures/cap184-shared-cache/MANIFEST.json",
-       "sha256": "e9c648eff2f3f962a8443dc5e709d4f8661ad7a89b0212bb0b7b297fd3cb83f9"
+       "sha256": "6b0a366b977600242b0264113fa44e009861af9bfa64b065b7757e9423531638"
       }
      ],
      "observation": "Child sub_process execution retrieved c1..c3 from the parent's cache.",
@@ -1116,7 +1116,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_execution_record.json",
-       "sha256": "eb6db0928c72258b34e5cc3b0aa94df1a01d0a3cff99ce73e3ac03b408dc8cb9"
+       "sha256": "d775cddcb079d16c2e0511512e95f2236a5f5e3db732db621ae24d799f31c974"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_br-1/parent_process_log.txt",
@@ -1136,7 +1136,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-br\"}']; UI rendering not observed (browser extension not connected)",
@@ -1169,7 +1169,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_execution_record.json",
-       "sha256": "4fd9eb0ff52970854c89bb4d786fc3c34e6da2c4dadf3679267c810f2c06e00c"
+       "sha256": "c07144674ddd0e960e8338002a93fe160adbc0bae64cffda49bf62758f5440d9"
       },
       {
        "file": "captures/cap184-prefix-predecessors/runs/pfx_cache_retrieve_dec-1/parent_process_log.txt",
@@ -1189,7 +1189,7 @@
       },
       {
        "file": "captures/cap184-prefix-predecessors/MANIFEST.json",
-       "sha256": "11c8a8ab5af953278a9d512b9bcccbb6a945c39c5623f7438e0610a9ac4aceda"
+       "sha256": "17bc2e2661042d46080d2a08c44af4dec98db523d99c12717bac6cb82292fa42"
       }
      ],
      "observation": "body=['{\"k\": \"E01840913062808-pfx-cache_retrieve-dec\"}']; UI rendering not observed (browser extension not connected)",
@@ -1213,7 +1213,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
-       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+       "sha256": "908cfa690faaebe24e74ceaf7f2b5c0a9aae7ebda8023b2aa0864a6238c2eaa5"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
@@ -1233,7 +1233,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
@@ -1264,7 +1264,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/execution_record.json",
-       "sha256": "820a82486f61c629963c587d0febd4f35dcd1beb2695a716cd195ffa6f78b0a3"
+       "sha256": "908cfa690faaebe24e74ceaf7f2b5c0a9aae7ebda8023b2aa0864a6238c2eaa5"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r1/mock_access_log_window.txt",
@@ -1284,7 +1284,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "wire: ['POST /__E1_184__/E11840913073745/r1/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r1-cached\"}']",
@@ -1308,7 +1308,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/execution_record.json",
-       "sha256": "16af858e0cfb0c2f1cea52ee493f035797ee5ed5f7f86673ba467051b91a7a6c"
+       "sha256": "75896ada175c8ee4ccd9e59cf9cee6bba8c2c68c35dfe84231d27dc3afdc870f"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r2/mock_access_log_window.txt",
@@ -1328,7 +1328,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "wire: ['POST /__E1_184__/E11840913073745/r2/X-current HTTP/1.1'] body ['{\"k\": \"E11840913073745-r2-cached\"}']",
@@ -1352,7 +1352,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/execution_record.json",
-       "sha256": "c60267f2d40e465ad225005eb58a8c71e9ce1d8d5e63ba5c51d861aecb8e1199"
+       "sha256": "00fa73a35eab7852dff1868204b814e109998b96701d38b33711ba89383a35df"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r3/mock_access_log_window.txt",
@@ -1372,7 +1372,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "wire: ['POST /__E1_184__/E11840913073745/r3/X-cached HTTP/1.1'] body ['{\"k\": \"E11840913073745-r3-cached\"}']",
@@ -1397,7 +1397,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/execution_record.json",
-       "sha256": "88db3401e3999b2c161fbe351833566c6dafc0fa8c4c2562d05d05700e380472"
+       "sha256": "7135352f99a93313c6414f5dffc68c9571975bce57a8cff53c4b4ec4edd8db0b"
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/runs/r4/mock_access_log_window.txt",
@@ -1417,7 +1417,7 @@
       },
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "X reached the wire as X-cached and Y as Y-current, both on the cached document's body.",
@@ -1449,7 +1449,7 @@
       },
       {
        "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/parent_execution_record.json",
-       "sha256": "88d0cbf62b9105fc9d8c3698bc0bd0dcb3c55f5a5ec153ec99d6aada3b62509d"
+       "sha256": "1148e44208fb03ea7df64ac027c9a216a6efa7f739acb43ab27635a3877b5596"
       },
       {
        "file": "captures/cap184-passthrough-ddp-handoff/runs/ddp-cache-1/parent_process_log.txt",
@@ -1461,7 +1461,7 @@
       },
       {
        "file": "captures/cap184-passthrough-ddp-handoff/MANIFEST.json",
-       "sha256": "76ade3b978e2f4f61e01ac48e6ef46810e3376e520998be09ca6b02fc8e41760"
+       "sha256": "6d2430b546a03ee7d826be0557c75ba00a64f69fa3cdf3e327c9f943f83e3dba"
       }
      ],
      "observation": "REFUTED in this configuration: the retrieved (cached) documents c1..c3 reached the wire with their own parent-set DDP paths; nothing was lost.",
@@ -1484,7 +1484,7 @@
      "files": [
       {
        "file": "captures/cap184-retrieve-ddp-replacement/MANIFEST.json",
-       "sha256": "f005c72f8a5133395faeff6c6593cc52387bf6e7b38cf4a5c34c5e8ecc8a2510"
+       "sha256": "913faefa3e1b78473cc0160846174041fd49e56913bbaaf5e7198c90f3d0d638"
       }
      ],
      "observation": "Every R run retrieved exactly 1 cached document for exactly 1 current document.",
@@ -1511,7 +1511,7 @@
       },
       {
        "file": "captures/cap184-send-then-read/MANIFEST.json",
-       "sha256": "37d9af3189dcdb058f212255d413fe739893c23da769777a1c600c0165efa930"
+       "sha256": "16aa35d0bbd8af4d69d38cabe068f1163aa50ac8043197bddf31ee618c8304f6"
       }
      ],
      "observation": "Not executed: no cheap non-producing operation on this stack (see RECORD.json).",
@@ -1564,7 +1564,7 @@
       },
       {
        "file": "captures/cap184-passthrough-standalone/runs/sa-1/parent_execution_record.json",
-       "sha256": "c8ce666b250c5205451f0423f24bf2105e6bc498d2eab89439adb7fec3341d91"
+       "sha256": "fbc069c5c1e7041c3171371265e49dc9345888d06a0c7941cd6c3165c5cfc8e7"
       },
       {
        "file": "captures/cap184-passthrough-standalone/runs/sa-1/parent_process_log.txt",
@@ -1576,7 +1576,7 @@
       },
       {
        "file": "captures/cap184-passthrough-standalone/MANIFEST.json",
-       "sha256": "533139eadee68e5f42edab0bc874f9918509bb0bf372714fd792f866718b30fc"
+       "sha256": "7019656bfa92c5cd6ffca1de3178b2ffa9bacaa1bbfe58b17428a11492a91267"
       }
      ],
      "observation": "Start logged 'NoData ... 1 document(s) found'; the first step's request body was empty (0 bytes).",
@@ -1612,7 +1612,7 @@
       },
       {
        "file": "captures/cap184-nodata-per-document/runs/nd-1/child_execution_records.json",
-       "sha256": "4de2c3035e9283e14640532dd3e82df9c71f2bda0e94a864bafd4e47ed9b7f63"
+       "sha256": "5f57b25b4badd1237b7c39caf5861835c9378eb297ae2fc0aca9b0bdda3cdf15"
       },
       {
        "file": "captures/cap184-nodata-per-document/runs/nd-1/execute.json",
@@ -1624,7 +1624,7 @@
       },
       {
        "file": "captures/cap184-nodata-per-document/runs/nd-1/parent_execution_record.json",
-       "sha256": "f9e01a32b3de8cd75733fbd74bd8e9f31784f2a1116f561969fb4d65681f3a62"
+       "sha256": "a2cce6997ba3db420d71936047904543b68152841d28c220dedc01a552b1bdf8"
       },
       {
        "file": "captures/cap184-nodata-per-document/runs/nd-1/parent_process_log.txt",
@@ -1636,7 +1636,7 @@
       },
       {
        "file": "captures/cap184-nodata-per-document/MANIFEST.json",
-       "sha256": "db6658dc73e39c7936102e9ef66704a7d9a531f309925230d5a4b88258a5c758"
+       "sha256": "d3dc5b2760fa1f7e0ed084b0df5af7cd4cab9285ae3dafa2c237b53cfba7a8c8"
       }
      ],
      "observation": "3 sub_process ExecutionRecords (topLevelExecutionId = parent, in=1 out=2 each); parent log 'standalone start data' with 3 'Executing process' lines; each child's first connector sent an EMPTY body (0 bytes) x3.",

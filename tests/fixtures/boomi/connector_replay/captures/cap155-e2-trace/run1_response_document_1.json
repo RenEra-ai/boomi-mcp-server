@@ -3,7 +3,7 @@
   "resp": {
     "_success": true,
     "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi05MTk3OGY5Mi0xOTY4LTQyYTUtYWE1Yy04MmI1ZWU1NTE2MzMtMjAyNi4wOC4yNjpjb25uZWN0b3ItZmUxMTAxODgtNmQ3NC00MTU3LWFkZjUtMzNkN2FhZjVjZmI3",
-    "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-d85dc626-63d7-4882-b49f-03ee09968615",
+    "download_url": "https://platform.boomi.com/account/retiredaccounta-RETA01/api/download/ConnectorDocument-d85dc626-63d7-4882-b49f-03ee09968615",
     "status_code": 202,
     "message": "Beginning download.",
     "_downloaded": true,

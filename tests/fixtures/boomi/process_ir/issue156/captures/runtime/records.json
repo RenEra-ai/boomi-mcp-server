@@ -3,9 +3,9 @@
     "scenario": "runtime",
     "file": "runtime_summary.json",
     "utc": "2026-09-06T03:59:50.217499+00:00",
-    "account_id": "trainingglebbochkarov-16926N",
-    "sha256": "51c9a85445f7c6a57233beadd1fa77519a10e53d388100525ca94001364ef440",
-    "byte_length": 9147,
+    "account_id": "retiredaccountb-RETB01",
+    "sha256": "527f8afd1681d183dc57b98052d331a8dee2662d1c94792b01840896de9f2157",
+    "byte_length": 9135,
     "archive_path": "docs/architecture/evidence/issue-156/captures/runtime/runtime_summary.json",
     "kind": "reconstructed runtime cell summary"
   }

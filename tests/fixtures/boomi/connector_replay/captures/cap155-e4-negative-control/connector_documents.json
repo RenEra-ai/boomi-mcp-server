@@ -4,7 +4,7 @@
     "resp": {
       "_success": true,
       "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hODAwZmU3Mi02NTg5LTRhYzktODA5My00YTQ3OGFmNDkyNWQtMjAyNi4wOC4yNzpjb25uZWN0b3ItODhjMWM0ZDQtODFjMi00Y2Q1LTg3N2ItZjdiMGFlODEzZTQw",
-      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-f902eec4-582e-4096-87b9-7c4323384711",
+      "download_url": "https://platform.boomi.com/account/retiredaccounta-RETA01/api/download/ConnectorDocument-f902eec4-582e-4096-87b9-7c4323384711",
       "status_code": 202,
       "message": "Beginning download.",
       "_downloaded": true,
@@ -18,7 +18,7 @@
     "resp": {
       "_success": true,
       "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hODAwZmU3Mi02NTg5LTRhYzktODA5My00YTQ3OGFmNDkyNWQtMjAyNi4wOC4yNzpjb25uZWN0b3ItMGJiYWRmYTctNjZhNS00MjAzLWEzYjctNjg1ZDY3Mzk3MjQ2",
-      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-253fc9d9-8bb1-4acb-946c-09a4c24dc95c",
+      "download_url": "https://platform.boomi.com/account/retiredaccounta-RETA01/api/download/ConnectorDocument-253fc9d9-8bb1-4acb-946c-09a4c24dc95c",
       "status_code": 202,
       "message": "Beginning download.",
       "_downloaded": true,
@@ -32,7 +32,7 @@
     "resp": {
       "_success": true,
       "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi1hODAwZmU3Mi02NTg5LTRhYzktODA5My00YTQ3OGFmNDkyNWQtMjAyNi4wOC4yNzpjb25uZWN0b3ItZmQ0ZDkzN2YtODEwYy00YTUyLWFmOGQtMTE4NzljZjBjMjgx",
-      "download_url": "https://platform.boomi.com/account/traininghlibbochkarov-JKIY2X/api/download/ConnectorDocument-07e6fc9d-534e-425f-a64f-7726f20147a9",
+      "download_url": "https://platform.boomi.com/account/retiredaccounta-RETA01/api/download/ConnectorDocument-07e6fc9d-534e-425f-a64f-7726f20147a9",
       "status_code": 202,
       "message": "Beginning download.",
       "_downloaded": true,

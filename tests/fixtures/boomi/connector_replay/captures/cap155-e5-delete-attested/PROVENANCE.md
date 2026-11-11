@@ -11,7 +11,7 @@ execution. The evidence registry requires a retry verdict to be supported by an 
 replay -- as many logged requests of the verb under test as there were executions -- so
 neither supported an affirmative verdict. This capture supplies both conjuncts.
 
-Account `traininghlibbochkarov-JKIY2X`,
+Account `retiredaccounta-RETA01`,
 runtime `renera-local-atom`, environment `Local Test Env`, 2026-08-27.
 
 ## The two executions and their requests
@@ -111,7 +111,7 @@ nothing in this capture.
 * `component_op_src.xml` <- `cap155-e2-delete/source_operation_component.xml` (banked sha256 `279806a7551e9907…`), verb `GET`, path bytes unedited: `True`
 * `component_op_tgt.xml` <- `cap155-e2-delete/operation_component.xml` (banked sha256 `40633cb19b978923…`), verb `DELETE`, path bytes unedited: `True`
 * `component_process.xml` <- `cap155-e3b-patch-canonical/component_process.xml` (banked sha256
-  `e2bb0683eb13f412…`)
+  `413f3cbfcfebb5b2…`)
 
 Only identity attributes (`componentId`, `version`, `createdDate`/`By`,
 `modifiedDate`/`By`, `deleted`, `currentVersion`, `branchName`/`Id`) were stripped and the

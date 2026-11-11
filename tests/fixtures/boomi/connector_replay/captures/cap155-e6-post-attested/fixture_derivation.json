@@ -70,7 +70,7 @@
     "component_id": "62c7eef4-bdad-4d46-82b0-9b31da654fc0",
     "name": "_TEST_155E6_proc_POST_20260901195354",
     "banked_source": "cap155-e3b-patch-canonical/component_process.xml",
-    "banked_sha256": "e2bb0683eb13f412c5040d8506243ff7fcd72d14ec9b54dedfc4c1d18f33c0e5",
+    "banked_sha256": "413f3cbfcfebb5b270119fa2316d73e298e973e7ced0d558933b1d1b3b657a03",
     "created_xml_sha256": "2901d5367da0d78c265f22f5ffe0cfad5c0a9618efcaab081a2690c65b1e3ebe",
     "readback_sha256": "93ef2b8555c42d42aaba5cb376b701b0af77ea940926e95ddda8731d8fd8898f",
     "substitutions": {

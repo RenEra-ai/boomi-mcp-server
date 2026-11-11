@@ -3,7 +3,7 @@
   "status_code": 200,
   "method": "POST",
   "endpoint": "GenericConnectorRecord/query",
-  "url": "https://api.boomi.com/api/rest/v1/traininghlibbochkarov-JKIY2X/GenericConnectorRecord/query",
+  "url": "https://api.boomi.com/api/rest/v1/retiredaccounta-RETA01/GenericConnectorRecord/query",
   "profile": "renera",
   "data": {
     "@type": "QueryResult",

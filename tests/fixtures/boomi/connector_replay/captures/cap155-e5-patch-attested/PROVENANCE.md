@@ -11,7 +11,7 @@ execution. The evidence registry requires a retry verdict to be supported by an 
 replay -- as many logged requests of the verb under test as there were executions -- so
 neither supported an affirmative verdict. This capture supplies both conjuncts.
 
-Account `traininghlibbochkarov-JKIY2X`,
+Account `retiredaccounta-RETA01`,
 runtime `renera-local-atom`, environment `Local Test Env`, 2026-08-27.
 
 ## The two executions and their requests
@@ -110,10 +110,10 @@ Every component here was created by POSTing **banked, proven-operable component 
 `manage_component(action="create", config={"xml": …})`. The builder under test authored
 nothing in this capture.
 
-* `component_op_src.xml` <- `cap155-e3b-patch-canonical/component_op_src.xml` (banked sha256 `22a101efd3d691d2…`), verb `GET`, path bytes unedited: `True`
-* `component_op_tgt.xml` <- `cap155-e3b-patch-canonical/component_op_patch.xml` (banked sha256 `afc8ba001fa65487…`), verb `PATCH`, path bytes unedited: `True`
+* `component_op_src.xml` <- `cap155-e3b-patch-canonical/component_op_src.xml` (banked sha256 `18bcf1d00e500589…`), verb `GET`, path bytes unedited: `True`
+* `component_op_tgt.xml` <- `cap155-e3b-patch-canonical/component_op_patch.xml` (banked sha256 `7cb08c39a7fb6766…`), verb `PATCH`, path bytes unedited: `True`
 * `component_process.xml` <- `cap155-e3b-patch-canonical/component_process.xml` (banked sha256
-  `e2bb0683eb13f412…`)
+  `413f3cbfcfebb5b2…`)
 
 Only identity attributes (`componentId`, `version`, `createdDate`/`By`,
 `modifiedDate`/`By`, `deleted`, `currentVersion`, `branchName`/`Id`) were stripped and the

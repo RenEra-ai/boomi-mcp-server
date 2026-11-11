@@ -21,7 +21,7 @@ for p in (os.path.join(WT, "src"), WT):
 os.environ["BOOMI_LOCAL"] = "true"
 
 P = "renera"
-ACCOUNT = "trainingglebbochkarov-16926N"
+ACCOUNT = "retiredaccountb-RETB01"
 ATOM = "a40a3313-1537-47c4-91c7-573a703537c7"
 ENV = "b173ce8a-2d7f-41e3-9d3f-06e45d5b0de9"
 REST_CONN = "2fe488e4-3169-4529-9515-d854570c8ffc"

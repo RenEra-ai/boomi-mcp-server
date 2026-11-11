@@ -8,7 +8,7 @@ pairs, and therefore the route whose retry/idempotency classification is at issu
 
 Two independent authoring routes, the same counterparty contract, the same verdict.
 
-Account `traininghlibbochkarov-JKIY2X`, runtime `renera-local-atom`, environment
+Account `retiredaccounta-RETA01`, runtime `renera-local-atom`, environment
 `Local Test Env`, 2026-08-27.
 
 ## The verdict (see analysis.json)

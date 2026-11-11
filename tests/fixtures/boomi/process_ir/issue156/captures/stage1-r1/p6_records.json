@@ -3,7 +3,7 @@
     "scenario": "stage1-r1",
     "file": "p6_serialized_connector_regions_notify_dlq_emitted.xml",
     "utc": "2026-09-06T07:12:40.235641+00:00",
-    "account_id": "trainingglebbochkarov-16926N",
+    "account_id": "retiredaccountb-RETB01",
     "sha256": "91df44d8ce29251ccc2c23783dc58eb1a780004fd0a60868009d7f2b1d6c52a5",
     "byte_length": 5266,
     "archive_path": "docs/architecture/evidence/issue-156/captures/stage1-r1/p6_serialized_connector_regions_notify_dlq_emitted.xml",

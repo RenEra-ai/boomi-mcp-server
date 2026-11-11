@@ -1,11 +1,11 @@
 {
  "record": "cap158-r3-wss-method-matrix",
  "date_utc": "2026-09-11",
- "account_id": "trainingglebbochkarov-16926N",
+ "account_id": "retiredaccountb-RETB01",
  "scenario": "WSS operationType x inputType -> HTTP method served; /ws/rest all-inherit ASC (advanced) and bare /ws/simple (intermediate); 14 cells x 5 methods",
  "raw": "r3-wss-method-evidence.json",
- "sha256": "bb6751b4122dc02cacea62b3ebc1a4f7b8cb42799e7a8af27f6d07792c7defc3",
- "bytes": 102065,
+ "sha256": "f5d80e1929cee3c62b17a23c0f4a4b5d4ec75cf00f48779bf85034e820a4959d",
+ "bytes": 102059,
  "tool_tree": "git archive 3a8469e",
  "final_rounds": {
   "A": "poll07",

@@ -10,7 +10,7 @@
    "capture": {
     "execution_id": "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
     "captured_at": "2026-08-27T20:33:34Z",
-    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "account_scope_hash": "9f09cae4ff827d163d30d24620cc0626bf4dcb9d5c36fab15777cf30050f080d",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -24,9 +24,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "34614e7c081fdc699ae38cd8ce916ed56da6300460a25e57189e83a32e1df144"
+    "capture_digest": "105398b0019e8617a858b22f16ad21c73248d4cd45951792cd7ba21a2d63def7"
    },
-   "capture_digest": "34614e7c081fdc699ae38cd8ce916ed56da6300460a25e57189e83a32e1df144",
+   "capture_digest": "105398b0019e8617a858b22f16ad21c73248d4cd45951792cd7ba21a2d63def7",
    "execution_ids": [
     "execution-d999b19c-8f5f-4d46-9d93-11de5846c7a4-2026.08.27",
     "execution-18b59781-67b7-4f31-afc6-89a619efd15b-2026.08.27"
@@ -43,7 +43,7 @@
    "capture": {
     "execution_id": "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27",
     "captured_at": "2026-08-27T13:32:00Z",
-    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "account_scope_hash": "9f09cae4ff827d163d30d24620cc0626bf4dcb9d5c36fab15777cf30050f080d",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -57,9 +57,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "e403860b635d5f6f130f10757aedfe281b480d7b733ff780ebe56e176ef0d3a8"
+    "capture_digest": "097fa2cbd8521e724dd36c8dea306825c0d0f1a94a8dd64e4b284eb35fee6fb2"
    },
-   "capture_digest": "e403860b635d5f6f130f10757aedfe281b480d7b733ff780ebe56e176ef0d3a8",
+   "capture_digest": "097fa2cbd8521e724dd36c8dea306825c0d0f1a94a8dd64e4b284eb35fee6fb2",
    "execution_ids": [
     "execution-487d4ceb-32e5-4f1e-95ec-9a2d64475607-2026.08.27"
    ]
@@ -74,7 +74,7 @@
    "capture": {
     "execution_id": "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27",
     "captured_at": "2026-08-27T13:32:19Z",
-    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "account_scope_hash": "9f09cae4ff827d163d30d24620cc0626bf4dcb9d5c36fab15777cf30050f080d",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -88,9 +88,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "67ed7efbf5691516d1aeefcd4138743b00951fa8be7740fe50d1f2e5cc0812b1"
+    "capture_digest": "012fb67e48dc239f565ff0aa3d64f2dff44c9b632f58bb5653425cd3ff1d82ce"
    },
-   "capture_digest": "67ed7efbf5691516d1aeefcd4138743b00951fa8be7740fe50d1f2e5cc0812b1",
+   "capture_digest": "012fb67e48dc239f565ff0aa3d64f2dff44c9b632f58bb5653425cd3ff1d82ce",
    "execution_ids": [
     "execution-88a1330f-52a2-4a68-ba95-7d4698618bda-2026.08.27"
    ]
@@ -105,7 +105,7 @@
    "capture": {
     "execution_id": "execution-58bc6079-7b94-4793-b110-113d5f951dd3-2026.08.27",
     "captured_at": "2026-08-27T20:22:58Z",
-    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "account_scope_hash": "9f09cae4ff827d163d30d24620cc0626bf4dcb9d5c36fab15777cf30050f080d",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -119,9 +119,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "dec268ab22bd2f6b15df6a85c537abd949dc5d3813261f74c119d6c0f788a1bb"
+    "capture_digest": "f9ded7b5b08c2a94c99b77677a7169e7aa84f4eed1eb040f07bbf7cc3094b7cd"
    },
-   "capture_digest": "dec268ab22bd2f6b15df6a85c537abd949dc5d3813261f74c119d6c0f788a1bb",
+   "capture_digest": "f9ded7b5b08c2a94c99b77677a7169e7aa84f4eed1eb040f07bbf7cc3094b7cd",
    "execution_ids": [
     "execution-58bc6079-7b94-4793-b110-113d5f951dd3-2026.08.27",
     "execution-7d1f0df7-282c-4dfa-886e-91c5ab506f24-2026.08.27"
@@ -138,7 +138,7 @@
    "capture": {
     "execution_id": "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
     "captured_at": "2026-09-01T19:54:06Z",
-    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -152,9 +152,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "80e530d635dbb659cb5fcf1a30b0ae4c69dda26a1b7e26050e68aea23ad921ec"
+    "capture_digest": "d87e1a45c4950c3a6f13c4f1218e2ded778e73e8d640267c8174bd9ffe6f9c31"
    },
-   "capture_digest": "80e530d635dbb659cb5fcf1a30b0ae4c69dda26a1b7e26050e68aea23ad921ec",
+   "capture_digest": "d87e1a45c4950c3a6f13c4f1218e2ded778e73e8d640267c8174bd9ffe6f9c31",
    "execution_ids": [
     "execution-040dc855-b5c1-44fb-9382-b07a2d0f1705-2026.09.01",
     "execution-3752bda7-f0af-4518-8728-1f5cbf931c01-2026.09.01"
@@ -171,7 +171,7 @@
    "capture": {
     "execution_id": "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
     "captured_at": "2026-09-01T19:52:28Z",
-    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -185,9 +185,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "a065632cfbf9157e3b4c74ef8605de01f8ca8e8af2eab25ce037540072eff7d4"
+    "capture_digest": "d3952f026edecc22d055554625dc83286be039710da3f59dcfc7e4058799ae2f"
    },
-   "capture_digest": "a065632cfbf9157e3b4c74ef8605de01f8ca8e8af2eab25ce037540072eff7d4",
+   "capture_digest": "d3952f026edecc22d055554625dc83286be039710da3f59dcfc7e4058799ae2f",
    "execution_ids": [
     "execution-116a711b-4c5d-4782-b852-9015a3f1b56d-2026.09.01",
     "execution-6541710d-8096-4bac-a651-5b3703d92097-2026.09.01"
@@ -204,7 +204,7 @@
    "capture": {
     "execution_id": "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27",
     "captured_at": "2026-08-27T13:32:33Z",
-    "account_scope_hash": "74e3eb7225a05f258fc2f39c66b2bde09153627c66268f1ece7298107430e1ae",
+    "account_scope_hash": "9f09cae4ff827d163d30d24620cc0626bf4dcb9d5c36fab15777cf30050f080d",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -218,9 +218,9 @@
       "execution_record"
      ]
     },
-    "capture_digest": "0c62c0fb6ca337c438fe4779e7b3b9b5fd11ab775fef1f62c3bfc5af2be53081"
+    "capture_digest": "afd78abde2457c1145131ad5ed54724cfa5756329dd4c62c82f7845e9e0da947"
    },
-   "capture_digest": "0c62c0fb6ca337c438fe4779e7b3b9b5fd11ab775fef1f62c3bfc5af2be53081",
+   "capture_digest": "afd78abde2457c1145131ad5ed54724cfa5756329dd4c62c82f7845e9e0da947",
    "execution_ids": [
     "execution-0aa56e9d-237e-45d7-9062-aa01811aeff3-2026.08.27"
    ]
@@ -233,7 +233,7 @@
    "action": "PATCH",
    "semantics_id": "resource_identity_upsert_static_route_same_effect",
    "semantics_revision": 1,
-   "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+   "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
    "operation_identity": {
     "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
     "version": 2,
@@ -253,7 +253,7 @@
    "capture": {
     "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
     "captured_at": "2026-09-03T19:57:29Z",
-    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "summary": {
      "placement": "downstream",
      "input_observation": "documents_consumed",
@@ -269,7 +269,7 @@
     },
     "capture_digest": "7b5dac1b83c5ebf7a949521465cfe09aff04314b7de00ee2146aff587a74daf5"
    },
-   "record_digest": "a679146d4113714c158ff89c36567c2a8682571d7710ecbe56cb86271ac704c3"
+   "record_digest": "3bcebad13c46e0ff5db8ea90bdbe1072178c66b8291c4cb683d09ec9456d39b4"
   }
  ],
  "projection_allowlists": [

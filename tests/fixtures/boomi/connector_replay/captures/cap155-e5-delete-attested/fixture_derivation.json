@@ -40,7 +40,7 @@
     "component_id": "de6367ca-6f15-427f-8d17-f51cf10d8ce5",
     "name": "_TEST_155E5_proc_DELETE_20260827202715",
     "banked_source": "cap155-e3b-patch-canonical/component_process.xml",
-    "banked_sha256": "e2bb0683eb13f412c5040d8506243ff7fcd72d14ec9b54dedfc4c1d18f33c0e5",
+    "banked_sha256": "413f3cbfcfebb5b270119fa2316d73e298e973e7ced0d558933b1d1b3b657a03",
     "created_xml_sha256": "82b91d8f5b7a254b631f1853e03a1463ceffadea404deade19802294eaa46065",
     "readback_sha256": "4d873c7ce4cb49b887e1805b6bd388034f90e2e29703244560956e737631f1f0",
     "substitutions": {

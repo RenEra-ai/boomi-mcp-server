@@ -2,7 +2,7 @@
   "scenario": "cap155-e3-patch-legacy",
   "route": "legacy integration_spec / sync_pipeline (fetch GET -> send PATCH)",
   "question": "does the SECOND identical PATCH leave the resource in the same state as the first, and does it report success?",
-  "account_id": "traininghlibbochkarov-JKIY2X",
+  "account_id": "retiredaccounta-RETA01",
   "process_component_id": "b85057b8-1e80-4937-8972-1d09fe1f3946",
   "executions": [
     {

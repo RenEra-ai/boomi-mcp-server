@@ -2,7 +2,7 @@
   "issue": 184,
   "capture_id": "cap184-dpp-both-ways",
   "kind": "pre-implementation live evidence (E0) \u2014 no #184 code exists",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
   "nonce": "E01840913062808",
   "utc_window": {
@@ -491,8 +491,8 @@
     },
     {
       "file": "runs/dpp-nd-1/child_execution_records.json",
-      "sha256": "48a92ae1bf4e4eb2360833d06ea6775420ed2c9d022683f7709b4d6e0b32888f",
-      "bytes": 970
+      "sha256": "cf980077ee41d6be80a9ee071e1683d4ebf1bcef3ae5f34c170a776d23a1d0b5",
+      "bytes": 964
     },
     {
       "file": "runs/dpp-nd-1/execute.json",
@@ -506,8 +506,8 @@
     },
     {
       "file": "runs/dpp-nd-1/parent_execution_record.json",
-      "sha256": "c206d830241d03f706898723e01781713368568c1701698d306191bf0cec94bb",
-      "bytes": 744
+      "sha256": "e037689a6dea27b27c7f7b7275a0ab073cfba24f8b8da1dcaaef16566c8683f3",
+      "bytes": 738
     },
     {
       "file": "runs/dpp-nd-1/parent_process_log.txt",
@@ -536,8 +536,8 @@
     },
     {
       "file": "runs/dpp-pt-1/parent_execution_record.json",
-      "sha256": "5ade931622c4d86f032494ca8b4196dfbf9c7011d9960c7efc1d16c09355fe0a",
-      "bytes": 744
+      "sha256": "cb0aae78d715623605c5daec1d21e12f8e29b4e0903f3256d151f0dbd61d2192",
+      "bytes": 738
     },
     {
       "file": "runs/dpp-pt-1/parent_process_log.txt",

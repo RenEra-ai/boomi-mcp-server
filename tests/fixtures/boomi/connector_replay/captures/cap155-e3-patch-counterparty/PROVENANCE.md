@@ -7,7 +7,7 @@ against a known counterparty contract rather than against an assumption.
 
 * `account_liveness.json` — C1. `list_boomi_profiles`, `boomi_account_info` and
   `manage_runtimes` through the public MCP tool boundary at capture time.
-  Account `traininghlibbochkarov-JKIY2X` status `active`; licences standard 3/0 and
+  Account `retiredaccounta-RETA01` status `active`; licences standard 3/0 and
   standard_test 3/0; runtime `renera-local-atom` (89387bdf-…) `ONLINE`, version 26.07.0.
 * `counterparty_patch_replay.json` — three probes:
   - `P1_identical_patch_replay` — create a client, read it, PATCH, read, PATCH the

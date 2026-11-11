@@ -1,7 +1,7 @@
 {
   "verb": "PATCH",
   "scenario": "cap155-e7-patch-operation-record",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "route": "banked cap155-e5-patch-attested operation + process XML, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped; path bytes UNEDITED). The PATCH operation is a DURABLE account fixture, reused unchanged.",
   "executions": [
     {

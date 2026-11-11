@@ -1,5 +1,5 @@
 {
-  "what": "the OperationContractRecordV1 for REST PATCH minted on trainingglebbochkarov-16926N from this capture",
+  "what": "the OperationContractRecordV1 for REST PATCH minted on retiredaccountb-RETB01 from this capture",
   "capture_digest": {
     "value": "7b5dac1b83c5ebf7a949521465cfe09aff04314b7de00ee2146aff587a74daf5",
     "computed_by": "boomi_mcp.connector_replay.capture.summarize(<this dir>)",
@@ -87,10 +87,10 @@
     ]
   },
   "account_scope_hash": {
-    "value": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "value": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "computed_by": "ingest._account_scope_hash(summary) -> digests.account_scope_hash",
     "account_id_source": "the account id the summariser read out of the execution records, not a constant",
-    "account_id": "trainingglebbochkarov-16926N"
+    "account_id": "retiredaccountb-RETB01"
   },
   "operation_identity": {
     "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
@@ -127,7 +127,7 @@
   "capture_reference": {
     "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
     "captured_at": "2026-09-03T19:57:29Z",
-    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "summary": {
       "placement": "downstream",
       "input_observation": "documents_consumed",

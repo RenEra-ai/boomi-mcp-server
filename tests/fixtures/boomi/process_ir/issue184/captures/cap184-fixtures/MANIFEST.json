@@ -2,7 +2,7 @@
   "issue": 184,
   "capture_id": "cap184-fixtures",
   "kind": "pre-implementation live evidence (E0) \u2014 no #184 code exists",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "branch_point_sha": "cbab28ffc176ddb2378283cf7132eb9c37afc374",
   "nonce": "E01840913062808",
   "utc_window": {
@@ -640,8 +640,8 @@
     },
     {
       "file": "instruments/lib184.py",
-      "sha256": "82602d5f9092ec9e970038b72a9ac1715c658586f82224ffee8bf9bab9c6692c",
-      "bytes": 9415
+      "sha256": "03f038e6227087ec064558326330e9e86b190e1f2caaf121b77b8060bd35d117",
+      "bytes": 9409
     },
     {
       "file": "instruments/p02_provision.py",

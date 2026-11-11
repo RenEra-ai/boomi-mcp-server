@@ -2,7 +2,7 @@
   "scenario": "cap155-e3-patch-canonical",
   "question": "does the SECOND identical PATCH leave the resource in the same state as the first, and does it report success?",
   "route": "canonical authoring_request / process_ir (source GET -> connector_call PATCH)",
-  "account_id": "traininghlibbochkarov-JKIY2X",
+  "account_id": "retiredaccounta-RETA01",
   "process_component_id": "7740736c-1477-4d0f-8c07-eeeb8ff0d397",
   "executions": [
     {

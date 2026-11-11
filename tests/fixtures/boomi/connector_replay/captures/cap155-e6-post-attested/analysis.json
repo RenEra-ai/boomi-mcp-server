@@ -1,7 +1,7 @@
 {
   "verb": "POST",
   "scenario": "cap155-e6-post-attested",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "route": "banked cap155-e2-post operation XML + cap155-e3b canonical process, re-created verbatim (identity+folder attrs stripped, root name= substituted, operation/connection refs remapped, send actionType swapped; path bytes UNEDITED)",
   "executions": [
     {

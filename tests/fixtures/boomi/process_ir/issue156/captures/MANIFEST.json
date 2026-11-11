@@ -1,21 +1,21 @@
 {
   "issue": 156,
   "kind": "pre-implementation live oracle capture",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "baseline_sha": "b07babeb3752d337ffa307c4c486e181e703a2c2",
   "generated_utc": "2026-09-06T04:00:29.516217+00:00",
   "artifact_count": 45,
   "artifacts": [
     {
       "file": "docs/architecture/evidence/issue-156/captures/provision/provision_state.json",
-      "sha256": "ac922191515720e3d7871b195b81537e66765b28eb5fcf553ac64c4354c8734b",
-      "bytes": 703,
+      "sha256": "20fa22c8dcc93d6fb2c09a1b1f016cd717835b7e94ddd557f9c42c94caeb544f",
+      "bytes": 697,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/provision/records.json",
-      "sha256": "f71f18bd4bd0b70f984077d647b9f196aac227949eb8443bcfa61cf43dcbc6f9",
-      "bytes": 594,
+      "sha256": "005088b7f4eead11eab3d7209a99a7be53e7de4b27051069f06ef4bdb8522f99",
+      "bytes": 588,
       "redacted": false
     },
     {
@@ -176,8 +176,8 @@
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/golden_parity_records.json",
-      "sha256": "e12e8c15495b809fa0f3854b56ba2c150fc63087e7969793895bec0485d863a7",
-      "bytes": 685,
+      "sha256": "6a0320fbd02b303e53399f92ce36b2c63e4acfb6be392c5271085a39e78043a0",
+      "bytes": 679,
       "redacted": false
     },
     {
@@ -188,8 +188,8 @@
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/oracle-graphs/records.json",
-      "sha256": "b05534ded05ccc4d1b8876bf43ea81990ffa1cdaacefcdc5cc6be8630ab02822",
-      "bytes": 13217,
+      "sha256": "0cc0af99ced4c8dc1b19115d5d6b21aa622b12a045891a1122ef9bbea82dbc88",
+      "bytes": 13061,
       "redacted": false
     },
     {
@@ -218,44 +218,44 @@
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/deploy/records.json",
-      "sha256": "b7d4846b845b1d169d1d9191820cda444b096fd37e91911820c9fd995418bac6",
-      "bytes": 1325,
+      "sha256": "a5f3c1563a457414d0ee30b3e4909787fd7c34088443a4ddf1b1459d0a374b44",
+      "bytes": 1307,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C1_SUCCESS_CONTROL_B1.json",
-      "sha256": "db6edec0d46acc3383ae60dae0c831160f8b6bed451bde086c995501b029cae8",
-      "bytes": 5444,
+      "sha256": "905d7dd12e831f9ed50cb1a92ec720bfb5ad1afb7a4ef7e2203fc54ed6de3ed4",
+      "bytes": 5432,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C2_SUCCESS_CONTROL_B2.json",
-      "sha256": "102d3428465093bbfe9f29fa15fd504f1524443b6cc5c76f71a3f2b4dfd9bd9a",
-      "bytes": 5463,
+      "sha256": "22e17b2f11115875445799d3acec72983dd4438b22175902c4341d77f2ee71ce",
+      "bytes": 5451,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C3_FAILURE_B1.json",
-      "sha256": "3663c6fb660759b1518f578741c9d607cd061b1ce009467d07a2545bc32edfb5",
-      "bytes": 13657,
+      "sha256": "6e9ddfdbf5635d6b840b5ea24c58023209017dd4874f10f1dec1853228835bb1",
+      "bytes": 13645,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C4_FAILURE_B2.json",
-      "sha256": "6959f3bc22c6733411d23ee3076bd2c0593350b01328f333e5835bc83ffef3bb",
-      "bytes": 14358,
+      "sha256": "27ffe838c8d328b854636f577c641a9f085174225ee4d92a731cfac56164acd1",
+      "bytes": 14346,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C5_ABORT_CONTROL.json",
-      "sha256": "b6758d515087936e6d680b1cc0afecec9168b6ae16c4c71cf0461fc1f56026ea",
-      "bytes": 14496,
+      "sha256": "ae2d30362b0c6c8defbf44247e7a460fc04fc716260b04628de580a57b5ab230",
+      "bytes": 14484,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/C6_RESTORE_CHECK_B1.json",
-      "sha256": "dba84f8ff582b9b1ed1f465b7aff9b6e7ab5aa52e788e91410c843108dc126af",
-      "bytes": 5464,
+      "sha256": "e7cbfb1ec709940f977990a81019692cea6dd6b4bd56bcf991d86ae7833adc07",
+      "bytes": 5452,
       "redacted": false
     },
     {
@@ -266,14 +266,14 @@
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/records.json",
-      "sha256": "6fb21bd30ff5654b84965137e35f42630d4de108db91e78bb16f81f5beec4c66",
-      "bytes": 425,
+      "sha256": "68a09be96d1160104943a61ed0f0bb3190f1dd2cb7a4107bebbbef950070784a",
+      "bytes": 419,
       "redacted": false
     },
     {
       "file": "docs/architecture/evidence/issue-156/captures/runtime/runtime_summary.json",
-      "sha256": "51c9a85445f7c6a57233beadd1fa77519a10e53d388100525ca94001364ef440",
-      "bytes": 9147,
+      "sha256": "527f8afd1681d183dc57b98052d331a8dee2662d1c94792b01840896de9f2157",
+      "bytes": 9135,
       "redacted": false
     }
   ]

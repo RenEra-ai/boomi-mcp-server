@@ -6,7 +6,7 @@ through the PUBLIC MCP tool boundary, on the legacy `integration_spec` /
 `sync_pipeline` route (fetch GET -> send PATCH) — the route E1/E2 proved carries a
 non-GET REST verb.
 
-Account `traininghlibbochkarov-JKIY2X`, runtime `renera-local-atom`
+Account `retiredaccounta-RETA01`, runtime `renera-local-atom`
 (89387bdf-b177-4631-9cc6-687bf4afefa7), environment `Local Test Env`
 (c8d9140d-6d34-4ca6-91ff-bfd263556d5b), 2026-08-27.
 

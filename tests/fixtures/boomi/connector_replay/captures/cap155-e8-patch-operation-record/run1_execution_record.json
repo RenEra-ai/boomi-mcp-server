@@ -3,7 +3,7 @@
   "status_code": 200,
   "method": "POST",
   "endpoint": "ExecutionRecord/query",
-  "url": "https://api.boomi.com/api/rest/v1/trainingglebbochkarov-16926N/ExecutionRecord/query",
+  "url": "https://api.boomi.com/api/rest/v1/retiredaccountb-RETB01/ExecutionRecord/query",
   "profile": "renera",
   "data": {
     "@type": "QueryResult",
@@ -11,7 +11,7 @@
       {
         "@type": "ExecutionRecord",
         "executionId": "execution-3663904b-b15c-43da-8970-2098154a02cb-2026.09.03",
-        "account": "trainingglebbochkarov-16926N",
+        "account": "retiredaccountb-RETB01",
         "executionTime": "2026-09-03T05:56:40Z",
         "status": "COMPLETE",
         "executionType": "exec_manual",

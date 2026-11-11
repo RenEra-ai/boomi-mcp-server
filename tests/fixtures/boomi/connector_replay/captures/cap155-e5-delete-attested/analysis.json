@@ -1,7 +1,7 @@
 {
   "verb": "DELETE",
   "scenario": "cap155-e5-delete-attested",
-  "account_id": "traininghlibbochkarov-JKIY2X",
+  "account_id": "retiredaccounta-RETA01",
   "route": "banked cap155-e3b component XML, re-created verbatim (identity attrs stripped, root name= substituted, path bytes UNEDITED)",
   "executions": [
     {

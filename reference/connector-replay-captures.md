@@ -19,13 +19,13 @@ the safe direction: a registry that failed to load, or loaded empty, denies.
 
 | family | action | side effect | retry safety | executions | capture |
 | --- | --- | --- | --- | --- | --- |
-| rest | DELETE | write | conditionally_idempotent | 2 | `34614e7c081f` |
-| rest | HEAD | read | unverified | 1 | `e403860b635d` |
-| rest | OPTIONS | read | unverified | 1 | `67ed7efbf569` |
-| rest | PATCH | write | conditionally_idempotent | 2 | `dec268ab22bd` |
-| rest | POST | write | conditionally_idempotent | 2 | `80e530d635db` |
-| rest | PUT | write | conditionally_idempotent | 2 | `a065632cfbf9` |
-| rest | TRACE | read | unverified | 1 | `0c62c0fb6ca3` |
+| rest | DELETE | write | conditionally_idempotent | 2 | `105398b0019e` |
+| rest | HEAD | read | unverified | 1 | `097fa2cbd852` |
+| rest | OPTIONS | read | unverified | 1 | `012fb67e48dc` |
+| rest | PATCH | write | conditionally_idempotent | 2 | `f9ded7b5b08c` |
+| rest | POST | write | conditionally_idempotent | 2 | `d87e1a45c495` |
+| rest | PUT | write | conditionally_idempotent | 2 | `d3952f026ede` |
+| rest | TRACE | read | unverified | 1 | `afd78abde245` |
 
 ## Operation contract records
 

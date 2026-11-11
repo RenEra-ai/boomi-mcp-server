@@ -14,7 +14,7 @@ test as there were executions -- so neither supported an affirmative verdict. Ve
 running it: `classify()` returns `UNKNOWN`/`UNVERIFIED` for this directory with
 `mock_access_log.txt` removed, and again with the replay's logged request deleted.
 
-Account `trainingglebbochkarov-16926N`,
+Account `retiredaccountb-RETB01`,
 runtime `renera-local-atom`, environment `Local Test Env`, 2026-09-01.
 
 ## The two executions and their requests
@@ -125,13 +125,13 @@ nothing in this capture.
 * `component_op_src.xml` <- `cap155-e2-post/source_operation_component.xml` (banked sha256 `279806a7551e9907…`), verb `GET`, path bytes unedited: `True`
 * `component_op_tgt.xml` <- `cap155-e2-post/operation_component.xml` (banked sha256 `41a0edd40dcc1f05…`), verb `POST`, path bytes unedited: `True`
 * `component_process.xml` <- `cap155-e3b-patch-canonical/component_process.xml` (banked sha256
-  `e2bb0683eb13f412…`)
+  `413f3cbfcfebb5b2…`)
 
 Only identity attributes (`componentId`, `version`, `createdDate`/`By`,
 `modifiedDate`/`By`, `deleted`, `currentVersion`, `branchName`/`Id`) and the FOLDER
 attributes (`folderFullPath`, `folderId`, `folderName`) were stripped, and the root `name=`
 substituted. The folder strip is new relative to the E5 captures and is forced by the
-account roll: the banked bytes carry the folder id of `traininghlibbochkarov-JKIY2X`, which
+account roll: the banked bytes carry the folder id of `retiredaccounta-RETA01`, which
 this account has no row for.
 
 The process additionally had its references remapped and, where the verb differs from the

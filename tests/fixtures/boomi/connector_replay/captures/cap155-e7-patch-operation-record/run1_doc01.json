@@ -8,7 +8,7 @@
   "download_response": {
     "_success": true,
     "generic_connector_record_id": "R0VOX0NPTk5fUkVDX2V4ZWN1dGlvbi0yOWJiNzAwMi1lMjMwLTQ4ZmYtOGM0ZC1jZDAwNWZkMzIxMzktMjAyNi4wOS4wMjpjb25uZWN0b3ItMDg1YjJjYTctMjkyMy00NTcxLWE2NjYtYmRlODBmMjgyZWI2",
-    "download_url": "https://platform.boomi.com/account/trainingglebbochkarov-16926N/api/download/ConnectorDocument-00f84982-ea56-4d21-a185-0edb74ee5729",
+    "download_url": "https://platform.boomi.com/account/retiredaccountb-RETB01/api/download/ConnectorDocument-00f84982-ea56-4d21-a185-0edb74ee5729",
     "status_code": 202,
     "message": "Beginning download.",
     "_downloaded": true,

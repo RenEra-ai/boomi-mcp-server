@@ -4,7 +4,7 @@
   "action": "PATCH",
   "semantics_id": "resource_identity_upsert_static_route_same_effect",
   "semantics_revision": 1,
-  "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+  "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
   "operation_identity": {
     "component_id": "485f3b01-fba5-4850-8281-2fc19decefb7",
     "version": 2,
@@ -24,7 +24,7 @@
   "capture": {
     "execution_id": "execution-ca9b66f6-04c5-4d66-803c-8853974a8da8-2026.09.03",
     "captured_at": "2026-09-03T19:57:29Z",
-    "account_scope_hash": "636bee2908a4c701926ca07c280703374adaef0eb8cdab907d2222267f75e0e2",
+    "account_scope_hash": "8035266280e2f319237603faf9107ce8fce2fd1dd0c6cb1398f7084d51cd46d0",
     "summary": {
       "placement": "downstream",
       "input_observation": "documents_consumed",

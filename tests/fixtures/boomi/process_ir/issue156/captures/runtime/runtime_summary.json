@@ -2,7 +2,7 @@
   "issue": 156,
   "kind": "pre-implementation live oracle capture",
   "nonce": "ORC1560906034913",
-  "account_id": "trainingglebbochkarov-16926N",
+  "account_id": "retiredaccountb-RETB01",
   "baseline_sha": "b07babeb3752d337ffa307c4c486e181e703a2c2",
   "generated_utc": "2026-09-06T03:59:50.217131+00:00",
   "components": {
@@ -15,7 +15,7 @@
   "fixtures": {
     "nonce": "ORC1560906034913",
     "utc": "2026-09-06T03:49:13.588861+00:00",
-    "account": "trainingglebbochkarov-16926N",
+    "account": "retiredaccountb-RETB01",
     "freeze": "b07babeb3752/dirty:5fb57803c292/956ae1d25935",
     "db_profile_id": "a9f02127-07bd-40c9-a81c-0a3a699c9e20",
     "db_op_id": "cacbde23-8bbf-4ba4-8595-356c53e423e5",

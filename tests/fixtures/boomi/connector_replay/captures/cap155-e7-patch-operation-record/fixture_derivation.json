@@ -6,7 +6,7 @@
     "created_this_run": false,
     "durable": true,
     "banked_source": "cap155-e5-patch-attested/component_op_tgt.xml",
-    "banked_sha256": "dab74c75a11f1cebc694f0c26808038095891366fc8c79c04c5260e73b3f2276",
+    "banked_sha256": "2881195b0cac0e4251f5f3ee72c84271dd456e55013e0f76f9bddab015f88def",
     "created_xml_sha256": null,
     "substitutions": {
       "note": "not re-created this run"
@@ -33,7 +33,7 @@
       "component_id": "8cb60420-7fdf-4b7d-adb6-06331a007d80",
       "name": "_TEST_155E7_src_GET_20260902053242",
       "banked_source": "cap155-e5-patch-attested/component_op_src.xml",
-      "banked_sha256": "539286b99fb24f8e6d6e421b0a08b2d3e8c9559a5ca16a9d243fc3ac4dc1da7d",
+      "banked_sha256": "007de087bd5ea7c3a0d7291b484f2ee2ae6bfcffab929b90a2788c01205433e7",
       "created_xml_sha256": "1b46bfa547cd7196c720fefda3ac7ab293ee28c5bea0a3a7bdac2d04bd65c585",
       "readback_sha256": "8f06fff8db51b1bdad2f06a97c6ea5854854951044a4933ac7dc2ee89b9ba1ce",
       "substitutions": {
@@ -66,7 +66,7 @@
     "component_id": "d658519f-7d7e-4a98-9e6d-6362ae289605",
     "name": "_TEST_155E7_proc_PATCH_20260902053242",
     "banked_source": "cap155-e5-patch-attested/component_process.xml",
-    "banked_sha256": "6f111b6a0cb25f5f1884223a54c0a3afd160cd98fcfc18d637a683533daffca2",
+    "banked_sha256": "806457e40a31a330e4de6de19a65f6d72df2406350332cf66a5a270b15862539",
     "created_xml_sha256": "81174bee3bee217b2c4805f114ce1cb982e9ace9d89b3be6df4478b97e2b7c16",
     "readback_sha256": "deba7b4c27c0ca358b6ef204f68ae20c278a870070376bf6c6faf4a2d7974e33",
     "substitutions": {

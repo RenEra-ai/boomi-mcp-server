@@ -5,7 +5,7 @@ A REST PATCH executed TWICE against the same resource with an identical payload,
 the PUBLIC MCP tool boundary, on the CANONICAL `authoring_request` / `process_ir` route
 with first-class `connector_call` nodes — the route on which `rest.patch` is one of the served callable family/action pairs, and therefore the route whose retry/idempotency classification is at issue.
 
-Account `traininghlibbochkarov-JKIY2X`, runtime `renera-local-atom`
+Account `retiredaccounta-RETA01`, runtime `renera-local-atom`
 (89387bdf-b177-4631-9cc6-687bf4afefa7), environment `Local Test Env`
 (c8d9140d-6d34-4ca6-91ff-bfd263556d5b), 2026-08-27.
 

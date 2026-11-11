@@ -3,7 +3,7 @@
     "scenario": "oracle-graphs",
     "file": "golden_parity.json",
     "utc": "2026-09-06T03:54:56.197525+00:00",
-    "account_id": "trainingglebbochkarov-16926N",
+    "account_id": "retiredaccountb-RETB01",
     "sha256": "428f625e38df48056f38263b34ece1abb0c0f50ced47c95436651ab11c5ca8bc",
     "byte_length": 702,
     "archive_path": "docs/architecture/evidence/issue-156/captures/oracle-graphs/golden_parity.json",
