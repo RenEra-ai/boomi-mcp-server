@@ -1665,8 +1665,9 @@ def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset())
     A program is a submitted, non-opaque root outside every call cycle and reaching none (`_call_graph`'s order)
     — the child's ProcessIR and its OWN per-root validation context, as canonical JSON, built bottom-up so a
     child's program names its own children's. A call TO an opaque root, or to one this request does not carry,
-    binds no program and keeps its contract; a root that calls nothing binds none and is returned unchanged, so a
-    call-free request is exactly what it was."""
+    binds no program and keeps its contract, and so does a spelling no call site waits for and aborts on; a root
+    with no such call binds none and is returned unchanged, so a call-free request is exactly what it was
+    (QA-187-r1-01)."""
     import hashlib
 
     from ..compiler.process_ir.semantic_validation.contracts import (
@@ -1680,9 +1681,23 @@ def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset())
     programs: Dict[str, Any] = {}
     closure: Dict[str, Dict[str, Any]] = {}
 
+    # Only a spelling some call site waits for AND aborts on can ever be replayed (`lineage._replay_call`'s
+    # gate), so only such a spelling binds a program: a parent whose every call into a child is
+    # fire-and-forget, or continues after a failure, carries none and is not re-planned when that child changes.
+    awaited = {
+        key: {node.process_ref for node in _iter_nodes(ir.body)
+              if getattr(node, "kind", None) == "process_call"
+              and getattr(node, "wait", False) and getattr(node, "abort_on_error", False)}
+        for key, ir in process_roots
+    }
+
     def _bindings(key):
         return tuple(sorted(
-            (ref, programs[child].program_id) for ref, child in calls[key].items() if child in programs))
+            (ref, programs[child].program_id) for ref, child in calls[key].items()
+            if child in programs and ref in awaited[key]))
+
+    def _bound_children(key):
+        return {calls[key][ref] for ref, _program in _bindings(key)}
 
     for key in eligible:
         own = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
@@ -1694,9 +1709,8 @@ def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset())
         programs[key] = ChildLineageProgramV1(
             program_id=program_id, ir_canonical_json=ir_json, capabilities_canonical_json=capabilities_json)
         reach = {program_id: programs[key]}
-        for child in calls[key].values():
-            if child in closure:
-                reach.update(closure[child])
+        for child in _bound_children(key):
+            reach.update(closure[child])
         closure[key] = reach
 
     result = dict(per_root)
@@ -1707,9 +1721,8 @@ def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset())
         if not bindings:
             continue
         reach: Dict[str, Any] = {}
-        for child in calls[key].values():
-            if child in closure:
-                reach.update(closure[child])
+        for child in _bound_children(key):
+            reach.update(closure[child])
         base = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
         result[key] = base.model_copy(update={
             "child_lineage_calls": bindings,

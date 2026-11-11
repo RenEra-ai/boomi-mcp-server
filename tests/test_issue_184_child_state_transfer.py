@@ -11713,6 +11713,11 @@ def _c187_cells():
              [("PARENT", _legs(_c187_call("CACHE_CHILD", wait, abort), _c187_p1("CACHE"), _c187_uses_p1("CACHE"))),
               ("CACHE_CHILD", child)],
              _legs(*_c187_legs_of(child), _c187_p1("CACHE"), _c187_uses_p1("CACHE")), expected=expected)
+    # The same spelling called once aborting (so it binds a program) and once not: only the first is replayed.
+    cell("r9-01 mixed spelling",
+         [("PARENT", _legs(_c187_call("CACHE_CHILD"), _c187_call("CACHE_CHILD", True, False), _c187_p1("CACHE"),
+                           _c187_uses_p1("CACHE"))), ("CACHE_CHILD", child)],
+         None, expected={PROCESS_IR_SEMANTIC_PROFILE_MISMATCH})
     # CDX-186-w1-01: an unwaited grandchild's P1 may land after the child's removal; and the caller's own.
     child = _legs(_c187_call("WRITER", False, False), _c187_empty("CACHE"), _c187_p2("CACHE"))
     cell("w1-01", [("PARENT", _legs(_c187_call("CACHE_CHILD"), _c187_p2("CACHE"), _c187_uses_p2("CACHE"))),
@@ -11852,7 +11857,7 @@ def test_a_nested_replay_starts_where_its_call_stands(monkeypatch):
 def test_a_call_that_continues_after_failure_is_not_replayed(monkeypatch):
     """#187 source mutant — gate: a call that does not abort on error meets the child's normal end: the cell leaves its twin's verdict."""
     _lineage_with_source(monkeypatch, '        if not (_waits_and_aborts(semantic) and stream.state != STREAM_ABSENT', "        if not (getattr(semantic, 'wait', False) and stream.state != STREAM_ABSENT")
-    holds, composed = _c187_holds('r9-01 wait=True abort=False')
+    holds, composed = _c187_holds('r9-01 mixed spelling')
     assert not holds, composed
 
 
@@ -11933,3 +11938,16 @@ def test_the_replay_programs_are_material_only_where_a_call_binds_one():
         "$ref:" + name: ir for name, ir in parsed}).capabilities_by_root["PARENT"]
     assert decode_value(encode_value(capabilities)) == capabilities
     assert {ref for _path, ref in iter_lineage_program_refs(capabilities)} == {"$ref:GETP1", "$ref:CACHE", "$ref:CACHE_P2"}
+
+
+@pytest.mark.parametrize("wait, abort, binds", [(True, True, True), (True, False, False), (False, False, False)])
+def test_only_a_call_a_replay_can_cover_binds_a_program(wait, abort, binds):
+    """QA-187-r1-01: a program is plan material, so a call no replay can ever cover — one that does not wait, or
+    continues after a failure — binds none, and its caller is not re-planned when the child changes."""
+    roots = [("PARENT", _legs(_c187_call("CACHE_CHILD", wait, abort), {"steps": [_MSG], "terminal": _STOP})),
+             ("CACHE_CHILD", _legs({"steps": [_MSG], "terminal": _STOP}, {"steps": [_MSG], "terminal": _STOP}))]
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    capabilities = resolve_process_ir_effect_declarations(parsed, None, _c187_symbols(), [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed}).capabilities_by_root["PARENT"]
+    assert bool(capabilities is not None and capabilities.child_lineage_programs) is binds
+    assert bool(capabilities is not None and capabilities.child_lineage_calls) is binds
