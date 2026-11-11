@@ -1,6 +1,7 @@
 """#188: the vendored Arrange emulator vs. Boomi — every recorded Arrange result is reproduced exactly.
 
 Ported from the canvas-Arrange handoff's ``tests/test_autoformat.py`` (fixtures in tests/fixtures/arrange/)."""
+import math
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -239,12 +240,14 @@ def assert_canvas_consistent(src):
             assert (d.x, d.y) == dps[(s.name, k)]
 
 
-def test_only_the_first_process_canvas_changes():
+def test_a_process_inside_an_unsupported_wrapper_is_refused_not_guessed():
+    """#188 (D5): the handoff arranged "the first process/shapes in document order". The server
+    selects the canvas by path and refuses an ambiguous wrapper instead of choosing one."""
+    from boomi_mcp.arrange.model import CanvasUnsupported
     second = '<process><shapes><shape name="s" shapetype="start" x="9" y="9"/></shapes></process>'
     src = f"<list>{proc(START + STOP)}{second}</list>"
-    out = autoformat_xml(src)
-    assert out.endswith(second + "</list>")
-    assert_canvas_consistent(src)
+    with pytest.raises(CanvasUnsupported):
+        autoformat_xml(src)
 
 
 def test_process_markup_nested_in_a_shape_is_left_alone():
@@ -258,9 +261,13 @@ def test_process_markup_nested_in_a_shape_is_left_alone():
     assert_canvas_consistent(src)
 
 
-def test_nested_process_before_the_canvas_is_chosen_consistently():
+def test_nested_process_before_the_canvas_is_chosen_by_path():
+    """#188: a process nested in <description> before the real canvas is never the canvas."""
     src = ('<process><description><process><shapes><shape name="a" shapetype="start" x="3" y="3"/></shapes>'
            '</process></description><shapes>' + START + STOP + '</shapes></process>')
+    out = autoformat_xml(src)
+    assert '<shape name="a" shapetype="start" x="3" y="3"/>' in out
+    assert xy(out, "t") == (240.0, 48.0)
     assert_canvas_consistent(src)
 
 
@@ -336,3 +343,259 @@ def test_the_vendored_fixtures_match_their_checksums():
     assert sorted(listed) == on_disk
     for name, digest in listed.items():
         assert hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest() == digest, name
+
+
+# ------------------------------------------------------------------ #188: defects fixed while vendoring
+
+from boomi_mcp import errors as _errors  # noqa: E402
+from boomi_mcp.arrange import (  # noqa: E402
+    ProcessLayoutError, arrange_for_submission, arrange_process_body, consume_receipt,
+    layout_refusal, layout_report_for, resolve_layout_control)
+from boomi_mcp.arrange import model as _model, xmlpatch as _xmlpatch  # noqa: E402
+
+
+def component(shapes: str, extra_object: str = "", type_: str = "process") -> str:
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" name="c" type="' + type_ + '">'
+            '<bns:object>' + extra_object + '<process xmlns="" workload="general"><shapes>' + shapes
+            + '</shapes></process></bns:object></bns:Component>')
+
+
+@pytest.mark.parametrize("ref,char", [("&#x80;", "\x80"), ("&#128;", "\x80"), ("&#xe9;", "\xe9"),
+                                      ("&amp;", "&"), ("&apos;", "'"), ("&#9;", "\t")])
+def test_a_numeric_or_predefined_reference_in_a_shape_name_is_decoded_by_xml_rules(ref, char):
+    """The handoff decoded with html.unescape: `&#x80;` became `€`, the shape was looked up under
+    the wrong name and its coordinates were silently left unchanged."""
+    src = proc(START.replace('name="s"', f'name="s{ref}"').replace('toShape="t"', 'toShape="unset"'))
+    out = autoformat_xml(src)
+    assert parse(out)[0].name == "s" + char
+    assert xy(out, "s" + char) == (48.0, 46.0)
+
+
+def test_a_reference_the_parser_would_not_resolve_is_never_patched_silently():
+    with pytest.raises(SyntaxError):  # ET refuses an undeclared entity before the patcher runs
+        autoformat_xml(proc(START.replace('name="s"', 'name="s&euro;"')))
+
+
+@pytest.mark.parametrize("bad", ["nan", "NaN", "inf", "-inf", "Infinity", "1e400", "abc"])
+@pytest.mark.parametrize("where", ["shape", "dragpoint"])
+def test_non_finite_coordinates_are_rejected(bad, where):
+    if where == "shape":
+        src = proc(START + STOP.replace('x="5"', f'x="{bad}"'))
+    else:
+        src = proc(START.replace('x="0" y="0"', f'x="0" y="{bad}"') + STOP)
+    with pytest.raises(_model.CoordinateError):
+        _model.read(src)
+    with pytest.raises(ProcessLayoutError) as caught:
+        arrange_process_body(src)
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_XML_INVALID
+    with pytest.raises(ProcessLayoutError):  # never bypassed by preserve
+        arrange_process_body(src, "preserve")
+
+
+def test_the_component_canvas_is_selected_by_path():
+    decoy = '<process><shapes><shape name="d" shapetype="start" x="7" y="7"/></shapes></process>'
+    src = component(START + STOP).replace("<bns:object>", "<bns:description>" + decoy
+                                          + "</bns:description><bns:object>")
+    canvas = _model.read(src)
+    assert canvas.path == ("Component", "object", "process", "shapes")
+    out, report = arrange_process_body(src)
+    assert decoy in out
+    assert xy(out, "t") == (240.0, 48.0)
+    assert report["applied"] and report["reason"] == "arranged"
+
+
+@pytest.mark.parametrize("src", [
+    component(START + STOP, extra_object='<process><shapes/></process>'),            # two processes
+    component(START + STOP).replace("</shapes>", "</shapes><shapes/>"),              # two canvases
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"><bns:object/></bns:Component>',
+    '<bns:Component xmlns:bns="u"><bns:object/><bns:object/></bns:Component>',
+])
+def test_an_ambiguous_or_unsupported_canvas_is_refused(src):
+    with pytest.raises(ProcessLayoutError) as caught:
+        arrange_process_body(src)
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_CANVAS_UNSUPPORTED
+    out, report = arrange_process_body(src, "preserve")
+    assert out == src
+    assert report["warnings"] == [_errors.PROCESS_LAYOUT_CANVAS_UNSUPPORTED]
+
+
+def test_a_non_process_component_passes_through_byte_exact():
+    src = ('<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="connector-settings">'
+           '<bns:object><GenericConnectionConfig/></bns:object></bns:Component>')
+    for mode in ("arrange", "preserve"):
+        out, report = arrange_process_body(src, mode)
+        assert out == src and report["reason"] == "not_process" and not report["applied"]
+
+
+def test_an_empty_canvas_and_a_process_without_shapes_are_unchanged():
+    for src in (component(""), '<process workload="general"/>'):
+        out, report = arrange_process_body(src)
+        assert out == src
+        assert report["reason"] == "empty_canvas" and (report["columns"], report["rows"]) == (0, 0)
+
+
+def test_no_start_is_unchanged_and_reported():
+    src = component('<shape name="a" shapetype="stop" x="1" y="2"/>')
+    out, report = arrange_process_body(src)
+    assert out == src and report["reason"] == "no_start" and not report["applied"]
+
+
+def test_multiple_starts_arrange_from_the_last_one():
+    src = component(START.replace('name="s"', 'name="s0"').replace('toShape="t"', 'toShape="unset"')
+                    + START + STOP)
+    out, report = arrange_process_body(src)
+    assert xy(out, "s") == (48.0, 46.0) and xy(out, "s0") == (48.0, 206.0)
+    assert report["reason"] == "arranged" and (report["columns"], report["rows"]) == (2, 2)
+
+
+def test_a_modeled_target_the_patcher_cannot_find_refuses(monkeypatch):
+    """Every modeled shape and dragpoint must be patched; a miss refuses, never half-arranges."""
+    real = _xmlpatch.apply
+
+    def drop_one(xml, shape_pos, dp_pos, path):
+        shape_pos = dict(shape_pos)
+        shape_pos["ghost"] = (1.0, 1.0)
+        return real(xml, shape_pos, dp_pos, path)
+
+    monkeypatch.setattr(_xmlpatch, "apply", drop_one)
+    with pytest.raises(ProcessLayoutError) as caught:
+        arrange_process_body(component(START + STOP))
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_INTERNAL_ERROR
+
+
+def test_unarrangeable_topology_refuses_but_preserve_warns():
+    src = (FIXTURES / "before" / "p17_orphan_cycle.saved.xml").read_text(encoding="utf-8")
+    with pytest.raises(ProcessLayoutError) as caught:
+        arrange_process_body(src)
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_UNARRANGEABLE
+    out, report = arrange_process_body(src, "preserve")
+    assert out == src
+    assert report == {"applied": False, "mode": "preserve", "reason": "preserved", "columns": None,
+                      "rows": None, "estimated_extent": None,
+                      "warnings": [_errors.PROCESS_LAYOUT_UNARRANGEABLE]}
+
+
+@pytest.mark.parametrize("src", ["<process><shapes>", "", "not xml",
+                                 '<!DOCTYPE p [<!ENTITY a "s">]><process/>'])
+def test_malformed_xml_refuses_in_both_modes(src):
+    for mode in ("arrange", "preserve"):
+        with pytest.raises(ProcessLayoutError) as caught:
+            arrange_process_body(src, mode)
+        assert caught.value.error_code == _errors.PROCESS_LAYOUT_XML_INVALID
+
+
+def test_the_report_and_extent_estimate():
+    src = (FIXTURES / "before" / "p03_decision.saved.xml").read_text(encoding="utf-8")
+    out, report = arrange_process_body(src)
+    cells = layout.grid(_model.parse(src))
+    columns = max(c for c, _ in cells.values()) + 1
+    rows = max(r for _, r in cells.values()) + 1
+    assert report == {
+        "applied": True, "mode": "arrange", "reason": "arranged", "columns": columns, "rows": rows,
+        # the handoff README's documented estimate: 208 = widest caption box, 70 = tallest shape
+        "estimated_extent": {"width": 48 + 192 * (columns - 1) + 208.0,
+                             "height": 48 + 160 * (rows - 1) + 70.0},
+        "warnings": [],
+    }
+    assert compare(out, (FIXTURES / "after" / "p03_decision.saved.xml").read_text(encoding="utf-8")) == []
+
+
+def test_preserve_returns_the_exact_bytes():
+    src = (FIXTURES / "before" / "p09_unset_dragpoints.saved.xml").read_text(encoding="utf-8")
+    out, report = arrange_process_body(src, "preserve")
+    assert out is src or out == src
+    assert report == {"applied": False, "mode": "preserve", "reason": "preserved", "columns": None,
+                      "rows": None, "estimated_extent": None, "warnings": []}
+
+
+def test_arranging_twice_moves_only_unset_dragpoints_p09():
+    """One Arrange, not a fixed point: connected canvas is idempotent; an unset dragpoint keeps
+    its shape's PRE-Arrange snapped height, so a second pass moves it again (Boomi does the same)."""
+    src = (FIXTURES / "before" / "p09_unset_dragpoints.saved.xml").read_text(encoding="utf-8")
+    once, _ = arrange_process_body(src)
+    twice, _ = arrange_process_body(once)
+    assert compare(twice, once, include_unset=False) == []
+    moved = [d for d in compare(twice, once) if d[0] == "unset"]
+    assert moved, "p09 has unset dragpoints whose height follows the pre-Arrange position"
+    once_shapes = {s.name: s for s in _model.parse(once)}
+    for _kind, where, got, _was in moved:
+        name, k = where.rsplit("[", 1)
+        shape = once_shapes[name]
+        n = len(shape.dragpoints)
+        snapped = 16 * math.floor(shape.y / 16 + 0.5)
+        assert got == (shape.x + 176, snapped + 10 + 40 * (int(k[:-1]) - (n - 1) / 2))
+
+
+def test_mode_validation():
+    with pytest.raises(ProcessLayoutError) as caught:
+        arrange_process_body(proc(STOP), "auto")
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_MODE_INVALID
+
+
+@pytest.mark.parametrize("container,explicit,expected", [
+    ({}, None, "arrange"),
+    (None, None, "arrange"),
+    ({"layout": "preserve"}, None, "preserve"),
+    ({"layout": "arrange"}, "arrange", "arrange"),
+    ({}, "preserve", "preserve"),
+])
+def test_the_control_resolver(container, explicit, expected):
+    original = None if container is None else dict(container)
+    stripped, mode = resolve_layout_control(container, explicit=explicit)
+    assert mode == expected
+    assert "layout" not in stripped
+    assert container == original  # never mutated
+
+
+@pytest.mark.parametrize("container,explicit", [
+    ({"layout": "auto"}, None), ({"layout": None}, None), ({"layout": 1}, None),
+    ({"layout": "Preserve"}, None), ({"layout": "arrange"}, "preserve"), ({}, "bogus"),
+])
+def test_the_control_resolver_refuses(container, explicit):
+    with pytest.raises(ProcessLayoutError) as caught:
+        resolve_layout_control(container, explicit=explicit)
+    assert caught.value.error_code == _errors.PROCESS_LAYOUT_MODE_INVALID
+
+
+def test_the_receipt_binds_bytes_and_mode():
+    src = component(START + STOP)
+    receipt = arrange_for_submission(src)
+    assert consume_receipt(receipt, receipt.xml, "arrange")["reason"] == "arranged"
+    for xml, mode in ((receipt.xml + " ", "arrange"), (receipt.xml, "preserve")):
+        with pytest.raises(ProcessLayoutError) as caught:
+            consume_receipt(receipt, xml, mode)
+        assert caught.value.error_code == _errors.PROCESS_LAYOUT_INTERNAL_ERROR
+    with pytest.raises(ProcessLayoutError):
+        consume_receipt({"xml": receipt.xml, "mode": "arrange"}, receipt.xml, "arrange")
+
+
+def test_the_refusal_envelope_is_stamped_written_nothing():
+    exc = ProcessLayoutError(_errors.PROCESS_LAYOUT_UNARRANGEABLE, "detail")
+    envelope = layout_refusal(exc)
+    assert envelope["_success"] is False and envelope["write_attempted"] is False
+    assert envelope["error_code"] == "PROCESS_LAYOUT_UNARRANGEABLE"
+    assert envelope["error"].startswith(_errors.ERROR_TAXONOMY["PROCESS_LAYOUT_UNARRANGEABLE"].summary)
+
+
+def test_the_metadata_report_never_raises():
+    assert layout_report_for(component(START + STOP))["reason"] == "metadata_only"
+    assert layout_report_for("<x/>") is None and layout_report_for("<<") is None
+
+
+def test_every_active_golden_arranges_without_error():
+    """The emitter's golden bytes stay as they are (#188 out of scope); each one must arrange."""
+    import json
+    rows = [json.loads(line) for line in
+            (Path(__file__).resolve().parent / "fixtures" / "wave_gate" / "goldens.jsonl")
+            .read_text(encoding="utf-8").splitlines()[1:]]
+    active = [r for r in rows if r.get("state") == "active"]
+    assert active
+    processes = 0
+    for row in active:
+        path = Path(__file__).resolve().parent.parent / row["expected_file"]
+        assert path.is_file(), row
+        xml = path.read_text(encoding="utf-8")
+        out, report = arrange_process_body(xml)
+        processes += report["reason"] != "not_process"
+    assert processes, "no active golden is a process"

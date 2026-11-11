@@ -648,6 +648,15 @@ CONNECTOR_REPLAY_SUBMITTED_XML_UNREADABLE = (
 #: fail-open, because the checks derived from the reading then have nothing to
 #: fire on and a process is applied against a component nobody could examine.
 CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE = "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"
+
+# #188 — server-side canvas Arrange at the write boundary (``boomi_mcp.arrange``). Every one is a
+# PRE-SUBMISSION refusal: the layout step runs before any digest, pre-push callback or transport
+# call, so a route that serves one of these wrote nothing for that component.
+PROCESS_LAYOUT_MODE_INVALID = "PROCESS_LAYOUT_MODE_INVALID"
+PROCESS_LAYOUT_XML_INVALID = "PROCESS_LAYOUT_XML_INVALID"
+PROCESS_LAYOUT_CANVAS_UNSUPPORTED = "PROCESS_LAYOUT_CANVAS_UNSUPPORTED"
+PROCESS_LAYOUT_UNARRANGEABLE = "PROCESS_LAYOUT_UNARRANGEABLE"
+PROCESS_LAYOUT_INTERNAL_ERROR = "PROCESS_LAYOUT_INTERNAL_ERROR"
 CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE = (
     "CONNECTOR_REPLAY_DISCOVERY_IDENTITY_UNAVAILABLE"
 )
@@ -2558,6 +2567,60 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "is hashed whole and does carry the spelling."
             ),
             owner="#157",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_LAYOUT_MODE_INVALID,
+            category="process_layout",
+            retryable=False,
+            summary=(
+                "The layout control is invalid: it must be 'arrange' (the default) or "
+                "'preserve', and it may not contradict a mode the caller passed explicitly."
+            ),
+            owner="#188",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_LAYOUT_XML_INVALID,
+            category="process_layout",
+            retryable=False,
+            summary=(
+                "The component body could not be read as a process layout (malformed XML, a "
+                "DOCTYPE, an unnamed or duplicate shape, or a non-finite coordinate), so it was "
+                "not submitted; this is refused under 'preserve' too."
+            ),
+            owner="#188",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_LAYOUT_CANVAS_UNSUPPORTED,
+            category="process_layout",
+            retryable=False,
+            summary=(
+                "The body holds process markup outside the one canvas Arrange can select "
+                "(Component/object/process/shapes), so it was not arranged or submitted; pass "
+                "layout 'preserve' to submit it unchanged."
+            ),
+            owner="#188",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_LAYOUT_UNARRANGEABLE,
+            category="process_layout",
+            retryable=False,
+            summary=(
+                "Boomi's own Arrange fails on this process (a loop the Start shape cannot reach, "
+                "or a single-output shape pointing at a shape that does not exist), so it was "
+                "not submitted; fix the topology, or pass layout 'preserve' to submit it unchanged."
+            ),
+            owner="#188",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_LAYOUT_INTERNAL_ERROR,
+            category="process_layout",
+            retryable=False,
+            summary=(
+                "The arranged body failed an internal consistency check (a modeled shape or "
+                "dragpoint was not rewritten, or the body changed after it was arranged), so it "
+                "was not submitted."
+            ),
+            owner="#188",
         ),
     )
 }
