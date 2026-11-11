@@ -2970,7 +2970,7 @@ def test_every_recompiling_consumer_on_the_evidenced_route_gets_the_grants():
             "xml": operation_xml if is_operation else connection_xml,
         }
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         submitted["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -3241,7 +3241,7 @@ def test_each_authored_root_is_projected_for_its_own_process():
 
     created = {"n": 0}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         created["n"] += 1
         component_id = "process-cid-%d" % created["n"]
         submitted[component_id] = payload_in["xml"]

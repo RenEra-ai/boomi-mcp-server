@@ -295,7 +295,7 @@ def test_materialization_succeeds_with_every_legacy_entry_point_bombed(monkeypat
         created["n"] += 1
         return {"_success": True, "component_id": "dep-%d" % created["n"]}
 
-    def _create(_client, _profile, body):
+    def _create(_client, _profile, body, **_kwargs):
         submitted["xml"] = body["xml"]
         return {"_success": True, "component_id": "proc-id"}
 

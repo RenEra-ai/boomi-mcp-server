@@ -408,7 +408,6 @@ def test_the_component_canvas_is_selected_by_path():
 @pytest.mark.parametrize("src", [
     component(START + STOP, extra_object='<process><shapes/></process>'),            # two processes
     component(START + STOP).replace("</shapes>", "</shapes><shapes/>"),              # two canvases
-    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"><bns:object/></bns:Component>',
     '<bns:Component xmlns:bns="u"><bns:object/><bns:object/></bns:Component>',
 ])
 def test_an_ambiguous_or_unsupported_canvas_is_refused(src):
@@ -420,6 +419,12 @@ def test_an_ambiguous_or_unsupported_canvas_is_refused(src):
     assert report["warnings"] == [_errors.PROCESS_LAYOUT_CANVAS_UNSUPPORTED]
 
 
+def test_a_process_body_under_another_declared_type_is_still_arranged():
+    src = component(START + STOP, type_="connector-settings")
+    out, report = arrange_process_body(src)
+    assert report["reason"] == "arranged" and xy(out, "t") == (240.0, 48.0)
+
+
 def test_a_non_process_component_passes_through_byte_exact():
     src = ('<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="connector-settings">'
            '<bns:object><GenericConnectionConfig/></bns:object></bns:Component>')
@@ -429,7 +434,8 @@ def test_a_non_process_component_passes_through_byte_exact():
 
 
 def test_an_empty_canvas_and_a_process_without_shapes_are_unchanged():
-    for src in (component(""), '<process workload="general"/>'):
+    for src in (component(""), '<process workload="general"/>',
+                '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"><bns:object/></bns:Component>'):
         out, report = arrange_process_body(src)
         assert out == src
         assert report["reason"] == "empty_canvas" and (report["columns"], report["rows"]) == (0, 0)

@@ -2394,7 +2394,8 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
                       "manage_component_action",),
         "classification": "raw_process_capable",
         "summary": "Caller-facing dispatcher: forwards `config.xml` verbatim to the create "
-                   "and update arms with no component-type restriction.",
+                   "and update arms with no component-type restriction (#188: it consumes "
+                   "the root `layout` control; the arms arrange a process body's coordinates).",
         "owning_issue": "#160",
         "post_retraction_assertion": "the shared process-content classifier runs at the "
                                      "dispatcher, before either arm.",
@@ -2404,7 +2405,8 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
         "locations": ("src/boomi_mcp/categories/components/manage_component.py::"
                       "create_component",),
         "classification": "raw_process_capable",
-        "summary": "Caller `config.xml` is posted verbatim, so "
+        "summary": "Caller `config.xml` is posted verbatim apart from #188's Arrange of a "
+                   "process body's coordinates, so "
                    "`<Component type=\"process\">` mints a process. The same function also "
                    "hosts the typed non-process builders (shared location).",
         "owning_issue": "#160",
@@ -2447,8 +2449,8 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
         "locations": ("src/boomi_mcp/categories/components/manage_component.py::"
                       "clone_component",),
         "classification": "platform_sourced_rematerialization",
-        "summary": "Re-posts platform-sourced XML with the identity attributes stripped, "
-                   "creating a NEW component with a NEW server-assigned id — a second "
+        "summary": "Re-posts platform-sourced XML with the identity attributes stripped "
+                   "(#188: a process clone is arranged), creating a NEW component with a NEW server-assigned id — a second "
                    "unattested materialization, not metadata drift.",
         "owning_issue": "#160",
         "post_retraction_assertion": "process-typed clone REJECTED; non-process clone preserved.",
@@ -2457,7 +2459,8 @@ WRITE_ROUTES: Tuple[Dict[str, Any], ...] = (
         "route_id": "WRT-manage-connector-create",
         "locations": ("src/boomi_mcp/categories/components/connectors.py::create_connector",),
         "classification": "raw_process_capable",
-        "summary": "Raw-XML create posts caller XML with NO type check, so "
+        "summary": "Raw-XML create posts caller XML with NO type check (#188 arranges a "
+                   "process body's coordinates), so "
                    "`<Component type=\"process\">` mints a process (shared location with the "
                    "typed connector builders).",
         "owning_issue": "#160",

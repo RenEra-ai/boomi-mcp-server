@@ -175,11 +175,22 @@ def plan_offline(spec):
     return plan
 
 
+# #188: a tree with write-time Arrange lays out every process body it creates. These
+# records freeze the EMITTED bytes of the legacy chain; Arrange is a separate layer over
+# them (tests/test_arrange.py), so the replay submits with layout "preserve" — the emitted
+# bytes, unchanged. A tree from before #188 has no such layer and gets no such key.
+try:
+    import boomi_mcp.arrange  # noqa: F401
+    _EMITTED_BYTES = {"layout": "preserve"}
+except ImportError:
+    _EMITTED_BYTES = {}
+
+
 def apply_capture(spec):
     store = []
     client = make_client(store)
     with patch.object(ib, "paginate_metadata", return_value=[]):
-        result = ib.build_integration_action(client, "renera", "apply", {"integration_spec": copy.deepcopy(spec), "dry_run": False})
+        result = ib.build_integration_action(client, "renera", "apply", {"integration_spec": copy.deepcopy(spec), "dry_run": False, **_EMITTED_BYTES})
     assert_no_other_mutation(client)
     assert result.get("_success"), canon({k: v for k, v in result.items() if k != "integration_spec"})[:1500]
     by_id = dict(store)

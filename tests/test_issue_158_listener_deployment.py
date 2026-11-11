@@ -297,7 +297,7 @@ class _ApplyBoundary:
         self.executed[comp.key] = copy.deepcopy(kwargs["config"])
         return {"_success": True, "component_id": self.ids.get(comp.key, "applied-" + comp.key)}
 
-    def create(self, _client, _profile, payload):
+    def create(self, _client, _profile, payload, **_kwargs):
         component_id = self._root_ids[len(self.created)]
         self.created.append(component_id)
         self.stored[component_id] = payload["xml"]

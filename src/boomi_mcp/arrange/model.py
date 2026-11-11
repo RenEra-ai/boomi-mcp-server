@@ -83,7 +83,8 @@ def select_canvas(root):
     | anything    | not a process, unless it holds ``process`` markup (then unsupported)        |
 
     A Component with no ``object/process`` is not a process, unless it declares
-    ``type="process"`` (then unsupported: a declared type can neither hide nor fake a body).
+    ``type="process"`` (then an empty canvas: there is nothing to arrange). The declared type
+    never hides a body: ``object/process`` is arranged whatever ``type`` says.
     """
     name = local(root.tag)
     if name == "shapes":
@@ -98,9 +99,10 @@ def select_canvas(root):
         if len(processes) > 1:
             raise CanvasUnsupported("the component object holds more than one <process> element")
         if not processes:
+            # A declared type="process" with no body has nothing to arrange; it is passed
+            # through as an empty canvas. A body under ANY declared type is found and arranged.
             if root.get("type") == "process":
-                raise CanvasUnsupported(
-                    'the component declares type="process" but has no object/process body')
+                return None, "empty_canvas", ("Component", "object")
             return None, "not_process", ()
         return _process_canvas(processes[0], ("Component", "object", "process"))
     if _contains_process(root):

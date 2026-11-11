@@ -113,7 +113,7 @@ def _apply(payload, *, create_result=None):
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -812,7 +812,7 @@ def test_a_thrown_apply_serves_the_record_of_what_it_did_write():
             raise RuntimeError("connection reset between roots")
         return real(**kwargs)
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -866,7 +866,7 @@ def test_a_throw_after_every_write_never_reports_no_mutation():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -1385,7 +1385,7 @@ def test_an_update_attests_the_folder_id_the_platform_received():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "cid-x"}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -1596,7 +1596,7 @@ def test_a_platform_renamed_component_is_reported_as_renamed():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -1668,7 +1668,7 @@ def test_an_unverifiable_name_is_marked_unverified_not_asserted():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -1753,7 +1753,7 @@ def test_every_canonical_result_carries_the_name_discriminator():
     Initializing at construction makes that unrepresentable rather than
     remembered.
     """
-    def _no_id(_client, _profile, payload_in):
+    def _no_id(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True}          # success, no component_id
 
@@ -1901,7 +1901,7 @@ def test_a_write_that_committed_then_failed_still_warns_about_its_name():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _commit_then_fail(_client, _profile, payload_in):
+    def _commit_then_fail(_client, _profile, payload_in, **_kwargs):
         # The write LANDED — the platform has the component — and the response
         # did not come back. This is the case that must warn.
         _SUBMITTED["xml"] = payload_in["xml"]
@@ -2216,7 +2216,7 @@ def test_a_typed_apply_executes_the_stored_compiled_plan():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2289,7 +2289,7 @@ def test_a_clone_attests_the_COMPILED_plan_and_emits_the_suffixed_name():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2358,7 +2358,7 @@ def test_folder_placement_resolves_to_exactly_one_live_folder():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2436,7 +2436,7 @@ def test_partial_mutation_evidence_survives_the_lost_response():
 
     calls = {"n": 0}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         calls["n"] += 1
         _SUBMITTED["xml"] = payload_in["xml"]
         if calls["n"] == 1:
@@ -2490,7 +2490,7 @@ def test_the_attested_scope_hash_cannot_be_chosen_by_the_caller():
             created["n"] += 1
             return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-        def _create(_client, _profile, payload_in):
+        def _create(_client, _profile, payload_in, **_kwargs):
             _SUBMITTED["xml"] = payload_in["xml"]
             return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2594,7 +2594,7 @@ def test_a_healthy_clone_does_not_warn_about_a_platform_rename():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2863,7 +2863,7 @@ def test_an_ignored_placement_is_never_attested_as_applied():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -2943,7 +2943,7 @@ def test_a_folder_named_like_the_account_cannot_fake_a_placement():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -3043,7 +3043,7 @@ def test_an_id_only_readback_is_a_folder_not_the_root():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -3121,7 +3121,7 @@ def test_the_roots_own_folder_id_does_not_make_it_a_folder():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -3240,7 +3240,7 @@ def test_an_explicitly_requested_root_folder_confirms_by_its_own_id():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -3296,7 +3296,7 @@ def test_a_failed_readback_never_claims_the_component_is_at_root():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -3780,7 +3780,7 @@ def test_an_update_says_so_when_its_requested_folder_is_not_applied():
             return {"type": "process", "xml": elsewhere}
         return {"type": "connector-settings", "xml": _LIVE_COMPONENT_XML}
 
-    def _update(_client, _profile, _target, _comp, xml, _policy, on_pre_push=None):
+    def _update(_client, _profile, _target, _comp, xml, _policy, on_pre_push=None, **_kwargs):
         # The real update takes a pre-push hook since #155 slice E, and a double
         # that drops it hides whichever refusal the hook exists to make. Honoured
         # here rather than merely accepted: if a caller passes one, it runs, and a
@@ -3849,7 +3849,7 @@ def test_a_confirmed_write_is_durable_before_it_is_attested():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "dep-1"}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -4026,7 +4026,7 @@ def test_the_pre_write_plan_is_consumed_not_rebuilt():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "dep-1"}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -4430,7 +4430,7 @@ def test_the_raw_route_also_records_a_confirmed_write():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "dep-1"}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -4522,7 +4522,7 @@ def test_a_reference_of_the_wrong_kind_is_refused_before_any_write():
     def _ok(*_a, **_k):
         return {"_success": True, "component_id": "dep-1"}
 
-    def _create_ok(_client, _profile, payload_in):
+    def _create_ok(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         return {"_success": True, "component_id": _PROCESS_ID}
 
@@ -4706,7 +4706,7 @@ def test_a_confirmed_write_with_no_id_is_recorded_as_unidentified():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "dep-1"}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         _SUBMITTED["xml"] = payload_in["xml"]
         # Exactly what a componentId-less 200 yields.
         return {"_success": True, "component_id": ""}
@@ -4760,7 +4760,7 @@ def test_no_write_note_is_recorded_for_a_step_that_never_wrote():
 
     ib._BUILD_REGISTRY.clear()
 
-    def _refused(_client, _profile, _payload):
+    def _refused(_client, _profile, _payload, **_kwargs):
         return {"_success": False, "write_attempted": False,
                 "error": "refused before the push", "error_code": "REFUSED"}
 

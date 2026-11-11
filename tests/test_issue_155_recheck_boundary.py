@@ -86,7 +86,7 @@ def _apply(payload, *, reads):
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -247,7 +247,7 @@ def _apply_with_a_grant(*, live_identity_xml):
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, _payload_in):
+    def _create(_client, _profile, _payload_in, **_kwargs):
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -366,7 +366,7 @@ def _apply_with_a_grant_drifting_at(*, drift_after_reads):
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, _payload_in):
+    def _create(_client, _profile, _payload_in, **_kwargs):
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -550,7 +550,7 @@ def test_a_projection_that_cannot_complete_never_reads_as_no_grants():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, _payload_in):
+    def _create(_client, _profile, _payload_in, **_kwargs):
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -1076,7 +1076,7 @@ def test_a_proven_no_write_keeps_its_own_refusal_through_the_apply_boundary():
         created["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % created["n"]}
 
-    def _create(_client, _profile, _payload):
+    def _create(_client, _profile, _payload, **_kwargs):
         created["n"] += 1
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -1165,7 +1165,7 @@ def _apply_creating_with_drift_during_materialization():
         connector_creates["n"] += 1
         return {"_success": True, "component_id": "cid-%d" % connector_creates["n"]}
 
-    def _create(_client, _profile, payload_in):
+    def _create(_client, _profile, payload_in, **_kwargs):
         process_creates.append(payload_in)
         return {"_success": True, "component_id": "process-cid-1"}
 
@@ -1275,7 +1275,7 @@ def test_a_mutation_uncertain_push_retains_the_accounting_it_owes():
     def _component(*_a, **_k):
         return {"_success": True, "component_id": "cid-1"}
 
-    def _create(_c, _p, _payload):
+    def _create(_c, _p, _payload, **_kwargs):
         return {"_success": True, "component_id": "process-cid-1"}
 
     def _get_xml(_c, component_id, *_a, **_k):

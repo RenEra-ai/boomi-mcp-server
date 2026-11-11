@@ -120,6 +120,12 @@ prefix at shape1/shape2 and starts the sequence at shape3 (`_emit_composed_flow_
 `_CATCH_DRAGPOINT_Y=464.0` (`:425-435`); `_shape_x(i)=96.0+(i-1)*160.0` (`:438`),
 `_dragpoint_x(i)=_shape_x(i)+144.0` (`:443`). **These are floats and render with a trailing `.0`**
 (`x="96.0"`). Carrying them as ints would silently break byte parity for the #138 emitter.
+These constants are the EMITTER's geometry and stay compatibility-pinned (plans, fingerprints and
+golden bytes keep them). They are not what reaches the platform: since #188 every process body the
+server writes is laid out at the write boundary with Boomi's own Arrange (Auto Format) placement
+(`boomi_mcp.arrange`), after emission and placement and before any digest, so wire coordinates
+come from Arrange, not from the plan. A caller selects `layout: "preserve"` to submit the emitted
+coordinates unchanged.
 
 **Dragpoints.** The plain helper `_emit_dragpoints:4231` writes `name`, `toShape`, `x`, `y` and
 **no** `identifier`/`text`. Branch (`_emit_branch:4346`) writes the same 1-based integer in both

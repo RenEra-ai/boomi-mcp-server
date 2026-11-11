@@ -460,3 +460,170 @@ def test_every_layout_code_is_owned_and_emitted_by_a_route():
     emitted.add(manage_component.create_component(
         _Client(), "p", {"xml": PROCESS}, _layout_receipt=receipt)["error_code"])
     assert emitted == codes
+
+
+# ---- build_integration: the two process CREATE arms, through the real create_component
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from _m12_11_support import appliable_process_ir_request  # noqa: E402
+from boomi_mcp.arrange import layout as _arrange_layout  # noqa: E402
+from boomi_mcp.authoring.workflow import compile_authoring_request_v1  # noqa: E402
+from boomi_mcp.categories.components import manage_component as _mc  # noqa: E402
+
+_PROC_ID = "process-cid-188"
+
+
+def _typed_payload():
+    request = appliable_process_ir_request()
+    with patch.object(ib, "paginate_metadata", return_value=[]):  # a MagicMock pages forever
+        result, _ = compile_authoring_request_v1(request, boomi_client=MagicMock(), profile="p")
+    payload = request.model_dump(mode="json")
+    payload["expected_capability_revision"] = result.revision_binding.capability_revision
+    payload["expected_compile_hash"] = result.revision_binding.compile_hash
+    return payload
+
+
+def _typed_apply(*, layout=None, layout_mode=None, arrange_hook=None):
+    """A real typed apply; the non-process components and the transport are faked. The
+    process root reaches the REAL create_component, whose raw transport is spied."""
+    sent, arranged_inputs, arrange_calls = [], [], []
+    real_arrange_for_submission = ib.arrange_for_submission
+
+    def spy_submission(xml, mode):
+        arranged_inputs.append(xml)
+        if arrange_hook is not None:
+            arrange_hook(xml, mode)
+        return real_arrange_for_submission(xml, mode)
+
+    real_layout_arrange = _arrange_layout.arrange
+
+    def count_layout(shapes):
+        arrange_calls.append(1)
+        return real_layout_arrange(shapes)
+
+    def raw_create(_client, xml, **_kw):
+        sent.append(xml)
+        return {"component_id": _PROC_ID, "name": "p", "type": "process", "sub_type": "",
+                "folder_name": "", "version": "1"}
+
+    def live(_client, component_id, *_a, **_k):
+        if component_id == _PROC_ID and sent:
+            return {"type": "process", "xml": sent[-1]}
+        return {"type": "connector-settings",
+                "xml": '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+                       'type="connector-settings"><bns:object><c/></bns:object></bns:Component>'}
+
+    counter = {"n": 0}
+
+    def other(*_a, **_k):
+        counter["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % counter["n"]}
+
+    config = {"authoring_request": _typed_payload(), "dry_run": False}
+    if layout is not None:
+        config["layout"] = layout
+    ib._BUILD_REGISTRY.clear()
+    with patch.object(ib, "paginate_metadata", return_value=[]), \
+            patch.object(ib, "_execute_component", side_effect=other), \
+            patch.object(ib, "component_get_xml", side_effect=live), \
+            patch.object(ib, "arrange_for_submission", side_effect=spy_submission), \
+            patch.object(_arrange_layout, "arrange", side_effect=count_layout), \
+            patch.object(_mc, "_create_component_raw", side_effect=raw_create):
+        kwargs = {"layout_mode": layout_mode} if layout_mode else {}
+        result = ib.build_integration_action(MagicMock(), "p", "apply", config=config, **kwargs)
+    return result, sent, arranged_inputs, arrange_calls
+
+
+def test_a_process_ir_create_is_arranged_once_and_attested_over_the_arranged_bytes():
+    result, sent, inputs, calls = _typed_apply()
+    assert result["_success"], result.get("error")
+    (submitted,) = sent
+    (emitted,) = inputs
+    assert submitted == arrange_process_body(emitted)[0]
+    assert submitted != emitted, "non-vacuous: the emitter's geometry is not Arrange's"
+    assert len(calls) == 1, "the body was arranged more than once in one call chain"
+    (mutation,) = result["process_mutations"]
+    assert mutation["submitted_xml_digest"] == "sha256:" + hashlib.sha256(submitted.encode()).hexdigest()
+    assert result["results"]["proc"]["layout"]["reason"] == "arranged"
+
+
+@pytest.mark.parametrize("how", ["config", "internal"])
+def test_a_process_ir_create_preserves_on_request(how):
+    result, sent, inputs, _ = _typed_apply(**({"layout": "preserve"} if how == "config"
+                                              else {"layout_mode": "preserve"}))
+    assert result["_success"], result.get("error")
+    assert sent == inputs
+    assert result["results"]["proc"]["layout"]["mode"] == "preserve"
+
+
+def test_a_process_ir_layout_refusal_writes_nothing_for_the_root_and_keeps_earlier_writes():
+    from boomi_mcp.arrange import ProcessLayoutError
+
+    def refuse(xml, mode):
+        raise ProcessLayoutError("PROCESS_LAYOUT_UNARRANGEABLE", "synthetic")
+
+    result, sent, _, _ = _typed_apply(arrange_hook=refuse)
+    assert result["_success"] is False
+    assert sent == []
+    partial = result.get("partial_results") or result.get("results") or {}
+    assert partial["proc"]["status"] == "refused"
+    assert partial["proc"]["result"]["error_code"] == "PROCESS_LAYOUT_UNARRANGEABLE"
+    # the two dependency components written before the root stay accounted for
+    assert {k for k, v in partial.items() if (v.get("component_id") or "").startswith("cid-")} == {"conn", "op"}
+    assert not result.get("process_mutations")
+
+
+def _legacy_process():
+    return ib.IntegrationComponentSpec(
+        key="p1", type="process", action="create", name="Legacy",
+        config={"name": "Legacy", "process_kind": "wrapper_subprocess",
+                "process_calls": [{"process_id": "99999999-9999-9999-9999-999999999999"}]})
+
+
+@pytest.mark.parametrize("mode", ["arrange", "preserve"])
+def test_a_legacy_process_create_is_placed_then_arranged_once(mode):
+    comp = _legacy_process()
+    client = _Client()
+    real = ib._execute_component
+
+    with patch.object(_mc, "arrange_process_body", wraps=_mc.arrange_process_body) as spy:
+        result = real(client, "p", comp, comp.config,
+                      placement=ib._ComponentPlacement(folder_id="F9", requested_name=None),
+                      layout_mode=mode)
+    assert result["_success"], result
+    (sent,) = _sent(client)
+    assert spy.call_count == 1
+    (call,) = spy.call_args_list
+    assert 'folderId="F9"' in call.args[0], "placement precedes arrangement"
+    if mode == "arrange":
+        assert sent == arrange_process_body(call.args[0])[0] != call.args[0]
+    else:
+        assert sent == call.args[0]
+    assert result["layout"]["mode"] == mode
+
+
+# ---- one explicit internal-caller preserve per hook (#182 forward contract)
+
+
+def test_every_hook_accepts_an_explicit_internal_preserve(monkeypatch):
+    calls = {
+        "create_component": lambda c: manage_component.create_component(c, "p", {"xml": PROCESS}, layout_mode="preserve"),
+        "update_component": lambda c: manage_component.update_component(c, "p", "x", {"xml": PROCESS}, layout_mode="preserve"),
+        "clone_component": lambda c: manage_component.clone_component(c, "p", "x", {"name": "C"}, layout_mode="preserve"),
+        "create_connector": lambda c: connectors.create_connector(c, "p", {"xml": PROCESS}, layout_mode="preserve"),
+        "update_connector": lambda c: connectors.update_connector(c, "p", "x", {"xml": PROCESS}, layout_mode="preserve"),
+        "merge_versions": lambda c: analyze_component.merge_versions(c, "p", "x", {"source_version": 1}, layout_mode="preserve"),
+        "manage_component_action": lambda c: manage_component.manage_component_action(c, "p", "create", layout_mode="preserve", config={"xml": PROCESS}),
+        "manage_connector_action": lambda c: connectors.manage_connector_action(c, "p", "create", layout_mode="preserve", config={"xml": PROCESS}),
+        "analyze_component_action": lambda c: analyze_component.analyze_component_action(c, "p", "merge", component_id="x", layout_mode="preserve", config={"source_version": 1}),
+    }
+    for name, call in calls.items():
+        client = _Client()
+        result = call(client)
+        assert result["_success"], (name, result)
+        (sent,) = _sent(client)
+        assert compare(sent, PROCESS) == [], name
+        assert result["layout"]["mode"] == "preserve", name
+    # _apply_structured_update, _execute_canonical_process, _execute_component, safe edit and
+    # build_integration_action are covered above with layout_mode="preserve".
