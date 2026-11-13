@@ -1659,76 +1659,80 @@ def _call_graph(process_roots, symbols) -> Tuple[Dict[str, Dict[str, Optional[st
     return calls, ordered
 
 
-def _with_lineage_programs(process_roots, per_root, symbols, opaque=frozenset()) -> Dict[str, Any]:
-    """#187: each root's capabilities with the programs its covered calls replay.
-
-    A program is a submitted, non-opaque root outside every call cycle and reaching none (`_call_graph`'s order)
-    — the child's ProcessIR and its OWN per-root validation context, as canonical JSON, built bottom-up so a
-    child's program names its own children's. A call TO an opaque root, or to one this request does not carry,
-    binds no program and keeps its contract, and so does a spelling no call site waits for and aborts on; a root
-    with no such call binds none and is returned unchanged, so a call-free request is exactly what it was
-    (QA-187-r1-01)."""
-    import hashlib
-
-    from ..compiler.process_ir.semantic_validation.contracts import (
-        ChildLineageProgramV1,
-        ProcessIRValidationCapabilitiesV1,
-    )
-
-    calls, ordered = _call_graph(process_roots, symbols)
-    roots = dict(process_roots)
-    eligible = [key for key in ordered if key not in opaque]
-    programs: Dict[str, Any] = {}
-    closure: Dict[str, Dict[str, Any]] = {}
-
-    # Only a spelling some call site waits for AND aborts on can ever be replayed (`lineage._replay_call`'s
-    # gate), so only such a spelling binds a program: a parent whose every call into a child is
-    # fire-and-forget, or continues after a failure, carries none and is not re-planned when that child changes.
-    awaited = {
+def _awaited_refs(process_roots) -> Dict[str, set]:
+    """#187: per root, the ``process_ref`` spellings some call site waits for AND aborts on — the only spellings a
+    replay can cover (`lineage._replay_call`'s gate), so the only ones that bind a program: a parent whose every
+    call into a child is fire-and-forget, or continues after a failure, carries none and is not re-planned when
+    that child changes (QA-187-r1-01)."""
+    return {
         key: {node.process_ref for node in _iter_nodes(ir.body)
               if getattr(node, "kind", None) == "process_call"
               and getattr(node, "wait", False) and getattr(node, "abort_on_error", False)}
         for key, ir in process_roots
     }
 
-    def _bindings(key):
-        return tuple(sorted(
-            (ref, programs[child].program_id) for ref, child in calls[key].items()
-            if child in programs and ref in awaited[key]))
 
-    def _bound_children(key):
-        return {calls[key][ref] for ref, _program in _bindings(key)}
+def _lineage_program(ir, capabilities) -> Any:
+    """#187: one child's replayable program — its ProcessIR and the validation context its contract was derived
+    with, as canonical JSON, identified by the hash of both."""
+    import hashlib
 
-    for key in eligible:
-        own = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
-        own = own.model_copy(update={"child_lineage_calls": _bindings(key), "child_lineage_programs": ()})
-        ir_json = _canonical_json(roots[key].model_dump(mode="json", warnings=False))
-        capabilities_json = _canonical_json(_canonical_capabilities_payload(own))
-        program_id = "sha256:" + hashlib.sha256(
-            _canonical_json({"ir": ir_json, "capabilities": capabilities_json}).encode("utf-8")).hexdigest()
-        programs[key] = ChildLineageProgramV1(
-            program_id=program_id, ir_canonical_json=ir_json, capabilities_canonical_json=capabilities_json)
-        reach = {program_id: programs[key]}
-        for child in _bound_children(key):
-            reach.update(closure[child])
-        closure[key] = reach
+    from ..compiler.process_ir.semantic_validation.contracts import ChildLineageProgramV1
 
+    ir_json = _canonical_json(ir.model_dump(mode="json", warnings=False))
+    capabilities_json = _canonical_json(_canonical_capabilities_payload(capabilities))
+    program_id = "sha256:" + hashlib.sha256(
+        _canonical_json({"ir": ir_json, "capabilities": capabilities_json}).encode("utf-8")).hexdigest()
+    return ChildLineageProgramV1(
+        program_id=program_id, ir_canonical_json=ir_json, capabilities_canonical_json=capabilities_json)
+
+
+#: #187: the capability fields that carry replay programs, left out where a program's context is compared with
+#: the context the resolver serves for the same root.
+_LINEAGE_FIELDS = ("child_lineage_calls", "child_lineage_programs")
+
+
+class _EntryBindings(dict):
+    """`_entry_contract_bindings`' per-root bindings, carrying the replay programs its derivation walked with
+    (#187, CDX-187-r1-01): ``lineage`` — root -> ``(child_lineage_calls, child_lineage_programs)``; ``programs`` —
+    root -> the context its own program states. A plain dict (a perturbed binder) carries none."""
+
+    lineage: Dict[str, Tuple[tuple, tuple]] = {}
+    programs: Dict[str, Any] = {}
+
+
+def _with_lineage_programs(process_roots, per_root, bindings) -> Dict[str, Any]:
+    """#187: each root's served capabilities with the programs its derivation replayed — the SAME programs, so a
+    validation replays exactly the children, under exactly the contexts, its contract was derived against
+    (CDX-187-r1-01). A root that binds none is returned unchanged, so a call-free request is what it was.
+
+    A program states its child's context as the derivation built it; the resolver serves that root its own. They
+    must agree on every field but the programs themselves — a child's own validation is what a replay subtracts
+    (`lineage._standalone_profile_keys`) — and a disagreement is a resolver defect, raised, never served."""
+    from ..compiler.process_ir.semantic_validation.contracts import ProcessIRValidationCapabilitiesV1
+
+    lineage = getattr(bindings, "lineage", {})
+    programs = getattr(bindings, "programs", {})
     result = dict(per_root)
-    for key, _ir in process_roots:
-        if key in opaque:
+    bound = {program.program_id for _calls, reach in lineage.values() for program in reach}
+    for key, (calls, reach) in lineage.items():
+        if not calls:
             continue
-        bindings = _bindings(key)
-        if not bindings:
-            continue
-        reach: Dict[str, Any] = {}
-        for child in _bound_children(key):
-            reach.update(closure[child])
         base = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
-        result[key] = base.model_copy(update={
-            "child_lineage_calls": bindings,
-            "child_lineage_programs": tuple(reach[pid] for pid in sorted(reach)),
-        })
+        result[key] = base.model_copy(update={"child_lineage_calls": calls, "child_lineage_programs": reach})
+    for key, (program_id, stated) in programs.items():
+        if program_id not in bound:
+            continue
+        served = per_root.get(key) or ProcessIRValidationCapabilitiesV1()
+        if _without_lineage(served) != _without_lineage(stated):
+            raise RuntimeError(
+                "a replay program's context differs from the context served for root {0!r}".format(key))
     return result
+
+
+def _without_lineage(capabilities) -> str:
+    payload = _canonical_capabilities_payload(capabilities)
+    return _canonical_json({name: value for name, value in payload.items() if name not in _LINEAGE_FIELDS})
 
 
 def _canonical_capabilities_payload(capabilities) -> Any:
@@ -1739,7 +1743,16 @@ def _canonical_capabilities_payload(capabilities) -> Any:
             for key, value in dumped.items()}
 
 
-def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None, opaque=frozenset()) -> Dict[str, tuple]:
+def _runs_as_passthrough(ir, symbols) -> bool:
+    """Whether a root runs as a Data Passthrough child — the entry form `derive_child_entry_facts` derives (#187)."""
+    from ..compiler.process_ir.entry_policy import PASSTHROUGH, classify_entry
+    from ..compiler.process_ir.semantic_validation.context import prepare_validation_context
+
+    return classify_entry(prepare_validation_context(ir, symbols).cfg) == PASSTHROUGH
+
+
+def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
+                             opaque=frozenset()) -> Dict[str, tuple]:
     """Per root: ``(child rows, seeded reads, caller-composed writers, own contract, form, cache seeds, cached-property seeds, judged by callers, caller-judged reads)``.
 
     Children are derived before their callers, so a grandchild's contract reaches the
@@ -1760,6 +1773,13 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
     that runs either, so it discharges nothing: a root only opaque roots call is not "called"
     and gets none of the entry state a caller would establish (correction batch 32). Its own
     facts are still derived, so its own validation is unchanged.
+
+    #187 (CDX-187-r1-01): an ordered root is derived WITH the replay programs of the children its waited, aborting
+    calls reach, built bottom-up from each child's own binding, so its contract states what its validation sees
+    after such a call — a write of the child's documents its callers must judge is carried to them, as an inline
+    write's is. The same programs are what `_with_lineage_programs` serves. A call-cycle member, a root that reaches
+    one and an opaque root replay nothing and are the program of no call. ``base_for`` is a root's whole served
+    base context, declared summaries and the entry state they seed included (QA-187-r3-01).
     """
     from ..compiler.process_ir.semantic_validation.contracts import (
         ChildEntryContractV1,
@@ -1769,6 +1789,26 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
     roots = dict(process_roots)
     calls, ordered = _call_graph(process_roots, symbols)
     facts: Dict[str, Dict[str, Any]] = {}
+    # Only a call that RUNS seeds its callee: a root whose submitted body does not run makes no
+    # call that discharges anything (#184 correction batch 32).
+    called = {
+        child
+        for caller, targets in calls.items()
+        if caller not in opaque
+        for child in targets.values()
+        if child is not None
+    }
+    # #186 (CDX-186-r7-01): a root may leave a judgment to its callers only where every chain of callers
+    # above it ends at a root that makes it. Callers of an ORDERED root form no cycle, so every chain ends at a
+    # root nothing calls or at an unordered one — a call-cycle member, or a process that reaches one — and
+    # neither defers. A cycle member deferring to the others passed the obligation round the cycle forever.
+    defers = {key for key in called if key in ordered}
+    awaited = _awaited_refs(process_roots)
+    #: #187: root -> (program id, the context its program states); root -> every program its bound calls reach.
+    programs: Dict[str, Tuple[str, Any]] = {}
+    reaches: Dict[str, Dict[str, Any]] = {}
+    lineage: Dict[str, Tuple[tuple, tuple]] = {}
+    bindings: Dict[str, tuple] = {}
 
     def _rows(key):
         return tuple(
@@ -1777,14 +1817,71 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
             if child in facts and child not in opaque
         )
 
+    def _lineage_of(key):
+        if key in opaque:
+            return (), ()
+        bound = tuple(sorted(
+            (ref, programs[child][0]) for ref, child in calls[key].items()
+            if child in programs and ref in awaited[key]))
+        reach: Dict[str, Any] = {}
+        for ref, _program_id in bound:
+            reach.update(reaches[calls[key][ref]])
+        return bound, tuple(reach[program_id] for program_id in sorted(reach))
+
+    def _own(key):
+        bound, reach = lineage.get(key, ((), ()))
+        return ProcessIRValidationCapabilitiesV1(
+            child_entry_contracts=_rows(key), child_lineage_calls=bound, child_lineage_programs=reach,
+            **(base_for(key) if base_for else {}))
+
+    def _binding(key):
+        own = facts[key]
+        is_called = key in called
+        return (
+            _rows(key),
+            tuple(own.get("required_reads", ())) if is_called else (),
+            tuple(sorted({("ddp", name) for name, _ref in own.get("required_writers", ())}))
+            if is_called else (),
+            ChildEntryContractV1(process_ref="$ref:" + key, **own)
+            if own.get("entry_form") == "passthrough" else None,
+            own.get("entry_form"),
+            _caller_cache_seeds(own.get("cache_requirements", ()), symbols) if is_called else (),
+            # Amendment 3 §7-§8: the cached properties the child's OWN contract states,
+            # so no two parents' facts combine; each call proves them against its writes.
+            tuple(sorted({
+                (cache_ref, name)
+                for cache_ref, name, _ref, _bound in own.get("cache_property_requirements", ())
+            })) if is_called else (),
+            # #186 (architect evaluation 2): a called root whose contract leaves a cache write of
+            # retrieved documents to its callers does not judge that write itself.
+            key in defers and bool(own.get("cache_write_requirements")),
+            # #186 (ARCH-186-e1-04): a called root's reads whose code each caller decides — the sites of the
+            # rows its contract states, measured on the same walk over the same context it was derived from.
+            caller_judged_read_sites(roots[key], symbols_for(key, roots[key]), _own(key))
+            if key in defers and own.get("entry_form") == "passthrough" else (),
+        )
+
     for key in ordered:
         # The child's OWN trusted context (`base_for`): the map, script and
         # external-writer rows resolved for that root, so what they establish is never
-        # demanded of a caller.
-        own = ProcessIRValidationCapabilitiesV1(
-            child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})
-        )
-        facts[key] = derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), own)
+        # demanded of a caller — and, #187, the programs of the children it waits for.
+        lineage[key] = _lineage_of(key)
+        facts[key] = derive_child_entry_facts(roots[key], symbols_for(key, roots[key]), _own(key))
+        bindings[key] = _binding(key)
+        if key not in opaque:
+            # The context the resolver will serve this root, built by the same decisions: the declared path
+            # always binds its rows; the undeclared path serves a root `_binds` rejects no context at all.
+            stated = (
+                _with_entry_contracts(
+                    ProcessIRValidationCapabilitiesV1(**(base_for(key) if base_for else {})), bindings[key])
+                if base_for is not None or _binds(bindings[key])
+                else ProcessIRValidationCapabilitiesV1()
+            ).model_copy(update={"child_lineage_calls": lineage[key][0], "child_lineage_programs": ()})
+            program = _lineage_program(roots[key], stated)
+            programs[key] = (program.program_id, stated)
+            reaches[key] = {program.program_id: program}
+            for ref, _program_id in lineage[key][0]:
+                reaches[key].update(reaches[calls[key][ref]])
     # A root nothing could ORDER — a member of a call cycle, and any process that
     # transitively calls one — cannot be derived in order: its facts would need its callee's,
     # which need its. Stated as `entry_form="unknown"` alone, every other field of the row
@@ -1950,50 +2047,10 @@ def _entry_contract_bindings(process_roots, symbols, symbols_for, base_for=None,
             facts[key] = derived
         if all(previous[key] == facts[key] for key in unordered):
             break
-    # Only a call that RUNS seeds its callee: a root whose submitted body does not run makes no
-    # call that discharges anything (#184 correction batch 32).
-    called = {
-        child
-        for caller, targets in calls.items()
-        if caller not in opaque
-        for child in targets.values()
-        if child is not None
-    }
-    # #186 (CDX-186-r7-01): a root may leave a judgment to its callers only where every chain of callers
-    # above it ends at a root that makes it. Callers of an ORDERED root form no cycle, so every chain ends at a
-    # root nothing calls or at an unordered one — a call-cycle member, or a process that reaches one — and
-    # neither defers. A cycle member deferring to the others passed the obligation round the cycle forever.
-    defers = {key for key in called if key in ordered}
-    bindings: Dict[str, tuple] = {}
-    for key in roots:
-        own = facts[key]
-        is_called = key in called
-        bindings[key] = (
-            _rows(key),
-            tuple(own.get("required_reads", ())) if is_called else (),
-            tuple(sorted({("ddp", name) for name, _ref in own.get("required_writers", ())}))
-            if is_called else (),
-            ChildEntryContractV1(process_ref="$ref:" + key, **own)
-            if own.get("entry_form") == "passthrough" else None,
-            own.get("entry_form"),
-            _caller_cache_seeds(own.get("cache_requirements", ()), symbols) if is_called else (),
-            # Amendment 3 §7-§8: the cached properties the child's OWN contract states,
-            # so no two parents' facts combine; each call proves them against its writes.
-            tuple(sorted({
-                (cache_ref, name)
-                for cache_ref, name, _ref, _bound in own.get("cache_property_requirements", ())
-            })) if is_called else (),
-            # #186 (architect evaluation 2): a called root whose contract leaves a cache write of
-            # retrieved documents to its callers does not judge that write itself.
-            key in defers and bool(own.get("cache_write_requirements")),
-            # #186 (ARCH-186-e1-04): a called root's reads whose code each caller decides — the sites of the
-            # rows its contract states, measured on the same walk over the same context it was derived from.
-            caller_judged_read_sites(
-                roots[key], symbols_for(key, roots[key]),
-                ProcessIRValidationCapabilitiesV1(child_entry_contracts=_rows(key), **(base_for(key) if base_for else {})))
-            if key in defers and own.get("entry_form") == "passthrough" else (),
-        )
-    return bindings
+    result = _EntryBindings((key, bindings[key] if key in bindings else _binding(key)) for key in roots)
+    result.lineage = {key: value for key, value in lineage.items() if value[0]}
+    result.programs = programs
+    return result
 
 
 def _binds(binding: tuple) -> bool:
@@ -2071,7 +2128,7 @@ def resolve_process_ir_effect_declarations(
                     else None
                 )
                 for key, _ir in process_roots
-            }, symbols, opaque=opaque_roots),
+            }, entry_bindings),
             (),
             (),
         )
@@ -2237,23 +2294,14 @@ def resolve_process_ir_effect_declarations(
             for key, spelling in flagged
         )
 
-    # #184 (Stage-2 review): a child's entry contract is derived under its OWN trusted
-    # context, the rows resolved above for that root, so a cache its declared external
-    # writer fills is not a caller's obligation.
-    def _declared_rows_for(key):
-        return {
-            "map_effects": tuple(
-                row for _bound, rows in map_rows.values() for root_key, row in rows if root_key == key
-            ),
-            "script_effects": tuple(row for bound_keys, row in script_rows if key in bound_keys),
-            "external_writers": tuple(row for root_key, row in writer_rows if root_key == key),
-        }
-
-    entry_bindings = _entry_contract_bindings(
-        process_roots, symbols, symbols_for, base_for=_declared_rows_for, opaque=opaque_roots
-    )
-
     # --- subprocesses -----------------------------------------------------
+    # #187 (QA-187-r3-01): resolved BEFORE the entry contracts, so a root's contract is derived — and its replay
+    # program states — the very context the resolver serves it below, the summaries bound in it and the entry
+    # state a summary seeds included. A declaration then only adds context, and never takes a call out of the
+    # replay its validation would otherwise run.
+    #: Whether each root runs as a Data Passthrough child: the entry form `derive_child_entry_facts` derives,
+    #: asked before the contracts exist and checked against them below.
+    passthrough_roots = {key for key, ir in process_roots if _runs_as_passthrough(ir, symbols_for(key, ir))}
     #: Preconditions per CHILD root key, accumulated as summaries are derived.
     entry_state: Dict[str, set] = {}
     subprocess_rows: List[Tuple[List[str], Any]] = []
@@ -2362,7 +2410,7 @@ def resolve_process_ir_effect_declarations(
         if derived[0] and any(key not in opaque_roots for key, _spelling in bound):
             # #184 amendment 3 §8: a No Data child receives no caller documents, so its
             # document-property reads are its own defects, never a caller's obligation.
-            passthrough = child_key in entry_bindings and entry_bindings[child_key][4] == "passthrough"
+            passthrough = child_key in passthrough_roots
             entry_state.setdefault(child_key, set()).update(
                 key for key in derived[0] if passthrough or key[0] != "ddp"
             )
@@ -2372,25 +2420,32 @@ def resolve_process_ir_effect_declarations(
         # contents depend on which declaration happened to fail.
         return EffectResolutionV1({key: None for key, _ir in process_roots}, findings, inert)
 
+    # #184 (Stage-2 review): a child's entry contract is derived under its OWN trusted
+    # context, the rows resolved above for that root, so a cache its declared external
+    # writer fills is not a caller's obligation. #187 (QA-187-r3-01): the same fields the
+    # root is served below, built once here.
+    def _declared_rows_for(key):
+        return {
+            "map_effects": tuple(
+                row for _bound, rows in map_rows.values() for root_key, row in rows if root_key == key
+            ),
+            "script_effects": tuple(row for bound_keys, row in script_rows if key in bound_keys),
+            "subprocess_summaries": tuple(row for root_key, row in subprocess_rows if root_key == key),
+            "external_writers": tuple(row for root_key, row in writer_rows if root_key == key),
+            "established_at_entry": tuple(sorted(entry_state.get(key, ()))),
+        }
+
+    entry_bindings = _entry_contract_bindings(
+        process_roots, symbols, symbols_for, base_for=_declared_rows_for, opaque=opaque_roots)
+    misread = sorted(key for key in entry_state
+                     if (key in passthrough_roots) != (entry_bindings[key][4] == "passthrough"))
+    if misread:
+        raise RuntimeError("entry form asked before the entry contracts disagrees with them: %s" % misread)
+
     for key, _ir in process_roots:
-        per_root[key] = ProcessIRValidationCapabilitiesV1(
-            map_effects=tuple(
-                row
-                for _bound, rows in map_rows.values()
-                for root_key, row in rows
-                if root_key == key
-            ),
-            script_effects=tuple(row for bound, row in script_rows if key in bound),
-            subprocess_summaries=tuple(
-                row for root_key, row in subprocess_rows if root_key == key
-            ),
-            external_writers=tuple(
-                row for root_key, row in writer_rows if root_key == key
-            ),
-            established_at_entry=tuple(sorted(entry_state.get(key, ()))),
-        )
-        per_root[key] = _with_entry_contracts(per_root[key], entry_bindings[key])
-    return EffectResolutionV1(_with_lineage_programs(process_roots, per_root, symbols, opaque=opaque_roots), (), inert)
+        per_root[key] = _with_entry_contracts(
+            ProcessIRValidationCapabilitiesV1(**_declared_rows_for(key)), entry_bindings[key])
+    return EffectResolutionV1(_with_lineage_programs(process_roots, per_root, entry_bindings), (), inert)
 
 
 def effect_authority_rows() -> Tuple[Tuple[str, str], ...]:

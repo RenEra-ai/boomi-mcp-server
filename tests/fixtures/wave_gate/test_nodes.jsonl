@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14629, "minimum_collected": 14629, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14670, "minimum_collected": 14670, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15043,3 +15043,44 @@
 {"kind": "test", "id": "pytest-015042", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[True-True-True]", "state": "active"}
 {"kind": "test", "id": "pytest-015043", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_is_the_cache_effect", "state": "active"}
 {"kind": "test", "id": "pytest-015044", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_programs_are_material_only_where_a_call_binds_one", "state": "active"}
+{"kind": "test", "id": "pytest-015045", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller", "state": "active"}
+{"kind": "test", "id": "pytest-015046", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P1]", "state": "active"}
+{"kind": "test", "id": "pytest-015047", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P2]", "state": "active"}
+{"kind": "test", "id": "pytest-015048", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P1]", "state": "active"}
+{"kind": "test", "id": "pytest-015049", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P2]", "state": "active"}
+{"kind": "test", "id": "pytest-015050", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015051", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015052", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015053", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015054", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015055", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015056", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015057", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015058", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015059", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015060", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015061", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015062", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015063", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015064", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015065", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015066", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015067", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015068", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015069", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015070", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_deep_call_chain_validates", "state": "active"}
+{"kind": "test", "id": "pytest-015071", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_replays_as_its_validation_does", "state": "active"}
+{"kind": "test", "id": "pytest-015072", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_replay_leaves_the_write_with_the_child", "state": "active"}
+{"kind": "test", "id": "pytest-015073", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_see_the_declared_context_is_refused_loudly", "state": "active"}
+{"kind": "test", "id": "pytest-015074", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[False]", "state": "active"}
+{"kind": "test", "id": "pytest-015075", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[True]", "state": "active"}
+{"kind": "test", "id": "pytest-015076", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-24]", "state": "active"}
+{"kind": "test", "id": "pytest-015077", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-25]", "state": "active"}
+{"kind": "test", "id": "pytest-015078", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-3]", "state": "active"}
+{"kind": "test", "id": "pytest-015079", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-49]", "state": "active"}
+{"kind": "test", "id": "pytest-015080", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-24]", "state": "active"}
+{"kind": "test", "id": "pytest-015081", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-25]", "state": "active"}
+{"kind": "test", "id": "pytest-015082", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-3]", "state": "active"}
+{"kind": "test", "id": "pytest-015083", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-49]", "state": "active"}
+{"kind": "test", "id": "pytest-015084", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_unbounded_replay_depth_overflows_the_stack", "state": "active"}
+{"kind": "test", "id": "pytest-015085", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12072]", "state": "active"}

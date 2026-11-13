@@ -384,8 +384,11 @@ submitted in the same request, outside every call cycle, with no cache write sti
 caller's own unwaited calls or the child's), leaves in the caches exactly what the child's own walk
 leaves there when run from the caller's caches and the documents arriving at the call (#187): removals,
 joins, copies and grandchildren included, in the order they run, and a profile that walk refuses is
-refused at the call's `/process_ref`. That is in-process availability, not an every-completion
-guarantee. Every other call adds unknown content to the caches its child may write.
+refused at the call's `/process_ref`. The child's contract is derived from the same walk, so a write
+of its documents that only its callers can judge is judged at each of its calls. That is in-process
+availability, not an every-completion guarantee. It holds however deeply such calls nest, and
+whether or not a declared `subprocess_effects` entry is bound in or describes the process. Every other call
+adds unknown content to the caches its child may write.
 
 A document cache is shared with every caller and Add to Cache appends, so a child's own writes to a
 cache never take its callers' documents out of it: the cache obligations travel to each caller that

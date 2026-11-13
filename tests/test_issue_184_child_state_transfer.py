@@ -11622,8 +11622,8 @@ def _no_replay(monkeypatch):
     call is judged by the replay (`test_a_covered_call_earns_its_twins_verdict`)."""
     from boomi_mcp.authoring import process_ir_effects
 
-    monkeypatch.setattr(process_ir_effects, "_with_lineage_programs",
-                        lambda process_roots, per_root, *_args, **_kwargs: dict(per_root))
+    monkeypatch.setattr(process_ir_effects, "_awaited_refs",
+                        lambda process_roots: {key: set() for key, _ir in process_roots})
 
 
 # --- #187: a covered call replays its child's own walk from the caller's caches ---------------------------------------
@@ -11904,9 +11904,10 @@ def test_a_replay_that_ignores_the_childs_own_refusals_repeats_them(monkeypatch)
         (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/0/legs/1/terminal/process_ref")]
 
 
-def test_a_derivation_never_replays(monkeypatch):
-    """#187: contracts are derived by the abstract walk alone (`walk_lineage`), so every row a fallback call reads is the
-    one it read before replays existed; only a validation run (`collect_lineage_findings`) replays."""
+def test_a_derivation_replays_as_its_validation_does(monkeypatch):
+    """#187 (CDX-187-r1-01): a contract is derived over the programs its validation replays (`walk_lineage` opens the
+    same session `collect_lineage_findings` does), so what a covered call leaves in a cache is what the contract states
+    to every caller — the served programs are the ones the derivation walked."""
     calls = []
     real = lineage._replay_once
     monkeypatch.setattr(lineage, "_replay_once", lambda *args: calls.append(args) or real(*args))
@@ -11914,7 +11915,7 @@ def test_a_derivation_never_replays(monkeypatch):
     parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
     resolution = resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
         "$ref:" + name: ir for name, ir in parsed})
-    assert resolution.ok and calls == []
+    assert resolution.ok and calls, "the derivation replays the covered calls"
     capabilities = resolution.capabilities_by_root["PARENT"]
     assert dict(capabilities.child_lineage_calls).keys() == {"$ref:WRITER", "$ref:CACHE_CHILD"}
     assert len(capabilities.child_lineage_programs) == 2
@@ -11951,3 +11952,261 @@ def test_only_a_call_a_replay_can_cover_binds_a_program(wait, abort, binds):
         "$ref:" + name: ir for name, ir in parsed}).capabilities_by_root["PARENT"]
     assert bool(capabilities is not None and capabilities.child_lineage_programs) is binds
     assert bool(capabilities is not None and capabilities.child_lineage_calls) is binds
+
+
+# --- #187 Stage-2 r1: one coverage authority for a contract and its validation; a bounded replay depth -----------------
+
+
+def _c187_r1_cells():
+    """``{name: (roots, twin)}`` — CDX-187-r1-01: MID's own call into WRITER puts P1 beside whatever MID's caller stored,
+    and the copy into the P2 cache is the CALLER's to judge. Directly in MID and through a grandchild."""
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    writer = ("WRITER", _legs(_c187_p1("CACHE"), noop))
+    copy = _c187_copy("CACHE", "CACHE_P2")
+    cells = {}
+    for stored, put in (("P2", _c187_p2), ("P1", _c187_p1)):
+        cells["copy in MID, caller " + stored] = (
+            [("PARENT", _legs(put("CACHE"), _c187_call("MID"))),
+             ("MID", _legs(_c187_call("WRITER"), copy)), writer],
+            _legs(put("CACHE"), _c187_p1("CACHE"), noop, copy))
+        cells["copy in a grandchild, caller " + stored] = (
+            [("PARENT", _legs(put("CACHE"), _c187_call("MID"))),
+             ("MID", _legs(_c187_call("WRITER"), _c187_call("CACHE_CHILD"))), writer,
+             ("CACHE_CHILD", _legs(copy, noop))],
+            _legs(put("CACHE"), _c187_p1("CACHE"), noop, copy, noop))
+    return cells
+
+
+def _c187_r1_holds(name):
+    roots, twin = _c187_r1_cells()[name]
+    composed = _c187_codes(roots, _c187_symbols())
+    return composed == _c187_codes([("PARENT", twin)], _c187_symbols()), composed
+
+
+@pytest.mark.parametrize("name", sorted(_c187_r1_cells()))
+def test_a_called_roots_replayed_write_is_judged_by_its_callers(name):
+    """CDX-187-r1-01: a contract is derived over the replay its validation runs, so a write of what a child left in a
+    cache a caller may share is carried to the callers, as an inline write is: the caller's P2 beside the child's P1
+    is no proved profile (admitted, as the twin is), the caller's P1 is P1 (refused, as the twin is)."""
+    holds, composed = _c187_r1_holds(name)
+    assert holds, (name, composed)
+
+
+def test_a_derivation_that_does_not_replay_leaves_the_write_with_the_child(monkeypatch):
+    """CDX-187-r1-01 source mutant — the derivation's replay session (`walk_lineage` itself is rebound, which
+    `_lineage_with_source` does not do): a contract derived without it records no write requirement, so MID judges the caller-dependent copy itself and refuses the composition its twin admits."""
+    old = '    return _walk_lineage(prepared, capabilities, _session=_replay_session(capabilities))\n'
+    source = Path(lineage.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    namespace = {"__name__": lineage.__name__, "__package__": lineage.__package__, "__file__": lineage.__file__}
+    exec(compile(source.replace(old, old.replace("_replay_session(capabilities)", "None")), lineage.__file__, "exec"),  # noqa: S102
+         namespace)
+    monkeypatch.setattr(lineage, "walk_lineage", namespace["walk_lineage"])
+    holds, composed = _c187_r1_holds('copy in MID, caller P2')
+    assert not holds, composed
+
+
+@pytest.mark.parametrize("wait", (True, False))
+def test_a_grandparents_call_keeps_the_sibling_matrix_exact(monkeypatch, wait):
+    """CDX-187-r1-01 coverage: the 336-cell sibling-writer matrix with every PARENT itself called by a grandparent —
+    waited and aborting (its replay judges PARENT), or neither (only PARENT's contract reaches it) — earns exactly the
+    unwrapped matrix's verdicts: 294 exact, 42 recorded, none fail-open. Keeping the derivation's unknown content after a
+    replay in a called root instead admitted 8 cells under the unwaited grandparent (measured)."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    plain_symbols, plain_composed = _b186_cache2_symbols, _b186_composed
+    monkeypatch.setattr(sys.modules[__name__], "_b186_cache2_symbols", lambda **update: SymbolTableV1(
+        symbols=tuple(plain_symbols(**update).symbols) + (
+            ComponentSymbolV1(ref="$ref:GP", component_id="GP", component_type="process"),)))
+    grandparent = ("GP", _legs({"steps": [], "terminal": _call("PARENT", wait=wait, abort_on_error=wait)},
+                               {"steps": [_MSG], "terminal": _STOP}))
+    monkeypatch.setattr(sys.modules[__name__], "_b186_composed", lambda roots: plain_composed([grandparent] + list(roots)))
+    verdicts = _b186_sibling_writer_verdicts()
+    exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
+    fail_open = [cell for cell, (composed, twin) in verdicts.items() if twin and not composed]
+    assert (len(verdicts), len(exact), fail_open) == (336, 294, [])
+
+
+def test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller():
+    """Recorded limit (Stage-2 r1): MID proves it emptied CACHE, calls WRITER (P1) and copies CACHE into the P2 cache.
+    A waited, aborting caller's replay refuses the copy as the twin does. MID's contract defers the write (the call
+    ends MID's seal: a child's cohort is not MID's own, D4), so an unwaited caller — which runs no replay — admits it,
+    as the base does; HEAD before the r1 correction refused it only because MID's contract omitted the write."""
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    mid = _legs(_c187_empty("CACHE"), _c187_call("WRITER"), _c187_copy("CACHE", "CACHE_P2"))
+    writer = ("WRITER", _legs(_c187_p1("CACHE"), noop))
+    symbols = _c187_symbols()
+    waited = _c187_codes([("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID"))), ("MID", mid), writer], symbols)
+    unwaited = _c187_codes([("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID", False, False))), ("MID", mid), writer],
+                           symbols)
+    assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH in waited
+    assert unwaited == {PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING}
+
+
+def _c187_chain(length):
+    """A chain of ``length`` submitted processes, each waiting for and aborting on the next."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    names = ["C%03d" % index for index in range(length)]
+    roots = [(names[index], _legs(_c187_p1("CACHE"), _c187_call(names[index + 1]))) for index in range(length - 1)]
+    roots.append((names[-1], _legs(_c187_p1("CACHE"), _c187_uses_p1("CACHE"))))
+    symbols = SymbolTableV1(symbols=tuple(_c187_symbols().symbols) + tuple(
+        ComponentSymbolV1(ref="$ref:" + name, component_id=name, component_type="process") for name in names))
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok, resolution.findings
+    return validate_process_ir(dict(parsed)[names[0]], symbols, capabilities=resolution.capabilities_by_root[names[0]])
+
+
+def test_a_deep_call_chain_validates():
+    """CDX-187-r1-02, QA-187-r3-02: 250 nested covered calls all replay under Python's default recursion limit —
+    each block of `_REPLAY_LEVELS_PER_STACK` levels continues on a fresh thread's stack; no depth falls back."""
+    assert 250 > 4 * lineage._REPLAY_LEVELS_PER_STACK
+    assert list(_c187_chain(250).errors) == []
+
+
+def test_an_unbounded_replay_depth_overflows_the_stack(monkeypatch):
+    """CDX-187-r1-02 source mutant — the fresh stack: without it each nested replay is another Python walk on one
+    stack, and the 250-call chain raises RecursionError."""
+    _lineage_with_source(monkeypatch, '        if session.depth % _REPLAY_LEVELS_PER_STACK:\n', '        if True:\n')
+    with pytest.raises(RecursionError):
+        _c187_chain(250)
+
+
+def _c187_refill_chain(length, put):
+    """QA-187-r3-02: C000 stores ``put`` in CACHE and calls C001; each root waits for and aborts on the next; the
+    last empties CACHE, stores P1, calls WRITER (P1) and copies CACHE into the P2 cache. ``(composed, twin)``."""
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    names = ["C%03d" % index for index in range(length)]
+    roots = [(names[0], _legs(put("CACHE"), _c187_call(names[1])))] + [
+        (names[index], _legs(_c187_call(names[index + 1]), noop)) for index in range(1, length - 1)]
+    roots += [(names[-1], _legs(_c187_empty("CACHE"), _c187_p1("CACHE"), _c187_call("WRITER"),
+                                _c187_copy("CACHE", "CACHE_P2"))), ("WRITER", _legs(_c187_p1("CACHE"), noop))]
+    symbols = SymbolTableV1(symbols=tuple(_c187_symbols().symbols) + tuple(
+        ComponentSymbolV1(ref="$ref:" + name, component_id=name, component_type="process") for name in names))
+    twin = _legs(put("CACHE"), _c187_empty("CACHE"), _c187_p1("CACHE"), _c187_p1("CACHE"), noop,
+                 _c187_copy("CACHE", "CACHE_P2"))
+    return _c187_codes(roots, symbols), _c187_codes([("PARENT", twin)], _c187_symbols())
+
+
+@pytest.mark.parametrize("length", (3, 24, 25, 49))
+@pytest.mark.parametrize("stored", ("P1", "P2"))
+def test_a_removal_before_a_refill_is_judged_at_every_depth(length, stored):
+    """QA-187-r3-02: the refill after the last root's proved removal is judged as the twin judges it, at every
+    depth — a depth bound that fell back to the contract past 24 nested calls admitted 25 and deeper (measured)."""
+    composed, twin = _c187_refill_chain(length, _c187_p1 if stored == "P1" else _c187_p2)
+    assert twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
+    assert composed == twin
+
+
+# --- #187 QA r3-01: a declared subprocess summary keeps its callers' replay ----------------------------------------
+
+
+def _c187_r3_declared(roots, keys):
+    """The subprocess_effects declarations for ``keys`` of ``roots``: the content the server derives for each, or —
+    for a child it derives none for (a declaration the resolver records as inert) — a write of CACHE."""
+    from boomi_mcp.authoring.process_ir_effects import derive_subprocess_effect
+    from boomi_mcp.models.authoring_workflow import ProcessIREffectDeclarationsV1
+
+    items = []
+    for key in keys:
+        derived = derive_subprocess_effect(parse_process_ir_v1(dict(roots)[key]), symbols=_c187_symbols()).effect
+        reads, writes, safe = derived if derived is not None else ((), (("cache", "$ref:CACHE"),), False)
+        items.append({"process_ref": "$ref:" + key, "effect": {
+            "reads": [{"scope": scope, "name": name} for scope, name in reads],
+            "writes": [{"scope": scope, "name": name} for scope, name in writes], "replay_safe": safe}})
+    return ProcessIREffectDeclarationsV1.model_validate({"subprocess_effects": items})
+
+
+def _c187_r3_codes(roots, declarations):
+    import test_issue_184_child_entries as entries
+
+    symbols = _c187_symbols()
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = entries.resolve_process_ir_effect_declarations(
+        parsed, declarations, symbols, [], child_roots={"$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok, resolution.findings
+    found = set()
+    for name, ir in parsed:
+        capabilities = resolution.capabilities_by_root[name] or DEFAULT_VALIDATION_CAPABILITIES
+        found |= {item.code for item in validate_process_ir(ir, symbols, capabilities=capabilities).errors}
+    return found
+
+
+def _c187_r3_variants():
+    """``(cell, declared children)`` — every subset of each r1 cell's called roots."""
+    import itertools
+
+    variants = []
+    for name, (roots, _twin) in sorted(_c187_r1_cells().items()):
+        children = [key for key, _document in roots if key != "PARENT"]
+        for size in range(1, len(children) + 1):
+            variants.extend((name, keys) for keys in itertools.combinations(children, size))
+    return variants
+
+
+@pytest.mark.parametrize("name,keys", _c187_r3_variants(), ids=lambda value: "+".join(value) if isinstance(value, tuple) else value)
+def test_a_declared_summary_keeps_its_callers_replay(name, keys):
+    """QA-187-r3-01: a verified subprocess_effects declaration only ADDS context. Each root's contract and replay
+    program are derived over the context the resolver serves it — the summaries bound in it and the entry state
+    they seed included — so declaring any of the called roots leaves the twin's verdict: MID's copy of the
+    caller-shared cache is still judged by its callers (refused for the caller's P1, admitted beside its P2). The
+    rule this replaced made every root a summary was bound in or described replay nothing, and admitted the P1 cell
+    with WRITER declared (measured, as on dev 4f60644)."""
+    roots, twin = _c187_r1_cells()[name]
+    assert _c187_r3_codes(roots, _c187_r3_declared(roots, keys)) == _c187_codes([("PARENT", twin)], _c187_symbols())
+
+
+def test_a_derivation_that_does_not_see_the_declared_context_is_refused_loudly(monkeypatch):
+    """QA-187-r3-01 source mutant — the derivation's base: a contract derived without the summaries a root is served
+    states a program whose context is not the one validation runs, and `_with_lineage_programs` refuses to serve it
+    rather than replay the wrong walk."""
+    _effects_with_source(
+        monkeypatch,
+        "process_roots, symbols, symbols_for, base_for=_declared_rows_for, opaque=opaque_roots)",
+        "process_roots, symbols, symbols_for, base_for=lambda key: dict(_declared_rows_for(key), "
+        "subprocess_summaries=(), established_at_entry=()), opaque=opaque_roots)")
+    roots, _twin = _c187_r1_cells()["copy in MID, caller P1"]
+    with pytest.raises(RuntimeError):
+        _c187_r3_codes(roots, _c187_r3_declared(roots, ("WRITER",)))
+
+
+def test_a_derivation_never_replays(monkeypatch):
+    """#187: a derivation never replays a call its validation would not — a call that does not wait and abort falls
+    back to its contract in both, so neither walk runs its child (the covered case is
+    `test_a_derivation_replays_as_its_validation_does`)."""
+    import copy
+
+    calls = []
+    real = lineage._replay_once
+    monkeypatch.setattr(lineage, "_replay_once", lambda *args: calls.append(args) or real(*args))
+    roots, _twin, symbols, _expected = _c187_cells()["e3-01"]
+
+    def unwaited(node):
+        if isinstance(node, dict):
+            if "process_ref" in node and "wait" in node:
+                node["wait"] = False
+            for value in node.values():
+                unwaited(value)
+        elif isinstance(node, list):
+            for value in node:
+                unwaited(value)
+        return node
+
+    roots = [(name, unwaited(copy.deepcopy(document))) for name, document in roots]
+    assert any("process_ref" in str(document) for _name, document in roots)
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    resolution = resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed})
+    assert resolution.ok, resolution
+    capabilities = resolution.capabilities_by_root["PARENT"]
+    lineage.collect_lineage_findings(prepare_validation_context(dict(parsed)["PARENT"], symbols), capabilities)
+    assert calls == []
+    # Non-vacuity: the same roots, waited, do replay.
+    roots, _twin, symbols, _expected = _c187_cells()["e3-01"]
+    parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
+    assert resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
+        "$ref:" + name: ir for name, ir in parsed}).ok and calls

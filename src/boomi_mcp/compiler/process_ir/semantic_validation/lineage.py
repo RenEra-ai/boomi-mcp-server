@@ -37,6 +37,7 @@ default back in through the side door.
 
 from __future__ import annotations
 
+import threading
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
@@ -1340,16 +1341,50 @@ class _ReplaySession:
     -> (prepared child, its own validation context in canonical cache spelling). ``standalone``: program id -> the
     dedup keys of the profile findings the child's own validation reports. ``results``: a completed replay, by its
     complete input. No program calls back into one being replayed: programs exist only for roots outside every call
-    cycle (`process_ir_effects._call_graph`).
+    cycle (`process_ir_effects._call_graph`). ``depth``: how many child walks this run is inside; every
+    `_REPLAY_LEVELS_PER_STACK`-th one runs on a fresh stack (`_nested_walk`), so no depth is cut short.
     """
 
-    __slots__ = ("programs", "loaded", "standalone", "results")
+    __slots__ = ("programs", "loaded", "standalone", "results", "depth")
 
     def __init__(self, capabilities) -> None:
         self.programs = {item.program_id: item for item in capabilities.child_lineage_programs}
         self.loaded: Dict[str, tuple] = {}
         self.standalone: Dict[str, FrozenSet] = {}
         self.results: Dict[tuple, object] = {}
+        self.depth = 0
+
+
+#: #187: how many nested replay walks share one thread's stack. Each level is a nested Python walk (about five
+#: frames), so a chain of covered calls would otherwise raise RecursionError (CDX-187-r1-02); a depth BOUND that
+#: fell back to the contract past it admitted, past it, what the twin refuses (QA-187-r3-02). Python counts
+#: recursion per thread, so each block of levels continues on a fresh one and every depth replays.
+_REPLAY_LEVELS_PER_STACK = 24
+
+
+def _nested_walk(session, *args, **kwargs) -> "LineageWalkV1":
+    """#187: one child walk a level deeper in ``session`` — on this stack, or on a fresh thread's at every
+    `_REPLAY_LEVELS_PER_STACK`-th level. The caller waits for it, so the session is never used concurrently."""
+    session.depth += 1
+    try:
+        if session.depth % _REPLAY_LEVELS_PER_STACK:
+            return _walk_lineage(*args, **kwargs)
+        outcome: Dict[str, object] = {}
+
+        def _run() -> None:
+            try:
+                outcome["walk"] = _walk_lineage(*args, **kwargs)
+            except BaseException as exc:  # re-raised on the caller's stack below
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=_run, name="process-ir-replay", daemon=True)
+        worker.start()
+        worker.join()
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["walk"]
+    finally:
+        session.depth -= 1
 
 
 class _ReplayOutcome(NamedTuple):
@@ -1413,8 +1448,8 @@ def _replay_once(session, program_id, child, replay_capabilities, state, stream,
     if key is not None and key in session.results:
         return session.results[key]
     continuation: List[_State] = []
-    walk = _walk_lineage(child, replay_capabilities, _session=session, _entry=(state, stream, legacy),
-                         _continuation=continuation)
+    walk = _nested_walk(session, child, replay_capabilities, _session=session, _entry=(state, stream, legacy),
+                        _continuation=continuation)
     outcome = None
     if walk.profile_proof and not walk.unwaited_cache_writes and not walk.unwaited_writes_of_an_unknown_cache:
         outcome = _ReplayOutcome(continuation[-1], any(
@@ -1429,7 +1464,7 @@ def _standalone_profile_keys(session, program_id, child, own_capabilities) -> Fr
     """The profile findings the child's OWN validation reports (#187): a replay reports at the call only what it
     finds beyond these, so a child's intrinsic finding is never repeated at its callers."""
     if program_id not in session.standalone:
-        walk = _walk_lineage(child, own_capabilities, _session=session)
+        walk = _nested_walk(session, child, own_capabilities, _session=session)
         session.standalone[program_id] = frozenset(
             item.dedup_key() for item in walk.findings if item.code == PROCESS_IR_SEMANTIC_PROFILE_MISMATCH)
     return session.standalone[program_id]
@@ -3774,9 +3809,9 @@ def _walk_lineage(
         """#187: what a call leaves in this execution's caches, by running its child's own walk from them.
 
         The ONE decision whether a call is covered, taken before anything the call does is applied, so a
-        covered call never also applies the summary channels it replaces. Covered: a validation run (a
-        derivation never replays, so contracts and every fallback stay as they were); a submitted child
-        outside every call cycle; a derived entry form; a call that waits and aborts on error, on a path that
+        covered call never also applies the summary channels it replaces. Covered: a walk whose context binds
+        the call a program — a validation, or the derivation of the contract it is judged against, which bind
+        the same ones (CDX-187-r1-01); a submitted child outside every call cycle; a derived entry form; a call that waits and aborts on error, on a path that
         carries documents; profile proof standing on both sides; and no cache write still in flight — this
         process's own earlier unwaited calls here, or the child's, which its replayed walk itself reports
         (`_replay_once`). Otherwise None, and the call falls back to its contract exactly as before.
@@ -4626,10 +4661,15 @@ def collect_lineage_findings(
 ) -> Tuple[ValidationDiagnosticV1, ...]:
     """The validation phase's view of the walk: its diagnostics.
 
-    The one entry that replays a covered call's child (#187): a derivation (`walk_lineage`) never does, so every
-    contract and every call that falls back to one is exactly what it was."""
-    session = _ReplaySession(capabilities) if capabilities.child_lineage_programs else None
-    return _walk_lineage(prepared, capabilities, _session=session).findings
+    A covered call replays its child (#187) here exactly as in the derivation its contract came from
+    (`walk_lineage`): both open a replay session over the same programs (CDX-187-r1-01)."""
+    return _walk_lineage(prepared, capabilities, _session=_replay_session(capabilities)).findings
+
+
+def _replay_session(capabilities) -> "Optional[_ReplaySession]":
+    """#187: a replay session for a walk whose context carries programs, else None — one rule for a validation and
+    for the derivation of the contract it is judged against."""
+    return _ReplaySession(capabilities) if capabilities.child_lineage_programs else None
 
 
 def walk_lineage(
@@ -4646,10 +4686,8 @@ def walk_lineage(
     because a derivation calls this directly rather than through the validation
     pipeline.
     """
-    return _walk_lineage(
-        prepared,
-        canonical_cache_capabilities(capabilities, canonical_cache_refs(prepared.symbols)),
-    )
+    capabilities = canonical_cache_capabilities(capabilities, canonical_cache_refs(prepared.symbols))
+    return _walk_lineage(prepared, capabilities, _session=_replay_session(capabilities))
 
 
 def _leg_member_index(
