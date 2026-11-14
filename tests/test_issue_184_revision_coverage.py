@@ -173,6 +173,8 @@ def _perturbations():
         ("lineage", "_waits_and_aborts"): lambda semantic: bool(getattr(semantic, "wait", False)),
         # #187: a covered call's replayed content is dropped — the caller keeps what it held before the call.
         ("lineage", "_apply_replay"): lambda state, after: state,
+        # #187 (architect evaluation 1): a covered call keeps the contract's cache availability and seal.
+        ("lineage", "_with_replayed_walk_facts"): lambda state, after: state,
         # #187: no program loads, so every call falls back to its contract.
         ("lineage", "_load_replay_program"): lambda session, program_id, symbols: None,
         # #187: no replay is trusted, so every call falls back to its contract.

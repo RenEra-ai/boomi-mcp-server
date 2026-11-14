@@ -1428,11 +1428,37 @@ def _apply_replay(state: "_State", after: "_State") -> "_State":
     """The caller's state after a covered call (#187): its caches HOLD what the child's walk left in them.
 
     ``content`` is the child continuation's — REPLACED, not unioned, so a removal the child proved runs is seen
-    exactly as the twin sees it. Nothing else is taken from the replay: which caches are ESTABLISHED (#184
-    amendment 1 rule 7), the property cohorts a cache may hold and whether this path sealed it stay the contract's,
-    applied by `_discharge_child_contract` exactly as for a call that is not replayed — a child's cohorts name
-    writers by node ids of its own walk, and a cohort cannot tell a child's write from the caller's entry."""
+    exactly as the twin sees it. The property cohorts a cache may hold stay the contract's, applied by
+    `_discharge_child_contract` exactly as for a call that is not replayed — a child's cohorts name writers by node
+    ids of its own walk, and a cohort cannot tell a child's write from the caller's entry. Which caches a later step
+    may read and whether this path sealed them are the walk's too, taken after the contract's removals
+    (`_with_replayed_walk_facts`)."""
     return _State(state.document, state.execution, after.content, state.cohorts, state.sealed, state.proved)
+
+
+def _with_replayed_walk_facts(state: "_State", after: "_State") -> "_State":
+    """A covered call's cache AVAILABILITY and SEAL are the child walk's (#187, architect evaluation 1).
+
+    ``execution`` answers the in-process question — may a later step read this cache — and the replayed walk IS
+    the in-process walk the flattened twin runs, so which caches a later step here may read is exactly what the
+    child's continuation left readable: a write behind a step that may hand on no documents makes a cache
+    readable in-process, and a removal the walk saw makes it unreadable. Only cache keys: a child's DPP keys
+    keep the contract's establishment. ``proved`` — what every normal completion guaranteed (#184 amendment 1
+    rule 7) — stays the contract's, applied after this; a proved key is kept readable, since a guarantee is a
+    write that ran.
+
+    ``sealed`` — this path emptied the cache and only documents of THIS execution entered it since — is the
+    walk's for the same reason: the replay starts from this caller's seal, and the twin's single walk never
+    withdraws it for a write the child makes, since the child's documents are this execution's, not a caller's.
+    Keeping the contract's withdrawal handed the judgment of a copy after a proved removal and a covered refill
+    to callers that cannot see the removal: an unwaited caller admitted what the twin refuses (#187 blast radius,
+    `c187_deferral`)."""
+    return _State(
+        state.document,
+        frozenset(key for key in state.execution if key[0] != CACHE)
+        | frozenset(key for key in after.execution if key[0] == CACHE)
+        | frozenset(key for key in state.proved if key[0] == CACHE),
+        state.content, state.cohorts, after.sealed, state.proved)
 
 
 def _replay_once(session, program_id, child, replay_capabilities, state, stream, legacy, standalone):
@@ -3793,6 +3819,8 @@ def _walk_lineage(
         # fills it again on every normal completion still establishes it.
         for removed_ref in _caches_a_call_may_remove(cache_refs, contract):
             state = _without_cache_establishment(state, removed_ref)
+        if replay is not None:
+            state = _with_replayed_walk_facts(state, replay.after)
         # Amendment 1 rule 7: a waited child that completed normally established what its
         # contract guarantees. Execution state only: a child's document properties never
         # land on this process's sibling copies.
@@ -4247,6 +4275,13 @@ def _walk_lineage(
         # count-preserving carry is — a retrieve nothing reaches never runs, so what it
         # would hand on is not the question — and on nothing else: a retrieve of a cache
         # that may be empty still ends the proof.
+        if kind == "passthrough" and _entry is not None and _entry[1] is not None:
+            # #187 (architect evaluation 1): a replayed Data Passthrough entry is where the caller's documents
+            # ARRIVE, not a step — the flattened twin has no node here, and its next step sees the caller's stream
+            # unchanged. So every fact the caller proved about that stream is handed on as it arrived: its count
+            # (a singleton stays a singleton, a possibly absent group never becomes one), its property knowledge,
+            # its non-emptiness and whether it is a leg's input.
+            return state, writers, on_documents, invalidated, _entry[1], legacy
         stream = stream._replace(
             count=next_count,
             provably_nonempty=(

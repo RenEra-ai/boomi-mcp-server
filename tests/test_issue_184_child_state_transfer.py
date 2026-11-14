@@ -1277,14 +1277,23 @@ def test_a_child_that_empties_the_cache_guarantees_it_to_nobody():
     assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _compile_errors(roots, "PARENT")
     # A refill BEHIND A RETRIEVE does not bring the guarantee back: a retrieve that returns
     # nothing leaves the Add to Cache unrun while the child still completes normally, so the
-    # caller's later read is refused for that child too (amendment 1 rule 7). Round r18
-    # corrected this control, which pinned the opposite; the defect it witnesses is
-    # unchanged, and the refill's own case is measured just below.
+    # contract guarantees nothing (amendment 1 rule 7) and a caller that falls back to it —
+    # one that continues past a failure — is refused. Round r18 corrected this control, which
+    # pinned the opposite; the refill's own case is measured just below. #187 (architect
+    # evaluation 1): a waited, aborting call REPLAYS the child, and its later read is judged
+    # by the in-process rule the flattened twin applies — a write behind a possibly-empty step
+    # makes the cache readable — so it is admitted, as its twin
+    # (remove; retrieve -> Add to Cache; read) is.
     behind_a_retrieve = [("PARENT", _calls_then_reads_the_cache("WRITER")),
                          ("WRITER", _EMPTIES_THEN_PUTS)]
     assert _row(behind_a_retrieve, "PARENT", "WRITER").guaranteed_state == ()
     assert _row(behind_a_retrieve, "PARENT", "WRITER").removed_caches == ("$ref:CACHE",)
-    assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _errors(behind_a_retrieve, "PARENT")
+    assert _errors(behind_a_retrieve, "PARENT") == []
+    assert _errors([("PARENT", _legs(_EMPTIES_IT, _FILLS_THE_CACHE, {"steps": [_READ, _MSG], "terminal": _STOP}))],
+                   "PARENT") == []
+    continues = [("PARENT", _calls_then_reads_the_cache("WRITER", abort_on_error=False)),
+                 ("WRITER", _EMPTIES_THEN_PUTS)]
+    assert (_CACHE_WRITER_MISSING, _AT_THE_CACHE_READ) in _errors(continues, "PARENT")
     # CONTROL: the same child whose refill runs on a path the walk PROVES still guarantees
     # the cache, so the correction refuses the removal and not the removal step. The child
     # is a PASSTHROUGH root so that it is valid on its own, and BOTH roots are asserted
@@ -1352,6 +1361,14 @@ def _fills_calls_then_reads(child_key):
                  {"steps": [_READ, _MSG], "terminal": _STOP})
 
 
+def _fills_continues_then_reads(child_key):
+    """`_fills_calls_then_reads`, but the call continues past a child failure (#187): it is not
+    replayed, so the child's CONTRACT alone decides what the later read may see."""
+    return _legs(_FILLS_THE_CACHE,
+                 {"steps": [], "terminal": _call(child_key, wait=True, abort_on_error=False)},
+                 {"steps": [_READ, _MSG], "terminal": _STOP})
+
+
 def test_a_call_un_establishes_only_the_caches_the_walk_proves_it_may_remove():
     """A removal the walk PROVES un-establishes a cache; not knowing what a child does never
     does. That is the rule on the write side beside it — `_caches_a_call_may_write` records
@@ -1395,7 +1412,11 @@ def test_the_removal_fallback_is_load_bearing(monkeypatch):
     writes are not all known may have removed EVERY cache this process can observe — the
     derived chain is refused again, while the identical unknowability called directly stays
     admitted. That difference is the defect the correction removes."""
-    derived = [("PARENT", _fills_calls_then_reads("MID")), ("MID", _CALLS_UNKNOWN)]
+    # #187: the derived call continues past a failure, so it falls back to MID's contract — a
+    # waited, aborting one replays MID, and what MID's walk leaves readable decides the read.
+    derived = [("PARENT", _legs(_FILLS_THE_CACHE,
+                                {"steps": [], "terminal": _call("MID", wait=True, abort_on_error=False)},
+                                {"steps": [_READ, _MSG], "terminal": _STOP})), ("MID", _CALLS_UNKNOWN)]
     direct = [("PARENT", _fills_calls_then_reads("EXTERNAL"))]
     assert _errors(derived, "PARENT") == []
 
@@ -1459,11 +1480,15 @@ def test_the_proved_removal_surviving_an_unknown_call_is_load_bearing(monkeypatc
             facts = dict(facts, removed_caches=())
         return facts
 
-    roots = [("PARENT", _fills_calls_then_reads("MID")), ("MID", _EMPTIES_AND_CALLS_UNKNOWN)]
+    # #187: the mutant perturbs the CONTRACT, so it is observed at a call that falls back to it;
+    # a waited, aborting call replays MID's walk, whose own removal no contract edit can hide.
+    roots = [("PARENT", _fills_continues_then_reads("MID")), ("MID", _EMPTIES_AND_CALLS_UNKNOWN)]
+    replayed = [("PARENT", _fills_calls_then_reads("MID")), ("MID", _EMPTIES_AND_CALLS_UNKNOWN)]
     assert (_CACHE_WRITER_MISSING, _AT_A_LATER_LEGS_READ) in _errors(roots, "PARENT")
     monkeypatch.setattr(process_ir_effects, "derive_child_entry_facts", blanked_with_mutated_state)
     assert _row(roots, "PARENT", "MID").removed_caches == ()
     assert _errors(roots, "PARENT") == []
+    assert (_CACHE_WRITER_MISSING, _AT_A_LATER_LEGS_READ) in _errors(replayed, "PARENT")
 
 
 # ---------------------------------------------------------------------------
@@ -1535,8 +1560,13 @@ def test_the_one_rule_every_removal_site_reads_is_load_bearing(monkeypatch):
     the one rule, the forwarded removal disappears from the contract AND the direct one stops
     reaching its consumer — both, from one perturbation, because there is only one site left
     to gate. That is what replacing the enumeration with an invariant bought."""
-    forwarded = _REMOVAL_REACHES["one_forwarding_hop"]
-    direct = _REMOVAL_REACHES["the_childs_own_body"]
+    # #187: the perturbed rule is the CONTRACT's, so the outer call continues past a failure
+    # and falls back to MID's contract; a waited, aborting outer call replays MID's walk instead.
+    def continuing(roots):
+        return [("PARENT", _fills_continues_then_reads("MID"))] + roots[1:]
+
+    forwarded = continuing(_REMOVAL_REACHES["one_forwarding_hop"])
+    direct = continuing(_REMOVAL_REACHES["the_childs_own_body"])
     assert _errors(forwarded, "PARENT") != []
     assert _errors(direct, "PARENT") != []
 
@@ -11291,26 +11321,15 @@ def test_a_sibling_writers_stored_profile_crosses_the_call():
     """ARCH-186-e3-01, closed by #187: a covered call replays its child's own walk from the caller's caches, so a
     sibling writer's P1 beside the caller's P1 is P1, and the restage into the P2 cache is refused as the twin refuses
     it. Over every caller content times every sibling content times three targets, directly and through a forwarding
-    middle: 294 cells exact and none fail-open. The recorded class keeps its actual refusals: where the caller stores
-    nothing, `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` — a sibling's write behind a producer establishes
-    nothing across a call (#184 amendment 1 rule 7: a completion that skipped the write is still normal), which a
-    replay leaves to the contract — beside the twin's codes in all 42 (the twin admits by its in-process rule in
-    34, so the composition is the stricter side; in 8 both refuse, the composition with the twin's code too).
-    Fail-closed in every cell; the fail-open list is the witness that #187 closed the limit."""
-    missing = "PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING"
+    middle: all 336 cells earn exactly the twin's codes. Before architect evaluation 1, 42 cells where the caller
+    stores nothing kept `PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING` beside the twin's codes: the replay left
+    which caches a later step may read to the child's contract, whose every-completion guarantee (#184 amendment 1
+    rule 7) omits a sibling's write behind a producer. The replayed walk IS the in-process walk, so its availability
+    is taken from it (`_with_replayed_walk_facts`) and the class is gone."""
     verdicts = _b186_sibling_writer_verdicts()
-    exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
-    beside = [cell for cell, (composed, twin) in verdicts.items()
-              if composed != twin and not cell[1] and composed - twin == {missing} and twin <= composed]
-    instead = [cell for cell, (composed, twin) in verdicts.items()
-               if not cell[1] and composed == {missing} and twin == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}]
-    fail_open = sorted(cell for cell, (composed, twin) in verdicts.items()
-                       if not composed and twin)
-    assert len(verdicts) == 336 and (len(exact), len(beside), len(instead)) == (294, 42, 0), [
-        (cell, verdicts[cell]) for cell in set(verdicts) - set(exact) - set(beside) - set(instead) - set(fail_open)]
-    assert fail_open == [], fail_open
-    assert len(exact) + len(beside) + len(instead) == 336, "every cell is exact or in the recorded class"
-    assert all(composed for cell, (composed, twin) in verdicts.items() if cell in beside or cell in instead)
+    differing = sorted((cell, verdicts[cell]) for cell, (composed, twin) in verdicts.items() if composed != twin)
+    assert len(verdicts) == 336
+    assert differing == [], differing
 
 
 def _b186_two_relation_roots(supplied):
@@ -11828,7 +11847,7 @@ def test_the_replay_is_the_cache_effect(monkeypatch):
 
 def test_a_replay_receives_the_arriving_documents(monkeypatch):
     """#187 source mutant — the arriving stream: a replayed passthrough entry stages the declared profile again: the cell leaves its twin's verdict."""
-    _lineage_with_source(monkeypatch, '            if _entry is not None and _entry[1] is not None:\n', '            if False:\n')
+    _lineage_with_source(monkeypatch, '_entry is not None and _entry[1] is not None:\n', 'False:\n', occurrences=2)
     holds, composed = _c187_holds('w7-01 p1 and p2')
     assert not holds, composed
 
@@ -12010,7 +12029,7 @@ def test_a_derivation_that_does_not_replay_leaves_the_write_with_the_child(monke
 def test_a_grandparents_call_keeps_the_sibling_matrix_exact(monkeypatch, wait):
     """CDX-187-r1-01 coverage: the 336-cell sibling-writer matrix with every PARENT itself called by a grandparent —
     waited and aborting (its replay judges PARENT), or neither (only PARENT's contract reaches it) — earns exactly the
-    unwrapped matrix's verdicts: 294 exact, 42 recorded, none fail-open. Keeping the derivation's unknown content after a
+    unwrapped matrix's verdicts: all 336 exact (294 exact and 42 recorded before architect evaluation 1). Keeping the derivation's unknown content after a
     replay in a called root instead admitted 8 cells under the unwaited grandparent (measured)."""
     from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
 
@@ -12024,14 +12043,16 @@ def test_a_grandparents_call_keeps_the_sibling_matrix_exact(monkeypatch, wait):
     verdicts = _b186_sibling_writer_verdicts()
     exact = [cell for cell, (composed, twin) in verdicts.items() if composed == twin]
     fail_open = [cell for cell, (composed, twin) in verdicts.items() if twin and not composed]
-    assert (len(verdicts), len(exact), fail_open) == (336, 294, [])
+    assert (len(verdicts), len(exact), fail_open) == (336, 336, [])
 
 
 def test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller():
-    """Recorded limit (Stage-2 r1): MID proves it emptied CACHE, calls WRITER (P1) and copies CACHE into the P2 cache.
-    A waited, aborting caller's replay refuses the copy as the twin does. MID's contract defers the write (the call
-    ends MID's seal: a child's cohort is not MID's own, D4), so an unwaited caller — which runs no replay — admits it,
-    as the base does; HEAD before the r1 correction refused it only because MID's contract omitted the write."""
+    """MID proves it emptied CACHE, calls WRITER (P1) and copies CACHE into the P2 cache: MID's twin refuses
+    PROFILE_MISMATCH whatever its caller stored. A waited, aborting caller's replay refuses it. Since architect
+    evaluation 1 MID's own walk keeps its seal across the covered WRITER call (the replayed walk's seal: WRITER's
+    documents are this execution's, not a caller's), so MID judges the copy itself and an unwaited caller — which runs
+    no replay — is refused too, with the twin's code. Stage-2 r1 recorded `CACHE_WRITER_MISSING` here; the
+    availability projection alone admitted it (blast radius `c187_deferral`)."""
     noop = {"steps": [_MSG], "terminal": _STOP}
     mid = _legs(_c187_empty("CACHE"), _c187_call("WRITER"), _c187_copy("CACHE", "CACHE_P2"))
     writer = ("WRITER", _legs(_c187_p1("CACHE"), noop))
@@ -12040,7 +12061,7 @@ def test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller():
     unwaited = _c187_codes([("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID", False, False))), ("MID", mid), writer],
                            symbols)
     assert PROCESS_IR_SEMANTIC_PROFILE_MISMATCH in waited
-    assert unwaited == {PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING}
+    assert unwaited == {PROCESS_IR_SEMANTIC_PROFILE_MISMATCH}
 
 
 def _c187_chain(length):
@@ -12243,3 +12264,79 @@ def test_a_summary_write_that_carries_the_paths_proof_exports_a_guarantee(monkey
                          '            effect_proved = provably_runs\n')
     behind = _c187_r5_chain(_doc(_ENTRY, _A_RETRIEVE_THEN_THE_WRITE))
     assert _c187_r3_codes(behind, _c187_r3_declared(behind, ("WRITER",))) == set()
+
+
+# --- #187 architect evaluation 1: the replay boundary hands on the walk's own facts ------------------------------------
+
+
+def _c187_e1_cells():
+    """``{name: (composed roots, twin roots)}`` — each shape architect evaluation 1 and the blast radius measured
+    leaving its flattened twin when the replay boundary hand-picked what crosses it."""
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    passthrough_mid = _doc(_ENTRY, {"kind": "branch", "legs": [_c187_call("CHILD"), noop]})
+    deferral_mid = _legs(_c187_empty("CACHE"), _c187_call("WRITER"), _c187_copy("CACHE", "CACHE_P2"))
+    cells = {
+        # ARCH-187-e1-01: a passthrough middle keeps the caller's singleton count, so its No Data child runs once.
+        "passthrough count": (
+            [("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID"), _c187_p1("CACHE"), _c187_copy("CACHE", "CACHE_P2"))),
+             ("MID", passthrough_mid), ("CHILD", _legs(_c187_empty("CACHE"), _c187_p1("CACHE")))],
+            [("PARENT", _legs(_c187_p2("CACHE"), _c187_empty("CACHE"), _c187_p1("CACHE"), noop, _c187_p1("CACHE"),
+                              _c187_copy("CACHE", "CACHE_P2")))]),
+        # ARCH-187-e1-02: a sibling writer's write behind a producer is readable in-process after the call.
+        "sibling availability": (
+            [("PARENT", _legs(_c187_call("WRITER"), _c187_call("CACHE_CHILD"))),
+             ("WRITER", _legs(_c187_p1("CACHE"), noop)),
+             ("CACHE_CHILD", _legs(_c187_copy("CACHE", "CACHE2"), noop))],
+            [("PARENT", _legs(_c187_p1("CACHE"), noop, _c187_copy("CACHE", "CACHE2"), noop))]),
+    }
+    # Blast radius `c187_deferral`: MID's copy after its proved removal and a covered refill is MID's to judge,
+    # whatever its caller's call spelling — waited and aborting, unwaited, or waited and continuing.
+    for label, (wait, abort) in {"wa": (True, True), "nw": (False, False), "wn": (True, False)}.items():
+        cells["deferral " + label] = (
+            [("PARENT", _legs(_c187_p2("CACHE"), _c187_call("MID", wait, abort))), ("MID", deferral_mid),
+             ("WRITER", _legs(_c187_p1("CACHE"), noop))],
+            [("MID", _legs(_c187_empty("CACHE"), _c187_p1("CACHE"), noop, _c187_copy("CACHE", "CACHE_P2")))])
+    return cells
+
+
+def _c187_e1_holds(name):
+    roots, twin = _c187_e1_cells()[name]
+    symbols = _c187_symbols()
+    composed, expected = _c187_codes(roots, symbols), _c187_codes(twin, symbols)
+    return composed == expected and bool(expected) == (name != "sibling availability"), (composed, expected)
+
+
+@pytest.mark.parametrize("name", sorted(_c187_e1_cells()))
+def test_a_replay_boundary_hands_on_the_walks_facts(name):
+    """ARCH-187-e1-01/02 + blast radius: each cell earns its flattened twin's codes — the passthrough middle and the
+    deferral cells are refused PROFILE_MISMATCH as their twins are, the sibling-availability cell is admitted."""
+    holds, composed = _c187_e1_holds(name)
+    assert holds, (name, composed)
+
+
+def test_a_replayed_passthrough_entry_that_resets_the_count_runs_its_child_twice(monkeypatch):
+    """ARCH-187-e1-01 source mutant: a replayed passthrough entry treated as a step loses the caller's singleton
+    count, its No Data child may be skipped, and the caller's P2 survives the child's proved removal."""
+    _lineage_with_source(monkeypatch, '        if kind == "passthrough" and _entry is not None and _entry[1] is not None:\n',
+                         '        if False:\n')
+    holds, composed = _c187_e1_holds("passthrough count")
+    assert not holds, composed
+
+
+def test_a_replay_that_keeps_the_contracts_availability_refuses_a_readable_cache(monkeypatch):
+    """ARCH-187-e1-02 source mutant: availability left to the contract's every-completion guarantee refuses
+    `CACHE_WRITER_MISSING` where the twin reads the sibling's write."""
+    _lineage_with_source(monkeypatch, '        | frozenset(key for key in after.execution if key[0] == CACHE)\n',
+                         '        | frozenset(key for key in state.execution if key[0] == CACHE)\n')
+    holds, composed = _c187_e1_holds("sibling availability")
+    assert not holds, composed
+
+
+@pytest.mark.parametrize("label", ("nw", "wn"))
+def test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy(monkeypatch, label):
+    """Blast-radius source mutant: with the contract's seal withdrawal kept across MID's covered call, MID defers
+    the copy to callers that cannot see its removal, and a caller that runs no replay admits what the twin refuses."""
+    _lineage_with_source(monkeypatch, '        state.content, state.cohorts, after.sealed, state.proved)\n',
+                         '        state.content, state.cohorts, state.sealed, state.proved)\n')
+    holds, composed = _c187_e1_holds("deferral " + label)
+    assert not holds and not composed[0], composed

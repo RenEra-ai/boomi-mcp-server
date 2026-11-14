@@ -383,10 +383,15 @@ keeps its compatibility placement. A call with `wait=true` and `abort_on_error=t
 submitted in the same request, outside every call cycle, with no cache write still in flight (the
 caller's own unwaited calls or the child's), leaves in the caches exactly what the child's own walk
 leaves there when run from the caller's caches and the documents arriving at the call (#187): removals,
-joins, copies and grandchildren included, in the order they run, and a profile that walk refuses is
-refused at the call's `/process_ref`. The child's contract is derived from the same walk, so a write
-of its documents that only its callers can judge is judged at each of its calls. That is in-process
-availability, not an every-completion guarantee. It holds however deeply such calls nest, and
+joins, copies and grandchildren included, in the order they run. Which caches a later step may read
+and whether the caller's own documents can still be in them are that walk's too. A profile that walk
+refuses only because of the caller's documents is refused at the call's `/process_ref`; a refusal the
+child earns whatever its caller stores is reported at the child's own pointer, once, and not repeated
+at its calls. The child's contract is derived from the same walk, so a write of its documents that
+only its callers can judge is judged at each of its calls. That is in-process availability, not an
+every-completion guarantee: a write behind a step that may hand on no documents makes the cache
+readable after such a call, while a call that falls back to the child's contract establishes only
+what every normal completion of the child writes. It holds however deeply such calls nest, and
 whether or not a declared `subprocess_effects` entry is bound in or describes the process. Every other call
 adds unknown content to the caches its child may write.
 
