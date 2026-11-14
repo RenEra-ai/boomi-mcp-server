@@ -12210,3 +12210,36 @@ def test_a_derivation_never_replays(monkeypatch):
     parsed = [(name, parse_process_ir_v1(document)) for name, document in roots]
     assert resolve_process_ir_effect_declarations(parsed, None, symbols, [], child_roots={
         "$ref:" + name: ir for name, ir in parsed}).ok and calls
+
+
+def _c187_r5_chain(writer):
+    """PARENT calls MID and then reads K; MID calls WRITER; both calls wait and abort."""
+    mid = _doc({"kind": "branch", "legs": [{"steps": [], "terminal": _call("WRITER", **_WAITS_AND_ABORTS)},
+                                          {"steps": [_MSG], "terminal": _STOP}]})
+    parent = _doc({"kind": "branch", "legs": [{"steps": [], "terminal": _call("MID", **_WAITS_AND_ABORTS)},
+                                             _READS_K_LATER]})
+    return [("PARENT", parent), ("MID", mid), ("WRITER", writer)]
+
+
+_C187_R5_DECLARED = ((), ("WRITER",), ("MID",), ("MID", "WRITER"))
+
+
+@pytest.mark.parametrize("keys", _C187_R5_DECLARED, ids=lambda keys: "+".join(keys) or "none")
+def test_a_summary_establishes_but_proves_nothing_across_a_call(keys):
+    """CDX-187-r2-01: a declared subprocess summary is the child's established-at-exit set, which does not ask
+    whether documents reach the writer. WRITER sets K behind a retrieve that may return nothing, so no completion
+    proof exists and MID guarantees PARENT nothing, declared or not. A WRITER whose every completion sets K does
+    guarantee it, declared or not."""
+    behind = _c187_r5_chain(_doc(_ENTRY, _A_RETRIEVE_THEN_THE_WRITE))
+    assert _c187_r3_codes(behind, _c187_r3_declared(behind, keys) if keys else None) == {_READ_BEFORE_WRITE}
+    proved = _c187_r5_chain(_SETS_K)
+    assert _c187_r3_codes(proved, _c187_r3_declared(proved, keys) if keys else None) == set()
+
+
+def test_a_summary_write_that_carries_the_paths_proof_exports_a_guarantee(monkeypatch):
+    """CDX-187-r2-01 source mutant: a summary's writes proved by the caller's path alone make MID guarantee what
+    WRITER may skip, and PARENT's read is admitted."""
+    _lineage_with_source(monkeypatch, '            effect_proved = provably_runs and semantic.semantic_kind != "process_call"\n',
+                         '            effect_proved = provably_runs\n')
+    behind = _c187_r5_chain(_doc(_ENTRY, _A_RETRIEVE_THEN_THE_WRITE))
+    assert _c187_r3_codes(behind, _c187_r3_declared(behind, ("WRITER",))) == set()

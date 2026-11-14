@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14670, "minimum_collected": 14670, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14676, "minimum_collected": 14676, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15084,3 +15084,9 @@
 {"kind": "test", "id": "pytest-015083", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-49]", "state": "active"}
 {"kind": "test", "id": "pytest-015084", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_unbounded_replay_depth_overflows_the_stack", "state": "active"}
 {"kind": "test", "id": "pytest-015085", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12072]", "state": "active"}
+{"kind": "test", "id": "pytest-015086", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015087", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015088", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015089", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[none]", "state": "active"}
+{"kind": "test", "id": "pytest-015090", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_write_that_carries_the_paths_proof_exports_a_guarantee", "state": "active"}
+{"kind": "test", "id": "pytest-015091", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12242]", "state": "active"}

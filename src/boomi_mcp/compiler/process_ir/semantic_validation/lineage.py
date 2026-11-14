@@ -4007,8 +4007,13 @@ def _walk_lineage(
                     state = state.with_cohort(key[1], UNKNOWN_COHORT)
             if not establishes:
                 continue
+            # #187 (CDX-187-r2-01): a subprocess summary's writes are the child's established-at-exit set, which
+            # does not ask whether documents reach its writers, so they establish here but prove nothing: what a
+            # call proves is what its child's contract guarantees, applied by `_discharge_child_contract` below.
+            # A map or script runs in THIS process, where the path's own proof is the proof.
+            effect_proved = provably_runs and semantic.semantic_kind != "process_call"
             for key in effect.writes:
-                state = state.with_write((key[0], key[1]), proved=provably_runs)
+                state = state.with_write((key[0], key[1]), proved=effect_proved)
                 if key[0] == DDP:
                     on_documents = on_documents | {(key[0], key[1])}
                     established_here.add((key[0], key[1]))
