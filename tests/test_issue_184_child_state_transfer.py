@@ -2152,6 +2152,7 @@ def _c187_on_k(true_arm, false_arm):
 #: A Branch whose first leg stores the documents in CACHE: the only form a Decision arm admits a cache write in.
 _C187_PUTS = {"kind": "branch", "legs": [{"steps": [], "terminal": _PUT}, {"steps": [_MSG], "terminal": _STOP}]}
 _C187_SKIPS = {"steps": [_MSG], "terminal": _STOP}
+_C187_THROWS = {"kind": "exception", "message_template": "halt {1}"}
 #: #187 r9 (CDX-187-r9-01): a cache write in EVERY slot of a child body that admits one, at both start forms
 #: where the slot is authorable. A Branch leg's terminal admits ``cache_put``; a Decision arm admits it only
 #: inside a Branch (its own terminal refuses the kind); a catch body's terminal admits it; a try body and a
@@ -2166,6 +2167,15 @@ _C187_CACHE_WRITERS = {
         (False, True)),
     "the_false_arm_only": (
         [_GET, _c187_on_k(_C187_SKIPS, {"steps": [], "terminal": _C187_PUTS})], (False, True)),
+    # #187 r10 (CDX-187-r10-01): a write on ONE outcome of a Decision whose other outcome throws — an
+    # exception ending is no normal completion, so the walk establishes it; the predicate needs no new
+    # expectation, it compares every caller with the walk.
+    "the_true_arm_beside_a_throwing_arm": (
+        [_GET, _c187_on_k({"steps": [], "terminal": _C187_PUTS}, {"steps": [], "terminal": _C187_THROWS})],
+        (False, True)),
+    "the_false_arm_beside_a_throwing_arm": (
+        [_GET, _c187_on_k({"steps": [_MSG], "terminal": _C187_THROWS}, {"steps": [], "terminal": _C187_PUTS})],
+        (False, True)),
     "both_arms": (
         [_GET, _c187_on_k({"steps": [], "terminal": _C187_PUTS}, {"steps": [], "terminal": _C187_PUTS})],
         (False, True)),
@@ -2404,7 +2414,7 @@ def _a_waited_aborting_call_makes_a_cache_available(m):
     establishes it on every normal completion — the walk's verdict, not a per-shape expectation — at either
     start form and at several documents; while the child's process properties are still not established at
     several documents. Non-vacuous by construction: the measured slots must include a write the walk
-    establishes AND one it does not (a single Decision arm, a catch body)."""
+    establishes AND one it does not — which slots those are is read off the walk, never named here."""
     scopes = _cache_writer_scopes(m)
     verdicts = {not _refused(m[(scope, "authority", "walk")]) for scope in scopes}
     return (verdicts == {True, False}
@@ -2525,13 +2535,12 @@ _PROCESS_CALL_CLAIMS = (
      "completion.",
      _a_write_behind_a_possibly_empty_step_establishes_nothing),
     ("a-waited-aborting-call-makes-a-cache-available",
-     "A cache the child's own walk establishes on every normal completion is available to "
+     "A cache the child's own walk stores to on every normal completion is available to "
      "later paths after any call with wait=true and abort_on_error=true, as it would be "
-     "had the child's steps run in the calling process: a Branch runs every leg, so a "
-     "write in any leg counts, and neither a step in front of the write that may hand on "
-     "no documents nor the number of documents the call carries withdraws it; a write on "
-     "only one outcome of a Decision, or only where a Try/Catch handles an error, "
-     "establishes nothing.",
+     "had the child's steps run in the calling process, whatever number of documents the "
+     "call carries and whether or not a step in front of the write may hand on no "
+     "documents; a completion that ends in an exception is not a normal one, and a cache "
+     "some normal completion of the child leaves unwritten establishes nothing.",
      _a_waited_aborting_call_makes_a_cache_available),
     ("every-other-call-carries-nothing",
      "After any other call with wait=true those writes reach later paths only when a "
@@ -2637,7 +2646,7 @@ def test_the_boundary_rule_and_the_process_call_page_agree_on_what_a_call_establ
     # Accounting, scoped to the sentences that say what reaches a later path: a new
     # over-promise about it has to be a claim measured above.
     for sentence in _sentences(facts):
-        if not re.search(r"for later paths|reach(es)? later paths", sentence):
+        if not re.search(r"later paths", sentence):
             continue
         owners = [claim_id for claim_id, fragment, _ in _PROCESS_CALL_CLAIMS
                   if fragment in sentence]
