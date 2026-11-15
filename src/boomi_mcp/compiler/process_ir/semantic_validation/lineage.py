@@ -1461,6 +1461,24 @@ def _with_replayed_walk_facts(state: "_State", after: "_State") -> "_State":
         state.content, state.cohorts, after.sealed, state.proved)
 
 
+def _after_zero_or_more_runs(current: "_State", after: "_State") -> "_State":
+    """One step of a No Data child's repeated runs (#187): ``current`` (no further run) joined with one more run.
+
+    The same rule the single walk applies to a step that may run on no documents, so the iterated replay hands the
+    boundary the walk's facts exactly as one run does (`_with_replayed_walk_facts`). CACHE availability is the
+    run's: a write that may run makes a cache readable in-process and a removal that may run unestablishes it —
+    so meeting it with the zero-run arm withdrew every cache the child writes (#187 Stage-2 fix-only round,
+    `CDX-187-r7-01`). Content is the union of the runs; the seal and the every-completion proofs are MUST sets and
+    meet with the zero-run arm, since a run that may not happen proves nothing."""
+    joined = current.merged_with(_State(current.document, after.execution, after.content, current.cohorts,
+                                        after.sealed, after.proved))
+    return _State(
+        joined.document,
+        frozenset(key for key in joined.execution if key[0] != CACHE)
+        | frozenset(key for key in after.execution if key[0] == CACHE),
+        joined.content, joined.cohorts, joined.sealed, joined.proved)
+
+
 def _replay_once(session, program_id, child, replay_capabilities, state, stream, legacy, standalone):
     """One run of a child's walk from the caller's state, memoized on its complete input; None when the run is
     not one a caller may trust (#187 post-gate): its profile proof stood down, or it left a write in flight."""
@@ -3877,7 +3895,7 @@ def _walk_lineage(
             if outcome is None:
                 return None
             mismatch_found = mismatch_found or outcome.new_profile_mismatch
-            joined = current.merged_with(_apply_replay(current, outcome.after))  # content: the union of the runs
+            joined = _after_zero_or_more_runs(current, outcome.after)
             if (joined.execution, joined.proved, joined.content, joined.cohorts, joined.sealed) == (
                     current.execution, current.proved, current.content, current.cohorts, current.sealed):
                 return _ReplayOutcome(joined, mismatch_found)

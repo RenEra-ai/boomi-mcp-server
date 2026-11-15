@@ -175,6 +175,8 @@ def _perturbations():
         ("lineage", "_apply_replay"): lambda state, after: state,
         # #187 (architect evaluation 1): a covered call keeps the contract's cache availability and seal.
         ("lineage", "_with_replayed_walk_facts"): lambda state, after: state,
+        # #187 (CDX-187-r7-01): a No Data child's repeated runs leave nothing — the zero-run arm alone.
+        ("lineage", "_after_zero_or_more_runs"): lambda current, after: current,
         # #187: no program loads, so every call falls back to its contract.
         ("lineage", "_load_replay_program"): lambda session, program_id, symbols: None,
         # #187: no replay is trusted, so every call falls back to its contract.

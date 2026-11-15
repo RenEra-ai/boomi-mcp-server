@@ -2138,6 +2138,15 @@ _BOUNDARY_SHAPES = {
     "several_documents": dict(_WAITS_AND_ABORTS, passthrough=True),
 }
 _UNGATED = tuple(shape for shape in _BOUNDARY_SHAPES if shape != "gated")
+#: The callers after which a cache the child MAY write is available, as in one process (#187).
+_CACHE_CARRYING = ("gated", "several_documents")
+#: A measured scope's key for the same child authored with a Data Passthrough entry.
+_FROM_A_PASSTHROUGH_CHILD = "%s_from_a_passthrough_child"
+
+
+def _both_starts(*scopes):
+    """Every scope at BOTH child start forms the served sentences quantify over."""
+    return tuple(key for scope in scopes for key in (scope, _FROM_A_PASSTHROUGH_CHILD % scope))
 
 #: One child per WRITE SCOPE the served sentence quantifies over — each proving its write
 #: on every normal completion — with the caller's later leg that consumes it and the
@@ -2234,6 +2243,26 @@ def _boundary_measurements():
             measured[(scope, shape, "walk")] = _cell(roots)
             measured[(scope, shape, "declared")] = _cell(
                 roots, _subprocess_declaration("$ref:WRITER", write, replay_safe))
+            # The SAME child with a Data Passthrough entry: the served sentences quantify over
+            # every called child, and the No Data form alone left one start form unmeasured
+            # while the replay carried a cache past it (#187 r8).
+            if scope != "ddp":
+                passthrough_child = _doc(_ENTRY, *child["body"]["steps"])
+                roots = [("PARENT", parent), ("WRITER", passthrough_child)]
+                measured[(_FROM_A_PASSTHROUGH_CHILD % scope, shape, "walk")] = _cell(roots)
+                measured[(_FROM_A_PASSTHROUGH_CHILD % scope, shape, "declared")] = _cell(
+                    roots, _subprocess_declaration("$ref:WRITER", write, replay_safe))
+            if scope == "cache":
+                # The cache sentence's own quantifier: one write the child MAY run, behind a
+                # step that may hand on no documents, at either start form.
+                behind = _legs({"steps": [_GET], "terminal": _PUT},
+                               {"steps": [_MSG], "terminal": _STOP})
+                for start, writer in (
+                        ("cache_behind_a_possibly_empty_step", behind),
+                        (_FROM_A_PASSTHROUGH_CHILD % "cache_behind_a_possibly_empty_step",
+                         _doc(_ENTRY, *behind["body"]["steps"]))):
+                    measured[(start, shape, "walk")] = _cell(
+                        [("PARENT", parent), ("WRITER", writer)])
     for shape, call in _BOUNDARY_SHAPES.items():
         call = dict(call)
         passthrough = call.pop("passthrough", False)
@@ -2301,16 +2330,38 @@ def _inert_with_one_exception(m):
 
 def _the_gated_call_establishes(m):
     """The call `node.process_call` says establishes the child's PROCESS PROPERTIES AND
-    CACHES: both scopes clear there, with no declaration anywhere."""
-    return all(not _refused(m[(scope, "gated", "walk")]) for scope in ("dpp", "cache"))
+    CACHES: both scopes clear there, with no declaration anywhere, at either start form."""
+    return all(not _refused(m[(scope, "gated", "walk")])
+               for scope in _both_starts("dpp", "cache"))
+
+
+def _a_waited_aborting_call_makes_a_cache_available(m):
+    """#187 r8: after ANY waited, aborting call a cache the child may write is available,
+    as in one process — at several documents and behind a possibly-empty step, at either
+    start form — while its process properties are still not established there."""
+    return (all(not _refused(m[(scope, shape, "walk")])
+                for scope in _both_starts("cache", "cache_behind_a_possibly_empty_step")
+                for shape in _CACHE_CARRYING)
+            and all(_refused(m[(scope, "several_documents", "walk")])
+                    for scope in _both_starts("dpp")))
+
+
+def _the_boundary_call_establishes(m):
+    """The boundary rule's half: what `node.process_call` says a call establishes, for
+    properties and for caches."""
+    return _the_gated_call_establishes(m) and _a_waited_aborting_call_makes_a_cache_available(m)
 
 
 def _every_other_call_carries_nothing(m):
-    """The walk carries nothing past the other three calls, and a verified declaration is
-    what carries it past a WAITED one — never past wait=false, which is why the served
-    form is a necessary condition and not "whenever"."""
+    """The walk carries nothing past the other calls — properties past the three ungated
+    ones, caches past the two that do not both wait and abort — and a verified
+    declaration is what carries it past a WAITED one, never past wait=false, which is why
+    the served form is a necessary condition and not "whenever"."""
     return (all(_refused(m[(scope, shape, "walk")])
-                for scope in ("dpp", "cache") for shape in _UNGATED)
+                for scope in _both_starts("dpp") for shape in _UNGATED)
+            and all(_refused(m[(scope, shape, "walk")])
+                    for scope in _both_starts("cache", "cache_behind_a_possibly_empty_step")
+                    for shape in _UNGATED if shape not in _CACHE_CARRYING)
             and not _refused(m[("dpp", "no_abort", "declared")])
             and not _refused(m[("cache", "no_abort", "declared")])
             and not _refused(m[("dpp", "several_documents", "declared")])
@@ -2370,10 +2421,10 @@ _BOUNDARY_CLAIMS = (
      "warning; on a read without the flag it is inert like the rest.",
      _inert_with_one_exception),
     ("the-gated-call-establishes",
-     "at a call the process call entry says establishes the process properties and "
-     "caches the child writes, those writes are established and the strict findings "
-     "they clear are cleared",
-     _the_gated_call_establishes),
+     "at a call the process call entry says establishes the process properties the child "
+     "writes, or makes the caches it writes available, those writes are established and "
+     "the strict findings they clear are cleared",
+     _the_boundary_call_establishes),
     ("every-other-call-carries-nothing",
      "At every other call the walk carries nothing past the call, and those writes reach "
      "later paths only when a verified declaration states them.",
@@ -2394,16 +2445,22 @@ _BOUNDARY_CLAIMS = (
 _PROCESS_CALL_CLAIMS = (
     ("the-gated-call-establishes",
      "A call with wait=true and abort_on_error=true on a path that provably carries "
-     "exactly one document establishes, for later paths, the process properties and "
-     "caches the child writes on every normal completion at a step its own documents "
+     "exactly one document establishes, for later paths, the process properties the "
+     "child writes on every normal completion at a step its own documents "
      "provably reach.",
      _the_gated_call_establishes),
     ("a-write-behind-a-possibly-empty-step-establishes-nothing",
-     "A write the child makes behind a step that may hand on no documents — a connector "
+     "A property write the child makes behind a step that may hand on no documents — a connector "
      "call that may return no rows, a retrieve of a cache that may be empty — establishes "
      "nothing for the caller, because a completion that skipped it is still a normal "
      "completion.",
      _a_write_behind_a_possibly_empty_step_establishes_nothing),
+    ("a-waited-aborting-call-makes-a-cache-available",
+     "A cache the child may write is available to later paths after any call with "
+     "wait=true and abort_on_error=true, as it would be had the child's steps run in the "
+     "calling process: one write the child may run is enough, behind any step and "
+     "whatever the number of documents the call carries.",
+     _a_waited_aborting_call_makes_a_cache_available),
     ("every-other-call-carries-nothing",
      "After any other call with wait=true those writes reach later paths only when a "
      "verified subprocess effect declaration states them; after wait=false nothing "
@@ -2627,6 +2684,11 @@ def test_the_boundary_shapes_still_get_the_verdicts_the_rule_was_written_against
         (_READ_BEFORE_WRITE, _LATER_READ)}
     assert measured[("dpp", "several_documents", "walk")]["errors"] == {
         (_READ_BEFORE_WRITE, "/body/steps/1/legs/1/steps/0")}
+    # #187 r8: the cache the same caller reads is available after a waited, aborting call,
+    # at either start form; it was refused here before the replay carried it.
+    assert measured[("cache", "several_documents", "walk")]["errors"] == frozenset()
+    assert measured[(_FROM_A_PASSTHROUGH_CHILD % "cache", "several_documents", "walk")][
+        "errors"] == frozenset()
     assert measured[("cache", "no_abort", "walk")]["errors"] == {
         (_CACHE_WRITER_MISSING, _LATER_READ)}
     # rule 7: the gated call is the shape a document property most looks established at, and it is
@@ -12340,3 +12402,37 @@ def test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy(monkeypat
                          '        state.content, state.cohorts, state.sealed, state.proved)\n')
     holds, composed = _c187_e1_holds("deferral " + label)
     assert not holds and not composed[0], composed
+
+
+def _c187_r7_roots():
+    """CDX-187-r7-01: a Data Passthrough parent (its document count unknown) whose first leg calls a No Data cache
+    writer and whose next leg reads that cache, and the parent's flattened twin."""
+    noop = {"steps": [_MSG], "terminal": _STOP}
+    read = {"steps": [_c187_get("CACHE"), _MSG], "terminal": _STOP}
+    roots = [("PARENT", _doc(_ENTRY, {"kind": "branch", "legs": [_c187_call("WRITER"), read]})),
+             ("WRITER", _legs(_c187_p1("CACHE"), noop))]
+    twin = [("PARENT", _doc(_ENTRY, {"kind": "branch", "legs": [_c187_p1("CACHE"), noop, read]}))]
+    return roots, twin
+
+
+def test_repeated_no_data_runs_hand_on_the_walks_availability():
+    """CDX-187-r7-01: the repeated runs of a No Data child are joined by the single walk's rule for a step that may
+    run on no documents, so the cache the child writes stays readable after the call — plain and under a verified
+    subprocess_effects declaration alike, as in the flattened twin."""
+    roots, twin = _c187_r7_roots()
+    symbols = _c187_symbols()
+    assert _c187_codes(twin, symbols) == set()
+    assert _c187_codes(roots, symbols) == set()
+    assert _c187_r3_codes(roots, _c187_r3_declared(roots, ["WRITER"])) == set()
+
+
+def test_repeated_runs_met_with_the_zero_run_arm_lose_the_childs_write(monkeypatch):
+    """CDX-187-r7-01 source mutant: availability met with the zero-run arm withdraws the write, and the read is
+    refused `CACHE_WRITER_MISSING` on both channels."""
+    _lineage_with_source(monkeypatch, '        | frozenset(key for key in after.execution if key[0] == CACHE),\n'
+                                      '        joined.content, joined.cohorts, joined.sealed, joined.proved)\n',
+                         '        ,\n        joined.content, joined.cohorts, joined.sealed, joined.proved)\n')
+    roots, _twin = _c187_r7_roots()
+    assert _c187_codes(roots, _c187_symbols()) == {PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING}
+    assert _c187_r3_codes(roots, _c187_r3_declared(roots, ["WRITER"])) == {
+        PROCESS_IR_SEMANTIC_LINEAGE_CACHE_WRITER_MISSING}
