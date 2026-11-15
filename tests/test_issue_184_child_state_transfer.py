@@ -2138,8 +2138,69 @@ _BOUNDARY_SHAPES = {
     "several_documents": dict(_WAITS_AND_ABORTS, passthrough=True),
 }
 _UNGATED = tuple(shape for shape in _BOUNDARY_SHAPES if shape != "gated")
-#: The callers after which a cache the child MAY write is available, as in one process (#187).
+#: The callers after which a cache the child's walk establishes is available, as in one process (#187).
 _CACHE_CARRYING = ("gated", "several_documents")
+
+
+def _c187_on_k(true_arm, false_arm):
+    return {"kind": "decision", "comparison": "equals",
+            "left": {"value_type": "track", "property_id": "process.K"},
+            "right": {"value_type": "static", "static_value": "x"},
+            "true_arm": true_arm, "false_arm": false_arm}
+
+
+#: A Branch whose first leg stores the documents in CACHE: the only form a Decision arm admits a cache write in.
+_C187_PUTS = {"kind": "branch", "legs": [{"steps": [], "terminal": _PUT}, {"steps": [_MSG], "terminal": _STOP}]}
+_C187_SKIPS = {"steps": [_MSG], "terminal": _STOP}
+#: #187 r9 (CDX-187-r9-01): a cache write in EVERY slot of a child body that admits one, at both start forms
+#: where the slot is authorable. A Branch leg's terminal admits ``cache_put``; a Decision arm admits it only
+#: inside a Branch (its own terminal refuses the kind); a catch body's terminal admits it; a try body and a
+#: root terminal refuse it (measured: NODE_NOT_ALLOWED_IN_BODY, INVALID_CARDINALITY). A catch body under a
+#: Data Passthrough entry is refused (CAPABILITY_UNSUPPORTED), so it is measured at the No Data form only.
+#: ``name -> (steps of the body, start forms)``.
+_C187_CACHE_WRITERS = {
+    "a_branch_leg_behind_a_get": (
+        [{"kind": "branch", "legs": [{"steps": [_GET], "terminal": _PUT}, _C187_SKIPS]}], (False, True)),
+    "the_true_arm_only": (
+        [_GET, _c187_on_k({"steps": [], "terminal": _C187_PUTS}, {"steps": [], "terminal": _STOP})],
+        (False, True)),
+    "the_false_arm_only": (
+        [_GET, _c187_on_k(_C187_SKIPS, {"steps": [], "terminal": _C187_PUTS})], (False, True)),
+    "both_arms": (
+        [_GET, _c187_on_k({"steps": [], "terminal": _C187_PUTS}, {"steps": [], "terminal": _C187_PUTS})],
+        (False, True)),
+    "the_catch_body_only": (
+        [{"kind": "try_catch", "scope": "process", "try_body": {"steps": [_GET], "terminal": _STOP},
+          "catch_body": {"steps": [_GET], "terminal": _PUT}}], (False,)),
+}
+
+
+def _c187_cache_writer(name, passthrough):
+    steps = _C187_CACHE_WRITERS[name][0]
+    return _doc(_ENTRY, *steps) if passthrough else _doc(*steps)
+
+
+def _the_walk_establishes_the_cache(child):
+    """The AUTHORITY the served cache sentence names: the child's own walk, its MUST set over every normal
+    completion (`LineageWalkV1.established_at_exit`) — read off the walk, never hand-modelled per shape."""
+    walk = lineage.walk_lineage(prepare_validation_context(parse_process_ir_v1(child), _symbols()))
+    return ("cache", "$ref:CACHE") in walk.established_at_exit
+
+
+#: The code a cell carries when the child's walk does NOT establish the cache — not a served code, only
+#: the measurement's own spelling, so the walk's verdict reads like every other cell (refused = absent).
+_THE_WALK_DOES_NOT_ESTABLISH = ("WALK_DOES_NOT_ESTABLISH_THE_CACHE", "/")
+
+
+def _authority_cell(child):
+    """The walk's verdict as a measurement cell: admitted when the walk establishes the cache, refused
+    when it does not. A cell, not a bare flag, so the perturbed worlds of the falsifiability test replace
+    it like any other measurement and the validate/compile agreement control reads it uniformly."""
+    errors = frozenset() if _the_walk_establishes_the_cache(child) else frozenset({_THE_WALK_DOES_NOT_ESTABLISH})
+    return {"ok": True, "rejected": (), "inert": (), "errors": errors, "warnings": frozenset(),
+            "compile_errors": errors}
+
+
 #: A measured scope's key for the same child authored with a Data Passthrough entry.
 _FROM_A_PASSTHROUGH_CHILD = "%s_from_a_passthrough_child"
 
@@ -2253,16 +2314,14 @@ def _boundary_measurements():
                 measured[(_FROM_A_PASSTHROUGH_CHILD % scope, shape, "declared")] = _cell(
                     roots, _subprocess_declaration("$ref:WRITER", write, replay_safe))
             if scope == "cache":
-                # The cache sentence's own quantifier: one write the child MAY run, behind a
-                # step that may hand on no documents, at either start form.
-                behind = _legs({"steps": [_GET], "terminal": _PUT},
-                               {"steps": [_MSG], "terminal": _STOP})
-                for start, writer in (
-                        ("cache_behind_a_possibly_empty_step", behind),
-                        (_FROM_A_PASSTHROUGH_CHILD % "cache_behind_a_possibly_empty_step",
-                         _doc(_ENTRY, *behind["body"]["steps"]))):
-                    measured[(start, shape, "walk")] = _cell(
-                        [("PARENT", parent), ("WRITER", writer)])
+                # The cache sentence's own quantifier: a write in every slot that admits one, at
+                # each start form, with the walk's verdict on it alongside (#187 r9).
+                for name, (_, starts) in _C187_CACHE_WRITERS.items():
+                    for passthrough in starts:
+                        writer = _c187_cache_writer(name, passthrough)
+                        key = _FROM_A_PASSTHROUGH_CHILD % name if passthrough else name
+                        measured[(key, shape, "walk")] = _cell([("PARENT", parent), ("WRITER", writer)])
+                        measured[(key, "authority", "walk")] = _authority_cell(writer)
     for shape, call in _BOUNDARY_SHAPES.items():
         call = dict(call)
         passthrough = call.pop("passthrough", False)
@@ -2335,13 +2394,23 @@ def _the_gated_call_establishes(m):
                for scope in _both_starts("dpp", "cache"))
 
 
+def _cache_writer_scopes(m):
+    """Every measured cache-writer child, at every start form it was authorable at."""
+    return tuple(sorted(key[0] for key in m if key[1:] == ("authority", "walk")))
+
+
 def _a_waited_aborting_call_makes_a_cache_available(m):
-    """#187 r8: after ANY waited, aborting call a cache the child may write is available,
-    as in one process — at several documents and behind a possibly-empty step, at either
-    start form — while its process properties are still not established there."""
-    return (all(not _refused(m[(scope, shape, "walk")])
-                for scope in _both_starts("cache", "cache_behind_a_possibly_empty_step")
-                for shape in _CACHE_CARRYING)
+    """#187 r8/r9: after ANY waited, aborting call a cache is available EXACTLY when the child's own walk
+    establishes it on every normal completion — the walk's verdict, not a per-shape expectation — at either
+    start form and at several documents; while the child's process properties are still not established at
+    several documents. Non-vacuous by construction: the measured slots must include a write the walk
+    establishes AND one it does not (a single Decision arm, a catch body)."""
+    scopes = _cache_writer_scopes(m)
+    verdicts = {not _refused(m[(scope, "authority", "walk")]) for scope in scopes}
+    return (verdicts == {True, False}
+            and all(not _refused(m[("cache", shape, "walk")]) for shape in _CACHE_CARRYING)
+            and all(_refused(m[(scope, shape, "walk")]) is _refused(m[(scope, "authority", "walk")])
+                    for scope in scopes for shape in _CACHE_CARRYING)
             and all(_refused(m[(scope, "several_documents", "walk")])
                     for scope in _both_starts("dpp")))
 
@@ -2360,7 +2429,7 @@ def _every_other_call_carries_nothing(m):
     return (all(_refused(m[(scope, shape, "walk")])
                 for scope in _both_starts("dpp") for shape in _UNGATED)
             and all(_refused(m[(scope, shape, "walk")])
-                    for scope in _both_starts("cache", "cache_behind_a_possibly_empty_step")
+                    for scope in _both_starts("cache") + _cache_writer_scopes(m)
                     for shape in _UNGATED if shape not in _CACHE_CARRYING)
             and not _refused(m[("dpp", "no_abort", "declared")])
             and not _refused(m[("cache", "no_abort", "declared")])
@@ -2422,8 +2491,8 @@ _BOUNDARY_CLAIMS = (
      _inert_with_one_exception),
     ("the-gated-call-establishes",
      "at a call the process call entry says establishes the process properties the child "
-     "writes, or makes the caches it writes available, those writes are established and "
-     "the strict findings they clear are cleared",
+     "writes, or makes the caches its walk establishes available, those writes are "
+     "established and the strict findings they clear are cleared",
      _the_boundary_call_establishes),
     ("every-other-call-carries-nothing",
      "At every other call the walk carries nothing past the call, and those writes reach "
@@ -2456,10 +2525,13 @@ _PROCESS_CALL_CLAIMS = (
      "completion.",
      _a_write_behind_a_possibly_empty_step_establishes_nothing),
     ("a-waited-aborting-call-makes-a-cache-available",
-     "A cache the child may write is available to later paths after any call with "
-     "wait=true and abort_on_error=true, as it would be had the child's steps run in the "
-     "calling process: one write the child may run is enough, behind any step and "
-     "whatever the number of documents the call carries.",
+     "A cache the child's own walk establishes on every normal completion is available to "
+     "later paths after any call with wait=true and abort_on_error=true, as it would be "
+     "had the child's steps run in the calling process: a Branch runs every leg, so a "
+     "write in any leg counts, and neither a step in front of the write that may hand on "
+     "no documents nor the number of documents the call carries withdraws it; a write on "
+     "only one outcome of a Decision, or only where a Try/Catch handles an error, "
+     "establishes nothing.",
      _a_waited_aborting_call_makes_a_cache_available),
     ("every-other-call-carries-nothing",
      "After any other call with wait=true those writes reach later paths only when a "
