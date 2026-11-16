@@ -376,12 +376,14 @@ OWES, never what the child establishes for it.
 A step prefix needs a derived Data Passthrough contract and `wait=true`; a child whose entry cannot
 be derived (not in the request, a listener) and a No Data child refuse a prefix with
 `PROCESS_IR_CAPABILITY_PROCESS_CALL_PLACEMENT_UNSUPPORTED` at `/…/terminal`. A member of a call
-cycle is not in that set: its entry form and its requirements are derived against the fail-closed
-seed every cycle member starts from, so a prefix into one is admitted only where those derived
+cycle, and a process that calls into one directly or through other children, is not in that set: its
+entry form and its requirements are derived against the fail-closed seed every such process starts
+from, so a prefix into one is admitted only where those derived
 requirements are provable, and refused wherever what it consumes stays unknown. An empty-prefix call
 keeps its compatibility placement. A call with `wait=true` and `abort_on_error=true` into a child
-submitted in the same request, outside every call cycle, with no cache write still in flight (the
-caller's own unwaited calls or the child's), leaves in the caches exactly what the child's own walk
+submitted in the same request that is not part of a call cycle and calls into none, directly or
+through other children, with no cache write still in flight (the caller's own unwaited calls or the
+child's), leaves in the caches exactly what the child's own walk
 leaves there when run from the caller's caches and the documents arriving at the call (#187): removals,
 joins, copies and grandchildren included, in the order they run. Which caches a later step may read
 and whether the caller's own documents can still be in them are that walk's too. A profile that walk

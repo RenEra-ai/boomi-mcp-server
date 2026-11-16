@@ -2593,8 +2593,8 @@ _PROCESS_CALL_CLAIMS = (
     ("a-waited-aborting-call-makes-a-cache-available",
      "A cache the child's own walk stores to on every normal completion is available to "
      "later paths after a call with wait=true and abort_on_error=true into a child "
-     "submitted in the same request, outside every call cycle, with no cache write still "
-     "in flight, as it would be "
+     "submitted in the same request that is not part of a call cycle and calls into none, "
+     "directly or through other children, with no cache write still in flight, as it would be "
      "had the child's steps run in the calling process, whatever number of documents the "
      "call carries and whether or not a step in front of the write may hand on no "
      "documents; a completion that ends in an exception is not a normal one, and a cache "
@@ -2749,6 +2749,79 @@ def test_a_cache_promise_that_ignores_the_replay_gate_is_false():
         assert _refused(measured[(scope, shape, "walk")]), (scope, shape)
     assert "after any call with wait=true and abort_on_error=true, as it would be" not in " ".join(
         _served("node.process_call")["ordering_facts"])
+
+
+#: ARCH-187-e3-01: the served cycle clause, stated as a predicate on a call graph — a process outside the replay is one
+#: from which a chain of calls (of length zero or more) reaches a process that calls itself back.
+_C187_GRAPH_KEYS = ("MID", "LOOP_A", "LOOP_B")
+
+
+def _c187_graph_root(targets):
+    legs = [{"steps": [_GET], "terminal": _STOP}, {"steps": [_GET], "terminal": _STOP}]
+    legs += [{"steps": [], "terminal": _call(key, **_WAITS_AND_ABORTS)} for key in sorted(targets)]
+    return parse_process_ir_v1(_doc({"kind": "branch", "legs": legs}))
+
+
+def _the_served_clause_excludes(graph):
+    """``(on_a_cycle, excluded)``: the roots the served sentence says a call into is NOT replayed — part of a call
+    cycle, or calling into one directly or through other children. From the graph alone, never `_call_graph`."""
+    def reachable(start):
+        seen, todo = set(), list(graph[start])
+        while todo:
+            key = todo.pop()
+            if key not in seen:
+                seen.add(key)
+                todo.extend(graph[key])
+        return seen
+
+    on_a_cycle = {key for key in graph if key in reachable(key)}
+    return on_a_cycle, {key for key in graph if key in on_a_cycle or reachable(key) & on_a_cycle}
+
+
+def test_the_served_cycle_clause_is_the_call_graphs_own_exclusion():
+    """ARCH-187-e3-01, structural: the served condition said "outside every call cycle", but `_call_graph` — the one
+    authority both a child's contract and its replay program read — leaves out every root that REACHES a cycle as
+    well, so a call into an acyclic writer that calls a looping descendant fell back to its contract while the
+    sentence promised the walk. Pinned both ways over the authority's full case set at three processes (every
+    self-call, two- and three-cycle, and chain into one: all 512 graphs): the clause's exclusion IS the roots
+    `_call_graph` cannot order, and the clause is what the projection serves."""
+    import itertools
+
+    from boomi_mcp.authoring import process_ir_effects
+
+    edges = [(a, b) for a in _C187_GRAPH_KEYS for b in _C187_GRAPH_KEYS]
+    kinds = set()
+    for chosen in itertools.product((False, True), repeat=len(edges)):
+        graph = {key: {b for (a, b), on in zip(edges, chosen) if on and a == key} for key in _C187_GRAPH_KEYS}
+        roots = [(key, _c187_graph_root(graph[key])) for key in _C187_GRAPH_KEYS]
+        _calls, ordered = process_ir_effects._call_graph(roots, _symbols())
+        on_a_cycle, excluded = _the_served_clause_excludes(graph)
+        assert set(_C187_GRAPH_KEYS) - set(ordered) == excluded, graph
+        kinds.update("member" if key in on_a_cycle else "reacher" for key in excluded)
+    assert {"member", "reacher"} <= kinds, "the case set never exercises a process that only reaches a cycle"
+    served = " ".join(_served("node.process_call")["ordering_facts"])
+    assert "not part of a call cycle and calls into none, directly or through other children" in served
+    assert "outside every call cycle" not in served
+
+
+def test_a_writer_that_calls_into_a_cycle_is_not_replayed():
+    """ARCH-187-e3-01's measured cell (the reviewer's shape, both start forms): WRITER is in no cycle, writes the
+    cache on one Branch leg and calls the self-calling LOOP_A on another. Its own walk establishes the cache and it
+    is clean on its own, yet every waited, aborting caller's later read is refused — the call falls back to the
+    contract, exactly as the served clause now says."""
+    later = _BOUNDARY_SCOPES["cache"][2]
+    loop = _c187_on_k({"steps": [], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS)}, {"steps": [], "terminal": _STOP})
+    writer = {"kind": "branch", "legs": [{"steps": [_GET], "terminal": _PUT},
+                                         {"steps": [], "terminal": _call("LOOP_A", **_WAITS_AND_ABORTS)}]}
+    for make in (lambda body: _doc(body), lambda body: _doc(_ENTRY, body)):
+        child, looping = make(writer), make(loop)
+        assert _the_walk_establishes_the_cache(child)
+        assert not _refused(_cell([("WRITER", child), ("LOOP_A", looping)], key="WRITER"))
+        for call in _BOUNDARY_SHAPES.values():
+            call = dict(call)
+            passthrough = call.pop("passthrough", False)
+            parent = _call_then_read(later=later, passthrough=passthrough, **call)
+            assert _refused(_cell([("PARENT", parent), ("WRITER", child), ("LOOP_A", looping)]))
 
 
 def _fails_the_witness(monkeypatch, prose, marker):
@@ -11868,7 +11941,7 @@ def _no_replay(monkeypatch):
 
 # --- #187: a covered call replays its child's own walk from the caller's caches ---------------------------------------
 #
-# A call into a submitted child outside every call cycle, that waits and aborts on error, with no cache write in flight,
+# A call into a submitted child that neither is in nor reaches a call cycle, that waits and aborts on error, with no cache write in flight,
 # leaves in the caller's caches what the child's own walk leaves there when it starts from them — the flattened twin's
 # state by construction. Every #186 finding of the removed summary channel is a regression cell below, rebuilt from the
 # #186 ledger's verbatim summaries, and each earns its twin's verdict; each rule of the replay has a source mutant.

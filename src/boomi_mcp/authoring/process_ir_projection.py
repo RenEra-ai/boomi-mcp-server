@@ -293,9 +293,12 @@ _CACHE_EMISSION_SUMMARY = (
 #: #187 (ARCH-187-e2-01): the calls whose child walk is replayed from the caller's caches, stated ONCE and
 #: interpolated into every served sentence that quantifies over them — two hand-typed copies of this condition
 #: are how a sentence promised a cache "after any call" while a call-cycle member falls back to its contract.
+#: The cycle clause is `process_ir_effects._call_graph`'s own exclusion — a cycle member AND every root that reaches
+#: one get no replay program (ARCH-187-e3-01) — pinned against that function over every 3-process call graph.
 _A_REPLAYED_CALL = (
-    "a call with wait=true and abort_on_error=true into a child submitted in the same request, outside "
-    "every call cycle, with no cache write still in flight"
+    "a call with wait=true and abort_on_error=true into a child submitted in the same request that is not "
+    "part of a call cycle and calls into none, directly or through other children, with no cache write still "
+    "in flight"
 )
 
 
