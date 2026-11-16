@@ -14995,212 +14995,155 @@
 {"kind": "test", "id": "pytest-014994", "node_id": "tests/test_issue_180_compile_entry_context.py::test_every_strict_exemption_states_a_reason[key2-#187: the relocatability rule over the envelope and the root's own ProcessIR. Every replay program is a submitted root whose own plan runs this same rule over its ProcessIR, and the program's references are bound through the slot inventory, which the plan model checks WITH its recorded context.]", "state": "active"}
 {"kind": "test", "id": "pytest-014995", "node_id": "tests/test_issue_180_compile_entry_context.py::test_every_strict_exemption_states_a_reason[key3-the legacy dialect config bridge: amendment 3 \\xa78 carries child context to canonical roots, and a raw legacy component config has no canonical child root and no declaration channel, so no context is withheld.]", "state": "active"}
 {"kind": "test", "id": "pytest-014996", "node_id": "tests/test_issue_180_compile_entry_context.py::test_every_strict_exemption_states_a_reason[key4-the LEGACY dialect adapter: amendment 3 \\xa78 carries child context to canonical roots, and a legacy document names no canonical child root and declares no effects, so strict is the question, not an omission.]", "state": "active"}
-{"kind": "test", "id": "pytest-014997", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4629]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-014998", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4639]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-014999", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4930]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015000", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4973]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015001", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5451]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015002", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5460]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015003", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5920]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015004", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5992]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015005", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6105]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015006", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6110]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015007", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6514]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015008", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6520]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015009", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7212]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015010", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7534]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015011", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8328]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015012", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8960]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015013", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8991]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015014", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9520]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015015", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9591]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015016", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10079]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015017", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10103]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015018", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10300]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015019", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10598]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015020", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10613]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015021", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10628]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015022", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10642]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015023", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10653]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015024", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10671]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015025", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10679]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015026", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10764]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015027", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10802]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015028", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11149]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015029", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11161]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015030", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11179]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015031", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11255]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015032", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11592]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015033", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11620]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015034", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11653]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015035", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11693]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015036", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11737]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015037", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11772]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015038", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11986]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015039", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11993]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015040", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12000]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015041", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12007]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015042", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12014]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015043", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12021]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015044", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12028]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015045", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12035]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015046", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12042]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015047", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12063]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015048", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12236]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015049", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12406]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015050", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12463]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015051", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12472]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015052", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12482]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015053", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12513]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-015054", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_sibling_writers_stored_profile_crosses_the_call", "state": "active"}
-{"kind": "test", "id": "pytest-015055", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[child removal clears the caller's documents]", "state": "active"}
-{"kind": "test", "id": "pytest-015056", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[e3-01]", "state": "active"}
-{"kind": "test", "id": "pytest-015057", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[nested copy]", "state": "active"}
-{"kind": "test", "id": "pytest-015058", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-01]", "state": "active"}
-{"kind": "test", "id": "pytest-015059", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-02]", "state": "active"}
-{"kind": "test", "id": "pytest-015060", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-02 unproved removal]", "state": "active"}
-{"kind": "test", "id": "pytest-015061", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-01 AAA]", "state": "active"}
-{"kind": "test", "id": "pytest-015062", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-01 ZZZ]", "state": "active"}
-{"kind": "test", "id": "pytest-015063", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-02 sealed]", "state": "active"}
-{"kind": "test", "id": "pytest-015064", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-02 unsealed]", "state": "active"}
-{"kind": "test", "id": "pytest-015065", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 mixed spelling]", "state": "active"}
-{"kind": "test", "id": "pytest-015066", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=False abort=False]", "state": "active"}
-{"kind": "test", "id": "pytest-015067", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=False abort=True]", "state": "active"}
-{"kind": "test", "id": "pytest-015068", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=True abort=False]", "state": "active"}
-{"kind": "test", "id": "pytest-015069", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=True abort=True]", "state": "active"}
-{"kind": "test", "id": "pytest-015070", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[two calls, two caller states]", "state": "active"}
-{"kind": "test", "id": "pytest-015071", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-01]", "state": "active"}
-{"kind": "test", "id": "pytest-015072", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-01 caller-pending]", "state": "active"}
-{"kind": "test", "id": "pytest-015073", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-02]", "state": "active"}
-{"kind": "test", "id": "pytest-015074", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w7-01 p1]", "state": "active"}
-{"kind": "test", "id": "pytest-015075", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w7-01 p1 and p2]", "state": "active"}
-{"kind": "test", "id": "pytest-015076", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_is_the_cache_effect", "state": "active"}
-{"kind": "test", "id": "pytest-015077", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_receives_the_arriving_documents", "state": "active"}
-{"kind": "test", "id": "pytest-015078", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_starts_from_the_callers_documents", "state": "active"}
-{"kind": "test", "id": "pytest-015079", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_replaces_the_callers_cache_content", "state": "active"}
-{"kind": "test", "id": "pytest-015080", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_nested_replay_starts_where_its_call_stands", "state": "active"}
-{"kind": "test", "id": "pytest-015081", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_call_that_continues_after_failure_is_not_replayed", "state": "active"}
-{"kind": "test", "id": "pytest-015082", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_callers_pending_write_stops_the_replay", "state": "active"}
-{"kind": "test", "id": "pytest-015083", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_pending_write_stops_the_replay", "state": "active"}
-{"kind": "test", "id": "pytest-015084", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_is_memoized_on_the_callers_content", "state": "active"}
-{"kind": "test", "id": "pytest-015085", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_own_refusal_is_not_repeated_at_its_callers", "state": "active"}
-{"kind": "test", "id": "pytest-015086", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_ignores_the_childs_own_refusals_repeats_them", "state": "active"}
-{"kind": "test", "id": "pytest-015087", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_replays_as_its_validation_does", "state": "active"}
-{"kind": "test", "id": "pytest-015088", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_programs_are_material_only_where_a_call_binds_one", "state": "active"}
-{"kind": "test", "id": "pytest-015089", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[True-True-True]", "state": "active"}
-{"kind": "test", "id": "pytest-015090", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[True-False-False]", "state": "active"}
-{"kind": "test", "id": "pytest-015091", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[False-False-False]", "state": "active"}
-{"kind": "test", "id": "pytest-015092", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P1]", "state": "active"}
-{"kind": "test", "id": "pytest-015093", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P2]", "state": "active"}
-{"kind": "test", "id": "pytest-015094", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P1]", "state": "active"}
-{"kind": "test", "id": "pytest-015095", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P2]", "state": "active"}
-{"kind": "test", "id": "pytest-015096", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_replay_leaves_the_write_with_the_child", "state": "active"}
-{"kind": "test", "id": "pytest-015097", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[True]", "state": "active"}
-{"kind": "test", "id": "pytest-015098", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[False]", "state": "active"}
-{"kind": "test", "id": "pytest-015099", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller", "state": "active"}
-{"kind": "test", "id": "pytest-015100", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_deep_call_chain_validates", "state": "active"}
-{"kind": "test", "id": "pytest-015101", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_unbounded_replay_depth_overflows_the_stack", "state": "active"}
-{"kind": "test", "id": "pytest-015102", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-3]", "state": "active"}
-{"kind": "test", "id": "pytest-015103", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-24]", "state": "active"}
-{"kind": "test", "id": "pytest-015104", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-25]", "state": "active"}
-{"kind": "test", "id": "pytest-015105", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-49]", "state": "active"}
-{"kind": "test", "id": "pytest-015106", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-3]", "state": "active"}
-{"kind": "test", "id": "pytest-015107", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-24]", "state": "active"}
-{"kind": "test", "id": "pytest-015108", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-25]", "state": "active"}
-{"kind": "test", "id": "pytest-015109", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-49]", "state": "active"}
-{"kind": "test", "id": "pytest-015110", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID]", "state": "active"}
-{"kind": "test", "id": "pytest-015111", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015112", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID+WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015113", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID]", "state": "active"}
-{"kind": "test", "id": "pytest-015114", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015115", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID+WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015116", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID]", "state": "active"}
-{"kind": "test", "id": "pytest-015117", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015118", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015119", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015120", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015121", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015122", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015123", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID]", "state": "active"}
-{"kind": "test", "id": "pytest-015124", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015125", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015126", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015127", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015128", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015129", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER+CACHE_CHILD]", "state": "active"}
-{"kind": "test", "id": "pytest-015130", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_see_the_declared_context_is_refused_loudly", "state": "active"}
-{"kind": "test", "id": "pytest-015131", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_never_replays", "state": "active"}
-{"kind": "test", "id": "pytest-015132", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[none]", "state": "active"}
-{"kind": "test", "id": "pytest-015133", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015134", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID]", "state": "active"}
-{"kind": "test", "id": "pytest-015135", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID+WRITER]", "state": "active"}
-{"kind": "test", "id": "pytest-015136", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_write_that_carries_the_paths_proof_exports_a_guarantee", "state": "active"}
-{"kind": "test", "id": "pytest-015137", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral nw]", "state": "active"}
-{"kind": "test", "id": "pytest-015138", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral wa]", "state": "active"}
-{"kind": "test", "id": "pytest-015139", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral wn]", "state": "active"}
-{"kind": "test", "id": "pytest-015140", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[passthrough count]", "state": "active"}
-{"kind": "test", "id": "pytest-015141", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[sibling availability]", "state": "active"}
-{"kind": "test", "id": "pytest-015142", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replayed_passthrough_entry_that_resets_the_count_runs_its_child_twice", "state": "active"}
-{"kind": "test", "id": "pytest-015143", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_availability_refuses_a_readable_cache", "state": "active"}
-{"kind": "test", "id": "pytest-015144", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy[nw]", "state": "active"}
-{"kind": "test", "id": "pytest-015145", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy[wn]", "state": "active"}
-{"kind": "test", "id": "pytest-015146", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_no_data_runs_hand_on_the_walks_availability", "state": "active"}
-{"kind": "test", "id": "pytest-015147", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_runs_met_with_the_zero_run_arm_lose_the_childs_write", "state": "active"}
-{"kind": "test", "id": "pytest-015148", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_cache_promise_that_ignores_the_replay_gate_is_false", "state": "active"}
-{"kind": "test", "id": "pytest-015149", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10157]", "state": "active"}
-{"kind": "test", "id": "pytest-015150", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10181]", "state": "active"}
-{"kind": "test", "id": "pytest-015151", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10378]", "state": "active"}
-{"kind": "test", "id": "pytest-015152", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10676]", "state": "active"}
-{"kind": "test", "id": "pytest-015153", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10691]", "state": "active"}
-{"kind": "test", "id": "pytest-015154", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10706]", "state": "active"}
-{"kind": "test", "id": "pytest-015155", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10720]", "state": "active"}
-{"kind": "test", "id": "pytest-015156", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10731]", "state": "active"}
-{"kind": "test", "id": "pytest-015157", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10749]", "state": "active"}
-{"kind": "test", "id": "pytest-015158", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10757]", "state": "active"}
-{"kind": "test", "id": "pytest-015159", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10842]", "state": "active"}
-{"kind": "test", "id": "pytest-015160", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10880]", "state": "active"}
-{"kind": "test", "id": "pytest-015161", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11227]", "state": "active"}
-{"kind": "test", "id": "pytest-015162", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11239]", "state": "active"}
-{"kind": "test", "id": "pytest-015163", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11257]", "state": "active"}
-{"kind": "test", "id": "pytest-015164", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11333]", "state": "active"}
-{"kind": "test", "id": "pytest-015165", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11670]", "state": "active"}
-{"kind": "test", "id": "pytest-015166", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11698]", "state": "active"}
-{"kind": "test", "id": "pytest-015167", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11731]", "state": "active"}
-{"kind": "test", "id": "pytest-015168", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11771]", "state": "active"}
-{"kind": "test", "id": "pytest-015169", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11815]", "state": "active"}
-{"kind": "test", "id": "pytest-015170", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11850]", "state": "active"}
-{"kind": "test", "id": "pytest-015171", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12064]", "state": "active"}
-{"kind": "test", "id": "pytest-015172", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12071]", "state": "active"}
-{"kind": "test", "id": "pytest-015173", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12078]", "state": "active"}
-{"kind": "test", "id": "pytest-015174", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12085]", "state": "active"}
-{"kind": "test", "id": "pytest-015175", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12092]", "state": "active"}
-{"kind": "test", "id": "pytest-015176", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12099]", "state": "active"}
-{"kind": "test", "id": "pytest-015177", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12106]", "state": "active"}
-{"kind": "test", "id": "pytest-015178", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12113]", "state": "active"}
-{"kind": "test", "id": "pytest-015179", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12120]", "state": "active"}
-{"kind": "test", "id": "pytest-015180", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12141]", "state": "active"}
-{"kind": "test", "id": "pytest-015181", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12314]", "state": "active"}
-{"kind": "test", "id": "pytest-015182", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12484]", "state": "active"}
-{"kind": "test", "id": "pytest-015183", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12541]", "state": "active"}
-{"kind": "test", "id": "pytest-015184", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12550]", "state": "active"}
-{"kind": "test", "id": "pytest-015185", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12560]", "state": "active"}
-{"kind": "test", "id": "pytest-015186", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12591]", "state": "active"}
-{"kind": "test", "id": "pytest-015187", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4707]", "state": "active"}
-{"kind": "test", "id": "pytest-015188", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4717]", "state": "active"}
-{"kind": "test", "id": "pytest-015189", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5008]", "state": "active"}
-{"kind": "test", "id": "pytest-015190", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5051]", "state": "active"}
-{"kind": "test", "id": "pytest-015191", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5529]", "state": "active"}
-{"kind": "test", "id": "pytest-015192", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5538]", "state": "active"}
-{"kind": "test", "id": "pytest-015193", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5998]", "state": "active"}
-{"kind": "test", "id": "pytest-015194", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6070]", "state": "active"}
-{"kind": "test", "id": "pytest-015195", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6183]", "state": "active"}
-{"kind": "test", "id": "pytest-015196", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6188]", "state": "active"}
-{"kind": "test", "id": "pytest-015197", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6592]", "state": "active"}
-{"kind": "test", "id": "pytest-015198", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6598]", "state": "active"}
-{"kind": "test", "id": "pytest-015199", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7290]", "state": "active"}
-{"kind": "test", "id": "pytest-015200", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7612]", "state": "active"}
-{"kind": "test", "id": "pytest-015201", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8406]", "state": "active"}
-{"kind": "test", "id": "pytest-015202", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9038]", "state": "active"}
-{"kind": "test", "id": "pytest-015203", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9069]", "state": "active"}
-{"kind": "test", "id": "pytest-015204", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9598]", "state": "active"}
-{"kind": "test", "id": "pytest-015205", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9669]", "state": "active"}
+{"kind": "test", "id": "pytest-014997", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_cache_promise_that_ignores_the_replay_gate_is_false", "state": "active"}
+{"kind": "test", "id": "pytest-014998", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4707]", "state": "active"}
+{"kind": "test", "id": "pytest-014999", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line4717]", "state": "active"}
+{"kind": "test", "id": "pytest-015000", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5008]", "state": "active"}
+{"kind": "test", "id": "pytest-015001", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5051]", "state": "active"}
+{"kind": "test", "id": "pytest-015002", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5529]", "state": "active"}
+{"kind": "test", "id": "pytest-015003", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5538]", "state": "active"}
+{"kind": "test", "id": "pytest-015004", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line5998]", "state": "active"}
+{"kind": "test", "id": "pytest-015005", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6070]", "state": "active"}
+{"kind": "test", "id": "pytest-015006", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6183]", "state": "active"}
+{"kind": "test", "id": "pytest-015007", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6188]", "state": "active"}
+{"kind": "test", "id": "pytest-015008", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6592]", "state": "active"}
+{"kind": "test", "id": "pytest-015009", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line6598]", "state": "active"}
+{"kind": "test", "id": "pytest-015010", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7290]", "state": "active"}
+{"kind": "test", "id": "pytest-015011", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line7612]", "state": "active"}
+{"kind": "test", "id": "pytest-015012", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line8406]", "state": "active"}
+{"kind": "test", "id": "pytest-015013", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9038]", "state": "active"}
+{"kind": "test", "id": "pytest-015014", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9069]", "state": "active"}
+{"kind": "test", "id": "pytest-015015", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9598]", "state": "active"}
+{"kind": "test", "id": "pytest-015016", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line9669]", "state": "active"}
+{"kind": "test", "id": "pytest-015017", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10157]", "state": "active"}
+{"kind": "test", "id": "pytest-015018", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10181]", "state": "active"}
+{"kind": "test", "id": "pytest-015019", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10378]", "state": "active"}
+{"kind": "test", "id": "pytest-015020", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10676]", "state": "active"}
+{"kind": "test", "id": "pytest-015021", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10691]", "state": "active"}
+{"kind": "test", "id": "pytest-015022", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10706]", "state": "active"}
+{"kind": "test", "id": "pytest-015023", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10720]", "state": "active"}
+{"kind": "test", "id": "pytest-015024", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10731]", "state": "active"}
+{"kind": "test", "id": "pytest-015025", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10749]", "state": "active"}
+{"kind": "test", "id": "pytest-015026", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10757]", "state": "active"}
+{"kind": "test", "id": "pytest-015027", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10842]", "state": "active"}
+{"kind": "test", "id": "pytest-015028", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line10880]", "state": "active"}
+{"kind": "test", "id": "pytest-015029", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11227]", "state": "active"}
+{"kind": "test", "id": "pytest-015030", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11239]", "state": "active"}
+{"kind": "test", "id": "pytest-015031", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11257]", "state": "active"}
+{"kind": "test", "id": "pytest-015032", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11333]", "state": "active"}
+{"kind": "test", "id": "pytest-015033", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11670]", "state": "active"}
+{"kind": "test", "id": "pytest-015034", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11698]", "state": "active"}
+{"kind": "test", "id": "pytest-015035", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11731]", "state": "active"}
+{"kind": "test", "id": "pytest-015036", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11771]", "state": "active"}
+{"kind": "test", "id": "pytest-015037", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11815]", "state": "active"}
+{"kind": "test", "id": "pytest-015038", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line11850]", "state": "active"}
+{"kind": "test", "id": "pytest-015039", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12064]", "state": "active"}
+{"kind": "test", "id": "pytest-015040", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12071]", "state": "active"}
+{"kind": "test", "id": "pytest-015041", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12078]", "state": "active"}
+{"kind": "test", "id": "pytest-015042", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12085]", "state": "active"}
+{"kind": "test", "id": "pytest-015043", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12092]", "state": "active"}
+{"kind": "test", "id": "pytest-015044", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12099]", "state": "active"}
+{"kind": "test", "id": "pytest-015045", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12106]", "state": "active"}
+{"kind": "test", "id": "pytest-015046", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12113]", "state": "active"}
+{"kind": "test", "id": "pytest-015047", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12120]", "state": "active"}
+{"kind": "test", "id": "pytest-015048", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12141]", "state": "active"}
+{"kind": "test", "id": "pytest-015049", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12314]", "state": "active"}
+{"kind": "test", "id": "pytest-015050", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12484]", "state": "active"}
+{"kind": "test", "id": "pytest-015051", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12541]", "state": "active"}
+{"kind": "test", "id": "pytest-015052", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12550]", "state": "active"}
+{"kind": "test", "id": "pytest-015053", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12560]", "state": "active"}
+{"kind": "test", "id": "pytest-015054", "node_id": "tests/test_issue_184_child_state_transfer.py::test_every_source_mutant_this_module_applies_moves_the_served_revision[line12591]", "state": "active"}
+{"kind": "test", "id": "pytest-015055", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_sibling_writers_stored_profile_crosses_the_call", "state": "active"}
+{"kind": "test", "id": "pytest-015056", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[child removal clears the caller's documents]", "state": "active"}
+{"kind": "test", "id": "pytest-015057", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[e3-01]", "state": "active"}
+{"kind": "test", "id": "pytest-015058", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[nested copy]", "state": "active"}
+{"kind": "test", "id": "pytest-015059", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-01]", "state": "active"}
+{"kind": "test", "id": "pytest-015060", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-02]", "state": "active"}
+{"kind": "test", "id": "pytest-015061", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r11-02 unproved removal]", "state": "active"}
+{"kind": "test", "id": "pytest-015062", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-01 AAA]", "state": "active"}
+{"kind": "test", "id": "pytest-015063", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-01 ZZZ]", "state": "active"}
+{"kind": "test", "id": "pytest-015064", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-02 sealed]", "state": "active"}
+{"kind": "test", "id": "pytest-015065", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r12-02 unsealed]", "state": "active"}
+{"kind": "test", "id": "pytest-015066", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 mixed spelling]", "state": "active"}
+{"kind": "test", "id": "pytest-015067", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=False abort=False]", "state": "active"}
+{"kind": "test", "id": "pytest-015068", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=False abort=True]", "state": "active"}
+{"kind": "test", "id": "pytest-015069", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=True abort=False]", "state": "active"}
+{"kind": "test", "id": "pytest-015070", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[r9-01 wait=True abort=True]", "state": "active"}
+{"kind": "test", "id": "pytest-015071", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[two calls, two caller states]", "state": "active"}
+{"kind": "test", "id": "pytest-015072", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-01]", "state": "active"}
+{"kind": "test", "id": "pytest-015073", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-01 caller-pending]", "state": "active"}
+{"kind": "test", "id": "pytest-015074", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w1-02]", "state": "active"}
+{"kind": "test", "id": "pytest-015075", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w7-01 p1]", "state": "active"}
+{"kind": "test", "id": "pytest-015076", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_covered_call_earns_its_twins_verdict[w7-01 p1 and p2]", "state": "active"}
+{"kind": "test", "id": "pytest-015077", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_is_the_cache_effect", "state": "active"}
+{"kind": "test", "id": "pytest-015078", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_receives_the_arriving_documents", "state": "active"}
+{"kind": "test", "id": "pytest-015079", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_starts_from_the_callers_documents", "state": "active"}
+{"kind": "test", "id": "pytest-015080", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_replaces_the_callers_cache_content", "state": "active"}
+{"kind": "test", "id": "pytest-015081", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_nested_replay_starts_where_its_call_stands", "state": "active"}
+{"kind": "test", "id": "pytest-015082", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_call_that_continues_after_failure_is_not_replayed", "state": "active"}
+{"kind": "test", "id": "pytest-015083", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_callers_pending_write_stops_the_replay", "state": "active"}
+{"kind": "test", "id": "pytest-015084", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_pending_write_stops_the_replay", "state": "active"}
+{"kind": "test", "id": "pytest-015085", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_is_memoized_on_the_callers_content", "state": "active"}
+{"kind": "test", "id": "pytest-015086", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_childs_own_refusal_is_not_repeated_at_its_callers", "state": "active"}
+{"kind": "test", "id": "pytest-015087", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_ignores_the_childs_own_refusals_repeats_them", "state": "active"}
+{"kind": "test", "id": "pytest-015088", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_replays_as_its_validation_does", "state": "active"}
+{"kind": "test", "id": "pytest-015089", "node_id": "tests/test_issue_184_child_state_transfer.py::test_the_replay_programs_are_material_only_where_a_call_binds_one", "state": "active"}
+{"kind": "test", "id": "pytest-015090", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[True-True-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015091", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[True-False-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015092", "node_id": "tests/test_issue_184_child_state_transfer.py::test_only_a_call_a_replay_can_cover_binds_a_program[False-False-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015093", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P1]", "state": "active"}
+{"kind": "test", "id": "pytest-015094", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in MID, caller P2]", "state": "active"}
+{"kind": "test", "id": "pytest-015095", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P1]", "state": "active"}
+{"kind": "test", "id": "pytest-015096", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_replayed_write_is_judged_by_its_callers[copy in a grandchild, caller P2]", "state": "active"}
+{"kind": "test", "id": "pytest-015097", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_replay_leaves_the_write_with_the_child", "state": "active"}
+{"kind": "test", "id": "pytest-015098", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[True]", "state": "active"}
+{"kind": "test", "id": "pytest-015099", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_grandparents_call_keeps_the_sibling_matrix_exact[False]", "state": "active"}
+{"kind": "test", "id": "pytest-015100", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_called_roots_removal_before_its_call_is_judged_by_a_waiting_caller", "state": "active"}
+{"kind": "test", "id": "pytest-015101", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_deep_call_chain_validates", "state": "active"}
+{"kind": "test", "id": "pytest-015102", "node_id": "tests/test_issue_184_child_state_transfer.py::test_an_unbounded_replay_depth_overflows_the_stack", "state": "active"}
+{"kind": "test", "id": "pytest-015103", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-3]", "state": "active"}
+{"kind": "test", "id": "pytest-015104", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-24]", "state": "active"}
+{"kind": "test", "id": "pytest-015105", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-25]", "state": "active"}
+{"kind": "test", "id": "pytest-015106", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P1-49]", "state": "active"}
+{"kind": "test", "id": "pytest-015107", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-3]", "state": "active"}
+{"kind": "test", "id": "pytest-015108", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-24]", "state": "active"}
+{"kind": "test", "id": "pytest-015109", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-25]", "state": "active"}
+{"kind": "test", "id": "pytest-015110", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_removal_before_a_refill_is_judged_at_every_depth[P2-49]", "state": "active"}
+{"kind": "test", "id": "pytest-015111", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015112", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015113", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P1-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015114", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015115", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015116", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in MID, caller P2-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015117", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015118", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015119", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015120", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015121", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015122", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015123", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P1-MID+WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015124", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015125", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015126", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015127", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015128", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015129", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015130", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_declared_summary_keeps_its_callers_replay[copy in a grandchild, caller P2-MID+WRITER+CACHE_CHILD]", "state": "active"}
+{"kind": "test", "id": "pytest-015131", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_that_does_not_see_the_declared_context_is_refused_loudly", "state": "active"}
+{"kind": "test", "id": "pytest-015132", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_derivation_never_replays", "state": "active"}
+{"kind": "test", "id": "pytest-015133", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[none]", "state": "active"}
+{"kind": "test", "id": "pytest-015134", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015135", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID]", "state": "active"}
+{"kind": "test", "id": "pytest-015136", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_establishes_but_proves_nothing_across_a_call[MID+WRITER]", "state": "active"}
+{"kind": "test", "id": "pytest-015137", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_summary_write_that_carries_the_paths_proof_exports_a_guarantee", "state": "active"}
+{"kind": "test", "id": "pytest-015138", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral nw]", "state": "active"}
+{"kind": "test", "id": "pytest-015139", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral wa]", "state": "active"}
+{"kind": "test", "id": "pytest-015140", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[deferral wn]", "state": "active"}
+{"kind": "test", "id": "pytest-015141", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[passthrough count]", "state": "active"}
+{"kind": "test", "id": "pytest-015142", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_boundary_hands_on_the_walks_facts[sibling availability]", "state": "active"}
+{"kind": "test", "id": "pytest-015143", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replayed_passthrough_entry_that_resets_the_count_runs_its_child_twice", "state": "active"}
+{"kind": "test", "id": "pytest-015144", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_availability_refuses_a_readable_cache", "state": "active"}
+{"kind": "test", "id": "pytest-015145", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy[nw]", "state": "active"}
+{"kind": "test", "id": "pytest-015146", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy[wn]", "state": "active"}
+{"kind": "test", "id": "pytest-015147", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_no_data_runs_hand_on_the_walks_availability", "state": "active"}
+{"kind": "test", "id": "pytest-015148", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_runs_met_with_the_zero_run_arm_lose_the_childs_write", "state": "active"}
