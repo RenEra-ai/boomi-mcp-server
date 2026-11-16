@@ -2182,6 +2182,15 @@ _C187_CACHE_WRITERS = {
     "the_catch_body_only": (
         [{"kind": "try_catch", "scope": "process", "try_body": {"steps": [_GET], "terminal": _STOP},
           "catch_body": {"steps": [_GET], "terminal": _PUT}}], (False,)),
+    # #187 ARCH-187-e2-01: a writer whose walk establishes the cache but that calls ITSELF on another leg — a
+    # call-cycle member, so a call into it is not replayed and falls back to its contract. The coverage
+    # dimension's own non-vacuity case: the walk says available, the gate says not covered.
+    "a_branch_leg_beside_a_call_into_itself": (
+        [{"kind": "branch", "legs": [
+            {"steps": [_GET], "terminal": _PUT},
+            {"steps": [], "terminal": _c187_on_k(
+                {"steps": [], "terminal": _call("WRITER", **_WAITS_AND_ABORTS)}, {"steps": [], "terminal": _STOP})}]}],
+        (False, True)),
 }
 
 
@@ -2207,6 +2216,37 @@ def _authority_cell(child):
     when it does not. A cell, not a bare flag, so the perturbed worlds of the falsifiability test replace
     it like any other measurement and the validate/compile agreement control reads it uniformly."""
     errors = frozenset() if _the_walk_establishes_the_cache(child) else frozenset({_THE_WALK_DOES_NOT_ESTABLISH})
+    return {"ok": True, "rejected": (), "inert": (), "errors": errors, "warnings": frozenset(),
+            "compile_errors": errors}
+
+
+#: The code a cell carries when the call is NOT one the replay covers — the measurement's own spelling.
+_THE_CALL_IS_NOT_REPLAYED = ("CALL_FALLS_BACK_TO_ITS_CONTRACT", "/")
+
+
+def _coverage_cell(parent, writer):
+    """Whether the replay gate COVERS the parent's call, read off the code (#187 ARCH-187-e2-01): a spy on
+    `_replay_once` records the outcome of every outermost replay the parent's validation starts, and the call
+    is covered when one of them is not None. Never a re-listing of the gate's conditions — that list is
+    exactly the hand-copy that let a sentence promise a cache after a call that falls back."""
+    real, outcomes, depth = lineage._replay_once, [], [0]
+
+    def spy(*args, **kwargs):
+        depth[0] += 1
+        try:
+            outcome = real(*args, **kwargs)
+        finally:
+            depth[0] -= 1
+        if depth[0] == 0:
+            outcomes.append(outcome)
+        return outcome
+
+    lineage._replay_once = spy
+    try:
+        _cell([("PARENT", parent), ("WRITER", writer)])
+    finally:
+        lineage._replay_once = real
+    errors = frozenset() if any(item is not None for item in outcomes) else frozenset({_THE_CALL_IS_NOT_REPLAYED})
     return {"ok": True, "rejected": (), "inert": (), "errors": errors, "warnings": frozenset(),
             "compile_errors": errors}
 
@@ -2332,6 +2372,8 @@ def _boundary_measurements():
                         key = _FROM_A_PASSTHROUGH_CHILD % name if passthrough else name
                         measured[(key, shape, "walk")] = _cell([("PARENT", parent), ("WRITER", writer)])
                         measured[(key, "authority", "walk")] = _authority_cell(writer)
+                        if shape in _CACHE_CARRYING:
+                            measured[(key, shape, "covered")] = _coverage_cell(parent, writer)
     for shape, call in _BOUNDARY_SHAPES.items():
         call = dict(call)
         passthrough = call.pop("passthrough", False)
@@ -2409,17 +2451,31 @@ def _cache_writer_scopes(m):
     return tuple(sorted(key[0] for key in m if key[1:] == ("authority", "walk")))
 
 
+def _the_walk_alone_decides(m, scope, shape):
+    """The r9/r10 authority: the child's walk, whatever the call — false at a call that falls back."""
+    return _refused(m[(scope, shape, "walk")]) is _refused(m[(scope, "authority", "walk")])
+
+
+def _the_covered_walk_decides(m, scope, shape):
+    """The served authority (ARCH-187-e2-01): available EXACTLY when the replay covers the call AND the
+    child's walk establishes the cache on every normal completion — both read off the code."""
+    return _refused(m[(scope, shape, "walk")]) is (
+        _refused(m[(scope, "authority", "walk")]) or _refused(m[(scope, shape, "covered")]))
+
+
 def _a_waited_aborting_call_makes_a_cache_available(m):
-    """#187 r8/r9: after ANY waited, aborting call a cache is available EXACTLY when the child's own walk
-    establishes it on every normal completion — the walk's verdict, not a per-shape expectation — at either
-    start form and at several documents; while the child's process properties are still not established at
-    several documents. Non-vacuous by construction: the measured slots must include a write the walk
-    establishes AND one it does not — which slots those are is read off the walk, never named here."""
+    """#187 r8–e2: after a REPLAYED waited, aborting call a cache is available EXACTLY when the child's own
+    walk establishes it on every normal completion — the walk's verdict composed with the gate's coverage,
+    neither a per-shape expectation — at either start form and at several documents; while the child's
+    process properties are still not established at several documents. Non-vacuous by construction: the
+    measured cells must include a write the walk establishes AND one it does not, and a call the replay
+    covers AND one it does not — which those are is read off the code, never named here."""
     scopes = _cache_writer_scopes(m)
     verdicts = {not _refused(m[(scope, "authority", "walk")]) for scope in scopes}
-    return (verdicts == {True, False}
+    covered = {not _refused(m[(scope, shape, "covered")]) for scope in scopes for shape in _CACHE_CARRYING}
+    return (verdicts == {True, False} and covered == {True, False}
             and all(not _refused(m[("cache", shape, "walk")]) for shape in _CACHE_CARRYING)
-            and all(_refused(m[(scope, shape, "walk")]) is _refused(m[(scope, "authority", "walk")])
+            and all(_the_covered_walk_decides(m, scope, shape)
                     for scope in scopes for shape in _CACHE_CARRYING)
             and all(_refused(m[(scope, "several_documents", "walk")])
                     for scope in _both_starts("dpp")))
@@ -2536,7 +2592,9 @@ _PROCESS_CALL_CLAIMS = (
      _a_write_behind_a_possibly_empty_step_establishes_nothing),
     ("a-waited-aborting-call-makes-a-cache-available",
      "A cache the child's own walk stores to on every normal completion is available to "
-     "later paths after any call with wait=true and abort_on_error=true, as it would be "
+     "later paths after a call with wait=true and abort_on_error=true into a child "
+     "submitted in the same request, outside every call cycle, with no cache write still "
+     "in flight, as it would be "
      "had the child's steps run in the calling process, whatever number of documents the "
      "call carries and whether or not a step in front of the write may hand on no "
      "documents; a completion that ends in an exception is not a normal one, and a cache "
@@ -2671,6 +2729,26 @@ def test_every_boundary_claim_is_falsifiable_by_its_own_measurement():
     for claim_id, _fragment, predicate in _BOUNDARY_CLAIMS + _PROCESS_CALL_CLAIMS:
         assert predicate(measured), claim_id
         assert not (predicate(all_admitted) and predicate(all_refused)), claim_id
+
+
+def test_a_cache_promise_that_ignores_the_replay_gate_is_false():
+    """ARCH-187-e2-01's witness: the r10 sentence named the child's walk as the authority for EVERY waited,
+    aborting call. Measured, that claim is false — a writer that calls itself establishes the cache in its
+    own walk, yet a call into it falls back to its contract and the later read is refused — and the served
+    claim, the walk composed with the gate's coverage, is true at every cell."""
+    measured = _boundary_measurements()
+    scopes = _cache_writer_scopes(measured)
+    pairs = [(scope, shape) for scope in scopes for shape in _CACHE_CARRYING]
+    assert all(_the_covered_walk_decides(measured, scope, shape) for scope, shape in pairs)
+    contradicted = [(scope, shape) for scope, shape in pairs
+                    if not _the_walk_alone_decides(measured, scope, shape)]
+    assert contradicted, "the walk alone would decide every measured cell — the coverage dimension is vacuous"
+    for scope, shape in contradicted:
+        assert not _refused(measured[(scope, "authority", "walk")]), (scope, shape)
+        assert _refused(measured[(scope, shape, "covered")]), (scope, shape)
+        assert _refused(measured[(scope, shape, "walk")]), (scope, shape)
+    assert "after any call with wait=true and abort_on_error=true, as it would be" not in " ".join(
+        _served("node.process_call")["ordering_facts"])
 
 
 def _fails_the_witness(monkeypatch, prose, marker):

@@ -290,6 +290,15 @@ _CACHE_EMISSION_SUMMARY = (
     "supplies no successor documents."
 )
 
+#: #187 (ARCH-187-e2-01): the calls whose child walk is replayed from the caller's caches, stated ONCE and
+#: interpolated into every served sentence that quantifies over them — two hand-typed copies of this condition
+#: are how a sentence promised a cache "after any call" while a call-cycle member falls back to its contract.
+_A_REPLAYED_CALL = (
+    "a call with wait=true and abort_on_error=true into a child submitted in the same request, outside "
+    "every call cycle, with no cache write still in flight"
+)
+
+
 _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
     "sequence": {
         "category": "structure",
@@ -763,9 +772,7 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "run left.",
             "Both forms share the calling execution's process properties and document "
             "caches, so state a child reads strictly before writing it must be established "
-            "before the call. After a call with wait=true and abort_on_error=true into a "
-            "child submitted in the same request, outside every call cycle, with no cache "
-            "write still in flight, a later read sees what the child's own walk, run from "
+            "before the call. After " + _A_REPLAYED_CALL + ", a later read sees what the child's own walk, run from "
             "the caller's caches and documents, leaves in them or leaves readable, and a "
             "profile that walk refuses only because of the caller's documents is refused at "
             "the call, while one the child refuses whatever its caller stores is reported "
@@ -810,7 +817,7 @@ _NODE_FACTS: Mapping[str, Mapping[str, Any]] = {
             "that may be empty — establishes nothing for the caller, because a "
             "completion that skipped it is still a normal completion. A cache the child's "
             "own walk stores to on every normal completion is available to later paths "
-            "after any call with wait=true and abort_on_error=true, as it would be had the "
+            "after " + _A_REPLAYED_CALL + ", as it would be had the "
             "child's steps run in the calling process, whatever number of documents the "
             "call carries and whether or not a step in front of the write may hand on no "
             "documents; a completion that ends in an exception is not a normal one, and a "
