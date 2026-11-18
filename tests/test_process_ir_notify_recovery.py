@@ -1763,6 +1763,27 @@ def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make, m
     plan = lowering.lower_cfg_to_emission_plan(lowering.lower_process_ir_to_cfg(ir), symbols)
     assert "<shapes>" in emit_process(plan, symbols).process_xml
 
+    # The factory's plan check is BUCKET-aware (structural-fix witness,
+    # CDX-159S0-s4-01/s5-01): the unmutated golden, planned with every warning
+    # delivered in `errors` instead — fields unchanged — is refused, because the
+    # public compile refuses any non-empty `errors` whatever their severity.
+    import boomi_mcp.authoring.workflow as authoring_workflow
+
+    real_plan = authoring_workflow.plan_authoring_request_v1
+
+    def warnings_delivered_as_errors(*args, **kwargs):
+        result, internals = real_plan(*args, **kwargs)
+        assert result.warnings, "the witness needs a warning to move"
+        return result.model_copy(update={
+            "errors": tuple(result.errors) + tuple(result.warnings), "warnings": (),
+        }), internals
+
+    with monkeypatch.context() as patched:
+        patched.setattr(authoring_workflow, "plan_authoring_request_v1",
+                        warnings_delivered_as_errors)
+        with pytest.raises(AuthoringWorkflowError):
+            _corpus.render_golden_case(case_id, _corpus.declared_renderer(case_id))
+
     # The registered factory, fed the mutant through its own inputs, refuses it.
     for attribute, value in injected.items():
         assert hasattr(_corpus, attribute), attribute
