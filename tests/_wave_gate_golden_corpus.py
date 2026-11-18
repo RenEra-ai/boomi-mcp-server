@@ -956,27 +956,47 @@ def connector_scope_notify_contracts():
     )
 
 
+def plan_diagnostic_keys(plan_result):
+    """Every diagnostic a typed plan reported, as a comparable key:
+    ``(severity, code, "|"-joined cause codes, path, remediation-or-"")``.
+
+    The ACTUAL severity, never the list it arrived in (``warnings`` carries both
+    warnings and advisories). A diagnostic with no cause codes carries its
+    remediation too: nothing else tells the offline "lint did not run" advisory
+    from the "component plan could not be built from the account" one — same
+    code, empty path, no causes. A diagnostic WITH causes is told apart by them
+    and its path, so its served remediation is not copied here. Every slot is a
+    string (absent causes are ``""``), so a mismatch always sorts and reports.
+    """
+    return {_plan_diagnostic_key(d) for d in tuple(plan_result.errors) + tuple(plan_result.warnings)}
+
+
+def _plan_diagnostic_key(d):
+    return (d.severity, d.code, "|".join(d.cause_codes or ()), d.path or "",
+            "" if d.cause_codes else (d.remediation or ""))
+
+
 #: The plan diagnostic every OFFLINE plan carries: the component-plan lint (where
 #: builder preflight runs) needs an authenticated profile, so without an account
-#: the plan states that it did not run (``workflow.py`` "Re-plan with an
-#: authenticated profile") rather than reporting zero warnings.
-NOTIFY_OFFLINE_LINT_NOT_RUN = ("warning", "AUTHORING_COMPILE_BLOCKED", None, "")
+#: the plan states that it did not run rather than reporting zero warnings.
+NOTIFY_OFFLINE_LINT_NOT_RUN = (
+    "advisory", "AUTHORING_COMPILE_BLOCKED", "", "", "Re-plan with an authenticated profile.",
+)
 
 #: golden-000087's EXACT offline plan diagnostics: nothing but the lint statement.
 NOTIFY_DLQ_OFFLINE_DIAGNOSTICS = (NOTIFY_OFFLINE_LINT_NOT_RUN,)
 
-#: golden-000086's EXACT offline plan diagnostics, each as
-#: ``(group, code, cause_codes or None, path)`` — an allowlist, nothing else may appear.
-#: The error is the offline-contract limit: the key-reference contract is a
-#: symbol-table fact (no POST operation record in the packaged registry), attached
-#: after planning, so the plan cannot resolve it. The map warning: it has no typed
-#: effect declaration (warning severity, ``lineage.py``).
+#: golden-000086's EXACT offline plan diagnostics (``plan_diagnostic_keys`` form) —
+#: an allowlist, nothing else may appear. The error is the offline-contract limit:
+#: the key-reference contract is a symbol-table fact (no POST operation record in
+#: the packaged registry), attached after planning, so the plan cannot resolve it.
+#: The map warning: it has no typed effect declaration (``lineage.py``).
 CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS = (
     ("error", "AUTHORING_COMPILE_BLOCKED",
-     ("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",),
-     "/body/steps/2/try_body/steps/0/idempotency"),
+     "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+     "/body/steps/2/try_body/steps/0/idempotency", ""),
     ("warning", "AUTHORING_COMPILE_BLOCKED",
-     ("PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN",), "/body/steps/1"),
+     "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN", "/body/steps/1", ""),
     NOTIFY_OFFLINE_LINT_NOT_RUN,
 )
 
@@ -1006,7 +1026,7 @@ def _notify_request(document, components, *, name, folder_name):
     )
 
 
-def _normalized_notify_case(document, components, *, name, folder_name, contracts=(),
+def _normalized_notify_case(document, components, *, name, folder_name, contracts=None,
                             expected_diagnostics=None):
     """``(unit, symbols)`` from the PUBLIC typed plan (``plan_authoring_request_v1``,
     offline): normalization, the request-local connector-resolution snapshot,
@@ -1030,21 +1050,18 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
         profile="golden", account_id="golden",
     )
     if expected_diagnostics is not None:
-        seen = {
-            (severity, d.code, tuple(d.cause_codes or ()) or None, d.path or "")
-            for severity, group in (("error", plan_result.errors), ("warning", plan_result.warnings))
-            for d in group
-        }
+        expected = set(expected_diagnostics)
         unexpected_errors = tuple(
             d for d in plan_result.errors
-            if ("error", d.code, tuple(d.cause_codes or ()) or None, d.path or "") not in expected_diagnostics
+            if _plan_diagnostic_key(d) not in expected
         )
         if unexpected_errors:
             raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, unexpected_errors)
-        if seen != set(expected_diagnostics):
+        seen = plan_diagnostic_keys(plan_result)
+        if seen != expected:
             raise AssertionError(
                 "the notify plan's diagnostics changed: {0!r}, expected {1!r}".format(
-                    sorted(seen), sorted(expected_diagnostics)))
+                    sorted(seen), sorted(expected)))
     symbols = internals.symbols
     if symbols is None:
         raise AssertionError("the workflow composed no symbol table for the notify case")
@@ -1117,7 +1134,7 @@ def notify_id_registry(include_map=False):
 
 
 def render_notify_canonical_case(document, components, *, name, folder_name, id_registry,
-                                 contracts=(), expected_diagnostics):
+                                 contracts=None, expected_diagnostics):
     """The compile-gated canonical route for one Notify survivor.
 
     authored unit + supporting components ->
@@ -1499,11 +1516,7 @@ def _canonical_envelope_case():
         # diagnostics must be exactly the offline lint statement.
         plan_result, internals = plan_authoring_request_v1(
             request, profile="golden", account_id="golden")
-        diagnostics = {
-            (group, d.code, tuple(d.cause_codes or ()) or None, d.path or "")
-            for group, items in (("error", plan_result.errors), ("warning", plan_result.warnings))
-            for d in items
-        }
+        diagnostics = plan_diagnostic_keys(plan_result)
         if diagnostics != {NOTIFY_OFFLINE_LINT_NOT_RUN}:
             raise AssertionError("the M12.15 plan reported " + repr(sorted(diagnostics)))
         unit = internals.normalized.integration_spec.processes[0]
