@@ -886,13 +886,19 @@ CONNECTOR_SCOPE_NOTIFY_DOCUMENT = {
 def notify_dlq_components():
     """golden-000087's supporting components, as a caller authors them: DB Get ->
     REST POST, cache. A FRESH list on every call. The renderer normalizes these
-    exactly as the authoring workflow does — ``_normalize_intent`` ->
-    ``build_symbol_table`` — so every symbol fact (family, action, connection edge)
+    through the authoring workflow itself — ``_normalize_intent`` ->
+    ``_validate_processes`` — so every symbol fact (family, action, connection edge)
     is derived, and every component id starts as a placeholder that late binding
     must replace."""
     return [
+        # A connection the database builder's own preflight accepts (driver,
+        # host, auth; the credential is an opaque vault reference, never a secret).
         {"key": "DBCONN", "type": "connector-settings", "name": "DB conn", "action": "create",
-         "config": {"connector_type": "database", "component_name": "DB conn"}},
+         "config": {"connector_type": "database", "component_name": "DB conn",
+                    "driver_id": "sqlserver", "host": "dlq-db.example.invalid", "port": 1433,
+                    "dbname": "dlq", "auth_mode": "username_password",
+                    "username": "dlq_reader",
+                    "credential_ref": "credential://vault/dlq/password"}},
         {"key": "DBOP", "type": "connector-action", "name": "DB op", "action": "create",
          "depends_on": ["DBCONN"],
          "config": {"connector_type": "database", "operation_mode": "get",
@@ -905,8 +911,13 @@ def notify_dlq_components():
          "config": {"connector_type": "rest", "operation_mode": "execute",
                     "component_name": "REST send op", "connection_ref_key": "RESTCONN",
                     "method": "POST", "path": "/v1/dlq"}},
+        # The DLQ cache is an EXISTING component the process references, not a
+        # create: a created cache must be profiled (`document_cache_builder`), and
+        # golden-000086 routes DB-profile AND REST-profile documents into the one
+        # cache, which a single profile cannot admit (measured:
+        # PROCESS_IR_SEMANTIC_PROFILE_MISMATCH at its catch terminal).
         {"key": "CACHE", "type": "documentcache", "name": "DLQ cache", "action": "create",
-         "config": {"component_name": "DLQ cache"}},
+         "config": {"reference_only": True, "component_id": DLQ_CACHE_ID}},
     ]
 
 
@@ -918,7 +929,9 @@ def connector_scope_notify_components():
     components = notify_dlq_components()
     by_key = {component["key"]: component for component in components}
     by_key["DBOP"]["config"]["read_profile_id"] = "$ref:DBP"
+    by_key["DBOP"]["depends_on"].append("DBP")
     by_key["RESTOP"]["config"]["request_profile_id"] = "$ref:RESTP"
+    by_key["RESTOP"]["depends_on"].append("RESTP")
     return components + [
         {"key": "DBP", "type": "profile.db", "name": "DB profile", "action": "create",
          "config": {"component_name": "DB profile"}},
@@ -947,15 +960,12 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
     """``(unit, symbols)`` from the authoring workflow's own normalization.
 
     The unit envelope, its dependency keys and the supporting components go
-    through ``_normalize_intent``; the symbol table comes from
-    ``build_symbol_table`` over the normalized spec with the derived connector
-    metadata, so its ids are PLACEHOLDERS. ``contracts`` (idempotency evidence,
+    through ``_normalize_intent``; the symbol table is the one the workflow
+    itself composes (``_validate_processes``), so its ids are PLACEHOLDERS and
+    every fact on it is the workflow's. ``contracts`` (idempotency evidence,
     which no component carries) are the only facts attached afterwards.
     """
-    from boomi_mcp.authoring.workflow import (
-        _connector_metadata_from_components,
-        _normalize_intent,
-    )
+    from boomi_mcp.authoring.workflow import _normalize_intent, _validate_processes
     from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
     from boomi_mcp.models.authoring_workflow import (
         AuthoringRequestV1,
@@ -966,7 +976,6 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
         ProcessComponentEnvelopeV1,
     )
     from boomi_mcp.models.process_ir import parse_process_ir_v1
-    from boomi_mcp.recipes.materialization import build_symbol_table
 
     unit = ProcessAuthoringUnitV1(
         envelope=ProcessComponentEnvelopeV1(
@@ -980,12 +989,17 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
             integration_name="Notify DLQ", units=(unit,), components=tuple(components),
         )
     )
-    spec = _normalize_intent(request).integration_spec
-    symbols = build_symbol_table(
-        list(spec.components),
-        process_keys=[u.envelope.component_key for u in spec.processes],
-        connector_metadata=_connector_metadata_from_components(spec.components),
-    )
+    normalized = _normalize_intent(request)
+    spec = normalized.integration_spec
+    # The symbol table the typed authoring workflow ITSELF composes for this
+    # request (`_validate_processes`: the normalizer's connector metadata, the
+    # request-local connector-resolution snapshot, the roots as participants) —
+    # never re-assembled here, so no fact of it can drift from the workflow.
+    # Its diagnostics are not consulted: the compile below re-validates strictly,
+    # with the key-reference contract attached.
+    symbols = _validate_processes(normalized)[2]
+    if symbols is None:
+        raise AssertionError("the workflow composed no symbol table for the notify case")
     if contracts:
         # Through the constructor, carrying every field (as ``rebinding`` does),
         # so the contract validators run and nothing the table carries is lost.
@@ -1059,7 +1073,7 @@ def render_notify_canonical_case(document, components, *, name, folder_name, id_
     """The compile-gated canonical route for one Notify survivor.
 
     authored unit + supporting components -> ``_normalize_intent`` ->
-    ``build_symbol_table`` (placeholder ids) -> ``build_materialization_plan``
+    ``_validate_processes`` (its table, placeholder ids) -> ``build_materialization_plan``
     (compiles through ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml``
     (late binding of the placeholders to ``id_registry``, the #180 effect-channel
     recompile, the complete component file). The caller hands COPIES; nothing
@@ -1372,10 +1386,7 @@ def _canonical_envelope_case():
         from boomi_mcp.authoring.process_materialization import (
             build_materialization_plan,
         )
-        from boomi_mcp.authoring.workflow import (
-            _connector_metadata_from_components,
-            _normalize_intent,
-        )
+        from boomi_mcp.authoring.workflow import _normalize_intent
         from boomi_mcp.categories.components.canonical_process_apply import (
             materialize_canonical_process_xml,
         )
@@ -1432,12 +1443,13 @@ def _canonical_envelope_case():
                 components=(conn, op),
             )
         )
-        spec = _normalize_intent(request).integration_spec
+        normalized = _normalize_intent(request)
+        spec = normalized.integration_spec
         unit = spec.processes[0]
         symbols = build_symbol_table(
             list(spec.components),
             process_keys=[u.envelope.component_key for u in spec.processes],
-            connector_metadata=_connector_metadata_from_components(spec.components),
+            connector_metadata=normalized.connector_metadata,
         )
         plan = build_materialization_plan(
             envelope=unit.envelope,
@@ -1724,7 +1736,6 @@ def _issue180_effect_case(case):
     """
     def render():
         from boomi_mcp.authoring.workflow import (
-            _connector_metadata_from_components,
             _normalize_intent,
             compile_authoring_request_v1,
         )
@@ -1891,11 +1902,12 @@ def _issue180_effect_case(case):
             effect_declarations=declarations)
         _result, internals = compile_authoring_request_v1(
             request, profile="golden", account_id="golden")
-        spec = _normalize_intent(request).integration_spec
+        normalized = _normalize_intent(request)
+        spec = normalized.integration_spec
         symbols = build_symbol_table(
             list(spec.components),
             process_keys=[u.envelope.component_key for u in spec.processes],
-            connector_metadata=_connector_metadata_from_components(spec.components),
+            connector_metadata=normalized.connector_metadata,
         )
         return materialize_canonical_process_xml(
             plan=internals.materialization_plans["proc"],
