@@ -1710,9 +1710,10 @@ def _m1_unsupported_action():
         ),
     )
     return (
+        "trycatch_dlq:notify_document_cache_terminal",
+        {"notify_dlq_symbols": lambda: mutated},
         copy.deepcopy(_corpus.NOTIFY_DLQ_DOCUMENT),
         mutated,
-        _corpus.notify_id_registry(),
         "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
         "/body/steps/0/try_body/steps/1/operation_ref",
     )
@@ -1723,9 +1724,10 @@ def _m2_missing_key_reference():
     document = copy.deepcopy(_corpus.CONNECTOR_SCOPE_NOTIFY_DOCUMENT)
     del document["body"]["steps"][2]["try_body"]["steps"][0]["idempotency"]
     return (
-        document,
+        "trycatch_dlq:connector_scope_notify_terminal",
+        {"CONNECTOR_SCOPE_NOTIFY_DOCUMENT": document},
+        copy.deepcopy(document),
         _corpus.connector_scope_notify_symbols(),
-        _corpus.notify_id_registry(include_map=True),
         "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
         "/body/steps/2/try_body/steps/0/idempotency",
     )
@@ -1736,34 +1738,34 @@ def _m2_missing_key_reference():
     [_m1_unsupported_action, _m2_missing_key_reference],
     ids=["golden-000087-unsupported-action", "golden-000086-missing-key-reference"],
 )
-def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make):
+def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make, monkeypatch):
     """A3 alone is vacuous: the frozen bytes are identical whether the corpus
     factory compiles or calls the legacy builder, so a revert would satisfy it.
-    Each arm builds a document the emit-only path ACCEPTS and asserts the corpus
-    route — the same `render_notify_canonical_case` the registered factory
-    calls — REFUSES it, by code and by pointer. The emit-only path never runs
-    the capability or idempotency checks (`SELF-156-r4-01`)."""
+    Each arm builds a document the emit-only path ACCEPTS, injects it into the
+    module input its REGISTERED factory reads, and asserts that rendering the
+    golden case through `render_golden_case` — the path the golden test takes —
+    REFUSES it, by code and by pointer. A factory reverted to the legacy builder
+    would render the mutant instead. The emit-only path never runs the
+    capability or idempotency checks (`SELF-156-r4-01`)."""
     from boomi_mcp.compiler.process_ir import lowering
     from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
     from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
     from boomi_mcp.connector_replay.ids import authored_contract_ref
 
-    document, symbols, registry, code, pointer = make()
+    case_id, injected, document, symbols, code, pointer = make()
 
     # The emit-only path accepts the mutant.
     ir = parse_process_ir_v1(copy.deepcopy(document))
     plan = lowering.lower_cfg_to_emission_plan(lowering.lower_process_ir_to_cfg(ir), symbols)
     assert "<shapes>" in emit_process(plan, symbols).process_xml
 
-    # The corpus route refuses it.
+    # The registered factory, fed the mutant through its own inputs, refuses it.
+    for attribute, value in injected.items():
+        assert hasattr(_corpus, attribute), attribute
+        monkeypatch.setattr(_corpus, attribute, value)
+    renderer = _corpus.declared_renderer(case_id)
     with pytest.raises(ProcessIRCompileError) as excinfo:
-        _corpus.render_notify_canonical_case(
-            document,
-            symbols,
-            name=_corpus.NOTIFY_DLQ_GOLDEN_NAME,
-            folder_name=_corpus.NOTIFY_GOLDEN_FOLDER_NAME,
-            id_registry=registry,
-        )
+        _corpus.render_golden_case(case_id, renderer)
     assert (code, pointer) in {(d.code, d.path) for d in excinfo.value.diagnostics}, (
         [(d.code, d.path) for d in excinfo.value.diagnostics]
     )
