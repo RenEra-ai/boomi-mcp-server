@@ -883,102 +883,159 @@ CONNECTOR_SCOPE_NOTIFY_DOCUMENT = {
 }
 
 
-def notify_dlq_symbols():
-    """golden-000087's symbol table: DB Get -> REST POST, cache."""
-    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
-    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+def notify_dlq_components():
+    """golden-000087's supporting components, as a caller authors them: DB Get ->
+    REST POST, cache. A FRESH list on every call. The renderer normalizes these
+    exactly as the authoring workflow does — ``_normalize_intent`` ->
+    ``build_symbol_table`` — so every symbol fact (family, action, connection edge)
+    is derived, and every component id starts as a placeholder that late binding
+    must replace."""
+    return [
+        {"key": "DBCONN", "type": "connector-settings", "name": "DB conn", "action": "create",
+         "config": {"connector_type": "database", "component_name": "DB conn"}},
+        {"key": "DBOP", "type": "connector-action", "name": "DB op", "action": "create",
+         "depends_on": ["DBCONN"],
+         "config": {"connector_type": "database", "operation_mode": "get",
+                    "component_name": "DB extract op", "connection_ref_key": "DBCONN"}},
+        {"key": "RESTCONN", "type": "connector-settings", "name": "REST conn", "action": "create",
+         "config": {"connector_type": "rest", "component_name": "REST conn",
+                    "base_url": "https://dlq.example.invalid", "auth": "NONE"}},
+        {"key": "RESTOP", "type": "connector-action", "name": "REST op", "action": "create",
+         "depends_on": ["RESTCONN"],
+         "config": {"connector_type": "rest", "operation_mode": "execute",
+                    "component_name": "REST send op", "connection_ref_key": "RESTCONN",
+                    "method": "POST", "path": "/v1/dlq"}},
+        {"key": "CACHE", "type": "documentcache", "name": "DLQ cache", "action": "create",
+         "config": {"component_name": "DLQ cache"}},
+    ]
 
-    return SymbolTableV1(
-        symbols=(
-            ComponentSymbolV1(
-                ref="$ref:DBCONN", component_id=DLQ_DB_CONN_ID,
-                component_type="connector-settings", connector_type=CC.DATABASE_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:DBOP", component_id=DLQ_DB_OP_ID,
-                component_type="connector-action", connector_type=CC.DATABASE_FAMILY,
-                action_type="Get", connection_ref="$ref:DBCONN",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTCONN", component_id=DLQ_REST_CONN_ID,
-                component_type="connector-settings", connector_type=CC.REST_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTOP", component_id=DLQ_REST_OP_ID,
-                component_type="connector-action", connector_type=CC.REST_FAMILY,
-                action_type="POST", connection_ref="$ref:RESTCONN",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:CACHE", component_id=DLQ_CACHE_ID,
-                component_type="documentcache",
-            ),
+
+def connector_scope_notify_components():
+    """golden-000086's supporting components. The map boundary is DERIVED from
+    the operations' own builder fields (``read_profile_id`` on the DB Get,
+    ``request_profile_id`` on the REST POST) and the map's
+    ``source_profile_id``/``target_profile_id`` — not hand-set on symbols."""
+    components = notify_dlq_components()
+    by_key = {component["key"]: component for component in components}
+    by_key["DBOP"]["config"]["read_profile_id"] = "$ref:DBP"
+    by_key["RESTOP"]["config"]["request_profile_id"] = "$ref:RESTP"
+    return components + [
+        {"key": "DBP", "type": "profile.db", "name": "DB profile", "action": "create",
+         "config": {"component_name": "DB profile"}},
+        {"key": "RESTP", "type": "profile.json", "name": "REST profile", "action": "create",
+         "config": {"component_name": "REST profile"}},
+        {"key": "MAP", "type": "transform.map", "name": "DLQ map", "action": "create",
+         "depends_on": ["DBP", "RESTP"],
+         "config": {"component_name": "DLQ map", "source_profile_id": "$ref:DBP",
+                    "target_profile_id": "$ref:RESTP"}},
+    ]
+
+
+def connector_scope_notify_contracts():
+    """The retried POST's key-reference evidence. A symbol-table contract, not a
+    component: no POST operation record exists in the packaged registry, so this
+    is offline compile parity, not an apply-time grant. Attached to the
+    normalized table; nothing else in it is hand-set."""
+    from boomi_mcp.compiler.process_ir.contracts import IdempotencyContractSymbolV1
+
+    return (
+        IdempotencyContractSymbolV1(ref=NOTIFY_REST_POST_CONTRACT_REF, operation_ref="$ref:RESTOP"),
+    )
+
+
+def _normalized_notify_case(document, components, *, name, folder_name, contracts=()):
+    """``(unit, symbols)`` from the authoring workflow's own normalization.
+
+    The unit envelope, its dependency keys and the supporting components go
+    through ``_normalize_intent``; the symbol table comes from
+    ``build_symbol_table`` over the normalized spec with the derived connector
+    metadata, so its ids are PLACEHOLDERS. ``contracts`` (idempotency evidence,
+    which no component carries) are the only facts attached afterwards.
+    """
+    from boomi_mcp.authoring.workflow import (
+        _connector_metadata_from_components,
+        _normalize_intent,
+    )
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1,
+        ProcessIRAuthoringIntentV1,
+    )
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    unit = ProcessAuthoringUnitV1(
+        envelope=ProcessComponentEnvelopeV1(
+            component_key="notify_dlq", name=name, action="create", folder_name=folder_name,
+            depends_on=tuple(component["key"] for component in components),
+        ),
+        process_ir=parse_process_ir_v1(document),
+    )
+    request = AuthoringRequestV1(
+        intent=ProcessIRAuthoringIntentV1(
+            integration_name="Notify DLQ", units=(unit,), components=tuple(components),
         )
     )
+    spec = _normalize_intent(request).integration_spec
+    symbols = build_symbol_table(
+        list(spec.components),
+        process_keys=[u.envelope.component_key for u in spec.processes],
+        connector_metadata=_connector_metadata_from_components(spec.components),
+    )
+    if contracts:
+        # Through the constructor, carrying every field (as ``rebinding`` does),
+        # so the contract validators run and nothing the table carries is lost.
+        carried = {field: getattr(symbols, field) for field in type(symbols).model_fields}
+        carried["idempotency_contracts"] = tuple(symbols.idempotency_contracts) + tuple(contracts)
+        symbols = SymbolTableV1(**carried)
+    return spec.processes[0], symbols
+
+
+def _frozen_id_symbols(symbols, id_registry):
+    """The normalized table with each placeholder replaced by its frozen id —
+    the input the EMIT-ONLY tests hand the emitter directly. Derived from the
+    same normalization, so it cannot drift from what the factories compile."""
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+
+    return SymbolTableV1.rebinding(
+        symbols,
+        (
+            symbol.model_copy(update={"component_id": id_registry[symbol.ref[len("$ref:"):]]})
+            if symbol.ref[len("$ref:"):] in id_registry else symbol
+            for symbol in symbols.symbols
+        ),
+    )
+
+
+def _notify_frozen_ids(include_map=False):
+    ids = notify_id_registry(include_map=include_map)
+    if include_map:
+        ids.update({"DBP": DLQ_DB_PROFILE_ID, "RESTP": DLQ_REST_PROFILE_ID})
+    return ids
+
+
+def notify_dlq_symbols():
+    """golden-000087's table for the emit-only path: normalized, frozen ids."""
+    _unit, symbols = _normalized_notify_case(
+        copy.deepcopy(NOTIFY_DLQ_DOCUMENT), notify_dlq_components(),
+        name=NOTIFY_DLQ_GOLDEN_NAME, folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
+    )
+    return _frozen_id_symbols(symbols, _notify_frozen_ids())
 
 
 def connector_scope_notify_symbols():
-    """golden-000086's symbol table, built STANDALONE.
-
-    Not an extension of ``notify_dlq_symbols``: the map boundary needs profile
-    refs on BOTH operation symbols (DB Get outputs ``$ref:DBP``, REST POST
-    consumes ``$ref:RESTP``) and two profile symbols whose types are members of
-    ``connector_resolution.PROFILE_COMPONENT_TYPES``; golden-000087 has no map,
-    and sharing the operations would hand it facts it does not author. The
-    retried POST's key-reference evidence is a symbol-table contract — no POST
-    operation record exists in the packaged registry, so this is offline
-    compile parity, not an apply-time grant.
-    """
-    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
-    from boomi_mcp.compiler.process_ir.contracts import (
-        ComponentSymbolV1,
-        IdempotencyContractSymbolV1,
-        SymbolTableV1,
+    """golden-000086's table for the emit-only path: normalized, frozen ids,
+    plus the key-reference contract."""
+    _unit, symbols = _normalized_notify_case(
+        copy.deepcopy(CONNECTOR_SCOPE_NOTIFY_DOCUMENT), connector_scope_notify_components(),
+        name=CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME, folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
+        contracts=connector_scope_notify_contracts(),
     )
-
-    return SymbolTableV1(
-        symbols=(
-            ComponentSymbolV1(
-                ref="$ref:DBCONN", component_id=DLQ_DB_CONN_ID,
-                component_type="connector-settings", connector_type=CC.DATABASE_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:DBOP", component_id=DLQ_DB_OP_ID,
-                component_type="connector-action", connector_type=CC.DATABASE_FAMILY,
-                action_type="Get", connection_ref="$ref:DBCONN",
-                output_profile_ref="$ref:DBP",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTCONN", component_id=DLQ_REST_CONN_ID,
-                component_type="connector-settings", connector_type=CC.REST_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTOP", component_id=DLQ_REST_OP_ID,
-                component_type="connector-action", connector_type=CC.REST_FAMILY,
-                action_type="POST", connection_ref="$ref:RESTCONN",
-                input_profile_ref="$ref:RESTP",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:CACHE", component_id=DLQ_CACHE_ID,
-                component_type="documentcache",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:DBP", component_id=DLQ_DB_PROFILE_ID, component_type="profile.db",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTP", component_id=DLQ_REST_PROFILE_ID,
-                component_type="profile.json",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:MAP", component_id=DLQ_MAP_ID, component_type="transform.map",
-                input_profile_ref="$ref:DBP", output_profile_ref="$ref:RESTP",
-            ),
-        ),
-        idempotency_contracts=(
-            IdempotencyContractSymbolV1(
-                ref=NOTIFY_REST_POST_CONTRACT_REF, operation_ref="$ref:RESTOP"
-            ),
-        ),
-    )
+    return _frozen_id_symbols(symbols, _notify_frozen_ids(include_map=True))
 
 
 def notify_id_registry(include_map=False):
@@ -997,13 +1054,16 @@ def notify_id_registry(include_map=False):
     return registry
 
 
-def render_notify_canonical_case(document, symbols, *, name, folder_name, id_registry):
+def render_notify_canonical_case(document, components, *, name, folder_name, id_registry,
+                                 contracts=()):
     """The compile-gated canonical route for one Notify survivor.
 
-    unit envelope -> ``build_materialization_plan`` (compiles through
-    ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml`` (late
-    binding, the #180 effect-channel recompile, the complete component file).
-    The caller hands COPIES; nothing here aliases corpus module state.
+    authored unit + supporting components -> ``_normalize_intent`` ->
+    ``build_symbol_table`` (placeholder ids) -> ``build_materialization_plan``
+    (compiles through ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml``
+    (late binding of the placeholders to ``id_registry``, the #180 effect-channel
+    recompile, the complete component file). The caller hands COPIES; nothing
+    here aliases corpus module state.
     """
     from boomi_mcp.authoring.contract import get_authoring_revisions
     from boomi_mcp.authoring.process_materialization import build_materialization_plan
@@ -1012,15 +1072,13 @@ def render_notify_canonical_case(document, symbols, *, name, folder_name, id_reg
     )
     from boomi_mcp.categories.integration_builder import _materializer_revision
     from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
-    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
-    from boomi_mcp.models.process_ir import parse_process_ir_v1
 
-    envelope = ProcessComponentEnvelopeV1(
-        component_key="notify_dlq", name=name, action="create", folder_name=folder_name,
+    unit, symbols = _normalized_notify_case(
+        document, components, name=name, folder_name=folder_name, contracts=contracts,
     )
     plan = build_materialization_plan(
-        envelope=envelope,
-        process_ir=parse_process_ir_v1(document),
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
         symbols=symbols,
         conflict_policy="reuse",
         compiler_revision=get_authoring_revisions()["compiler_revision"],
@@ -1055,7 +1113,7 @@ def legacy_notify_dlq_terminal_xml():
 def _case_try_catch_notify_dlq_document_cache():
     return render_notify_canonical_case(
         copy.deepcopy(NOTIFY_DLQ_DOCUMENT),
-        notify_dlq_symbols(),
+        notify_dlq_components(),
         name=NOTIFY_DLQ_GOLDEN_NAME,
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(),
@@ -1065,10 +1123,11 @@ def _case_try_catch_notify_dlq_document_cache():
 def _case_connector_scoped_trycatch_notify():
     return render_notify_canonical_case(
         copy.deepcopy(CONNECTOR_SCOPE_NOTIFY_DOCUMENT),
-        connector_scope_notify_symbols(),
+        connector_scope_notify_components(),
         name=CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME,
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(include_map=True),
+        contracts=connector_scope_notify_contracts(),
     )
 
 

@@ -1697,23 +1697,26 @@ def test_the_recovery_golden_matches_the_archived_live_capture():
 
 
 def _m1_unsupported_action():
-    """golden-000087's graph with the REST operation re-labelled to a verb the
-    capability table does not register."""
-    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
-
-    symbols = _corpus.notify_dlq_symbols()
-    mutated = SymbolTableV1.rebinding(
-        symbols,
-        (
-            s.model_copy(update={"action_type": "DELETE"}) if s.ref == "$ref:RESTOP" else s
-            for s in symbols.symbols
-        ),
+    """golden-000087's REST operation authored with a verb the capability table
+    does not register. One mutant, both paths: the factory normalizes the
+    components; the emit-only path gets the same normalized table with its
+    frozen ids."""
+    components = _corpus.notify_dlq_components()
+    for component in components:
+        if component["key"] == "RESTOP":
+            component["config"]["method"] = "DELETE"
+    document = copy.deepcopy(_corpus.NOTIFY_DLQ_DOCUMENT)
+    _unit, placeholders = _corpus._normalized_notify_case(
+        copy.deepcopy(document), copy.deepcopy(components),
+        name=_corpus.NOTIFY_DLQ_GOLDEN_NAME, folder_name=_corpus.NOTIFY_GOLDEN_FOLDER_NAME,
     )
+    symbols = _corpus._frozen_id_symbols(placeholders, _corpus._notify_frozen_ids())
+    assert {s.ref: s.action_type for s in symbols.symbols}["$ref:RESTOP"] == "DELETE"
     return (
         "trycatch_dlq:notify_document_cache_terminal",
-        {"notify_dlq_symbols": lambda: mutated},
-        copy.deepcopy(_corpus.NOTIFY_DLQ_DOCUMENT),
-        mutated,
+        {"notify_dlq_components": lambda: copy.deepcopy(components)},
+        document,
+        symbols,
         "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
         "/body/steps/0/try_body/steps/1/operation_ref",
     )
