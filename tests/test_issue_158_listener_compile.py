@@ -337,7 +337,7 @@ def test_a_listener_is_a_document_producer_for_the_calls_after_it():
 @pytest.mark.parametrize(
     "call_symbol,extra,code",
     [
-        (_rest(action_type="POST"), (_REST_CONN,), PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED),
+        (_rest(action_type="PUT"), (_REST_CONN,), PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED),
         (_rest(requires_path_binding=True), (_REST_CONN,), PROCESS_IR_SEMANTIC_DYNAMIC_PATH_REQUIRED),
         (_rest(), (ComponentSymbolV1(ref="$ref:rc", component_id="RC",
                                      component_type="connector-settings",

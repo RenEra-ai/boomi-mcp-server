@@ -11,6 +11,7 @@ canonical emitter that agreed with a golden but disagreed with the code that
 produced the golden would be a parity claim resting on one frozen sample.
 """
 
+import copy
 import sys
 from pathlib import Path
 
@@ -49,6 +50,10 @@ from boomi_mcp.models.process_ir_tokens import (  # noqa: E402
 )
 
 GOLDEN = _ROOT / "tests" / "fixtures" / "golden_xml"
+
+if str(_ROOT / "tests") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "tests"))
+import _wave_gate_golden_corpus as _corpus  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -565,46 +570,15 @@ def test_a_connector_upstream_of_the_handler_admits_the_recovery_call():
 # Golden parity: the whole graph, not just the notify shape
 # ---------------------------------------------------------------------------
 
-_DLQ_DB_CONN = "11111111-1111-1111-1111-111111111111"
-_DLQ_DB_OP = "22222222-2222-2222-2222-222222222222"
-_DLQ_REST_CONN = "33333333-3333-3333-3333-333333333333"
-_DLQ_REST_OP = "44444444-4444-4444-4444-444444444444"
-_DLQ_CACHE = "55555555-5555-5555-5555-555555555555"
-
-
-def _dlq_symbols():
-    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
-    from boomi_mcp.compiler.process_ir.contracts import (
-        ComponentSymbolV1,
-        SymbolTableV1,
-    )
-
-    return SymbolTableV1(
-        symbols=(
-            ComponentSymbolV1(
-                ref="$ref:DBCONN", component_id=_DLQ_DB_CONN,
-                component_type="connector-settings", connector_type=CC.DATABASE_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:DBOP", component_id=_DLQ_DB_OP,
-                component_type="connector-action", connector_type=CC.DATABASE_FAMILY,
-                action_type="Get", connection_ref="$ref:DBCONN",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTCONN", component_id=_DLQ_REST_CONN,
-                component_type="connector-settings", connector_type=CC.REST_FAMILY,
-            ),
-            ComponentSymbolV1(
-                ref="$ref:RESTOP", component_id=_DLQ_REST_OP,
-                component_type="connector-action", connector_type=CC.REST_FAMILY,
-                action_type="POST", connection_ref="$ref:RESTCONN",
-            ),
-            ComponentSymbolV1(
-                ref="$ref:CACHE", component_id=_DLQ_CACHE,
-                component_type="documentcache",
-            ),
-        )
-    )
+# #159 S0: the documents, symbols and ids now live in the golden corpus (every
+# active golden must render with all test modules unimportable) and are imported
+# back here — ONE authority for both the corpus route and these pins.
+_DLQ_DB_CONN = _corpus.DLQ_DB_CONN_ID
+_DLQ_DB_OP = _corpus.DLQ_DB_OP_ID
+_DLQ_REST_CONN = _corpus.DLQ_REST_CONN_ID
+_DLQ_REST_OP = _corpus.DLQ_REST_OP_ID
+_DLQ_CACHE = _corpus.DLQ_CACHE_ID
+_dlq_symbols = _corpus.notify_dlq_symbols
 
 
 #: The canonical authoring of golden-000059's graph, in its #184 spelling.
@@ -624,39 +598,7 @@ def _dlq_symbols():
 #: `test_the_retired_catch_cache_write_then_stop_spelling_is_refused`. The retired
 #: row `golden-000059` is replaced by `golden-000087`
 #: (`issue184_cache_notify_terminal.xml`), whose seven shapes this reproduces.
-_NOTIFY_DLQ_DOCUMENT = {
-    "version": "1",
-    "body": {
-        "kind": "sequence",
-        "steps": [
-            {
-                "kind": "try_catch",
-                "scope": "process",
-                "retry": {"count": 0},
-                "try_body": {
-                    "steps": [
-                        {"kind": "connector_call", "operation_ref": "$ref:DBOP",
-                         "action": "get", "label": "DB extract"},
-                        {"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                         "label": "REST send"},
-                    ],
-                    "terminal": {"kind": "stop"},
-                },
-                "catch_body": {
-                    "steps": [
-                        {"kind": "notify", "level": "ERROR",
-                         "message_template": (
-                             "Integration catch path failed. Caught error: "
-                             + CAUGHT_ERROR_PROPERTY_ID
-                         )},
-                    ],
-                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                                 "label": "Route caught errors to DLQ cache"},
-                },
-            }
-        ],
-    },
-}
+_NOTIFY_DLQ_DOCUMENT = _corpus.NOTIFY_DLQ_DOCUMENT
 
 
 def test_the_notify_dlq_golden_is_reproduced_from_canonical_ir():
@@ -704,9 +646,11 @@ def test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder():
     change that moved BOTH the golden and the canonical emitter together would
     still be caught here.
 
-    The legacy case is `trycatch_dlq:notify_document_cache_terminal`, the
-    corpus row that replaced the retired `trycatch_dlq:notify_document_cache`:
-    the legacy builder no longer emits a Stop after the DLQ cache write either.
+    The legacy side is `legacy_notify_dlq_terminal_xml`, an UNREGISTERED corpus
+    helper: since #159 S0 the registered `trycatch_dlq:notify_document_cache_terminal`
+    case renders through the canonical compile-gated route, so it can no longer
+    stand in for the legacy builder. The legacy builder no longer emits a Stop
+    after the DLQ cache write either.
     """
     import re
     import sys as _sys
@@ -719,7 +663,10 @@ def test_the_canonical_notify_dlq_graph_agrees_with_the_legacy_builder():
     from boomi_mcp.compiler.process_ir import lowering
     from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
 
-    legacy_xml = corpus.CASE_REGISTRY["trycatch_dlq:notify_document_cache_terminal"][1]()
+    # #159 S0: the registered case now renders CANONICALLY, so reading it here
+    # would compare canonical to canonical. The legacy side is an unregistered
+    # corpus helper that runs the legacy builder fresh.
+    legacy_xml = corpus.legacy_notify_dlq_terminal_xml()
 
     symbols = _dlq_symbols()
     ir = parse_process_ir_v1(_NOTIFY_DLQ_DOCUMENT)
@@ -1345,7 +1292,7 @@ def test_the_continuation_remediation_covers_the_rules_that_serve_it():
     assert "try_catch" in text or "handler" in text
 
 
-_DLQ_MAP = "88888888-8888-8888-8888-888888888888"
+_DLQ_MAP = _corpus.DLQ_MAP_ID
 
 #: The canonical authoring of `golden-000005` — the connector-scoped DOUBLE guard.
 #:
@@ -1360,64 +1307,11 @@ _DLQ_MAP = "88888888-8888-8888-8888-888888888888"
 #: notify -> cache write -> stop, which is now refused (Add to Cache hands on zero
 #: documents, so the Stop never ran). The retired row `golden-000005` is replaced
 #: by `golden-000086` (`issue184_cache_notify_connector_terminal.xml`).
-_CHAIN_DLQ_DOCUMENT = {
-    "version": "1",
-    "body": {
-        "kind": "sequence",
-        "steps": [
-            {
-                "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
-                "try_body": {
-                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:DBOP",
-                               "action": "get", "label": "DB extract"}],
-                    "terminal": {"kind": "continue"},
-                },
-                "catch_body": {
-                    "steps": [
-                        {"kind": "notify", "level": "ERROR",
-                         "message_template": "Integration catch path failed. Caught error: "
-                                             + CAUGHT_ERROR_PROPERTY_ID},
-                    ],
-                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                                 "label": "Route caught errors to DLQ cache"},
-                },
-            },
-            {"kind": "map_ref", "map_ref": "$ref:MAP"},
-            {
-                "kind": "try_catch", "scope": "connector", "retry": {"count": 2},
-                "try_body": {
-                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:RESTOP",
-                               "label": "REST send"}],
-                    "terminal": dict(_STOP),
-                },
-                "catch_body": {
-                    "steps": [
-                        {"kind": "notify", "level": "ERROR",
-                         "message_template": "Integration catch path failed. Caught error: "
-                                             + CAUGHT_ERROR_PROPERTY_ID},
-                    ],
-                    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
-                                 "label": "Route caught errors to DLQ cache"},
-                },
-            },
-        ],
-    },
-}
-
-
-def _chain_symbols():
-    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
-    from boomi_mcp.compiler.process_ir.contracts import (
-        ComponentSymbolV1,
-        SymbolTableV1,
-    )
-
-    return SymbolTableV1(symbols=_dlq_symbols().symbols + (
-        ComponentSymbolV1(
-            ref="$ref:MAP", component_id=_DLQ_MAP, component_type="transform.map",
-            input_profile_ref="$ref:DBP", output_profile_ref="$ref:RESTP",
-        ),
-    ))
+#: #159 S0: the REST write's region is retried (count 2) over a REST POST, which
+#: is ``conditionally_idempotent``, so the document authors ``key_reference``
+#: evidence; the map boundary is proven by the operation symbols' profile refs.
+_CHAIN_DLQ_DOCUMENT = _corpus.CONNECTOR_SCOPE_NOTIFY_DOCUMENT
+_chain_symbols = _corpus.connector_scope_notify_symbols
 
 
 def test_the_connector_scoped_double_guard_golden_is_reproduced_from_canonical_ir():
@@ -1540,8 +1434,10 @@ def test_the_retired_catch_cache_write_then_stop_spelling_is_refused(case):
 # emission and materialization parity for the complete deployable envelope, and
 # it proves nothing about public authoring parity. The corpus migration the plan
 # also asks for (`tests/_wave_gate_golden_corpus.py`, the
-# `_canonical_envelope_case` pattern) is the compile-gated route, and it remains
-# blocked — see `test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet`.
+# `_canonical_envelope_case` pattern) is the compile-gated route. #159 S0 registered
+# the REST POST capability row that blocked it, and both corpus cases now render
+# through it (`render_notify_canonical_case`); the A4 witnesses below prove that
+# route is load-bearing. These pins stay as ADDED coverage of the emit-only path.
 
 
 def _materialized_component(document, symbols, *, name):
@@ -1793,103 +1689,87 @@ def test_the_recovery_golden_matches_the_archived_live_capture():
     assert "<dragpoints/>" in golden  # terminal: no successor, no synthetic Stop
 
 
-def test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet():
-    """Why the two notify corpus cases still render through the legacy builder.
 
-    The architect asked for them to be re-pointed at `_canonical_envelope_case`,
-    and rejected — correctly — my first argument that doing so would make the
-    goldens photographs of the code under test: the frozen bytes stay frozen
-    either way, so the canonical route genuinely adds the normalize -> COMPILE ->
-    late-bind -> materialize coverage that the tests above do not have.
 
-    What it no longer adds is the full-envelope comparison. That half is pinned
-    now, in `test_the_notify_golden_reproduces_as_a_complete_file`, which
-    reproduces both frozen files byte-for-byte through emit + materialize. So the
-    residue this test guards is exactly ONE thing: passing through
-    `compile_process_ir_v1`, the gate the pinned route bypasses.
+# ---------------------------------------------------------------------------
+# #159 S0 (ARCH-156-r2-06a, A4): the corpus route is LOAD-BEARING
+# ---------------------------------------------------------------------------
 
-    The blocker is a CAPABILITY the canonical surface does not model. Both
-    goldens drive a REST **POST** target, and `CONNECTOR_CALL_CAPABILITIES_V1`
-    registers only `get` and `patch` for the REST family, so
-    `compile_process_ir_v1` refuses both at
-    `PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED`. The gap is POST
-    specifically, not REST writing generally — `patch` is already a registered
-    write. Connector capability rows are out of scope for #156.
 
-    WHAT REGISTERING POST WOULD AND WOULD NOT UNBLOCK. This is measured, per
-    golden, and an earlier version of this docstring got it wrong by claiming it
-    jointly:
+def _m1_unsupported_action():
+    """golden-000087's graph with the REST operation re-labelled to a verb the
+    capability table does not register."""
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
 
-    - `golden-000059`, the single process-scoped handler: the row is necessary
-      AND SUFFICIENT. With a synthetic POST capability it compiles through
-      `compile_process_ir_v1` and emits `<shapes>` byte-equal to the frozen file.
-      Re-point it as soon as the row lands.
-    - `golden-000005`, the double guard: the row is necessary and NOT sufficient.
-      It is then refused at `PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING`
-      on its retried region, and once `key_reference` evidence is authored it is
-      refused AGAIN at `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` on the map. Three
-      changes, not one.
-
-    The idempotency code is not the fail-closed default arriving by the obvious
-    route: `lookup_capability` upgrades the default `unverified` to
-    `conditionally_idempotent` from the packaged replay registry's observed REST
-    POST verdict, and it is that classification which demands evidence. A row
-    registered `non_idempotent` yields `PROCESS_IR_SEMANTIC_RETRY_NON_IDEMPOTENT_WRITE`
-    instead. A future reader who assumes the default refusal will be looking for
-    the wrong diagnostic.
-
-    Exactly one region is retried — the REST-write region, count 2. The other
-    region and `golden-000059`'s handler are both count 0; any non-zero count
-    trips the same gate.
-
-    These per-golden measurements were taken on the rows #184 amendment 3 later
-    retired and on #156's catch spelling (cache write, then Stop). The
-    replacements `golden-000087` and `golden-000086` still render through the
-    legacy builder and still drive the same REST POST target, so the capability
-    refusal asserted below blocks them identically; the "sufficient" and
-    "not sufficient" verdicts above have NOT been re-measured on the
-    catch-terminal spelling, and must be when the row lands.
-
-    This test exists so the claim is checkable rather than asserted, and so it
-    FAILS the day a REST write intent is registered — at which point this
-    docstring's per-golden prerequisites must be REASSESSED. That failure is a
-    trigger to re-decide, not a certificate that the migration is now possible.
-    """
-    from boomi_mcp.compiler.process_ir.connector_capabilities import (
-        CONNECTOR_CALL_CAPABILITIES_V1,
-        REST_FAMILY,
+    symbols = _corpus.notify_dlq_symbols()
+    mutated = SymbolTableV1.rebinding(
+        symbols,
+        (
+            s.model_copy(update={"action_type": "DELETE"}) if s.ref == "$ref:RESTOP" else s
+            for s in symbols.symbols
+        ),
     )
-
-    registered = {action for family, action in CONNECTOR_CALL_CAPABILITIES_V1
-                  if family == REST_FAMILY}
-    assert registered == {"get", "patch"}, (
-        "a REST write intent is now registered. Re-decide the corpus migration "
-        "per golden, per this test's docstring: golden-000059 is unblocked by "
-        "this row alone; golden-000005 additionally needs authored idempotency "
-        "evidence and map-boundary profile refs (issue #156 ARCH-156-r2-06b): "
-        + repr(sorted(registered))
-    )
-
-    # ...and the refusal is real, not inferred from the table.
-    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
-    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
-
-    # A REAL POST operation, with the `action` ASSERTION OMITTED. The first
-    # version of this witness authored `action: "post"` against a PATCH
-    # operation, which exercises the assertion-mismatch refusal — a different
-    # mechanism that happens to share this code. `action` is an optional
-    # assertion of the operation's authoritative action, so omitting it leaves
-    # only the capability question, and the POINTER separates the two: the gap
-    # lands on `/operation_ref`, a mismatch on `/action`.
-    document = _doc([
-        {"kind": "connector_call", "operation_ref": "$ref:DBOP", "action": "get"},
-        {"kind": "connector_call", "operation_ref": "$ref:RESTOP"},
-        dict(_STOP),
-    ])
-    with pytest.raises(ProcessIRCompileError) as excinfo:
-        compile_process_ir_v1(parse_process_ir_v1(document), _dlq_symbols())
-    codes = {(d.code, d.path) for d in excinfo.value.diagnostics}
-    assert (
+    return (
+        copy.deepcopy(_corpus.NOTIFY_DLQ_DOCUMENT),
+        mutated,
+        _corpus.notify_id_registry(),
         "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED",
-        "/body/steps/1/operation_ref",
-    ) in codes, codes
+        "/body/steps/0/try_body/steps/1/operation_ref",
+    )
+
+
+def _m2_missing_key_reference():
+    """golden-000086's graph with the retried POST's key-reference evidence removed."""
+    document = copy.deepcopy(_corpus.CONNECTOR_SCOPE_NOTIFY_DOCUMENT)
+    del document["body"]["steps"][2]["try_body"]["steps"][0]["idempotency"]
+    return (
+        document,
+        _corpus.connector_scope_notify_symbols(),
+        _corpus.notify_id_registry(include_map=True),
+        "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
+        "/body/steps/2/try_body/steps/0/idempotency",
+    )
+
+
+@pytest.mark.parametrize(
+    "make",
+    [_m1_unsupported_action, _m2_missing_key_reference],
+    ids=["golden-000087-unsupported-action", "golden-000086-missing-key-reference"],
+)
+def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make):
+    """A3 alone is vacuous: the frozen bytes are identical whether the corpus
+    factory compiles or calls the legacy builder, so a revert would satisfy it.
+    Each arm builds a document the emit-only path ACCEPTS and asserts the corpus
+    route — the same `render_notify_canonical_case` the registered factory
+    calls — REFUSES it, by code and by pointer. The emit-only path never runs
+    the capability or idempotency checks (`SELF-156-r4-01`)."""
+    from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+    from boomi_mcp.connector_replay.ids import authored_contract_ref
+
+    document, symbols, registry, code, pointer = make()
+
+    # The emit-only path accepts the mutant.
+    ir = parse_process_ir_v1(copy.deepcopy(document))
+    plan = lowering.lower_cfg_to_emission_plan(lowering.lower_process_ir_to_cfg(ir), symbols)
+    assert "<shapes>" in emit_process(plan, symbols).process_xml
+
+    # The corpus route refuses it.
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        _corpus.render_notify_canonical_case(
+            document,
+            symbols,
+            name=_corpus.NOTIFY_DLQ_GOLDEN_NAME,
+            folder_name=_corpus.NOTIFY_GOLDEN_FOLDER_NAME,
+            id_registry=registry,
+        )
+    assert (code, pointer) in {(d.code, d.path) for d in excinfo.value.diagnostics}, (
+        [(d.code, d.path) for d in excinfo.value.diagnostics]
+    )
+
+    # The corpus holds the only published POST semantics id as a literal so it
+    # imports nothing at load; pin it to its authority.
+    assert _corpus.NOTIFY_REST_POST_CONTRACT_REF == authored_contract_ref(
+        "rest", "post", "resource_identity_upsert_static_route_same_effect", 1
+    )

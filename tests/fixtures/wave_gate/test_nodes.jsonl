@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14694, "minimum_collected": 14694, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14698, "minimum_collected": 14698, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -1233,7 +1233,7 @@
 {"kind": "test", "id": "pytest-001232", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[database_v2-Send]", "state": "active"}
 {"kind": "test", "id": "pytest-001233", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-001234", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-DELETE]", "state": "active"}
-{"kind": "test", "id": "pytest-001235", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-POST]", "state": "active"}
+{"kind": "test", "id": "pytest-001235", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-POST]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-001236", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[web_services_server-LISTEN]", "state": "active"}
 {"kind": "test", "id": "pytest-001237", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[wss-LISTEN]", "state": "active"}
 {"kind": "test", "id": "pytest-001238", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[wssoapclientsdk-Send]", "state": "active"}
@@ -1253,7 +1253,7 @@
 {"kind": "test", "id": "pytest-001252", "node_id": "tests/test_connector_call_resolution.py::test_unresolved_operation_ref", "state": "active"}
 {"kind": "test", "id": "pytest-001253", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[database_v2-Send]", "state": "active"}
 {"kind": "test", "id": "pytest-001254", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[intappoemprod-X3ABOD-intapp-dev-PATCH]", "state": "tombstone"}
-{"kind": "test", "id": "pytest-001255", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[rest-POST]", "state": "active"}
+{"kind": "test", "id": "pytest-001255", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[rest-POST]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-001256", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[soap_client-Send]", "state": "active"}
 {"kind": "test", "id": "pytest-001257", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[wss-LISTEN]", "state": "active"}
 {"kind": "test", "id": "pytest-001258", "node_id": "tests/test_connectors_rest_alias.py::test_create_missing_component_name_hint_does_not_show_http_url", "state": "active"}
@@ -11694,7 +11694,7 @@
 {"kind": "test", "id": "pytest-011693", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[INFO-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
 {"kind": "test", "id": "pytest-011694", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[WARNING-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
 {"kind": "test", "id": "pytest-011695", "node_id": "tests/test_process_ir_notify_recovery.py::test_canonical_notify_equals_the_legacy_emitter_for_the_same_graph[ERROR-[ERROR] caught meta.base.catcherrorsmessage]", "state": "active"}
-{"kind": "test", "id": "pytest-011696", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet", "state": "active"}
+{"kind": "test", "id": "pytest-011696", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_goldens_cannot_take_the_canonical_corpus_route_yet", "state": "tombstone"}
 {"kind": "test", "id": "pytest-011697", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_path_cannot_read_state_its_own_failed_try_wrote", "state": "active"}
 {"kind": "test", "id": "pytest-011698", "node_id": "tests/test_process_ir_error_handling.py::test_a_chain_grants_evidence_per_call_and_not_across_siblings", "state": "active"}
 {"kind": "test", "id": "pytest-011699", "node_id": "tests/test_process_ir_error_handling.py::test_a_recovery_request_reaches_materialization_with_its_child_reference", "state": "active"}
@@ -15149,3 +15149,10 @@
 {"kind": "test", "id": "pytest-015148", "node_id": "tests/test_issue_184_child_state_transfer.py::test_a_replay_that_keeps_the_contracts_seal_admits_a_deferred_copy[wn]", "state": "active"}
 {"kind": "test", "id": "pytest-015149", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_no_data_runs_hand_on_the_walks_availability", "state": "active"}
 {"kind": "test", "id": "pytest-015150", "node_id": "tests/test_issue_184_child_state_transfer.py::test_repeated_runs_met_with_the_zero_run_arm_lose_the_childs_write", "state": "active"}
+{"kind": "test", "id": "pytest-015151", "node_id": "tests/test_connector_call_resolution.py::test_gated_and_unknown_pairs_are_absent[officialboomi-X3979C-rest-prod-PUT]", "state": "active"}
+{"kind": "test", "id": "pytest-015152", "node_id": "tests/test_connector_call_resolution.py::test_a_downstream_rest_post_compiles_through_the_public_compiler", "state": "active"}
+{"kind": "test", "id": "pytest-015153", "node_id": "tests/test_connector_call_resolution.py::test_a_retried_rest_post_without_key_reference_evidence_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-015154", "node_id": "tests/test_connector_call_resolution.py::test_unsupported_family_action_pairs_are_rejected[rest-PUT]", "state": "active"}
+{"kind": "test", "id": "pytest-015155", "node_id": "tests/test_process_ir_authoring_contract_parity.py::test_the_served_rest_post_row_publishes_the_derived_replay_classification", "state": "active"}
+{"kind": "test", "id": "pytest-015156", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts[golden-000087-unsupported-action]", "state": "active"}
+{"kind": "test", "id": "pytest-015157", "node_id": "tests/test_process_ir_notify_recovery.py::test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts[golden-000086-missing-key-reference]", "state": "active"}

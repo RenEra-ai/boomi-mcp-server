@@ -781,7 +781,266 @@ CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME = "Connector Scope DLQ Golden"
 NOTIFY_GOLDEN_FOLDER_NAME = "Golden/Fixtures"
 
 
-def _case_try_catch_notify_dlq_document_cache():
+#: #159 S0 (ARCH-156-r2-06a): the two Notify survivors render through the
+#: COMPILE-GATED canonical route — parse -> unit envelope ->
+#: ``build_materialization_plan`` (which owns ``compile_process_ir_v1``) -> late
+#: binding -> ``materialize_canonical_process_xml`` — not the legacy builder.
+#:
+#: The documents and symbols live HERE, not in the test module that used to own
+#: them: every active golden must render with all ``test_*`` modules unimportable
+#: (``test_every_active_golden_renders_with_all_test_modules_unimportable``).
+#: ``tests/test_process_ir_notify_recovery.py`` imports them back.
+#:
+#: The frozen files are NOT regenerated from this route. They are the #184
+#: recorded byte transforms of legacy-builder output frozen before #156's
+#: baseline (``tests/fixtures/process_ir/issue184/PROVENANCE.md``), which is what
+#: keeps each comparison an oracle.
+DLQ_DB_PROFILE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+DLQ_REST_PROFILE_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+#: The only published REST POST idempotency semantics id (packaged replay
+#: registry ``semantics_definitions``, revision 1). Held as a literal so the
+#: corpus imports nothing at module load; a test pins it equal to
+#: ``connector_replay.ids.authored_contract_ref(...)``.
+NOTIFY_REST_POST_CONTRACT_REF = (
+    "$ref:icv1:rest:post:resource_identity_upsert_static_route_same_effect:1"
+)
+
+_DLQ_NOTIFY_CATCH_BODY = {
+    "steps": [
+        {"kind": "notify", "level": "ERROR", "message_template": DLQ_NOTIFY_TEMPLATE},
+    ],
+    "terminal": {"kind": "cache_put", "cache_ref": "$ref:CACHE",
+                 "label": "Route caught errors to DLQ cache"},
+}
+
+#: golden-000087 (``issue184_cache_notify_terminal.xml``): ONE process-scoped
+#: handler around DB Get -> REST POST; the catch leg notifies and terminates in
+#: the DLQ cache write (#184 amendment 3: Add to Cache hands on zero documents,
+#: so it is the catch body's TERMINAL). Every label is authored — the legacy
+#: builder hard-defaulted the DLQ cache label; the canonical emitter reads it.
+NOTIFY_DLQ_DOCUMENT = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {
+                "kind": "try_catch",
+                "scope": "process",
+                "retry": {"count": 0},
+                "try_body": {
+                    "steps": [
+                        {"kind": "connector_call", "operation_ref": "$ref:DBOP",
+                         "action": "get", "label": "DB extract"},
+                        {"kind": "connector_call", "operation_ref": "$ref:RESTOP",
+                         "label": "REST send"},
+                    ],
+                    "terminal": {"kind": "stop"},
+                },
+                "catch_body": copy.deepcopy(_DLQ_NOTIFY_CATCH_BODY),
+            }
+        ],
+    },
+}
+
+#: golden-000086 (``issue184_cache_notify_connector_terminal.xml``): the
+#: connector-scoped DOUBLE guard. Region 1 protects the DB read and continues;
+#: the map sits between the handlers; region 2 protects the REST write with
+#: retryCount=2 — exactly ONE retried region. A retried POST is
+#: ``conditionally_idempotent`` (derived), so it carries authored
+#: ``key_reference`` evidence; the map boundary is proven through the operation
+#: symbols' profile refs (``connector_scope_notify_symbols``).
+CONNECTOR_SCOPE_NOTIFY_DOCUMENT = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {
+                "kind": "try_catch", "scope": "connector", "retry": {"count": 0},
+                "try_body": {
+                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:DBOP",
+                               "action": "get", "label": "DB extract"}],
+                    "terminal": {"kind": "continue"},
+                },
+                "catch_body": copy.deepcopy(_DLQ_NOTIFY_CATCH_BODY),
+            },
+            {"kind": "map_ref", "map_ref": "$ref:MAP"},
+            {
+                "kind": "try_catch", "scope": "connector", "retry": {"count": 2},
+                "try_body": {
+                    "steps": [{"kind": "connector_call", "operation_ref": "$ref:RESTOP",
+                               "label": "REST send",
+                               "idempotency": {
+                                   "kind": "key_reference",
+                                   "contract_ref": NOTIFY_REST_POST_CONTRACT_REF,
+                               }}],
+                    "terminal": {"kind": "stop"},
+                },
+                "catch_body": copy.deepcopy(_DLQ_NOTIFY_CATCH_BODY),
+            },
+        ],
+    },
+}
+
+
+def notify_dlq_symbols():
+    """golden-000087's symbol table: DB Get -> REST POST, cache."""
+    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
+    from boomi_mcp.compiler.process_ir.contracts import ComponentSymbolV1, SymbolTableV1
+
+    return SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(
+                ref="$ref:DBCONN", component_id=DLQ_DB_CONN_ID,
+                component_type="connector-settings", connector_type=CC.DATABASE_FAMILY,
+            ),
+            ComponentSymbolV1(
+                ref="$ref:DBOP", component_id=DLQ_DB_OP_ID,
+                component_type="connector-action", connector_type=CC.DATABASE_FAMILY,
+                action_type="Get", connection_ref="$ref:DBCONN",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:RESTCONN", component_id=DLQ_REST_CONN_ID,
+                component_type="connector-settings", connector_type=CC.REST_FAMILY,
+            ),
+            ComponentSymbolV1(
+                ref="$ref:RESTOP", component_id=DLQ_REST_OP_ID,
+                component_type="connector-action", connector_type=CC.REST_FAMILY,
+                action_type="POST", connection_ref="$ref:RESTCONN",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:CACHE", component_id=DLQ_CACHE_ID,
+                component_type="documentcache",
+            ),
+        )
+    )
+
+
+def connector_scope_notify_symbols():
+    """golden-000086's symbol table, built STANDALONE.
+
+    Not an extension of ``notify_dlq_symbols``: the map boundary needs profile
+    refs on BOTH operation symbols (DB Get outputs ``$ref:DBP``, REST POST
+    consumes ``$ref:RESTP``) and two profile symbols whose types are members of
+    ``connector_resolution.PROFILE_COMPONENT_TYPES``; golden-000087 has no map,
+    and sharing the operations would hand it facts it does not author. The
+    retried POST's key-reference evidence is a symbol-table contract — no POST
+    operation record exists in the packaged registry, so this is offline
+    compile parity, not an apply-time grant.
+    """
+    from boomi_mcp.compiler.process_ir import connector_capabilities as CC
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ComponentSymbolV1,
+        IdempotencyContractSymbolV1,
+        SymbolTableV1,
+    )
+
+    return SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(
+                ref="$ref:DBCONN", component_id=DLQ_DB_CONN_ID,
+                component_type="connector-settings", connector_type=CC.DATABASE_FAMILY,
+            ),
+            ComponentSymbolV1(
+                ref="$ref:DBOP", component_id=DLQ_DB_OP_ID,
+                component_type="connector-action", connector_type=CC.DATABASE_FAMILY,
+                action_type="Get", connection_ref="$ref:DBCONN",
+                output_profile_ref="$ref:DBP",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:RESTCONN", component_id=DLQ_REST_CONN_ID,
+                component_type="connector-settings", connector_type=CC.REST_FAMILY,
+            ),
+            ComponentSymbolV1(
+                ref="$ref:RESTOP", component_id=DLQ_REST_OP_ID,
+                component_type="connector-action", connector_type=CC.REST_FAMILY,
+                action_type="POST", connection_ref="$ref:RESTCONN",
+                input_profile_ref="$ref:RESTP",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:CACHE", component_id=DLQ_CACHE_ID,
+                component_type="documentcache",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:DBP", component_id=DLQ_DB_PROFILE_ID, component_type="profile.db",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:RESTP", component_id=DLQ_REST_PROFILE_ID,
+                component_type="profile.json",
+            ),
+            ComponentSymbolV1(
+                ref="$ref:MAP", component_id=DLQ_MAP_ID, component_type="transform.map",
+                input_profile_ref="$ref:DBP", output_profile_ref="$ref:RESTP",
+            ),
+        ),
+        idempotency_contracts=(
+            IdempotencyContractSymbolV1(
+                ref=NOTIFY_REST_POST_CONTRACT_REF, operation_ref="$ref:RESTOP"
+            ),
+        ),
+    )
+
+
+def notify_id_registry(include_map=False):
+    """The applied ids late binding writes — a FRESH dict on every call. The
+    frozen files carry the connection AND operation ids (and no componentId),
+    so both are pinned, not left on their placeholders."""
+    registry = {
+        "DBCONN": DLQ_DB_CONN_ID,
+        "DBOP": DLQ_DB_OP_ID,
+        "RESTCONN": DLQ_REST_CONN_ID,
+        "RESTOP": DLQ_REST_OP_ID,
+        "CACHE": DLQ_CACHE_ID,
+    }
+    if include_map:
+        registry["MAP"] = DLQ_MAP_ID
+    return registry
+
+
+def render_notify_canonical_case(document, symbols, *, name, folder_name, id_registry):
+    """The compile-gated canonical route for one Notify survivor.
+
+    unit envelope -> ``build_materialization_plan`` (compiles through
+    ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml`` (late
+    binding, the #180 effect-channel recompile, the complete component file).
+    The caller hands COPIES; nothing here aliases corpus module state.
+    """
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeV1
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    envelope = ProcessComponentEnvelopeV1(
+        component_key="notify_dlq", name=name, action="create", folder_name=folder_name,
+    )
+    plan = build_materialization_plan(
+        envelope=envelope,
+        process_ir=parse_process_ir_v1(document),
+        symbols=symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+    return materialize_canonical_process_xml(
+        plan=plan, id_registry=dict(id_registry), symbols=symbols
+    )
+
+
+def legacy_notify_dlq_terminal_xml():
+    """The LEGACY builder's rendering of golden-000087's graph — NOT registered.
+
+    The live differential (A6) for the migrated case: with the corpus case now
+    rendering canonically, comparing against ``CASE_REGISTRY`` would compare
+    canonical to canonical. This keeps a freshly-run legacy builder on the other
+    side until #160 deletes it. The registry/manifest bijection compares keys
+    only, so an unregistered helper is legal.
+    """
     cfg = dlq_config(
         {"mode": "document_cache_ref", "document_cache_id": DLQ_CACHE_ID},
         catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY),
@@ -793,14 +1052,23 @@ def _case_try_catch_notify_dlq_document_cache():
     )
 
 
-def _case_connector_scoped_trycatch_notify():
-    cfg = dlq_connector_config(
-        retry_count=2, catch_notify=copy.deepcopy(DLQ_CATCH_NOTIFY)
+def _case_try_catch_notify_dlq_document_cache():
+    return render_notify_canonical_case(
+        copy.deepcopy(NOTIFY_DLQ_DOCUMENT),
+        notify_dlq_symbols(),
+        name=NOTIFY_DLQ_GOLDEN_NAME,
+        folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
+        id_registry=notify_id_registry(),
     )
-    return _dlq_builder().build(
-        cfg,
+
+
+def _case_connector_scoped_trycatch_notify():
+    return render_notify_canonical_case(
+        copy.deepcopy(CONNECTOR_SCOPE_NOTIFY_DOCUMENT),
+        connector_scope_notify_symbols(),
         name=CONNECTOR_SCOPE_NOTIFY_GOLDEN_NAME,
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
+        id_registry=notify_id_registry(include_map=True),
     )
 
 

@@ -213,6 +213,31 @@ def test_connector_rows_carry_every_field_with_verbatim_values():
     )
 
 
+def test_the_served_rest_post_row_publishes_the_derived_replay_classification():
+    """#159 P0 (A1/A2). The table registers REST POST ``unverified``; the served row
+    publishes what the compiler resolves — ``conditionally_idempotent``, derived
+    from the packaged single-endpoint observation — and the family's ``Path``
+    binding location comes with it."""
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        REST_FAMILY,
+        lookup_capability,
+    )
+
+    assert CONNECTOR_CALL_CAPABILITIES_V1[(REST_FAMILY, "post")].retry_safety == "unverified"
+    assert lookup_capability(REST_FAMILY, "POST").retry_safety == "conditionally_idempotent"
+    (row,) = [
+        row
+        for row in connector_capability_rows()
+        if (row["family"], row["action"]) == (REST_FAMILY, "POST")
+    ]
+    assert row["replay_classification"] == "conditionally_idempotent"
+    assert row["input_documents"] == "documents_required"
+    assert row["output_documents"] is True
+    assert row["side_effect"] == "write"
+    assert row["per_document_bindable_locations"] == ["Path"]
+    assert f"{REST_FAMILY} POST" in ids_of("connector_action")
+
+
 def test_retry_rules_reproduce_the_shipped_fail_closed_rule():
     """Stated as SHIPPED, including the part callers get wrong.
 

@@ -152,6 +152,26 @@ CONNECTOR_CALL_CAPABILITIES_V1 = _rows(
         # (.codex/plans/issue-142-live-captures.md §G4). Fail closed.
         retry_safety="unverified",
     ),
+    # REST Client POST — a `rest_send`-class verb, same document shape as PATCH:
+    # it consumes the outbound document and declares a Response Profile.
+    #   downstream <- the packaged replay observation (`connector_replay/
+    #                 registry_v1.json`, the POST evidence record): a downstream
+    #                 POST that consumed its documents and returned the response
+    #                 documents it received.
+    #   entry      <- not evidenced, hence ``documents_required``.
+    ConnectorCapabilityV1(
+        family=REST_FAMILY,
+        action="POST",
+        accepts_input="documents_required",
+        produces_output=True,
+        side_effect="write",
+        # UNVERIFIED in the table, deliberately — the packaged evidence is ONE
+        # endpoint's capture, which evidences that endpoint's behaviour, not the
+        # action's platform semantics. ``lookup_capability`` derives
+        # ``conditionally_idempotent`` from that observation, so a retry still
+        # needs per-call ``key_reference`` evidence.
+        retry_safety="unverified",
+    ),
     # SOAP Client EXECUTE — the single action of `wssoapclientsdk` (#126),
     # declaring request AND response XML profiles, so it produces.
     #   entry      <- `fetch(soap_fetch)` is a verified sync_pipeline SOURCE stage

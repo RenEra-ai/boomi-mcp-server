@@ -29,6 +29,7 @@ from boomi_mcp.errors import (
     PROCESS_IR_REFERENCE_CONNECTION_NOT_FOUND,
     PROCESS_IR_REFERENCE_OPERATION_NOT_FOUND,
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH,
+    PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH,
 )
 from boomi_mcp.compiler.process_ir import connector_capabilities as caps
@@ -167,6 +168,7 @@ def test_registry_is_immutable_and_closed():
     assert set(caps.CONNECTOR_CALL_CAPABILITIES_V1) == {
         (caps.REST_FAMILY, "get"),
         (caps.REST_FAMILY, "patch"),
+        (caps.REST_FAMILY, "post"),
         (caps.SOAP_FAMILY, "execute"),
         (caps.DATABASE_FAMILY, "get"),
         (caps.DATABASE_FAMILY, "send"),
@@ -189,6 +191,7 @@ def test_consumers_cannot_be_entry_and_producers_can():
     table = caps.CONNECTOR_CALL_CAPABILITIES_V1
     assert table[(caps.DATABASE_FAMILY, "send")].accepts_input == "documents_required"
     assert table[(caps.REST_FAMILY, "patch")].accepts_input == "documents_required"
+    assert table[(caps.REST_FAMILY, "post")].accepts_input == "documents_required"
     for key in ((caps.REST_FAMILY, "get"), (caps.SOAP_FAMILY, "execute"), (caps.DATABASE_FAMILY, "get")):
         assert table[key].accepts_input == "none_or_documents"
 
@@ -231,7 +234,7 @@ def test_lookup_is_case_insensitive_on_the_action_only():
         ("web_services_server", "LISTEN"),
         ("database_v2", "Send"),
         ("exampleoemprod-X0TEST-example-dev", "PATCH"),  # a live OEM REST subtype
-        (caps.REST_FAMILY, "POST"),
+        (caps.REST_FAMILY, "PUT"),
         (caps.REST_FAMILY, "DELETE"),
         (caps.SOAP_FAMILY, "Send"),
         (caps.DATABASE_FAMILY, "Upsert"),
@@ -288,6 +291,88 @@ def test_an_authored_action_matches_case_insensitively():
     (binding,) = resolve_connector_call_bindings(cfg, table)
     # The ASSERTION is case-insensitive; the EMITTED spelling stays authoritative.
     assert binding.action == "GET"
+
+
+def _rest_post_symbols():
+    """A GET entry plus a downstream REST POST on the same connection."""
+    return SymbolTableV1(
+        symbols=rest_get_symbols().symbols
+        + (
+            ComponentSymbolV1(
+                ref="op_post",
+                component_id="id_op_post",
+                component_type="connector-action",
+                connector_type="rest",
+                action_type="POST",
+                connection_ref="conn",
+            ),
+        )
+    )
+
+
+def test_a_downstream_rest_post_compiles_through_the_public_compiler():
+    """#159 P0 (A2). REST POST is a registered write: a downstream POST compiles,
+    and its binding carries the DERIVED retry safety, not the table's."""
+    doc = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {"kind": "connector_call", "operation_ref": "op"},
+                {"kind": "connector_call", "operation_ref": "op_post", "action": "POST"},
+                {"kind": "stop"},
+            ],
+        },
+    }
+    table = _rest_post_symbols()
+    compile_process_ir_v1(parse_process_ir_v1(doc), table)
+    bindings = resolve_connector_call_bindings(
+        lower_process_ir_to_cfg(parse_process_ir_v1(doc)), table
+    )
+    (post,) = [b for b in bindings if b.action == "POST"]
+    assert (post.family, post.role) == (caps.REST_FAMILY, "downstream")
+    assert post.capability.retry_safety == "conditionally_idempotent"
+    assert caps.CONNECTOR_CALL_CAPABILITIES_V1[(caps.REST_FAMILY, "post")].retry_safety == (
+        "unverified"
+    )
+
+
+def test_a_retried_rest_post_without_key_reference_evidence_is_refused():
+    """#159 P0 (A2). Admitting POST does not admit a RETRY over it: the derived
+    ``conditionally_idempotent`` demands per-call ``key_reference`` evidence."""
+
+    def doc(count):
+        return {
+            "version": "1",
+            "body": {
+                "kind": "sequence",
+                "steps": [
+                    {"kind": "connector_call", "operation_ref": "op"},
+                    {
+                        "kind": "try_catch",
+                        "scope": "connector",
+                        "retry": {"count": count},
+                        "try_body": {
+                            "steps": [{"kind": "connector_call", "operation_ref": "op_post"}],
+                            "terminal": {"kind": "stop"},
+                        },
+                        "catch_body": {
+                            "steps": [{"kind": "message", "text": "failed"}],
+                            "terminal": {"kind": "exception", "message_template": "caught {1}"},
+                        },
+                    },
+                ],
+            },
+        }
+
+    table = _rest_post_symbols()
+    codes = compile_codes(doc(1), table)
+    assert codes[0][:2] == (
+        PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING,
+        "/body/steps/1/try_body/steps/0/idempotency",
+    )
+    # Control: the same graph without a retry compiles.
+    compile_process_ir_v1(parse_process_ir_v1(doc(0)), table)
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +517,7 @@ def test_no_pre_140_symbol_can_reach_the_connection_family_requirement():
         ("wss", "LISTEN"),
         ("database_v2", "Send"),
         ("exampleoemprod-X0TEST-example-dev", "PATCH"),
-        ("rest", "POST"),
+        ("rest", "PUT"),
         ("soap_client", "Send"),
     ],
 )
@@ -485,8 +570,8 @@ def test_an_authored_action_that_contradicts_the_operation_is_rejected():
 def test_the_unsupported_path_points_at_the_authored_action_when_there_is_one():
     """Path selection is not cosmetic: it sends the reader to the field they can
     actually change."""
-    table = rest_get_symbols(connector_type="rest", action_type="POST")
-    assert compile_codes(one_call_doc(action="POST"), table)[0][1] == "/body/steps/0/action"
+    table = rest_get_symbols(connector_type="rest", action_type="PUT")
+    assert compile_codes(one_call_doc(action="PUT"), table)[0][1] == "/body/steps/0/action"
     assert (
         compile_codes(one_call_doc(action=None), table)[0][1]
         == "/body/steps/0/operation_ref"

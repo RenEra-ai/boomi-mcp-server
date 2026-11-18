@@ -760,6 +760,7 @@
 "tests/test_process_ir_entrypoint_diagnostic_parity.py::test_the_matrix_is_a_total_grid_and_every_carrier_is_legal": 0.93,
 "tests/test_process_ir_models.py::test_kindless_node_fails_the_json_schema": 0.05,
 "tests/test_process_ir_models.py::test_private_codec_not_imported_by_package_import": 0.15,
+"tests/test_process_ir_notify_recovery.py::test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts[golden-000087-unsupported-action]": 127.41,
 "tests/test_process_ir_semantic_pipeline.py::test_the_report_is_byte_identical_across_processes": 0.52,
 "tests/test_process_ir_semantic_pipeline.py::test_the_report_matches_its_committed_oracle": 0.26,
 "tests/test_process_ir_served_text_enforcement.py::test_a_missing_table_entry_fails_the_raised_code_invariant": 2.82,
