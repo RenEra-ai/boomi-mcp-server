@@ -957,47 +957,79 @@ def connector_scope_notify_contracts():
 
 
 def plan_diagnostic_keys(plan_result):
-    """Every diagnostic a typed plan reported, as a comparable key:
-    ``(severity, code, "|"-joined cause codes, path, remediation-or-"")``.
+    """Every diagnostic a typed plan reported, as ``(bucket, canonical JSON)``.
 
-    The ACTUAL severity, never the list it arrived in (``warnings`` carries both
-    warnings and advisories). A diagnostic with no cause codes carries its
-    remediation too: nothing else tells the offline "lint did not run" advisory
-    from the "component plan could not be built from the account" one — same
-    code, empty path, no causes. A diagnostic WITH causes is told apart by them
-    and its path, so its served remediation is not copied here. Every slot is a
-    string (absent causes are ``""``), so a mismatch always sorts and reports.
+    DERIVED from the diagnostic model, not enumerated: every field
+    ``AuthoringDiagnosticV1`` serves is in the key — a field added or changed
+    moves it — plus the BUCKET it arrived in (``errors`` or ``warnings``), since
+    ``compile_authoring_request_v1`` refuses any non-empty ``errors`` whatever the
+    diagnostic's severity. Two fields are left out: ``message`` (prose), and the
+    ``remediation`` of a diagnostic that HAS cause codes (the causes, path and
+    contract entries identify it; copying served remediation here would be a
+    hand copy of it). A causeless diagnostic keeps its remediation, the only
+    field telling the offline "lint did not run" advisory from the "component
+    plan could not be built from the account" one. Keys are strings, so a
+    mismatch always sorts and reports.
     """
-    return {_plan_diagnostic_key(d) for d in tuple(plan_result.errors) + tuple(plan_result.warnings)}
+    return {
+        _plan_diagnostic_key(bucket, d.model_dump(mode="json"))
+        for bucket, group in (("errors", plan_result.errors), ("warnings", plan_result.warnings))
+        for d in group
+    }
 
 
-def _plan_diagnostic_key(d):
-    return (d.severity, d.code, "|".join(d.cause_codes or ()), d.path or "",
-            "" if d.cause_codes else (d.remediation or ""))
+def _plan_diagnostic_key(bucket, fields):
+    fields = dict(fields)
+    fields.pop("message", None)
+    if fields.get("cause_codes"):
+        fields.pop("remediation", None)
+    return (bucket, json.dumps(fields, sort_keys=True))
+
+
+def _expected_plan_keys(expected):
+    """``plan_diagnostic_keys`` form of an expected ``((bucket, fields), ...)``."""
+    return {_plan_diagnostic_key(bucket, fields) for bucket, fields in expected}
+
+
+def _offline_lint_not_run():
+    return {
+        "authoring_contract_entry_ids": [], "cause_codes": [],
+        "code": "AUTHORING_COMPILE_BLOCKED", "evidence": [], "node_identity": "",
+        "path": "", "severity": "advisory", "subject_id": "", "subject_kind": "component_plan",
+        "remediation": "Re-plan with an authenticated profile.",
+    }
 
 
 #: The plan diagnostic every OFFLINE plan carries: the component-plan lint (where
 #: builder preflight runs) needs an authenticated profile, so without an account
 #: the plan states that it did not run rather than reporting zero warnings.
-NOTIFY_OFFLINE_LINT_NOT_RUN = (
-    "advisory", "AUTHORING_COMPILE_BLOCKED", "", "", "Re-plan with an authenticated profile.",
-)
+NOTIFY_OFFLINE_LINT_NOT_RUN = ("warnings", _offline_lint_not_run())
 
 #: golden-000087's EXACT offline plan diagnostics: nothing but the lint statement.
-NOTIFY_DLQ_OFFLINE_DIAGNOSTICS = (NOTIFY_OFFLINE_LINT_NOT_RUN,)
+NOTIFY_DLQ_OFFLINE_DIAGNOSTICS = (("warnings", _offline_lint_not_run()),)
 
-#: golden-000086's EXACT offline plan diagnostics (``plan_diagnostic_keys`` form) —
-#: an allowlist, nothing else may appear. The error is the offline-contract limit:
-#: the key-reference contract is a symbol-table fact (no POST operation record in
-#: the packaged registry), attached after planning, so the plan cannot resolve it.
-#: The map warning: it has no typed effect declaration (``lineage.py``).
+#: golden-000086's EXACT offline plan diagnostics — an allowlist, nothing else
+#: may appear. The error is the offline-contract limit: the key-reference contract
+#: is a symbol-table fact (no POST operation record in the packaged registry),
+#: attached after planning, so the plan cannot resolve it. The map warning: it has
+#: no typed effect declaration (``lineage.py``).
 CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS = (
-    ("error", "AUTHORING_COMPILE_BLOCKED",
-     "PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",
-     "/body/steps/2/try_body/steps/0/idempotency", ""),
-    ("warning", "AUTHORING_COMPILE_BLOCKED",
-     "PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN", "/body/steps/1", ""),
-    NOTIFY_OFFLINE_LINT_NOT_RUN,
+    ("errors", {
+        "authoring_contract_entry_ids": ["diagnostic.process_ir_semantic_idempotency_evidence_missing"],
+        "cause_codes": ["PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING"],
+        "code": "AUTHORING_COMPILE_BLOCKED", "evidence": [],
+        "node_identity": "/body/steps/2/try_body/steps/0",
+        "path": "/body/steps/2/try_body/steps/0/idempotency", "severity": "error",
+        "subject_id": "notify_dlq", "subject_kind": "process",
+    }),
+    ("warnings", {
+        "authoring_contract_entry_ids": ["diagnostic.process_ir_semantic_lineage_effect_unknown"],
+        "cause_codes": ["PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN"],
+        "code": "AUTHORING_COMPILE_BLOCKED", "evidence": [{"key": "effect_kind", "value": "map"}],
+        "node_identity": "/body/steps/1", "path": "/body/steps/1", "severity": "warning",
+        "subject_id": "notify_dlq", "subject_kind": "process",
+    }),
+    ("warnings", _offline_lint_not_run()),
 )
 
 
@@ -1050,10 +1082,10 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
         profile="golden", account_id="golden",
     )
     if expected_diagnostics is not None:
-        expected = set(expected_diagnostics)
+        expected = _expected_plan_keys(expected_diagnostics)
         unexpected_errors = tuple(
             d for d in plan_result.errors
-            if _plan_diagnostic_key(d) not in expected
+            if _plan_diagnostic_key("errors", d.model_dump(mode="json")) not in expected
         )
         if unexpected_errors:
             raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, unexpected_errors)
@@ -1197,7 +1229,7 @@ def _case_try_catch_notify_dlq_document_cache():
         name=NOTIFY_DLQ_GOLDEN_NAME,
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(),
-        expected_diagnostics=frozenset(NOTIFY_DLQ_OFFLINE_DIAGNOSTICS),
+        expected_diagnostics=copy.deepcopy(NOTIFY_DLQ_OFFLINE_DIAGNOSTICS),
     )
 
 
@@ -1209,7 +1241,7 @@ def _case_connector_scoped_trycatch_notify():
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(include_map=True),
         contracts=connector_scope_notify_contracts(),
-        expected_diagnostics=frozenset(CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS),
+        expected_diagnostics=copy.deepcopy(CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS),
     )
 
 
@@ -1517,7 +1549,7 @@ def _canonical_envelope_case():
         plan_result, internals = plan_authoring_request_v1(
             request, profile="golden", account_id="golden")
         diagnostics = plan_diagnostic_keys(plan_result)
-        if diagnostics != {NOTIFY_OFFLINE_LINT_NOT_RUN}:
+        if diagnostics != _expected_plan_keys(copy.deepcopy((NOTIFY_OFFLINE_LINT_NOT_RUN,))):
             raise AssertionError("the M12.15 plan reported " + repr(sorted(diagnostics)))
         unit = internals.normalized.integration_spec.processes[0]
         symbols = internals.symbols
