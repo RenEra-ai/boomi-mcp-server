@@ -1751,6 +1751,7 @@ def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make, m
     would render the mutant instead. The emit-only path never runs the
     capability or idempotency checks (`SELF-156-r4-01`)."""
     from boomi_mcp.compiler.process_ir import lowering
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError
     from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
     from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
     from boomi_mcp.connector_replay.ids import authored_contract_ref
@@ -1767,11 +1768,17 @@ def test_the_notify_corpus_route_refuses_what_the_emit_only_path_accepts(make, m
         assert hasattr(_corpus, attribute), attribute
         monkeypatch.setattr(_corpus, attribute, value)
     renderer = _corpus.declared_renderer(case_id)
-    with pytest.raises(ProcessIRCompileError) as excinfo:
+    # Refused at whichever gate owns the defect: the public plan (an
+    # `AuthoringWorkflowError` whose diagnostics carry the code as a cause) or
+    # the compile (a `ProcessIRCompileError` carrying it as the code).
+    with pytest.raises((ProcessIRCompileError, AuthoringWorkflowError)) as excinfo:
         _corpus.render_golden_case(case_id, renderer)
-    assert (code, pointer) in {(d.code, d.path) for d in excinfo.value.diagnostics}, (
-        [(d.code, d.path) for d in excinfo.value.diagnostics]
-    )
+    reported = {
+        (reported_code, d.path)
+        for d in excinfo.value.diagnostics
+        for reported_code in (d.code, *(getattr(d, "cause_codes", None) or ()))
+    }
+    assert (code, pointer) in reported, sorted(reported)
 
     # The corpus holds the only published POST semantics id as a literal so it
     # imports nothing at load; pin it to its authority.

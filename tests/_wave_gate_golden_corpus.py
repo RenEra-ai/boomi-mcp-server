@@ -886,8 +886,8 @@ CONNECTOR_SCOPE_NOTIFY_DOCUMENT = {
 def notify_dlq_components():
     """golden-000087's supporting components, as a caller authors them: DB Get ->
     REST POST, cache. A FRESH list on every call. The renderer normalizes these
-    through the authoring workflow itself — ``_normalize_intent`` ->
-    ``_validate_processes`` — so every symbol fact (family, action, connection edge)
+    through the authoring workflow itself — the public typed plan
+    ``plan_authoring_request_v1`` — so every symbol fact (family, action, connection edge)
     is derived, and every component id starts as a placeholder that late binding
     must replace."""
     return [
@@ -956,17 +956,32 @@ def connector_scope_notify_contracts():
     )
 
 
-def _normalized_notify_case(document, components, *, name, folder_name, contracts=()):
-    """``(unit, symbols)`` from the authoring workflow's own normalization.
+#: The plan diagnostic every OFFLINE plan carries: the component-plan lint (where
+#: builder preflight runs) needs an authenticated profile, so without an account
+#: the plan states that it did not run (``workflow.py`` "Re-plan with an
+#: authenticated profile") rather than reporting zero warnings.
+NOTIFY_OFFLINE_LINT_NOT_RUN = ("warning", "AUTHORING_COMPILE_BLOCKED", None, "")
 
-    The unit envelope, its dependency keys and the supporting components go
-    through ``_normalize_intent``; the symbol table is the one the workflow
-    itself composes (``_validate_processes``), so its ids are PLACEHOLDERS and
-    every fact on it is the workflow's. ``contracts`` (idempotency evidence,
-    which no component carries) are the only facts attached afterwards.
-    """
-    from boomi_mcp.authoring.workflow import _normalize_intent, _validate_processes
-    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+#: golden-000087's EXACT offline plan diagnostics: nothing but the lint statement.
+NOTIFY_DLQ_OFFLINE_DIAGNOSTICS = (NOTIFY_OFFLINE_LINT_NOT_RUN,)
+
+#: golden-000086's EXACT offline plan diagnostics, each as
+#: ``(group, code, cause_codes or None, path)`` — an allowlist, nothing else may appear.
+#: The error is the offline-contract limit: the key-reference contract is a
+#: symbol-table fact (no POST operation record in the packaged registry), attached
+#: after planning, so the plan cannot resolve it. The map warning: it has no typed
+#: effect declaration (warning severity, ``lineage.py``).
+CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS = (
+    ("error", "AUTHORING_COMPILE_BLOCKED",
+     ("PROCESS_IR_SEMANTIC_IDEMPOTENCY_EVIDENCE_MISSING",),
+     "/body/steps/2/try_body/steps/0/idempotency"),
+    ("warning", "AUTHORING_COMPILE_BLOCKED",
+     ("PROCESS_IR_SEMANTIC_LINEAGE_EFFECT_UNKNOWN",), "/body/steps/1"),
+    NOTIFY_OFFLINE_LINT_NOT_RUN,
+)
+
+
+def _notify_request(document, components, *, name, folder_name):
     from boomi_mcp.models.authoring_workflow import (
         AuthoringRequestV1,
         ProcessIRAuthoringIntentV1,
@@ -984,20 +999,53 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
         ),
         process_ir=parse_process_ir_v1(document),
     )
-    request = AuthoringRequestV1(
+    return AuthoringRequestV1(
         intent=ProcessIRAuthoringIntentV1(
             integration_name="Notify DLQ", units=(unit,), components=tuple(components),
         )
     )
-    normalized = _normalize_intent(request)
-    spec = normalized.integration_spec
-    # The symbol table the typed authoring workflow ITSELF composes for this
-    # request (`_validate_processes`: the normalizer's connector metadata, the
-    # request-local connector-resolution snapshot, the roots as participants) —
-    # never re-assembled here, so no fact of it can drift from the workflow.
-    # Its diagnostics are not consulted: the compile below re-validates strictly,
-    # with the key-reference contract attached.
-    symbols = _validate_processes(normalized)[2]
+
+
+def _normalized_notify_case(document, components, *, name, folder_name, contracts=(),
+                            expected_diagnostics=None):
+    """``(unit, symbols)`` from the PUBLIC typed plan (``plan_authoring_request_v1``,
+    offline): normalization, the request-local connector-resolution snapshot,
+    semantic validation and the component-plan lint — the workflow's own unit
+    and symbol table, never re-assembled here, so its ids are PLACEHOLDERS and
+    every fact on it is the workflow's.
+
+    ``expected_diagnostics`` (when given) is the EXACT set of plan diagnostics
+    the case may carry; anything else is refused — an unexpected error raises the
+    same ``AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED)`` the public compile
+    raises. ``None`` skips the check (the emit-only derivations, which must see a
+    mutant's table). ``contracts`` (idempotency evidence, which no component
+    carries) are the only facts attached afterwards.
+    """
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError, plan_authoring_request_v1
+    from boomi_mcp.compiler.process_ir.contracts import SymbolTableV1
+    from boomi_mcp.errors import AUTHORING_COMPILE_BLOCKED
+
+    plan_result, internals = plan_authoring_request_v1(
+        _notify_request(document, components, name=name, folder_name=folder_name),
+        profile="golden", account_id="golden",
+    )
+    if expected_diagnostics is not None:
+        seen = {
+            (severity, d.code, tuple(d.cause_codes or ()) or None, d.path or "")
+            for severity, group in (("error", plan_result.errors), ("warning", plan_result.warnings))
+            for d in group
+        }
+        unexpected_errors = tuple(
+            d for d in plan_result.errors
+            if ("error", d.code, tuple(d.cause_codes or ()) or None, d.path or "") not in expected_diagnostics
+        )
+        if unexpected_errors:
+            raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, unexpected_errors)
+        if seen != set(expected_diagnostics):
+            raise AssertionError(
+                "the notify plan's diagnostics changed: {0!r}, expected {1!r}".format(
+                    sorted(seen), sorted(expected_diagnostics)))
+    symbols = internals.symbols
     if symbols is None:
         raise AssertionError("the workflow composed no symbol table for the notify case")
     if contracts:
@@ -1006,7 +1054,7 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
         carried = {field: getattr(symbols, field) for field in type(symbols).model_fields}
         carried["idempotency_contracts"] = tuple(symbols.idempotency_contracts) + tuple(contracts)
         symbols = SymbolTableV1(**carried)
-    return spec.processes[0], symbols
+    return internals.normalized.integration_spec.processes[0], symbols
 
 
 def _frozen_id_symbols(symbols, id_registry):
@@ -1069,11 +1117,11 @@ def notify_id_registry(include_map=False):
 
 
 def render_notify_canonical_case(document, components, *, name, folder_name, id_registry,
-                                 contracts=()):
+                                 contracts=(), expected_diagnostics):
     """The compile-gated canonical route for one Notify survivor.
 
-    authored unit + supporting components -> ``_normalize_intent`` ->
-    ``_validate_processes`` (its table, placeholder ids) -> ``build_materialization_plan``
+    authored unit + supporting components ->
+    ``plan_authoring_request_v1`` (its unit and table, placeholder ids, exact diagnostics) -> ``build_materialization_plan``
     (compiles through ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml``
     (late binding of the placeholders to ``id_registry``, the #180 effect-channel
     recompile, the complete component file). The caller hands COPIES; nothing
@@ -1089,6 +1137,7 @@ def render_notify_canonical_case(document, components, *, name, folder_name, id_
 
     unit, symbols = _normalized_notify_case(
         document, components, name=name, folder_name=folder_name, contracts=contracts,
+        expected_diagnostics=expected_diagnostics,
     )
     plan = build_materialization_plan(
         envelope=unit.envelope,
@@ -1131,6 +1180,7 @@ def _case_try_catch_notify_dlq_document_cache():
         name=NOTIFY_DLQ_GOLDEN_NAME,
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(),
+        expected_diagnostics=frozenset(NOTIFY_DLQ_OFFLINE_DIAGNOSTICS),
     )
 
 
@@ -1142,6 +1192,7 @@ def _case_connector_scoped_trycatch_notify():
         folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
         id_registry=notify_id_registry(include_map=True),
         contracts=connector_scope_notify_contracts(),
+        expected_diagnostics=frozenset(CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS),
     )
 
 
@@ -1386,7 +1437,7 @@ def _canonical_envelope_case():
         from boomi_mcp.authoring.process_materialization import (
             build_materialization_plan,
         )
-        from boomi_mcp.authoring.workflow import _normalize_intent
+        from boomi_mcp.authoring.workflow import plan_authoring_request_v1
         from boomi_mcp.categories.components.canonical_process_apply import (
             materialize_canonical_process_xml,
         )
@@ -1401,7 +1452,6 @@ def _canonical_envelope_case():
             ProcessComponentEnvelopeV1,
         )
         from boomi_mcp.models.process_ir import parse_process_ir_v1
-        from boomi_mcp.recipes.materialization import build_symbol_table
 
         # Inlined rather than imported from a test module: goldens must render
         # with every test module unimportable, and the corpus is the ONE
@@ -1443,14 +1493,21 @@ def _canonical_envelope_case():
                 components=(conn, op),
             )
         )
-        normalized = _normalize_intent(request)
-        spec = normalized.integration_spec
-        unit = spec.processes[0]
-        symbols = build_symbol_table(
-            list(spec.components),
-            process_keys=[u.envelope.component_key for u in spec.processes],
-            connector_metadata=normalized.connector_metadata,
-        )
+        # The public typed plan's own unit and symbol table (normalization, the
+        # request-local connector-resolution snapshot, semantic validation) — not
+        # a re-assembly, so a fact the workflow derives cannot drift from it. Its
+        # diagnostics must be exactly the offline lint statement.
+        plan_result, internals = plan_authoring_request_v1(
+            request, profile="golden", account_id="golden")
+        diagnostics = {
+            (group, d.code, tuple(d.cause_codes or ()) or None, d.path or "")
+            for group, items in (("error", plan_result.errors), ("warning", plan_result.warnings))
+            for d in items
+        }
+        if diagnostics != {NOTIFY_OFFLINE_LINT_NOT_RUN}:
+            raise AssertionError("the M12.15 plan reported " + repr(sorted(diagnostics)))
+        unit = internals.normalized.integration_spec.processes[0]
+        symbols = internals.symbols
         plan = build_materialization_plan(
             envelope=unit.envelope,
             process_ir=unit.process_ir,
@@ -1735,10 +1792,7 @@ def _issue180_effect_case(case):
     golden must render with every `test_*` module unimportable.
     """
     def render():
-        from boomi_mcp.authoring.workflow import (
-            _normalize_intent,
-            compile_authoring_request_v1,
-        )
+        from boomi_mcp.authoring.workflow import compile_authoring_request_v1
         from boomi_mcp.categories.components.canonical_process_apply import (
             materialize_canonical_process_xml,
         )
@@ -1757,7 +1811,6 @@ def _issue180_effect_case(case):
             ProcessComponentEnvelopeV1,
         )
         from boomi_mcp.models.process_ir import parse_process_ir_v1
-        from boomi_mcp.recipes.materialization import build_symbol_table
 
         # REST-only by necessity: the database connection in the sibling
         # fixtures is refused by the builder's own preflight, so a plan built on
@@ -1902,13 +1955,9 @@ def _issue180_effect_case(case):
             effect_declarations=declarations)
         _result, internals = compile_authoring_request_v1(
             request, profile="golden", account_id="golden")
-        normalized = _normalize_intent(request)
-        spec = normalized.integration_spec
-        symbols = build_symbol_table(
-            list(spec.components),
-            process_keys=[u.envelope.component_key for u in spec.processes],
-            connector_metadata=normalized.connector_metadata,
-        )
+        # The compile's own symbol table — the one its materialization plans
+        # were compiled against — never rebuilt for materialization.
+        symbols = internals.symbols
         return materialize_canonical_process_xml(
             plan=internals.materialization_plans["proc"],
             id_registry=registry,
