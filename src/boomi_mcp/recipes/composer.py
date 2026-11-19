@@ -7,9 +7,10 @@ invocations happened to be assembled:
 1. invocations are topologically sorted on their declared recipe dependencies,
    with ties broken by ``(recipe_id, parsed SemVer, invocation_id)``;
 2. each executor's returned contribution tuple keeps its own order;
-3. operations are applied in a FIXED PHASE sequence — roots, then linear
-   inserts, then Branch legs, then topology objects, then topology relations,
-   then components, then constraints.
+3. operations are applied in a FIXED PHASE sequence — the component-key
+   namespace check for process units, then roots (process units first, then
+   ``set_process_root``), then linear inserts, then Branch legs, then topology
+   objects, then topology relations, then components, then constraints.
 
 The phase sequence is what makes "append a leg" well-defined regardless of which
 recipe ran first: every root exists before any insert or append is attempted, and
@@ -35,6 +36,7 @@ from ..errors import (
     RECIPE_PATCH_CONFLICT,
     RECIPE_PATCH_TARGET_NOT_FOUND,
 )
+from ..models.process_component import ProcessAuthoringUnitV1
 from ..models.process_ir import (
     ProcessIRV1,
     ProcessIRValidationError,
@@ -93,6 +95,14 @@ class ComposedContributionsV1:
     #: materialization, constraint evaluation or hashing — the authoring
     #: workflow serves them beside the executable result.
     recorded_intents: Tuple[AttributedContributionV1, ...] = ()
+    #: #159 S1: every process-unit contribution's unit, keyed by its envelope's
+    #: ``component_key``, in contribution order — AFTER root patches applied. The
+    #: ``process_ir`` here is the same composed root ``process_roots`` lists under
+    #: that key; the envelope is the contributed one, unchanged.
+    process_units: Tuple[Tuple[str, ProcessAuthoringUnitV1], ...] = ()
+    #: #159 S1: the process-unit contributions as their recipes returned them,
+    #: with attribution, in contribution order.
+    process_unit_contributions: Tuple[AttributedContributionV1, ...] = ()
 
 
 def order_invocations(
@@ -331,8 +341,15 @@ def compose(
     *,
     direct_process_roots: Mapping[str, ProcessIRV1] = None,
     direct_topologies: Mapping[str, Dict[str, Any]] = None,
+    catalog_keys: Sequence[str] = (),
 ) -> ComposedContributionsV1:
-    """Apply every contribution in the fixed phase order."""
+    """Apply every contribution in the fixed phase order.
+
+    ``catalog_keys`` (#159 S1) are the component keys that already exist beside
+    the contributions — the private catalog's entries. Only their KEYS are read,
+    and only to keep a process unit from claiming one (see
+    ``_compose_unit_namespace``); omitting them skips that one check.
+    """
     # Validated BEFORE any classification, patching or root combination — the
     # inherited #149 item this slice discharges. See `_validated_direct_roots`.
     direct_roots = _validated_direct_roots(direct_process_roots)
@@ -361,12 +378,34 @@ def compose(
         for item in attributed
         if item.contribution.contribution_kind == "recorded_intent"
     ]
+    units = [
+        item
+        for item in attributed
+        if item.contribution.contribution_kind == "process_unit"
+    ]
 
-    roots = _compose_process_roots(process_patches, descriptors, direct_roots)
+    _compose_unit_namespace(
+        attributed, units, process_patches, components, direct_roots, catalog_keys
+    )
+    roots = _compose_process_roots(process_patches, descriptors, direct_roots, units)
     topologies = _compose_topologies(topology_patches, descriptors, direct_topos)
     ordered_components = _compose_components(components, descriptors)
     ordered_constraints = _compose_constraints(constraints, descriptors)
     ordered_recorded = _compose_recorded_intents(recorded, roots)
+
+    # Each unit is rebuilt around its COMPOSED root: root patches may have
+    # inserted steps or appended legs, and the root that compiles is the one
+    # ``process_roots`` lists. The envelope is the contributed object, unchanged.
+    composed_units = tuple(
+        (
+            item.contribution.unit.envelope.component_key,
+            ProcessAuthoringUnitV1(
+                envelope=item.contribution.unit.envelope,
+                process_ir=roots[item.contribution.unit.envelope.component_key],
+            ),
+        )
+        for item in units
+    )
 
     return ComposedContributionsV1(
         process_roots=tuple(roots.items()),
@@ -374,7 +413,86 @@ def compose(
         topologies=tuple(topologies.items()),
         constraints=tuple(ordered_constraints),
         recorded_intents=tuple(ordered_recorded),
+        process_units=composed_units,
+        process_unit_contributions=tuple(units),
     )
+
+
+def _compose_unit_namespace(
+    attributed: Sequence[AttributedContributionV1],
+    units: Sequence[AttributedContributionV1],
+    process_patches: Sequence[AttributedContributionV1],
+    components: Sequence[AttributedContributionV1],
+    direct_roots: Mapping[str, Any],
+    catalog_keys: Sequence[str],
+) -> None:
+    """Refuse a process unit whose key another writer already claims (#159 S1).
+
+    Process units, component slots, process roots and the catalog's components
+    share ONE component-key namespace. Every refusal is ``RECIPE_PATCH_CONFLICT``
+    naming both producers in contribution order (the earlier writer first):
+
+    * two units with one key;
+    * a unit and a ``set_process_root`` patch for one key, in either order;
+    * a unit and a direct-authored root for one key (the direct root is first);
+    * a unit and a component slot for one key, in either order;
+    * a unit whose key names a catalog component no slot contributed — the
+      existing component is the first producer, attributed to direct authoring.
+
+    The rules apply to unit keys ONLY. A ``set_process_root`` patch sharing its
+    key with a ``process``-typed component slot is the established legacy shape
+    (the slot carries the root's envelope material) and stays legal. Nothing
+    here merges or dedupes: an identical second writer is still a conflict.
+    """
+    if not units:
+        return
+
+    # Contribution order is the order of ``attributed`` itself: invocations
+    # already sorted deterministically, each executor's tuple in its own order.
+    position = {id(item): index for index, item in enumerate(attributed)}
+
+    def ordered_conflict(one, other, target):
+        first, second = sorted((one, other), key=lambda item: position[id(item)])
+        return _conflict(_producer(first), _producer(second), target=target)
+
+    unit_writers: Dict[str, AttributedContributionV1] = {}
+    for item in units:
+        key = item.contribution.unit.envelope.component_key
+        previous = unit_writers.get(key)
+        if previous is not None:
+            raise _conflict(_producer(previous), _producer(item), target=f"process:{key}/root")
+        if key in direct_roots:
+            raise _conflict(
+                (DIRECT_AUTHORING_PRODUCER, "", ""),
+                _producer(item),
+                target=f"process:{key}/root",
+            )
+        unit_writers[key] = item
+
+    for item in process_patches:
+        key = item.contribution.process_key
+        unit = unit_writers.get(key)
+        if unit is None:
+            continue
+        if any(operation.op == "set_process_root" for operation in item.contribution.operations):
+            raise ordered_conflict(unit, item, f"process:{key}/root")
+
+    slot_keys = set()
+    for item in components:
+        key = item.contribution.component_key
+        slot_keys.add(key)
+        unit = unit_writers.get(key)
+        if unit is not None:
+            raise ordered_conflict(unit, item, f"component:{key}")
+
+    for key in sorted(set(catalog_keys) - slot_keys):
+        unit = unit_writers.get(key)
+        if unit is not None:
+            raise _conflict(
+                (DIRECT_AUTHORING_PRODUCER, "", ""),
+                _producer(unit),
+                target=f"component:{key}",
+            )
 
 
 def _compose_recorded_intents(
@@ -428,6 +546,7 @@ def _compose_process_roots(
     patches: Sequence[AttributedContributionV1],
     descriptors: Mapping[Tuple[str, str], RecipeDescriptorV1],
     direct_roots: Dict[str, ProcessIRV1],
+    units: Sequence[AttributedContributionV1] = (),
 ) -> Dict[str, ProcessIRV1]:
     roots: Dict[str, Any] = {
         # `warnings=False`: AR2-01 — a ProcessIR root may have been mutated, and
@@ -439,7 +558,22 @@ def _compose_process_roots(
         key: (DIRECT_AUTHORING_PRODUCER, "", "") for key in direct_roots
     }
 
-    # Phase 1 — establish roots.
+    # Phase 1a — #159 S1: a process unit establishes its root. Seeded after the
+    # direct roots and before any ``set_process_root``, so phases 2 and 3 patch a
+    # unit's root exactly as they patch any other. ``_compose_unit_namespace``
+    # has already refused every key collision; the check here is the same rule
+    # phase 1b applies, kept so this function never overwrites a root silently.
+    for item in units:
+        key = item.contribution.unit.envelope.component_key
+        if key in roots:
+            raise _conflict(root_writers[key], _producer(item), target=f"process:{key}/root")
+        # `warnings=False` for the AR2-01 reason, as above.
+        roots[key] = item.contribution.unit.process_ir.model_dump(
+            mode="json", warnings=False
+        )
+        root_writers[key] = _producer(item)
+
+    # Phase 1b — establish roots from ``set_process_root``.
     for item in patches:
         for operation in item.contribution.operations:
             if operation.op != "set_process_root":

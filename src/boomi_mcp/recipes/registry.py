@@ -45,7 +45,10 @@ from ..errors import (
     RECIPE_REQUEST_INVALID,
     RECIPE_VERSION_UNAVAILABLE,
 )
-from ..models.recipe_contributions import RECIPE_COMPONENT_TYPES
+from ..models.recipe_contributions import (
+    RECIPE_COMPONENT_TYPES,
+    RECIPE_CONTRIBUTION_KINDS,
+)
 from .contracts import (
     ExpectedRecipeRegistryV1,
     RecipeCapabilityRequirementV1,
@@ -62,6 +65,11 @@ from .contracts import (
 from .errors import recipe_error
 
 _CANONICAL = dict(sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+#: Every contribution kind a registration may declare in ``output_types`` — the
+#: union's derived kinds, never a copy (``RecipeOutputType`` is pinned to the same
+#: tuple at import in ``contracts``).
+_DECLARABLE_OUTPUT_TYPES = frozenset(RECIPE_CONTRIBUTION_KINDS)
 
 #: Positive states, per authority. ``plannable-only`` is satisfied by the
 #: stronger ``emittable`` as well — a requirement says "at least this", and a
@@ -1161,13 +1169,13 @@ class RecipeRegistry:
         if has_executor:
             self._check_executor_shape(reg)
 
+        # DERIVED from the contribution union (issue #159 S1). This was a
+        # hand-copied set that had already drifted — it omitted
+        # ``recorded_intent``, so a recipe could not declare a kind the union and
+        # ``RecipeOutputType`` both admitted. Reading the derived tuple makes a
+        # new contribution kind declarable in the same commit that adds it.
         for output in reg.output_types:
-            if output not in {
-                "process_ir_patch",
-                "system_topology_patch",
-                "component_contribution",
-                "constraint_requirement",
-            }:
+            if output not in _DECLARABLE_OUTPUT_TYPES:
                 raise ValueError(
                     f"{reg.recipe_id!r} declares unknown output type {output!r}"
                 )

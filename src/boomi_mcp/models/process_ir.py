@@ -264,6 +264,42 @@ ComponentRefV1 = Annotated[
 ]
 
 
+def _validate_component_key(value: str) -> str:
+    """A component key: non-blank, untrimmed, control-character free.
+
+    Deliberately NOT normalized. Component keys are the join between a recipe's
+    contributions and the private materialization catalog, and a key that is
+    silently trimmed here would resolve against a catalog entry it does not
+    actually equal — the exact class of near-miss the header verification in
+    ``recipes.materialization`` exists to catch. Reject instead.
+    """
+    if not value or value != value.strip():
+        raise PydanticCustomError(
+            "recipe_component_key_invalid",
+            "component key must be non-blank and carry no surrounding whitespace",
+        )
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        raise PydanticCustomError(
+            "recipe_component_key_invalid",
+            "component key must not contain control characters",
+        )
+    return value
+
+
+#: Defined HERE, beside :data:`ComponentRefV1`, rather than in
+#: ``recipe_contributions`` (issue #159 S1). The process-unit contribution embeds
+#: ``ProcessAuthoringUnitV1``, whose envelope is keyed by this alias, so
+#: ``recipe_contributions`` must import ``process_component`` — and
+#: ``process_component`` importing the alias back from ``recipe_contributions``
+#: would be a cycle. ``recipe_contributions`` re-exports this SAME object, so
+#: every existing import keeps resolving to one alias and one validator.
+RecipeComponentKey = Annotated[
+    str,
+    AfterValidator(_validate_component_key),
+    Field(description="Semantic component key (the ComponentPlan dependency key)"),
+]
+
+
 def _carries_component_ref_validator(metadata) -> bool:
     return any(
         isinstance(meta, AfterValidator) and meta.func is _validate_component_ref

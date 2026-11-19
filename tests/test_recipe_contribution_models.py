@@ -113,6 +113,23 @@ _SAMPLES = {
             "kind": "timestamp",
         },
     },
+    # #159 S1: the sixth kind — one whole root plus its strict envelope. The
+    # sample declares a dependency edge so every round-trip test exercises the
+    # one positioned `depends_on` exemption.
+    "process_unit": {
+        "contribution_kind": "process_unit",
+        "version": "1",
+        "contribution_id": "c.unit",
+        "unit": {
+            "envelope": {
+                "component_key": "main_process",
+                "name": "Main process",
+                "action": "create",
+                "depends_on": ["child_process"],
+            },
+            "process_ir": _ROOT,
+        },
+    },
 }
 
 
@@ -135,9 +152,10 @@ def test_contribution_kinds_are_derived_from_the_union_not_hand_listed():
         get_args(m.model_fields["contribution_kind"].annotation)[0] for m in members
     )
     assert derived == RECIPE_CONTRIBUTION_KINDS
-    # Five since #157 added `recorded_intent` — the count is pinned so a sixth
-    # member is a deliberate decision here, not a silent widening.
-    assert len(RECIPE_CONTRIBUTION_KINDS) == 5
+    # Six since #159 S1 added `process_unit` (#157 added the fifth,
+    # `recorded_intent`) — the count is pinned so a seventh member is a
+    # deliberate decision here, not a silent widening.
+    assert len(RECIPE_CONTRIBUTION_KINDS) == 6
 
 
 @pytest.mark.parametrize("kind", sorted(_SAMPLES))
@@ -834,3 +852,157 @@ def test_the_version_gate_rejects_before_the_model_rather_than_through_it(bad):
     assert exc.value.diagnostics == (
         (RECIPE_CONTRIBUTION_INVALID, "/version", "unsupported_version"),
     )
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: the process-unit arm, its one positioned exemption, the key alias
+# ---------------------------------------------------------------------------
+
+
+def _unit_payload():
+    return json.loads(json.dumps(_SAMPLES["process_unit"]))
+
+
+def test_process_unit_arm_round_trips_a_strict_unit_with_typed_dependencies():
+    from boomi_mcp.models.process_component import ProcessAuthoringUnitV1
+
+    parsed = parse_recipe_contribution(_unit_payload())
+    assert isinstance(parsed, rc.ProcessUnitContributionV1)
+    assert isinstance(parsed.unit, ProcessAuthoringUnitV1)
+    assert parsed.unit.envelope.component_key == "main_process"
+    assert parsed.unit.envelope.depends_on == ("child_process",)
+    # The model_construct guard re-validates an instantiated unit through the
+    # same positioned exemption, so an executor-built unit with edges survives.
+    again = validate_contribution_object(parsed)
+    assert canonical_recipe_contribution_json(again) == canonical_recipe_contribution_json(
+        parsed
+    )
+
+
+def test_process_unit_refuses_a_lenient_or_incomplete_envelope():
+    """The arm carries the STRICT unit: no authored-envelope defaults reach it."""
+    for mutate in (
+        lambda p: p["unit"]["envelope"].pop("name"),
+        lambda p: p["unit"]["envelope"].update(component_prefix="Pfx"),
+        lambda p: p["unit"]["envelope"].update(depends_on=["main_process"]),
+        lambda p: p["unit"]["envelope"].update(depends_on=["a", "a"]),
+        lambda p: p["unit"].pop("process_ir"),
+    ):
+        payload = _unit_payload()
+        mutate(payload)
+        with pytest.raises(RecipeContributionValidationError):
+            parse_recipe_contribution(payload)
+
+
+def _put(payload, path, value):
+    node = payload
+    for part in path[:-1]:
+        node = node[part]
+    node[path[-1]] = value
+    return payload
+
+
+@pytest.mark.parametrize(
+    "build,pointer",
+    [
+        # beside the unit, at the contribution's top level
+        (lambda: _put(_unit_payload(), ("depends_on",), ["x"]), "/depends_on"),
+        # one level up from the exempt position
+        (lambda: _put(_unit_payload(), ("unit", "depends_on"), ["x"]), "/unit/depends_on"),
+        # inside the unit's ProcessIR
+        (
+            lambda: _put(
+                _unit_payload(),
+                ("unit", "process_ir", "body", "steps", 0, "depends_on"),
+                ["x"],
+            ),
+            "/unit/process_ir/body/steps/0/depends_on",
+        ),
+        # inside the envelope, one level below the exempt position
+        (
+            lambda: _put(
+                _unit_payload(),
+                ("unit", "envelope", "process_extensions"),
+                {"depends_on": ["x"]},
+            ),
+            "/unit/envelope/process_extensions/depends_on",
+        ),
+        # the exempt position itself, but not a key sequence
+        (
+            lambda: _put(
+                _unit_payload(), ("unit", "envelope", "depends_on"), {"k": "v"}
+            ),
+            "/unit/envelope/depends_on",
+        ),
+        # the same path on a DIFFERENT contribution kind
+        (
+            lambda: dict(
+                _SAMPLES["component_contribution"],
+                unit={"envelope": {"depends_on": ["x"]}},
+            ),
+            "/unit/envelope/depends_on",
+        ),
+    ],
+    ids=[
+        "top_level",
+        "unit_level",
+        "inside_process_ir",
+        "below_the_envelope",
+        "exempt_position_not_a_sequence",
+        "other_contribution_kind",
+    ],
+)
+def test_depends_on_is_admitted_only_at_the_unit_envelope_position(build, pointer):
+    """Non-vacuity control for the ONE positioned exemption (#159 S1, deviation 10).
+
+    The exemption admits ``/unit/envelope/depends_on`` on a process unit, as a
+    key sequence. Everywhere else — and in any other shape — the recursive scan
+    still refuses it as a forbidden field, before the model ever runs.
+    """
+    with pytest.raises(RecipeContributionValidationError) as exc:
+        parse_recipe_contribution(build())
+    assert exc.value.diagnostics == (
+        (RECIPE_CONTRIBUTION_INVALID, pointer, "forbidden_field"),
+    )
+
+
+def test_the_public_scan_and_raw_recipe_input_get_no_exemption():
+    """The exemption lives in the contribution PARSER only.
+
+    ``scan_forbidden_recipe_shape`` is also the raw recipe-input gate, and the
+    exact process-unit shape handed to it is still refused at the edge.
+    """
+    assert scan_forbidden_recipe_shape(_unit_payload()) == (
+        ("unit", "envelope", "depends_on"),
+        "forbidden_field",
+    )
+
+
+def test_the_unit_envelope_still_refuses_secret_shaped_keys():
+    payload = _put(_unit_payload(), ("unit", "envelope", "password"), "hunter2")
+    with pytest.raises(RecipeContributionValidationError) as exc:
+        parse_recipe_contribution(payload)
+    assert exc.value.diagnostics == (
+        (RECIPE_CONTRIBUTION_INVALID, "/unit/envelope/password", "secret_shaped_field"),
+    )
+    assert "hunter2" not in str(exc.value)
+
+
+def test_component_key_alias_is_one_object_across_modules():
+    """C5 / deviation 4: the alias MOVED to ``process_ir`` and is re-exported.
+
+    One object and one validator, wherever it is imported from, with the
+    original error code — a copy would be two rules that could drift apart.
+    """
+    from pydantic import TypeAdapter, ValidationError
+
+    from boomi_mcp.models import process_component, process_ir
+
+    assert rc.RecipeComponentKey is process_ir.RecipeComponentKey
+    assert process_component.RecipeComponentKey is process_ir.RecipeComponentKey
+    assert rc._validate_component_key is process_ir._validate_component_key
+    adapter = TypeAdapter(rc.RecipeComponentKey)
+    for bad in (" k", "a\x00b"):
+        with pytest.raises(ValidationError) as exc:
+            adapter.validate_python(bad)
+        assert exc.value.errors()[0]["type"] == "recipe_component_key_invalid"

@@ -68,6 +68,18 @@ class MaterializationCatalog:
     def slots(self) -> Tuple[str, ...]:
         return tuple(sorted(self._entries))
 
+    def component_keys(self) -> Tuple[str, ...]:
+        """The catalog entries' COMPONENT keys — sorted, unique, and nothing else.
+
+        Not the slot names: a compatibility adapter's slot name and the key of
+        the component in that slot differ. Keys are the caller's own semantic
+        identifiers (the ComponentPlan dependency keys), so returning them
+        exposes no configuration, credential or component body. The composer
+        reads them to keep a recipe-emitted process unit from claiming the key
+        of a component that already exists beside the contributions (#159 S1).
+        """
+        return tuple(sorted({component.key for component in self._entries.values()}))
+
     def resolve(
         self,
         slot: str,

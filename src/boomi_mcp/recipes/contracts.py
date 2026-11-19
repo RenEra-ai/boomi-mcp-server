@@ -64,6 +64,12 @@ from pydantic_core import PydanticCustomError
 
 from ..models.recipe_contributions import (
     RECIPE_CONTRIBUTION_KINDS,
+    # Server-produced run records (issue #159 S1). DEFINED in the model layer —
+    # the authoring result models serve them and ``models/`` must not import this
+    # package — and re-exported here as the same objects, beside the descriptor
+    # provenance they summarize.
+    RecipeInvocationProvenanceV1,
+    RecipeRunDiagnosticV1,
     RecipeSemanticId,
 )
 
@@ -154,12 +160,18 @@ RecipeEntryKind = Literal[
     "compatibility_adapter",
 ]
 
+#: Spelled out because ``Literal`` needs its members at type-check time. It is
+#: NOT a free-standing list: the import-time check at the bottom of this module
+#: pins it to ``RECIPE_CONTRIBUTION_KINDS`` (derived from the contribution union)
+#: in both directions, and the registry's output allowlist reads that derived
+#: tuple directly rather than a copy of this literal.
 RecipeOutputType = Literal[
     "process_ir_patch",
     "system_topology_patch",
     "component_contribution",
     "constraint_requirement",
     "recorded_intent",
+    "process_unit",
 ]
 
 RecipeCapabilityAuthority = Literal[
@@ -452,7 +464,7 @@ class RecipeRegistrySkewV1(_RecipeModel):
 
 # The registry's own literal must equal the union's derived kinds. Asserted at
 # IMPORT time, in the same spirit as the topology capability coverage check: a
-# fifth contribution type added to the union without a matching literal here
+# contribution type added to the union without a matching literal here
 # would otherwise be undeclarable, and the failure would surface as a confusing
 # validation error at some later call site instead of at the seam that broke.
 _DECLARED_OUTPUT_TYPES = frozenset(RecipeOutputType.__args__)  # type: ignore[attr-defined]
@@ -477,6 +489,7 @@ __all__ = [
     "RecipeExecutorV1",
     "RecipeImplementationMismatchV1",
     "RecipeInputBase",
+    "RecipeInvocationProvenanceV1",
     "RecipeMergeRule",
     "RecipeOutputType",
     "RecipePrerequisiteV1",
@@ -484,6 +497,7 @@ __all__ = [
     "RecipeReferenceV1",
     "RecipeRegistrationV1",
     "RecipeRegistrySkewV1",
+    "RecipeRunDiagnosticV1",
     "RecipeVersionMismatchV1",
     "SemVerString",
     "parse_semver",

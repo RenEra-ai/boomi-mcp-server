@@ -1,17 +1,19 @@
 """Strict typed recipe contributions (issue #145 M12.10).
 
-The FOUR — and only four — values a registered executable recipe may return:
+The SIX — and only six — values a registered executable recipe may return:
 
-* :class:`ProcessIRPatchV1`        — closed operations on one process's root
-* :class:`SystemTopologyPatchV1`   — closed additive operations on one topology
-* :class:`ComponentContributionV1` — a component the recipe wants materialized
-* :class:`ConstraintRequirementV1` — a requirement the canonical validators check
+* :class:`ProcessIRPatchV1`             — closed operations on one process's root
+* :class:`SystemTopologyPatchV1`        — closed additive operations on one topology
+* :class:`ComponentContributionV1`      — a component the recipe wants materialized
+* :class:`ConstraintRequirementV1`      — a requirement the canonical validators check
+* :class:`RecordedIntentContributionV1` — a recorded-not-wired declaration (#157)
+* :class:`ProcessUnitContributionV1`    — one whole process root plus its envelope (#159)
 
 Every model is strict (``extra="forbid"``), frozen, versioned, repr-redacted, and
 canonically serializable. Together they are a CLOSED discriminated union tagged by
 ``contribution_kind``.
 
-**Why a discriminator at all.** The four models have disjoint field sets, so a
+**Why a discriminator at all.** The models have disjoint field sets, so a
 plain ``Union`` would parse by trial and a near-miss payload could land in the
 wrong member with a confusing error. More importantly, a recipe descriptor
 DECLARES which contribution types it emits, and enforcing that declaration means
@@ -54,15 +56,25 @@ it (a recipe is code the registry vouches for, and vouching for arbitrary script
 text is exactly what "no LLM-generated Python" rules out), and component
 ``depends_on`` is rejected because materialization order is builder-derived, not
 recipe-authored.
+
+That ``depends_on`` refusal has exactly ONE positioned exception (issue #159 S1):
+the typed envelope of a process-unit contribution, at
+``/unit/envelope/depends_on``. The integration planner reads a process root's
+declared dependency edges and refuses a root whose required edges are missing, so
+a unit cannot be emitted without them. The exception is applied by
+:func:`parse_recipe_contribution` only, only for ``contribution_kind ==
+"process_unit"``, and only to a sequence of key strings; the recursive scan stays
+in force at every other position of every contribution, and a raw recipe INPUT
+gets no exception at all.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, List, Literal, Optional, Tuple, Union, get_args
+from types import MappingProxyType
+from typing import Annotated, Any, List, Literal, Mapping, Optional, Tuple, Union, get_args
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -74,11 +86,18 @@ from pydantic_core import PydanticCustomError
 
 from ..errors import RECIPE_CONTRIBUTION_INVALID
 from .governance_intent import RecordedIntentDeclarationV1
+from .process_component import ProcessAuthoringUnitV1
 from .process_ir import (
     BranchLegV1,
     ComponentRefV1,
     LinearNodeV1,
     ProcessIRV1,
+    # Defined in ``process_ir`` and re-exported here as the SAME objects (issue
+    # #159 S1): ``process_component`` keys its envelope by this alias, and this
+    # module now imports ``process_component``, so the definition had to move
+    # below both. ``composer`` and every recipe input keep importing it from here.
+    RecipeComponentKey,
+    _validate_component_key,
 )
 from .system_topology import (
     OpaquePlatformRefV1,
@@ -144,34 +163,6 @@ RecipeSemanticId = Annotated[
     Field(description="Lower-case semantic identifier chosen by the recipe author"),
 ]
 
-
-def _validate_component_key(value: str) -> str:
-    """A component key: non-blank, untrimmed, control-character free.
-
-    Deliberately NOT normalized. Component keys are the join between a recipe's
-    contributions and the private materialization catalog, and a key that is
-    silently trimmed here would resolve against a catalog entry it does not
-    actually equal — the exact class of near-miss the header verification in
-    ``recipes.materialization`` exists to catch. Reject instead.
-    """
-    if not value or value != value.strip():
-        raise PydanticCustomError(
-            "recipe_component_key_invalid",
-            "component key must be non-blank and carry no surrounding whitespace",
-        )
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
-        raise PydanticCustomError(
-            "recipe_component_key_invalid",
-            "component key must not contain control characters",
-        )
-    return value
-
-
-RecipeComponentKey = Annotated[
-    str,
-    AfterValidator(_validate_component_key),
-    Field(description="Semantic component key (the ComponentPlan dependency key)"),
-]
 
 #: The component types a recipe may contribute. A PINNED COPY of
 #: ``integration_builder._COMPONENT_NAME_PRIMARY_TYPES`` plus ``process``, not an
@@ -493,6 +484,37 @@ class RecordedIntentContributionV1(_RecipeContributionBase):
     status: Literal["recorded_not_wired"]
 
 
+class ProcessUnitContributionV1(_RecipeContributionBase):
+    """One whole process root plus the envelope that describes it (issue #159).
+
+    The sixth contribution kind. Where a ``set_process_root`` patch hands over a
+    bare root and leaves its name, action, folder and extension bindings to be
+    supplied elsewhere, a process unit carries the STRICT
+    :class:`~boomi_mcp.models.process_component.ProcessAuthoringUnitV1` — exactly
+    one ``ProcessIRV1`` root and exactly one envelope — so the recipe that built
+    the root also owns its governance. One authority per root.
+
+    The unit's ``envelope.component_key`` is the root's key in the shared
+    component-key namespace. The composer refuses a unit whose key is also
+    written by another unit, by a ``set_process_root`` patch, by a direct root,
+    by a component slot, or that names an existing catalog component; root
+    patches (``insert_root_linear_step``, ``append_root_terminal_leg``) apply to
+    a unit's root exactly as they do to any other root, and the envelope is
+    carried through unchanged.
+
+    ``unit.envelope.depends_on`` is the ONE position in any contribution where a
+    dependency edge may be authored: the integration planner reads a root's
+    declared edges and refuses a root whose required edges are missing. Only a
+    sequence of component keys is admitted there; ``depends_on`` anywhere else in
+    this or any other contribution is still refused by the forbidden-shape scan.
+    """
+
+    contribution_kind: Literal["process_unit"]
+    version: Literal["1"]
+    contribution_id: RecipeSemanticId
+    unit: ProcessAuthoringUnitV1
+
+
 # ---------------------------------------------------------------------------
 # The closed union
 # ---------------------------------------------------------------------------
@@ -504,6 +526,7 @@ RecipeContributionV1 = Annotated[
         ComponentContributionV1,
         ConstraintRequirementV1,
         RecordedIntentContributionV1,
+        ProcessUnitContributionV1,
     ],
     Field(discriminator="contribution_kind"),
 ]
@@ -511,14 +534,107 @@ RecipeContributionV1 = Annotated[
 _CONTRIBUTION_MEMBERS: Tuple[type, ...] = get_args(get_args(RecipeContributionV1)[0])
 
 #: DERIVED from the union, never hand-listed — the registry's ``output_types``
-#: literal is built from this, so a fifth contribution type cannot be added to
-#: the union without the registry learning about it in the same commit.
+#: allowlist is built from this and ``RecipeOutputType`` is pinned to it at
+#: import, so a new contribution type cannot be added to the union without the
+#: registry learning about it in the same commit.
 RECIPE_CONTRIBUTION_KINDS: Tuple[str, ...] = tuple(
     get_args(member.model_fields["contribution_kind"].annotation)[0]
     for member in _CONTRIBUTION_MEMBERS
 )
 
 _KIND_TO_MODEL = dict(zip(RECIPE_CONTRIBUTION_KINDS, _CONTRIBUTION_MEMBERS))
+
+
+# ---------------------------------------------------------------------------
+# Server-produced run records (issue #159 S1)
+# ---------------------------------------------------------------------------
+#
+# Neither model below is a contribution: a recipe never returns one, and neither
+# is a member of ``RecipeContributionV1``. They are what the SERVER records about
+# a run. They live in the model layer, not in ``recipes.contracts``, because the
+# authoring result models serve them and ``models/`` must not import the
+# ``recipes`` package (whose ``__init__`` pulls in the engine and the registry).
+# ``recipes.contracts`` re-exports both.
+
+
+class RecipeInvocationProvenanceV1(_RecipeContributionBase):
+    """Which registered code one recipe invocation actually ran.
+
+    Every field except ``invocation_id`` is copied from the descriptor the
+    REGISTRY resolved for the invocation, never from the request: a request that
+    named no version and one that pinned the default version resolve to the same
+    descriptor and therefore record the same provenance. ``invocation_id`` is the
+    caller's own identifier for the invocation, returned to the caller.
+
+    Carries no recipe input, no contribution and no component material — only
+    the identity of the code that produced them.
+    """
+
+    invocation_id: str = Field(
+        ...,
+        description="The caller-chosen invocation_id of the invocation this record describes",
+    )
+    recipe_id: RecipeSemanticId
+    recipe_version: str = Field(
+        ...,
+        min_length=1,
+        description="The SemVer version of the descriptor the registry resolved",
+    )
+    entry_kind: str = Field(
+        ...,
+        min_length=1,
+        description="The resolved descriptor's entry kind",
+    )
+    implementation_sha256: str = Field(
+        ...,
+        min_length=64,
+        max_length=64,
+        description=(
+            "The registry-derived digest of the resolved recipe's implementation"
+        ),
+    )
+    source_revision: str = Field(
+        ...,
+        min_length=1,
+        description="The registry-derived source revision of the recipe layer",
+    )
+
+
+class RecipeRunDiagnosticV1(_RecipeContributionBase):
+    """One informational, value-free record about a recipe's assembled output.
+
+    Not a failure: a hard failure is a ``RecipeError`` and stops the run. This
+    record names, for one Branch leg of one recipe-assembled process, which
+    recipe invocation produced the leg and which semantic part of the recipe's
+    input it realizes, so a caller can trace an emitted leg back to its source.
+
+    Every field is a closed literal, a registered identifier, the caller's own
+    invocation id, a semantic key from the caller's own request, or a position.
+    None carries a configuration value, a credential, or component material.
+    """
+
+    code: Literal["RECIPE_LEG_PROVENANCE"]
+    invocation_id: str = Field(
+        ...,
+        description="The caller-chosen invocation_id of the producing invocation",
+    )
+    recipe_id: RecipeSemanticId
+    recipe_version: str = Field(
+        ...,
+        min_length=1,
+        description="The SemVer version of the producing recipe, as resolved",
+    )
+    process_key: RecipeComponentKey
+    ordinal: int = Field(
+        ...,
+        ge=1,
+        description="1-based position of the leg on the root's terminal Branch",
+    )
+    part_key: str = Field(
+        ...,
+        min_length=1,
+        description="The semantic part key, from the recipe input, the leg realizes",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -719,30 +835,67 @@ def scan_forbidden_recipe_shape(
     A ``None`` value is not a violation — an optional field that is simply absent
     carries nothing. An empty container is likewise nothing. Anything else under
     a forbidden key is.
+
+    This public scan has NO exemption. It is also the gate a raw recipe input
+    passes, and the one positioned exception the contribution parser applies
+    (``/unit/envelope/depends_on`` on a process unit) is applied by
+    :func:`parse_recipe_contribution` through a private entry point, never here.
+    """
+    return _scan_forbidden_shape(payload, _path, frozenset())
+
+
+#: The ONLY exact positions, as root-anchored structural paths, where a
+#: contribution may carry a key the scan otherwise forbids — keyed by the
+#: ``contribution_kind`` that earns the exception. Exactly one today (issue #159
+#: S1): a process unit's typed envelope declares the root's dependency edges,
+#: because the integration planner reads them and refuses a root whose required
+#: edges are missing.
+_POSITIONED_EXEMPTIONS: Mapping[str, frozenset] = MappingProxyType(
+    {"process_unit": frozenset({("unit", "envelope", "depends_on")})}
+)
+
+
+def _is_key_sequence(value: Any) -> bool:
+    """A list or tuple whose every item is a string — the typed key-sequence shape."""
+    return isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value)
+
+
+def _scan_forbidden_shape(
+    payload: Any, _path: Tuple[Any, ...], exempt: frozenset
+) -> Optional[Tuple[Tuple[Any, ...], str]]:
+    """The scan itself. ``exempt`` holds root-anchored paths whose KEY is admitted.
+
+    An exempt position admits its key only when the value there is a sequence of
+    strings (the typed key-sequence shape). Any other value at that position is
+    judged by the ordinary rules, so the exemption cannot carry a mapping, a
+    nested structure, or anything else past the scan.
     """
     if isinstance(payload, dict):
         for key, value in payload.items():
             if isinstance(key, str):
+                here = _path + (key,)
+                if here in exempt and _is_key_sequence(value):
+                    continue
                 if key in _ALLOWED_KEYS:
-                    found = scan_forbidden_recipe_shape(value, _path + (key,))
+                    found = _scan_forbidden_shape(value, here, exempt)
                     if found is not None:
                         return found
                     continue
                 lowered = key.lower()
                 if key in _FORBIDDEN_EXACT_KEYS:
                     if value is not None and value != "" and value != [] and value != {}:
-                        return _path + (key,), "forbidden_field"
+                        return here, "forbidden_field"
                     continue
                 if any(sub in lowered for sub in _FORBIDDEN_KEY_SUBSTRINGS):
                     if value is not None and value != "" and value != [] and value != {}:
-                        return _path + (key,), "secret_shaped_field"
+                        return here, "secret_shaped_field"
                     continue
-            found = scan_forbidden_recipe_shape(value, _path + (key,))
+            found = _scan_forbidden_shape(value, _path + (key,), exempt)
             if found is not None:
                 return found
     elif isinstance(payload, list):
         for index, item in enumerate(payload):
-            found = scan_forbidden_recipe_shape(item, _path + (index,))
+            found = _scan_forbidden_shape(item, _path + (index,), exempt)
             if found is not None:
                 return found
     return None
@@ -904,7 +1057,16 @@ def parse_recipe_contribution(payload: Any) -> Any:
             ((RECIPE_CONTRIBUTION_INVALID, "/", "payload_not_an_object"),)
         )
 
-    found = scan_forbidden_recipe_shape(payload)
+    # The positioned exemption is chosen by the payload's OWN kind, read with an
+    # ``isinstance`` guard first (an unhashable or look-alike kind must not reach
+    # the lookup). Any other kind — or none — is scanned with no exemption.
+    claimed_kind = payload.get("contribution_kind")
+    exempt = (
+        _POSITIONED_EXEMPTIONS.get(claimed_kind, frozenset())
+        if type(claimed_kind) is str
+        else frozenset()
+    )
+    found = _scan_forbidden_shape(payload, (), exempt)
     if found is not None:
         path, reason = found
         raise RecipeContributionValidationError(
@@ -1020,11 +1182,15 @@ __all__ = [
     "InsertRootLinearStepV1",
     "ProcessIRPatchOperationV1",
     "ProcessIRPatchV1",
+    "ProcessUnitContributionV1",
     "RecipeComponentKey",
     "RecipeComponentType",
     "RecipeContributionV1",
     "RecipeContributionValidationError",
+    "RecipeInvocationProvenanceV1",
+    "RecipeRunDiagnosticV1",
     "RecipeSemanticId",
+    "RecordedIntentContributionV1",
     "RequireCapabilityV1",
     "RequireComponentV1",
     "RequireProcessV1",

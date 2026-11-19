@@ -772,3 +772,362 @@ def test_an_internal_bug_in_the_process_parser_propagates_as_itself():
     ):
         with pytest.raises(RuntimeError, match="internal bug"):
             compose(contributions, _descriptors(("r.one", ())))
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: process units in the shared component-key namespace
+# ---------------------------------------------------------------------------
+
+
+def _unit_contribution(
+    key=PROCESS, contribution_id="c.unit", with_branch=False, depends_on=(), name="Unit"
+):
+    return parse_recipe_contribution(
+        {
+            "contribution_kind": "process_unit",
+            "version": "1",
+            "contribution_id": contribution_id,
+            "unit": {
+                "envelope": {
+                    "component_key": key,
+                    "name": name,
+                    "action": "create",
+                    "folder_name": "Unit Folder",
+                    "description": "a recipe-owned root",
+                    "depends_on": list(depends_on),
+                    "process_extensions": {
+                        "connections": [
+                            {
+                                "connection_id": "$ref:src_conn",
+                                "fields": [{"id": "url", "label": "URL"}],
+                            }
+                        ]
+                    },
+                },
+                "process_ir": _linear_root(with_branch),
+            },
+        }
+    )
+
+
+def _slot_contribution(key, slot="slot.k", component_type="process"):
+    return parse_recipe_contribution(
+        {
+            "contribution_kind": "component_contribution",
+            "version": "1",
+            "contribution_id": "c.slot",
+            "component_key": key,
+            "component_type": component_type,
+            "materialization_mode": "create",
+            "materializer_slot": slot,
+        }
+    )
+
+
+_UNIT_NAMESPACE_CASES = {
+    # two units claiming one key
+    "duplicate_unit": dict(
+        attributed=lambda: [
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i1"),
+            _attributed(_unit_contribution(), recipe_id="r.two", invocation="i2"),
+        ],
+        expected=(("r.one", "r.two"), ("i1", "i2")),
+        target=f"process:{PROCESS}/root",
+    ),
+    # a unit, then a set_process_root for its key
+    "unit_vs_set_root": dict(
+        attributed=lambda: [
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i1"),
+            _attributed(_root_patch(), recipe_id="r.two", invocation="i2"),
+        ],
+        expected=(("r.one", "r.two"), ("i1", "i2")),
+        target=f"process:{PROCESS}/root",
+    ),
+    # the reverse order: the root patch is the FIRST writer
+    "set_root_vs_unit": dict(
+        attributed=lambda: [
+            _attributed(_root_patch(), recipe_id="r.two", invocation="i1"),
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i2"),
+        ],
+        expected=(("r.two", "r.one"), ("i1", "i2")),
+        target=f"process:{PROCESS}/root",
+    ),
+    # a unit claiming a direct-authored root's key
+    "unit_vs_direct_root": dict(
+        attributed=lambda: [
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i1"),
+        ],
+        direct=True,
+        expected=((DIRECT_AUTHORING_PRODUCER, "r.one"), ("", "i1")),
+        target=f"process:{PROCESS}/root",
+    ),
+    # a unit and a component slot for one key (shared namespace)
+    "unit_vs_slot": dict(
+        attributed=lambda: [
+            _attributed(_slot_contribution(PROCESS), recipe_id="r.two", invocation="i1"),
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i2"),
+        ],
+        expected=(("r.two", "r.one"), ("i1", "i2")),
+        target=f"component:{PROCESS}",
+    ),
+    # a unit naming an existing catalog component no slot contributed
+    "unit_vs_catalog_key": dict(
+        attributed=lambda: [
+            _attributed(_unit_contribution(), recipe_id="r.one", invocation="i1"),
+        ],
+        catalog_keys=(PROCESS, "unrelated"),
+        expected=((DIRECT_AUTHORING_PRODUCER, "r.one"), ("", "i1")),
+        target=f"component:{PROCESS}",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_UNIT_NAMESPACE_CASES))
+def test_direct_unit_namespace_collisions_are_conflicts(case):
+    spec = _UNIT_NAMESPACE_CASES[case]
+    with pytest.raises(RecipeError) as exc:
+        compose(
+            spec["attributed"](),
+            _descriptors(("r.one", ()), ("r.two", ())),
+            direct_process_roots=(
+                {PROCESS: parse_process_ir_v1(_linear_root())} if spec.get("direct") else None
+            ),
+            catalog_keys=spec.get("catalog_keys", ()),
+        )
+    (diagnostic,) = exc.value.diagnostics
+    assert diagnostic.code == RECIPE_PATCH_CONFLICT
+    assert diagnostic.phase == "composition"
+    assert diagnostic.target == spec["target"]
+    assert (diagnostic.recipe_ids, diagnostic.invocation_ids) == spec["expected"]
+
+
+def test_the_namespace_rules_bind_unit_keys_only():
+    """The legacy shape — a ``set_process_root`` sharing its key with a ``process``
+    slot, and a catalog holding that key — stays legal beside an unrelated unit.
+    Without this control a rule widened to every root would pass the conflict
+    cases above while breaking every sync preset."""
+    composed = compose(
+        [
+            _attributed(_slot_contribution(PROCESS), invocation="i1", index=0),
+            _attributed(_root_patch(), invocation="i1", index=1),
+            _attributed(_unit_contribution(key="other_process"), invocation="i1", index=2),
+        ],
+        _descriptors(("r.one", ())),
+        catalog_keys=(PROCESS,),
+    )
+    # Unit roots are established before ``set_process_root`` roots (phase 1a).
+    assert [key for key, _ in composed.process_roots] == ["other_process", PROCESS]
+    assert [key for key, _ in composed.process_units] == ["other_process"]
+    assert [item.contribution.component_key for item in composed.component_slots] == [PROCESS]
+
+
+def test_root_patches_apply_to_a_unit_ir_and_preserve_its_envelope():
+    """A unit's root is patched exactly like a ``set_process_root`` root, and its
+    envelope is carried through byte for byte."""
+    rules = ("append_root_terminal_leg", "insert_root_linear_step")
+    unit = _unit_contribution(with_branch=True, depends_on=("child_process",))
+    via_unit = compose(
+        [
+            _attributed(unit, index=0),
+            _attributed(_insert_patch(), index=1),
+            _attributed(_leg_patch(), index=2),
+        ],
+        _descriptors(("r.one", rules)),
+    )
+    via_root = compose(
+        [
+            _attributed(_root_patch(with_branch=True), index=0),
+            _attributed(_insert_patch(), index=1),
+            _attributed(_leg_patch(), index=2),
+        ],
+        _descriptors(("r.one", rules)),
+    )
+    (key, composed_unit), = via_unit.process_units
+    assert key == PROCESS
+    root = dict(via_unit.process_roots)[PROCESS]
+    # The unit's root IS the composed root, with both patches applied...
+    assert composed_unit.process_ir.model_dump(mode="json") == root.model_dump(mode="json")
+    assert [s.kind for s in root.body.steps] == ["source", "map_ref", "message", "branch"]
+    assert len(root.body.steps[-1].legs) == 3
+    # ...in the same order a set_process_root root gets them.
+    assert root.model_dump(mode="json") == dict(via_root.process_roots)[PROCESS].model_dump(
+        mode="json"
+    )
+    # The envelope is the contributed one, unchanged.
+    assert composed_unit.envelope.model_dump(mode="json") == unit.unit.envelope.model_dump(
+        mode="json"
+    )
+    assert composed_unit.envelope.depends_on == ("child_process",)
+    assert via_unit.process_unit_contributions[0].contribution is unit
+
+
+def test_a_recorded_intent_may_target_a_unit_root():
+    """Recorded intents check ownership against the composed roots, units included."""
+    recorded = parse_recipe_contribution(
+        {
+            "contribution_kind": "recorded_intent",
+            "version": "1",
+            "intent_id": "hint.a",
+            "process_key": PROCESS,
+            "status": "recorded_not_wired",
+            "declaration": {"declaration_kind": "runtime_hint", "hint_kind": "note", "value": "x"},
+        }
+    )
+    composed = compose(
+        [_attributed(_unit_contribution(), index=0), _attributed(recorded, index=1)],
+        _descriptors(("r.one", ())),
+    )
+    assert [item.contribution.intent_id for item in composed.recorded_intents] == ["hint.a"]
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: process units and supporting components through the ENGINE
+# ---------------------------------------------------------------------------
+
+
+def _unit_executor(inp):
+    """Emit one process unit whose root reads ``conn``/``op`` and declares both edges."""
+    return (
+        parse_recipe_contribution(
+            {
+                "contribution_kind": "process_unit",
+                "version": "1",
+                "contribution_id": "c.unit",
+                "unit": {
+                    "envelope": {
+                        "component_key": inp.process_key,
+                        "name": "Recipe unit",
+                        "action": "create",
+                        "folder_name": "Recipe Folder",
+                        "depends_on": ["conn", "op"],
+                    },
+                    "process_ir": {
+                        "version": "1",
+                        "body": {
+                            "kind": "sequence",
+                            "steps": [
+                                {
+                                    "kind": "source",
+                                    "connection_ref": "$ref:conn",
+                                    "operation_ref": "$ref:op",
+                                },
+                                {"kind": "message", "text": "hello"},
+                                {"kind": "return_documents"},
+                            ],
+                        },
+                    },
+                },
+            }
+        ),
+    )
+
+
+def _unit_registry():
+    return build_test_registry(
+        (
+            RecipeRegistrationV1(
+                recipe_id="r.unit",
+                recipe_version="1.0.0",
+                entry_kind="executable_recipe",
+                is_default=True,
+                input_model=SyncRecipeInputV1,
+                executor=_unit_executor,
+                output_types=("process_unit",),
+                conflict_policy=RecipeConflictPolicyV1(),
+            ),
+        )
+    )
+
+
+def _supporting_specs(*overrides):
+    import copy as _copy
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    specs = [_copy.deepcopy(APPLIABLE_CONN), _copy.deepcopy(APPLIABLE_OP)]
+    specs.extend(_copy.deepcopy(item) for item in overrides)
+    return [IntegrationComponentSpec(**spec) for spec in specs]
+
+
+def _run_unit(supporting, process_key="p"):
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeRequestV1, run_recipes
+
+    raw = dict(_ENGINE_INPUT, process_key=process_key)
+    return run_recipes(
+        [RecipeRequestV1(recipe_id="r.unit", invocation_id="i1", raw_input=raw)],
+        catalog=MaterializationCatalog({}),
+        registry=_unit_registry(),
+        supporting_components=supporting,
+        connector_metadata={"conn": ("rest", None), "op": ("rest", "GET")},
+    )
+
+
+def test_run_recipes_compiles_a_recipe_emitted_unit_against_supporting_components():
+    supporting = _supporting_specs()
+    result = _run_unit(supporting)
+    (unit,) = result.process_units
+    assert unit.envelope.component_key == "p"
+    assert unit.envelope.folder_name == "Recipe Folder"
+    assert unit.envelope.depends_on == ("conn", "op")
+    assert [key for key, _artifact in result.process_artifacts] == ["p"]
+    # ``components`` still means the resolved catalog slots — none here — and the
+    # trusted supporting specs ride beside them, unchanged.
+    assert result.components == ()
+    assert result.supporting_components == tuple(supporting)
+
+
+def test_the_engine_hands_recipe_units_to_the_write_conflict_check(monkeypatch):
+    """A unit's envelope (update / create-by-name) makes it a write participant."""
+    from boomi_mcp.recipes import engine
+
+    seen = {}
+    real = engine.build_symbol_table
+
+    def spy(components, **kwargs):
+        seen["processes"] = tuple(kwargs.get("processes", ()))
+        seen["process_keys"] = tuple(kwargs.get("process_keys", ()))
+        return real(components, **kwargs)
+
+    monkeypatch.setattr(engine, "build_symbol_table", spy)
+    result = _run_unit(_supporting_specs())
+    assert seen["processes"] == result.process_units
+    assert seen["process_keys"] == ("p",)
+
+
+def test_a_unit_may_not_claim_a_supporting_component_key():
+    spare = {
+        "key": "spare",
+        "type": "connector-settings",
+        "name": "Spare conn",
+        "action": "create",
+        "config": {"connector_type": "rest", "base_url": "https://spare.example.invalid"},
+    }
+    with pytest.raises(RecipeError) as exc:
+        _run_unit(_supporting_specs(spare), process_key="spare")
+    (diagnostic,) = exc.value.diagnostics
+    assert diagnostic.code == RECIPE_PATCH_CONFLICT
+    assert diagnostic.target == "component:spare"
+    assert diagnostic.recipe_ids == (DIRECT_AUTHORING_PRODUCER, "r.unit")
+
+
+def test_two_specs_for_one_component_key_are_refused():
+    from boomi_mcp.errors import RECIPE_CONSTRAINT_FAILED
+
+    duplicate = {
+        "key": "op",
+        "type": "connector-action",
+        "name": "Other op",
+        "action": "create",
+        "config": {"connector_type": "rest", "connection_ref_key": "conn"},
+    }
+    with pytest.raises(RecipeError) as exc:
+        _run_unit(_supporting_specs(duplicate))
+    (diagnostic,) = exc.value.diagnostics
+    assert diagnostic.code == RECIPE_CONSTRAINT_FAILED
+    assert diagnostic.target == "component:op"
+    assert diagnostic.cause_codes == ("INTEGRATION_COMPONENT_KEY_DUPLICATE",)
+    # Value-free: the diagnostic names the key, never a spec's content.
+    assert "Other op" not in str(exc.value) and "Other op" not in repr(diagnostic)

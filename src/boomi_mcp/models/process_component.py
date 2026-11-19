@@ -54,8 +54,10 @@ from .governance_intent import (
     WatermarkDeclarationV1,
     reject_retired_spellings,
 )
-from .process_ir import ComponentRefV1, ProcessIRV1
-from .recipe_contributions import RecipeComponentKey
+# The key alias lives in ``process_ir`` (issue #159 S1): importing it from
+# ``recipe_contributions`` would cycle, because that module embeds
+# ``ProcessAuthoringUnitV1`` in its process-unit contribution.
+from .process_ir import ComponentRefV1, ProcessIRV1, RecipeComponentKey
 
 #: Fields safe to expose in a repr: discriminators only. Mirrors
 #: ``models.process_ir._REPR_SAFE_FIELDS`` and exists for the same reason — an

@@ -4876,3 +4876,179 @@ def test_a_built_registry_exposes_no_writable_mappings():
     nested = next(iter(registry.declared_shape().values()))
     with pytest.raises(TypeError):
         nested["injected"] = None  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: declarable outputs are the union's kinds; typed invocation provenance
+# ---------------------------------------------------------------------------
+
+
+def test_output_type_allowlist_is_the_contribution_union():
+    """C4 / deviation 3: the registry's allowlist is DERIVED, not hand-copied.
+
+    The copied set had already drifted — it omitted ``recorded_intent``, which the
+    union and ``RecipeOutputType`` both admitted, so no registration could declare
+    it. Every kind of the union is now declarable by a valid executable
+    registration, and anything else is still refused at construction.
+    """
+    from boomi_mcp.models.recipe_contributions import RECIPE_CONTRIBUTION_KINDS
+
+    build_test_registry(
+        (_reg(output_types=tuple(sorted(RECIPE_CONTRIBUTION_KINDS))),)
+    )
+    build_test_registry(
+        (_reg(output_types=("process_ir_patch", "recorded_intent")),)
+    )
+    with pytest.raises(ValueError):
+        build_test_registry((_reg(output_types=("bogus", "process_ir_patch")),))
+
+
+def test_output_type_literal_matches_the_union_both_ways():
+    from typing import get_args
+
+    from boomi_mcp.models.recipe_contributions import RECIPE_CONTRIBUTION_KINDS
+    from boomi_mcp.recipes.contracts import RecipeOutputType
+
+    assert set(get_args(RecipeOutputType)) == set(RECIPE_CONTRIBUTION_KINDS)
+    assert len(get_args(RecipeOutputType)) == len(RECIPE_CONTRIBUTION_KINDS)
+    assert registry_module._DECLARABLE_OUTPUT_TYPES == frozenset(RECIPE_CONTRIBUTION_KINDS)
+
+
+def _capability_only_executor(inp):
+    """One positive capability requirement — needs no component to evaluate."""
+    from boomi_mcp.models.recipe_contributions import parse_recipe_contribution
+
+    return (
+        parse_recipe_contribution(
+            {
+                "contribution_kind": "constraint_requirement",
+                "version": "1",
+                "requirement_id": "req.capability",
+                "requirement": {
+                    "kind": "capability",
+                    "authority": "process_ir",
+                    "subject": "rich_branch_decision_bodies",
+                    "required_state": "supported",
+                },
+            }
+        ),
+    )
+
+
+_PROVENANCE_SENTINEL = "SENTINEL-c9-provenance-7f3a"
+
+
+def test_invocation_provenance_is_registry_computed_and_carries_no_input():
+    """C7 / C9: one typed record per invocation, from the RESOLVED descriptor.
+
+    No raw input reaches it; a request that names no version and one that pins
+    the default resolve to one descriptor and record identical provenance; and
+    the established ``provenance`` mapping is derived from the records with its
+    exact historical shape (no ``source_revision`` key, same key order).
+    """
+    from boomi_mcp.models.recipe_contributions import RecipeInvocationProvenanceV1
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeRequestV1, run_recipes
+    from boomi_mcp.recipes import contracts
+
+    # Re-exported from ``recipes.contracts`` as the SAME object.
+    assert contracts.RecipeInvocationProvenanceV1 is RecipeInvocationProvenanceV1
+
+    registrations = tuple(
+        RecipeRegistrationV1(
+            recipe_id="r.prov",
+            recipe_version=version,
+            entry_kind="constraint_only",
+            is_default=version == "1.0.0",
+            input_model=SyncRecipeInputV1,
+            executor=_capability_only_executor,
+            output_types=("constraint_requirement",),
+            # Both versions emit one identical requirement; declaring the dedupe
+            # rule lets two invocations share a run.
+            conflict_policy=RecipeConflictPolicyV1(
+                merge_rules=("dedupe_identical_constraint",)
+            ),
+        )
+        for version in ("1.0.0", "2.0.0")
+    )
+    registry = build_test_registry(registrations)
+    raw = {
+        "version": "1",
+        "process_key": "p",
+        "source_connection_ref": "$ref:" + _PROVENANCE_SENTINEL,
+        "source_operation_ref": "$ref:b",
+        "map_ref": "$ref:m",
+        "target_connection_ref": "$ref:c",
+        "target_operation_ref": "$ref:d",
+        "component_slots": [
+            {
+                "contribution_id": "c.0",
+                "component_key": "k",
+                "component_type": "process",
+                "materialization_mode": "create",
+                "materializer_slot": "s.k",
+            }
+        ],
+    }
+
+    def run(*versions):
+        return run_recipes(
+            [
+                RecipeRequestV1(
+                    recipe_id="r.prov",
+                    recipe_version=version,
+                    invocation_id=f"i{index}",
+                    raw_input=raw,
+                )
+                for index, version in enumerate(versions)
+            ],
+            catalog=MaterializationCatalog({}),
+            registry=registry,
+        )
+
+    result = run(None, "2.0.0")
+    v1 = registry.resolve("r.prov", "1.0.0")
+    v2 = registry.resolve("r.prov", "2.0.0")
+    assert result.invocation_provenance == (
+        RecipeInvocationProvenanceV1(
+            invocation_id="i0",
+            recipe_id="r.prov",
+            recipe_version="1.0.0",
+            entry_kind="constraint_only",
+            implementation_sha256=v1.provenance.implementation_sha256,
+            source_revision=v1.provenance.source_revision,
+        ),
+        RecipeInvocationProvenanceV1(
+            invocation_id="i1",
+            recipe_id="r.prov",
+            recipe_version="2.0.0",
+            entry_kind="constraint_only",
+            implementation_sha256=v2.provenance.implementation_sha256,
+            source_revision=v2.provenance.source_revision,
+        ),
+    )
+    # The established mapping, pinned to its historical shape and key order.
+    assert json.dumps(result.provenance) == json.dumps(
+        {
+            "registry_revision": registry.registry_revision,
+            "recipes": [
+                {
+                    "recipe_id": "r.prov",
+                    "recipe_version": version,
+                    "entry_kind": "constraint_only",
+                    "implementation_sha256": descriptor.provenance.implementation_sha256,
+                    "invocation_id": invocation_id,
+                }
+                for invocation_id, version, descriptor in (
+                    ("i0", "1.0.0", v1),
+                    ("i1", "2.0.0", v2),
+                )
+            ],
+        }
+    )
+    dumped = json.dumps(
+        [record.model_dump(mode="json") for record in result.invocation_provenance]
+    )
+    assert _PROVENANCE_SENTINEL not in dumped
+    assert _PROVENANCE_SENTINEL not in json.dumps(result.provenance)
+    # Default and explicit pin of the same descriptor record the same thing.
+    assert run(None).invocation_provenance == run("1.0.0").invocation_provenance

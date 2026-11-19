@@ -75,6 +75,7 @@ from pydantic import BaseModel, TypeAdapter
 from typing_extensions import is_typeddict
 
 from ..errors import (
+    INTEGRATION_COMPONENT_KEY_DUPLICATE,
     RECIPE_CONSTRAINT_FAILED,
     RECIPE_REQUEST_INVALID,
     RECIPE_CONTRIBUTION_INVALID,
@@ -84,6 +85,8 @@ from ..errors import (
 from ..models.integration_models import IntegrationComponentSpec
 from ..models.recipe_contributions import (
     RecipeContributionValidationError,
+    RecipeInvocationProvenanceV1,
+    RecipeRunDiagnosticV1,
     canonical_recipe_contributions_json,
     scan_forbidden_recipe_shape,
     validate_contribution_object,
@@ -121,13 +124,39 @@ class RecipeRequestV1:
 
 @dataclass(frozen=True)
 class RecipeRunResultV1:
-    """Everything a validated recipe run produced."""
+    """Everything a validated recipe run produced.
+
+    ``components`` are the RESOLVED CATALOG SLOTS, in contribution order — the
+    real specs the contributed headers named, each verified against its header.
+    ``supporting_components`` (#159 S1) are additional specs handed to the run by
+    a trusted server-side caller, never by a recipe executor; the run validates,
+    compiles, plans and evaluates against ``components + supporting_components``.
+
+    ``provenance`` is the established mapping (``registry_revision`` plus one
+    ``recipes`` entry per invocation). It is DERIVED from the ordered, typed
+    ``invocation_provenance`` tuple, so the two cannot disagree; the mapping's
+    shape is unchanged. ``diagnostics`` are informational run records, never
+    failures — a failure raises ``RecipeError``.
+    """
 
     composed: ComposedContributionsV1
     components: Tuple[IntegrationComponentSpec, ...]
     process_artifacts: Tuple[Tuple[str, Any], ...]
     topology_plans: Tuple[Tuple[str, Any], ...]
     provenance: Mapping[str, Any]
+    supporting_components: Tuple[IntegrationComponentSpec, ...] = ()
+    invocation_provenance: Tuple[RecipeInvocationProvenanceV1, ...] = ()
+    diagnostics: Tuple[RecipeRunDiagnosticV1, ...] = ()
+
+    @property
+    def process_units(self) -> Tuple[Any, ...]:
+        """#159 S1: the recipe-emitted process units, composed, in contribution order.
+
+        DERIVED from the composed result, like ``recorded_intents``: each unit's
+        ``process_ir`` is the root ``composed.process_roots`` lists under its key
+        (root patches applied) and its envelope is the contributed one.
+        """
+        return tuple(unit for _key, unit in self.composed.process_units)
 
     @property
     def recorded_intents(self) -> Tuple[Any, ...]:
@@ -1591,8 +1620,17 @@ def run_recipes(
     resolver=placeholder_component_id,
     effect_declarations: Any = None,
     conflict_policy: str = "reuse",
+    supporting_components: Sequence[IntegrationComponentSpec] = (),
 ) -> RecipeRunResultV1:
     """Run, compose, and canonically validate a set of recipe requests.
+
+    ``supporting_components`` (#159 S1) are complete component specs a TRUSTED
+    server-side caller prepared for this run — never anything a recipe executor
+    returned, which can only name catalog slots. They join the resolved slots for
+    every downstream gate (map coverage, compilation, topology planning,
+    constraint evaluation). Their keys share the component-key namespace: a
+    process unit may not claim one, and two specs — supporting or resolved —
+    may not share one. Omitted is the default and behaves exactly as before.
 
     ``effect_declarations`` (#154) is the SAME public envelope
     ``AuthoringRequestV1`` carries, and it is resolved through the same
@@ -1686,39 +1724,115 @@ def run_recipes(
                 )
             )
 
-    composed = compose(attributed, descriptors)
+    supporting = tuple(supporting_components)
+    composed = compose(
+        attributed,
+        descriptors,
+        # #159 S1: keys only. A process unit may not claim the key of a component
+        # that already exists beside the contributions — catalog or supporting.
+        catalog_keys=tuple(
+            sorted(set(catalog.component_keys()) | {spec.key for spec in supporting})
+        ),
+    )
 
     components = _resolve_components(composed, catalog)
+    _refuse_duplicate_component_keys(list(components) + list(supporting))
+    # Every downstream gate sees the WHOLE component set: the resolved slots plus
+    # the trusted supporting specs (#159 S1). With no supporting specs this is
+    # exactly the resolved list, as before.
+    all_components = list(components) + list(supporting)
     # #157: the required-target-leaf coverage HARD GATE, the same single
     # implementation the typed intents' semantic validation runs, invoked on
     # the raw recipe route too so neither entry point can skip it.
-    _validate_component_maps(components, conflict_policy)
+    _validate_component_maps(all_components, conflict_policy)
     process_artifacts = _compile_processes(
-        composed, components, connector_metadata, resolver, effect_declarations,
+        composed, all_components, connector_metadata, resolver, effect_declarations,
         conflict_policy,
     )
-    topology_plans = _plan_topologies(composed, components, topology_context)
-    _evaluate_constraints(composed, components, active)
+    topology_plans = _plan_topologies(composed, all_components, topology_context)
+    _evaluate_constraints(composed, all_components, active)
+
+    invocation_provenance = tuple(
+        RecipeInvocationProvenanceV1(
+            invocation_id=inv.invocation_id,
+            recipe_id=inv.descriptor.recipe_id,
+            recipe_version=inv.descriptor.recipe_version,
+            entry_kind=inv.descriptor.entry_kind,
+            implementation_sha256=inv.descriptor.provenance.implementation_sha256,
+            source_revision=inv.descriptor.provenance.source_revision,
+        )
+        for inv in ordered
+    )
 
     return RecipeRunResultV1(
         composed=composed,
         components=tuple(components),
         process_artifacts=tuple(process_artifacts),
         topology_plans=tuple(topology_plans),
-        provenance={
-            "registry_revision": active.registry_revision,
-            "recipes": [
-                {
-                    "recipe_id": inv.descriptor.recipe_id,
-                    "recipe_version": inv.descriptor.recipe_version,
-                    "entry_kind": inv.descriptor.entry_kind,
-                    "implementation_sha256": inv.descriptor.provenance.implementation_sha256,
-                    "invocation_id": inv.invocation_id,
-                }
-                for inv in ordered
-            ],
-        },
+        provenance=_provenance_mapping(active.registry_revision, invocation_provenance),
+        supporting_components=supporting,
+        invocation_provenance=invocation_provenance,
     )
+
+
+def _provenance_mapping(
+    registry_revision: str,
+    invocation_provenance: Sequence[RecipeInvocationProvenanceV1],
+) -> Dict[str, Any]:
+    """The established ``provenance`` mapping, DERIVED from the typed records.
+
+    The shape is pinned, not dumped: each ``recipes`` entry carries exactly
+    ``recipe_id``, ``recipe_version``, ``entry_kind``, ``implementation_sha256``
+    and ``invocation_id``, in that order — what every consumer of the mapping
+    has always read. ``source_revision`` is deliberately absent here; it lives
+    on the typed record only.
+    """
+    return {
+        "registry_revision": registry_revision,
+        "recipes": [
+            {
+                "recipe_id": record.recipe_id,
+                "recipe_version": record.recipe_version,
+                "entry_kind": record.entry_kind,
+                "implementation_sha256": record.implementation_sha256,
+                "invocation_id": record.invocation_id,
+            }
+            for record in invocation_provenance
+        ],
+    }
+
+
+def _refuse_duplicate_component_keys(
+    components: Sequence[IntegrationComponentSpec],
+) -> None:
+    """Refuse two component specs sharing one key (#159 S1).
+
+    Resolved slots cannot collide with each other — the composer already refused
+    two slots for one key — so this fires only when a trusted supporting spec
+    repeats a slot's key or another supporting spec's. One key is one component
+    in the plan; two specs for it would make which one materializes an accident
+    of list order. The diagnostic names the key, never the specs.
+    """
+    seen: set = set()
+    duplicates = []
+    for component in components:
+        if component.key in seen and component.key not in duplicates:
+            duplicates.append(component.key)
+        seen.add(component.key)
+    if duplicates:
+        raise RecipeError(
+            tuple(
+                recipe_diagnostic(
+                    RECIPE_CONSTRAINT_FAILED,
+                    phase="composition",
+                    target=f"component:{key}",
+                    # The shared component namespace's own code, carried
+                    # value-free as the cause the remediation points at.
+                    cause_codes=(INTEGRATION_COMPONENT_KEY_DUPLICATE,),
+                )
+                for key in duplicates
+            )
+        )
 
 
 def _validate_component_maps(
@@ -1882,6 +1996,11 @@ def _compile_processes(
             resolver=resolver,
             # #184: which declared bindings apply keeps decides component identity.
             conflict_policy=conflict_policy,
+            # #159 S1: a recipe-emitted process unit carries a real envelope (an
+            # update writes an existing process; a create reuses one by name), so
+            # it joins the write-conflict check exactly as an authored unit does.
+            # Bare ``set_process_root`` roots carry no envelope and stay keys only.
+            processes=[unit for _key, unit in composed.process_units],
         )
     except ComponentWriteConflictError as conflict:
         # #184: one diagnostic per spec that writes a component another spec also writes,
