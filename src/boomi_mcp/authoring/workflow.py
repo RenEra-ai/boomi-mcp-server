@@ -68,6 +68,7 @@ from .governance import (
     scan_runtime_secrets,
 )
 from .derived_flows import derive_recipe_projection
+from ..recipes.errors import declared_loc_segments
 from .process_materialization import (
     canonical_plan_material,
     envelope_relocatability_offenders,
@@ -583,7 +584,12 @@ def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkf
         path = ""
         pointer = getattr(diagnostic, "path", "") or ""
         invocations = tuple(getattr(diagnostic, "invocation_ids", ()) or ())
-        if pointer and len(invocations) == 1 and invocations[0] in invocation_index:
+        placed = len(invocations) == 1 and invocations[0] in invocation_index
+        if placed and not pointer and getattr(diagnostic, "phase", None) == "input":
+            # An INPUT refusal with no placeable field still names the
+            # invocation whose input failed (#159 S1, QA r2-01).
+            path = "/intent/invocations/{0}/raw_input".format(invocation_index[invocations[0]])
+        elif pointer and placed:
             path = "/intent/invocations/{0}{1}".format(
                 invocation_index[invocations[0]], pointer
             )
@@ -643,55 +649,8 @@ def _declared_material_segments(model: Any) -> frozenset:
     return frozenset(names)
 
 
-def _request_segments(model: Any, loc: Sequence[Any]) -> Tuple[str, ...]:
-    """The REQUEST path a pydantic ``loc`` addresses, walked against the schema.
-
-    pydantic inserts the variant tag of a discriminated union (``create``,
-    ``reuse``) into ``loc``; the tag is a schema fact, not a request key, so it
-    is dropped. A segment that is neither a declared property, an array index
-    into a declared array, nor a declared tag was authored by the caller: the
-    walk stops BEFORE it, so an unknown key's name is never served."""
-    try:
-        schema = model.model_json_schema()
-    except Exception:  # noqa: BLE001 — an empty path truncates the pointer, safely
-        return ()
-    defs = schema.get("$defs") or {}
-
-    def flatten(node: Any) -> List[Mapping]:
-        while isinstance(node, Mapping) and "$ref" in node:
-            node = defs.get(str(node["$ref"]).rsplit("/", 1)[-1], {})
-        if not isinstance(node, Mapping):
-            return []
-        if "discriminator" in node:
-            return [node]
-        members = [m for key in ("anyOf", "oneOf", "allOf") for m in (node.get(key) or ())]
-        if members:
-            return [n for member in members for n in flatten(member)]
-        return [node]
-
-    current = flatten(schema)
-    kept: List[str] = []
-    for part in loc:
-        segment = str(part)
-        if segment.startswith("function-"):
-            continue
-        following: List[Mapping] = []
-        is_tag = False
-        for node in current:
-            mapping = (node.get("discriminator") or {}).get("mapping") or {}
-            if segment in mapping:
-                is_tag = True
-                following.extend(flatten({"$ref": mapping[segment]}))
-            elif segment.isdigit() and node.get("items") is not None:
-                following.extend(flatten(node["items"]))
-            elif segment in (node.get("properties") or {}):
-                following.extend(flatten(node["properties"][segment]))
-        if not following:
-            break
-        if not is_tag:
-            kept.append(segment)
-        current = following
-    return tuple(kept)
+# The walker is shared with the recipe engine's own input refusals (#159 S1, QA r2-01).
+_request_segments = declared_loc_segments
 
 
 def _material_pointer(error: Any, model: Any) -> str:
@@ -798,6 +757,13 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
         if preparation is None:
             if material is not None:
                 raise refuse("component_material_not_declared")
+            # The engine validates this input again, but it raises before any
+            # invocation is placed. Validated here, the refusal names the
+            # invocation and its ``raw_input`` field (#159 S1, QA r2-01).
+            try:
+                _validate_input(descriptor, registry, invocation.raw_input)
+            except RecipeError as exc:
+                raise tagged(exc, invocation, "/raw_input") from None
             continue
         if material is None:
             raise refuse("component_material_required")

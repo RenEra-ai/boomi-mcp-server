@@ -99,7 +99,7 @@ from .composer import (
     order_invocations,
 )
 from .contracts import RecipeDescriptorV1
-from .errors import RecipeError, recipe_diagnostic, recipe_error
+from .errors import RecipeError, declared_loc_segments, recipe_diagnostic, recipe_error
 from .materialization import (
     MaterializationCatalog,
     build_symbol_table,
@@ -272,10 +272,11 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
     # the gates actually ran.
     try:
         validated = model.model_validate(dict(raw))
-    except Exception:  # noqa: BLE001 — pydantic text can echo an authored value
+    except Exception as invalid:  # noqa: BLE001 — pydantic text can echo an authored value
         raise recipe_error(
             RECIPE_INPUT_INVALID,
             phase="input",
+            path=_declared_input_pointer(invalid, model),
             recipe_ids=(descriptor.recipe_id,),
             recipe_versions=(descriptor.recipe_version,),
         ) from None
@@ -364,6 +365,25 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
             recipe_versions=(descriptor.recipe_version,),
         ) from None
     return validated
+
+
+def _declared_input_pointer(error: Any, model: Any) -> str:
+    """Where in ``raw_input`` the strict model refused — DECLARED structure only.
+
+    Relative to ``raw_input``, like the forbidden-shape scan's pointer. Read
+    from the error's ``loc`` alone (never its message or ``input``), walked
+    against the input model's schema: union variant tags are dropped and the
+    walk stops BEFORE a segment the model does not declare, so an unknown key's
+    name is never served (#159 S1, QA r2-01). Empty when nothing is placeable,
+    the established value."""
+    try:
+        errors = error.errors(include_input=False, include_url=False)
+        if not errors:
+            return ""
+        segments = declared_loc_segments(model, errors[0].get("loc", ()))
+    except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
+        return ""
+    return _pointer(tuple(segments)) if segments else ""
 
 
 #: Adapters the ENGINE built, keyed by annotation. Never an adapter the input

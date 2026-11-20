@@ -720,3 +720,71 @@ def test_a_request_parse_failure_at_the_tool_boundary_echoes_no_material(edit):
     )
     assert envelope["_success"] is False
     assert _leaks(json.dumps(envelope)) == []
+
+
+# ---------------------------------------------------------------------------
+# QA-159-S1-r2-01: a raw_input refusal names the invocation and the declared field
+# ---------------------------------------------------------------------------
+
+
+def _second_invocation(raw, material):
+    return {
+        "recipe_id": RECIPE_ID,
+        "recipe_version": V2,
+        "invocation_id": "second",
+        "raw_input": copy.deepcopy(raw),
+        "component_material": copy.deepcopy(material),
+    }
+
+
+def _input_refusal(raw_bad, *, at_index):
+    raw, material = flagship_v2()
+    if at_index == 0:
+        request = recipe_request(raw_bad, material)
+    else:
+        request = recipe_request(
+            raw, material, extra_invocations=(_second_invocation(raw_bad, material),)
+        )
+    diagnostics = _blocked(request)
+    assert diagnostics, "the refusal carried no diagnostic"
+    assert RECIPE_INPUT_INVALID in diagnostics[0].cause_codes
+    return diagnostics[0]
+
+
+@pytest.mark.parametrize("at_index", [0, 1])
+def test_a_raw_input_refusal_points_at_the_declared_field_of_its_invocation(at_index):
+    raw, _material = flagship_v2()
+    bad = copy.deepcopy(raw)
+    bad["source"]["binding_mode"] = "not-a-mode"
+    diagnostic = _input_refusal(bad, at_index=at_index)
+    assert diagnostic.path == f"/intent/invocations/{at_index}/raw_input/source/binding_mode"
+
+
+def test_an_unknown_raw_input_key_is_placed_without_serving_its_name():
+    raw, _material = flagship_v2()
+    bad = copy.deepcopy(raw)
+    bad["source"]["canary_key_5c1e"] = "canary-value-5c1e"
+    diagnostic = _input_refusal(bad, at_index=1)
+    assert diagnostic.path == "/intent/invocations/1/raw_input/source"
+    served = json.dumps(diagnostic.model_dump(mode="json"))
+    assert "canary_key_5c1e" not in served and "canary-value-5c1e" not in served
+
+
+def test_a_cross_field_raw_input_refusal_names_the_object_that_failed():
+    raw, _material = flagship_v2()
+    bad = copy.deepcopy(raw)
+    assert bad["source"]["binding_mode"] == "create"
+    bad["source"].pop("auth_mode")
+    diagnostic = _input_refusal(bad, at_index=0)
+    assert diagnostic.path.startswith("/intent/invocations/0/raw_input/source")
+
+
+def test_a_v1_raw_input_refusal_names_its_invocations_input():
+    """The engine's own invocation loop (a registration without material) places
+    the refusal too: under the invocation's ``raw_input``, the key name unserved."""
+    request = recipe_request({"canary_key_5c1e": 1}, None, recipe_version=None)
+    (diagnostic,) = _blocked(request)
+    assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
+    # The first refusal is the missing required field: a declared location.
+    assert diagnostic.path == "/intent/invocations/0/raw_input/version"
+    assert "canary_key_5c1e" not in json.dumps(diagnostic.model_dump(mode="json"))
