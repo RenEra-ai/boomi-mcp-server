@@ -363,6 +363,7 @@ def _rt():
 
     from ...categories.components.builders.connector_builder import (
         BuilderValidationError,
+        RestClientOperationBuilder,
     )
     from ...categories.components.builders.json_profile_builder import (
         JSONGeneratedProfileBuilder,
@@ -382,6 +383,7 @@ def _rt():
 
     return SimpleNamespace(
         BuilderValidationError=BuilderValidationError,
+        RestClientOperationBuilder=RestClientOperationBuilder,
         JSONGeneratedProfileBuilder=JSONGeneratedProfileBuilder,
         FUNCTION_FAMILIES=FUNCTION_FAMILIES,
         profile_from_json_schema=profile_from_json_schema,
@@ -772,8 +774,9 @@ class FanoutRestCreateMaterialV2(_FanoutMaterialModel):
     base_url: str = Field(
         min_length=1,
         description=(
-            "Absolute http(s) base URL. Userinfo ('user:password@') and "
-            "secret-shaped query-parameter names are refused."
+            "Absolute http(s) base URL. Userinfo ('user:password@') and any "
+            "query pair the REST operation builder refuses as a secret "
+            "(REST_SECRET_VALUE_FORBIDDEN) are refused."
         ),
     )
 
@@ -789,16 +792,25 @@ class FanoutQueryParameterV2(_FanoutMaterialModel):
     value_source: _Literal["literal", "watermark"]
     literal_value: Optional[str] = Field(
         default=None,
-        description="Refused under a secret-shaped parameter name (a literal key is a secret).",
+        description=(
+            "Refused when the REST operation builder refuses the (name, value) "
+            "pair as a secret (REST_SECRET_VALUE_FORBIDDEN): a literal key is a secret."
+        ),
     )
 
 
 class FanoutRestOperationMaterialV2(_FanoutMaterialModel):
     path: str = Field(
         min_length=1,
-        description="Request path. Userinfo and secret-shaped query-parameter names are refused.",
+        description=(
+            "Request path. Userinfo and any query pair the REST operation "
+            "builder refuses as a secret are refused."
+        ),
     )
-    query_parameters: Tuple[FanoutQueryParameterV2, ...] = ()
+    query_parameters: Tuple[FanoutQueryParameterV2, ...] = Field(
+        default=(),
+        description="Names are compared after trimming; a repeated name is refused.",
+    )
 
 
 class FanoutTargetMaterialV2(_FanoutMaterialModel):
@@ -847,19 +859,23 @@ class FanoutComponentMaterialV2(_FanoutMaterialModel):
 #       no JDBC property (``;`` / ``=``) — the two ways a password rides a host.
 #   FanoutDbCreateMaterialV2.database         jdbc_property: no ``;`` / ``=``
 #       (a ``;password=...`` suffix lands in the JDBC URL).
-#   FanoutRestCreateMaterialV2.base_url       url: no userinfo, no secret-shaped
-#       query-parameter name.
+#   FanoutRestCreateMaterialV2.base_url       url: no userinfo, and no query
+#       pair the REST builder refuses as a secret.
 #   FanoutRestOperationMaterialV2.path        url: same rule (a path may carry a
 #       query string, or an authority when written scheme-/protocol-relative).
-#   FanoutQueryParameterV2.literal_value      named_literal: refused under a
-#       secret-shaped parameter name (a literal ``api_key`` value IS the key).
+#   FanoutQueryParameterV2.literal_value      named_literal: the (name, literal)
+#       pair is refused when the REST builder refuses it as a secret (a literal
+#       ``api_key`` value IS the key).
 #
 # Every other field is classified ``None`` with its reason in the table. There
 # is no ``jdbc_options`` (or other open map) in the v2 material: the only maps it
 # can reach are the closed models below.
 #
-# "Secret-shaped" is the recipe layer's own authority
-# (``models.recipe_contributions._FORBIDDEN_KEY_SUBSTRINGS``), never re-typed.
+# Which REST query pair is a secret is the REST BUILDER's own authority — the
+# customProperties check ``RestClientOperationBuilder`` applies to the very
+# ``query_parameters`` these values become (whole-name key pattern + secret
+# value shapes, ``REST_SECRET_VALUE_FORBIDDEN``) — asked, never re-typed
+# (CDX-r2-02: the recipe-input substring scanner refused ``pageToken``).
 
 _CREDENTIAL_REFERENCE_PREFIX = "credential://"
 #: The cause a boundary refusal carries: the builders' own code for a plaintext
@@ -966,11 +982,20 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
     )
 
 
-def _secret_shaped(name: str) -> bool:
-    from ...models.recipe_contributions import _FORBIDDEN_KEY_SUBSTRINGS
+#: The REST builder's own code for a query/header pair it refuses as a secret.
+_REST_SECRET_CODE = "REST_SECRET_VALUE_FORBIDDEN"
 
-    lowered = name.lower()
-    return any(sub in lowered for sub in _FORBIDDEN_KEY_SUBSTRINGS)
+
+def _rest_query_pair_is_secret(name: str, value: str) -> bool:
+    """Whether the REST builder refuses ``name=value`` as a plaintext secret.
+
+    Asks ``RestClientOperationBuilder``'s customProperties validator — the check
+    the emitted operation's ``query_parameters`` meet at build time — on exactly
+    this one pair, and reads only its error CODE."""
+    error = _rt().RestClientOperationBuilder._validate_dict_param(
+        {name: value}, "query_parameters"
+    )
+    return getattr(error, "error_code", None) == _REST_SECRET_CODE
 
 
 def _url_carries_a_secret(value: str) -> bool:
@@ -983,7 +1008,8 @@ def _url_carries_a_secret(value: str) -> bool:
     if "@" in parts.netloc:
         return True
     return any(
-        _secret_shaped(name) for name, _value in parse_qsl(parts.query, keep_blank_values=True)
+        _rest_query_pair_is_secret(name, pair_value)
+        for name, pair_value in parse_qsl(parts.query, keep_blank_values=True)
     )
 
 
@@ -1004,7 +1030,7 @@ def _breaches(rule: str, value: _Any, owner: _Any) -> bool:
     if rule == "url":
         return _url_carries_a_secret(text)
     if rule == "named_literal":
-        return _secret_shaped(str(getattr(owner, "name", "") or ""))
+        return _rest_query_pair_is_secret(str(getattr(owner, "name", "") or "").strip(), text)
     return True  # an unknown rule fails closed
 
 
@@ -1373,9 +1399,19 @@ def _check_base_auth(
     declare override points for credentials it does not have (CDX-r1-04). The
     builders REQUIRE the auth key on a created connection (no default), so an
     absent value is a mismatch too.
+
+    A base connection whose write submits raw ``config.xml``
+    (``submits_raw_component_xml``, the predicate every write route asks) is
+    REFUSED (CDX-r2-03): the route posts those bytes verbatim, so the
+    structured auth field beside them describes nothing that will be written,
+    and no authority in this repository reads a connection's auth out of
+    submitted XML (``live_identity_from_component_xml`` reads only type,
+    subtype, verb and path). Unverifiable is not verified.
     """
+    from ...categories.components._shared import submits_raw_component_xml
+
     config = (base_catalog[key].config or {}) if key in base_catalog else {}
-    if config.get(config_key) != expected:
+    if submits_raw_component_xml(config) or config.get(config_key) != expected:
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
 
 
@@ -1778,6 +1814,20 @@ def _authorize_material_v2(
             )
             for qp_index, parameter in enumerate(entry.operation.query_parameters)
         ]
+        # CDX-r2-01: names are compared AFTER the authority normalized them, so
+        # ``" mode "`` and ``"mode"`` are one parameter. The emitted query is a
+        # name -> value map; a second entry would silently replace the first
+        # (the legacy composition's dict comprehension does exactly that), so
+        # it is refused at the SECOND entry's declared position instead.
+        seen_names: set = set()
+        for qp_index, parameter in enumerate(parameters):
+            if parameter.name in seen_names:
+                raise _refusal(
+                    COMPOSITION_CONTRACT_MISMATCH,
+                    f"{base}/operation/query_parameters/{qp_index}",
+                    phase="input",
+                )
+            seen_names.add(parameter.name)
         request = _authority_check(
             base + "/operation",
             RestSendRequest,

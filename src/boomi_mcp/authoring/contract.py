@@ -784,8 +784,10 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "never a value. A credential boundary refuses "
                 "(PLAINTEXT_SECRET_REJECTED) a credential_ref that is not an "
                 "opaque 'credential://' reference, URL userinfo, a JDBC property "
-                "in a host or database, and a literal query value under a "
-                "secret-shaped name."
+                "in a host or database, and any query pair (a literal "
+                "parameter, or one written into a base URL or path) the REST "
+                "operation builder itself refuses as a secret "
+                "(REST_SECRET_VALUE_FORBIDDEN)."
             ),
             "recipe_provenance": (
                 "RecipeInvocationProvenanceV1 — on the recipe intent, which "

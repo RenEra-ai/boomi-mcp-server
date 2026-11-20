@@ -890,7 +890,11 @@ def _scan_forbidden_shape(
                     if value is not None and value != "" and value != [] and value != {}:
                         return here, "secret_shaped_field"
                     continue
-            found = _scan_forbidden_shape(value, _path + (key,), exempt)
+            # A mapping key is always a STR segment, so no reader can mistake
+            # a non-str key for a sequence index (#159 S1, CDX-r2-04).
+            found = _scan_forbidden_shape(
+                value, _path + (key if isinstance(key, str) else str(key),), exempt
+            )
             if found is not None:
                 return found
     elif isinstance(payload, list):

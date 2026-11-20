@@ -1300,3 +1300,72 @@ def test_a_single_route_keeps_the_unqualified_wire():
         "rest_target",
         "rest_target_billing",
     ]
+
+
+# ---------------------------------------------------------------------------
+# CDX-r2-01: duplicate NORMALIZED query-parameter names are refused
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        pytest.param({"name": " mode ", "value_source": "literal", "literal_value": "x"}, id="padded"),
+        pytest.param({"name": "mode", "value_source": "literal", "literal_value": "x"}, id="exact"),
+    ],
+)
+def test_a_repeated_normalized_query_name_is_refused_at_the_second_entry(second):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "mode", "value_source": "literal", "literal_value": "full"},
+        second,
+    ]
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material)
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/targets/1/operation/query_parameters/1"
+    assert diagnostic.cause_codes == (COMPOSITION_CONTRACT_MISMATCH,)
+
+
+def test_a_watermark_name_repeating_a_literal_name_is_refused():
+    raw, material = _watermarked(
+        first=[_DEFERRED, {"name": " since", "value_source": "literal", "literal_value": "x"}]
+    )
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material)
+    assert caught.value.diagnostics[0].path == (
+        "/component_material/targets/0/operation/query_parameters/1"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CDX-r2-03: a raw-XML base connection's auth cannot be verified -> refused
+# ---------------------------------------------------------------------------
+
+
+def test_a_create_base_db_connection_submitted_as_raw_xml_is_refused():
+    raw, material = _create_bound_source()
+    base = _create_base_db()
+    base = base.model_copy(update={"config": dict(base.config, xml="<Component/>")})
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(base,))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/raw_input/source/auth_mode"
+    assert diagnostic.cause_codes == (COMPOSITION_CONTRACT_MISMATCH,)
+    # Control: the same structured base without the XML binds.
+    assert _prepare(raw, material, base=(_create_base_db(),)).selected_base_keys[0] == "shared_db"
+
+
+def test_a_create_base_rest_connection_submitted_as_raw_xml_is_refused():
+    raw, material = flagship_v2()
+    config = {"connector_type": "rest", "base_url": "https://b.example.invalid", "auth": "NONE"}
+    raw["targets"][1]["connection_key"] = "shared_rest"
+    material["targets"][1].pop("connection")
+    structured = IntegrationComponentSpec(
+        key="shared_rest", type="connector-settings", name="Shared REST", config=config
+    )
+    assert "shared_rest" in _prepare(raw, material, base=(structured,)).selected_base_keys
+    xml_base = structured.model_copy(update={"config": dict(config, xml="<Component/>")})
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(xml_base,))
+    assert caught.value.diagnostics[0].path == "/raw_input/targets/1/connection_key"

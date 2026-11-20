@@ -218,24 +218,41 @@ RETIRED_SPELLINGS: Mapping[str, str] = MappingProxyType(
 )
 
 
-def retired_spellings_in(value: Any, *, path: str = "") -> Tuple[Tuple[str, str], ...]:
-    """Every retired spelling used as a KEY anywhere in ``value``.
+def retired_spelling_locations(
+    value: Any, *, path: Tuple[Any, ...] = ()
+) -> Tuple[Tuple[Tuple[Any, ...], str], ...]:
+    """Every retired spelling used as a KEY anywhere in ``value``, TYPED.
 
-    Returns ``(json_pointer_path, spelling)`` pairs in document order. Walks
-    mappings and sequences; values are never inspected, only key names, so a
-    caller's authored text cannot trip it.
+    Returns ``(path, spelling)`` pairs in document order, where ``path`` keeps
+    its segment TYPES: a sequence index is an ``int``, a mapping key a ``str``
+    (#159 S1, CDX-r2-04) — so a reader can tell a caller's object key
+    ``"904417"`` from an array position. Values are never inspected, only key
+    names, so a caller's authored text cannot trip it.
     """
     found = []
     if isinstance(value, Mapping):
         for key, sub in value.items():
-            here = "{0}/{1}".format(path, key)
+            here = path + (key if isinstance(key, str) else str(key),)
             if isinstance(key, str) and key in RETIRED_SPELLINGS:
                 found.append((here, key))
-            found.extend(retired_spellings_in(sub, path=here))
+            found.extend(retired_spelling_locations(sub, path=here))
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
-            found.extend(retired_spellings_in(item, path="{0}/{1}".format(path, index)))
+            found.extend(retired_spelling_locations(item, path=path + (index,)))
     return tuple(found)
+
+
+def retired_spellings_in(value: Any, *, path: str = "") -> Tuple[Tuple[str, str], ...]:
+    """Every retired spelling used as a KEY anywhere in ``value``.
+
+    Returns ``(json_pointer_path, spelling)`` pairs in document order — the
+    string rendering of :func:`retired_spelling_locations` (one walk, two
+    spellings of its result).
+    """
+    return tuple(
+        (path + "".join("/{0}".format(segment) for segment in located), spelling)
+        for located, spelling in retired_spelling_locations(value)
+    )
 
 
 def reject_retired_spellings(value: Any, *, path: str = "") -> None:
@@ -261,5 +278,6 @@ __all__ = [
     "RuntimeHintDeclarationV1",
     "WatermarkDeclarationV1",
     "reject_retired_spellings",
+    "retired_spelling_locations",
     "retired_spellings_in",
 ]

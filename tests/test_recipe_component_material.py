@@ -1023,3 +1023,185 @@ def test_the_neutral_rest_authority_is_unchanged_and_still_admits_userinfo():
 
     settings = RestCreateSettings(base_url="https://u:p@h.example.invalid", auth_mode="none")
     assert settings.base_url == "https://u:p@h.example.invalid"
+
+
+# ---------------------------------------------------------------------------
+# CDX-r2-02: REST query secrecy is the REST BUILDER's own classification
+# ---------------------------------------------------------------------------
+
+_PAGINATION_NAMES = ("pageToken", "nextPageToken", "page_token")
+_BUILDER_SECRET_NAMES = ("api_key", "token", "Authorization")
+
+
+def _builder_refuses(name, value="v"):
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        RestClientOperationBuilder,
+    )
+
+    error = RestClientOperationBuilder._validate_dict_param({name: value}, "query_parameters")
+    return getattr(error, "error_code", None) == "REST_SECRET_VALUE_FORBIDDEN"
+
+
+@pytest.mark.parametrize("name", _PAGINATION_NAMES)
+def test_a_pagination_query_name_plans_through_the_boundary(name):
+    assert not _builder_refuses(name)  # the authority admits it
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": name, "value_source": "literal", "literal_value": "abc"}
+    ]
+    material["targets"][0]["operation"]["path"] += "?" + name + "=first"
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+@pytest.mark.parametrize("name", _BUILDER_SECRET_NAMES)
+def test_a_query_name_the_rest_builder_refuses_is_still_refused(name):
+    from boomi_mcp.recipes.builtins import fanout
+
+    assert _builder_refuses(name)  # non-vacuity: the authority refuses it
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": name, "value_source": "literal", "literal_value": _SECRET_CANARY}
+    ]
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == (
+        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/literal_value"
+    )
+    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+
+
+def test_a_secret_shaped_value_under_a_plain_name_is_refused_by_the_value_rule():
+    """The builder's VALUE patterns travel too: a bearer credential under an
+    innocuous name is still a secret."""
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "q", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
+    ]
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path.endswith("/targets/1/operation/query_parameters/0/literal_value")
+    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+
+
+# ---------------------------------------------------------------------------
+# CDX-r2-04: pointer segments are TYPED end to end
+# ---------------------------------------------------------------------------
+
+_DIGIT_KEY = "904417"
+
+
+@pytest.mark.parametrize("request_path", [False, True], ids=["pydantic_loc", "raw_path"])
+def test_the_walker_takes_an_array_step_only_for_an_int_segment(request_path):
+    from boomi_mcp.recipes.errors import declared_loc_segments
+
+    walk = lambda loc: declared_loc_segments(  # noqa: E731
+        FanoutComponentMaterialV2, loc, request_path=request_path
+    )
+    # (a) an object key where the array is declared: stop at the declared parent
+    assert walk(("targets", _DIGIT_KEY, "part_key")) == ("targets",)
+    # a genuine index is still served
+    assert walk(("targets", 1, "part_key")) == ("targets", "1", "part_key")
+
+
+def test_the_forbidden_shape_scan_stops_before_a_digit_object_key_where_an_array_is_declared():
+    raw, material = flagship_v2()
+    raw["targets"] = {_DIGIT_KEY: {"host": "x"}}
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/raw_input/targets"
+    assert _DIGIT_KEY not in diagnostic.model_dump_json()
+
+
+def test_the_forbidden_shape_scan_still_serves_a_genuine_array_index():
+    raw, material = flagship_v2()
+    raw["targets"][1]["host"] = "x"
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/raw_input/targets/1"
+
+
+def test_a_retired_spelling_under_a_digit_object_key_where_an_array_is_declared():
+    raw, material = flagship_v2()
+    material["targets"] = {_DIGIT_KEY: {"jdbc_options": {"a": "b"}}}
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/component_material/targets"
+    assert _DIGIT_KEY not in diagnostic.model_dump_json()
+    assert GOVERNANCE_RETIRED_SPELLING in diagnostic.cause_codes
+
+
+def test_a_retired_spelling_at_a_genuine_array_index_is_still_pointed_at():
+    raw, material = flagship_v2()
+    material["targets"][1]["connection"]["jdbc_options"] = {"a": "b"}
+    request = recipe_request(raw, material)
+    (diagnostic,) = _blocked(request)
+    assert diagnostic.path == (
+        "/intent/invocations/0/component_material/targets/1/connection/jdbc_options"
+    )
+    assert GOVERNANCE_RETIRED_SPELLING in diagnostic.cause_codes
+
+
+def test_the_typed_retired_walk_renders_exactly_the_string_walk():
+    from boomi_mcp.models.governance_intent import (
+        retired_spelling_locations,
+        retired_spellings_in,
+    )
+
+    value = {"a": [{"jdbc_options": 1}, {_DIGIT_KEY: {"cron": 2}}]}
+    typed = retired_spelling_locations(value)
+    assert [path for path, _ in typed] == [
+        ("a", 0, "jdbc_options"),
+        ("a", 1, _DIGIT_KEY, "cron"),
+    ]
+    assert retired_spellings_in(value) == (
+        ("/a/0/jdbc_options", "jdbc_options"),
+        ("/a/1/" + _DIGIT_KEY + "/cron", "cron"),
+    )
+
+
+_KEY_PROBE = "canaryKEY77"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["envelope_caller_key", "envelope_digit_key", "material_caller_key", "material_digit_array"],
+)
+def test_no_retired_spelling_consumer_serves_a_caller_key_at_the_tool_boundary(case):
+    """CDX-r2-04 sweep: ``reject_retired_spellings`` has THREE callers (the
+    material model, the recipe per-root envelope, the process-component
+    envelope). The material refusal's pointer is walked typed; the two envelope
+    refusals are served by the typed-request boundary as their model-level
+    ``loc`` and ``type`` only (never the ctx path or the message). Measured at
+    the served ``build_integration`` envelope, which validates before the
+    workflow."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    raw, material = flagship_v2()
+    intent = {
+        "intent_kind": "recipe",
+        "integration_name": "retired probe",
+        "invocations": [
+            {
+                "recipe_id": RECIPE_ID,
+                "recipe_version": V2,
+                "invocation_id": "fanout",
+                "raw_input": raw,
+                "component_material": material,
+            }
+        ],
+    }
+    if case == "envelope_caller_key":
+        intent["process_envelopes"] = [{"component_key": "main_process", _KEY_PROBE: {"cron": "x"}}]
+    elif case == "envelope_digit_key":
+        intent["process_envelopes"] = [{"component_key": "main_process", _DIGIT_KEY: {"cron": "x"}}]
+    elif case == "material_caller_key":
+        material["source"]["connection"][_KEY_PROBE] = {"jdbc_options": {"a": "b"}}
+    else:
+        material["targets"] = {_DIGIT_KEY: {"jdbc_options": {"a": "b"}}}
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": {"contract_version": "2", "intent": intent}}
+        )
+    assert envelope["_success"] is False
+    served = json.dumps(envelope, default=str)
+    assert "GOVERNANCE_RETIRED_SPELLING" in served  # the refusal really fired
+    assert _KEY_PROBE not in served and _DIGIT_KEY not in served

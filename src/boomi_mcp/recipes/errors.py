@@ -284,7 +284,15 @@ def declared_loc_segments(
     (the forbidden-shape scan's path, #159 S1 CDX-r1-03). A raw path carries no
     variant tags, so none is dropped: a discriminated union admits a segment
     any of its variants declares, and a raw key that happens to spell a tag is
-    judged like any other key."""
+    judged like any other key.
+
+    SEGMENTS ARE TYPED, end to end (#159 S1, CDX-r2-04): a sequence index is an
+    ``int`` and a mapping key a ``str`` — as pydantic's ``loc`` already is, and
+    as both raw-path producers (the forbidden-shape scan and the retired-spelling
+    walk) now emit them. An ARRAY step is taken ONLY for an ``int``; a ``str``
+    is accepted only as a declared property or a discriminator tag. A caller's
+    object key ``"904417"`` where an array is declared is a key, not an index,
+    and the walk stops before it (stringifying first made it look like one)."""
     try:
         schema = model.model_json_schema()
     except Exception:  # noqa: BLE001 — an empty path truncates the pointer, safely
@@ -306,18 +314,23 @@ def declared_loc_segments(
     current = flatten(schema)
     kept: List[str] = []
     for part in loc:
+        is_index = isinstance(part, int) and not isinstance(part, bool)
+        if not is_index and not isinstance(part, str):
+            break  # neither an index nor a key: nothing declared can match it
         segment = str(part)
-        if not request_path and segment.startswith("function-"):
+        if not request_path and not is_index and segment.startswith("function-"):
             continue
         following: List[Mapping] = []
         is_tag = False
         for node in current:
+            if is_index:
+                if node.get("items") is not None:
+                    following.extend(flatten(node["items"]))
+                continue
             mapping = {} if request_path else ((node.get("discriminator") or {}).get("mapping") or {})
             if segment in mapping:
                 is_tag = True
                 following.extend(flatten({"$ref": mapping[segment]}))
-            elif segment.isdigit() and node.get("items") is not None:
-                following.extend(flatten(node["items"]))
             elif segment in (node.get("properties") or {}):
                 following.extend(flatten(node["properties"][segment]))
         if not following:

@@ -627,7 +627,7 @@ def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkf
 _request_segments = declared_loc_segments
 
 
-def _material_pointer(error: Any, model: Any) -> str:
+def _material_pointer(error: Any, model: Any, raw: Any = None) -> str:
     """A JSON pointer for a material validation failure — DECLARED structure only.
 
     Built from the error's ``loc`` (or, for a retired spelling, the refusal's own
@@ -638,7 +638,7 @@ def _material_pointer(error: Any, model: Any) -> str:
     The error's ``input`` and message are never read. A truncated pointer still
     names the closest declared object, so the caller can find the offender.
     """
-    from ..models.governance_intent import RETIRED_SPELLINGS
+    from ..models.governance_intent import RETIRED_SPELLINGS, retired_spelling_locations
 
     try:
         errors = error.errors(include_input=False, include_url=False)
@@ -653,10 +653,19 @@ def _material_pointer(error: Any, model: Any) -> str:
             # caller's raw mapping, so it is walked with the shared walker in
             # request mode (#159 S1, CDX-r1-03 sweep): a name-blind "digit or
             # declared anywhere" test served a caller's digit-only dict key.
-            parts = [part for part in retired.split("/") if part]
+            #
+            # The refusal's own path is a STRING, which has lost its segment
+            # types (CDX-r2-04): ``/targets/904417`` cannot say whether 904417
+            # was an index or a caller's key. The TYPED location is re-read from
+            # the raw material with the same walk, and used only when its
+            # rendering is exactly the path the refusal reported.
+            located = retired_spelling_locations(raw) if raw is not None else ()
+            parts: Tuple[Any, ...] = located[0][0] if located else ()
+            if "".join("/{0}".format(part) for part in parts) != retired:
+                parts = ()
             kept = list(_request_segments(model, parts[:-1], request_path=True))
             if parts and len(kept) == len(parts) - 1 and parts[-1] in RETIRED_SPELLINGS:
-                kept.append(parts[-1])
+                kept.append(str(parts[-1]))
         else:
             kept = list(_request_segments(model, first.get("loc", ())))
     except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
@@ -760,7 +769,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
                     recipe_diagnostic(
                         RECIPE_INPUT_INVALID,
                         phase="input",
-                        path=_material_pointer(exc, model),
+                        path=_material_pointer(exc, model, material),
                         recipe_ids=(descriptor.recipe_id,),
                         recipe_versions=(descriptor.recipe_version,),
                         invocation_ids=(invocation.invocation_id,),
