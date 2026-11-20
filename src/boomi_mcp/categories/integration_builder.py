@@ -10031,6 +10031,16 @@ def _apply_plan(
     planned = _build_plan(boomi_client, config)
     if not planned.get("_success"):
         return planned
+    if authoring_bundle is not None:
+        # B14 (#159 S1): the EXECUTION component plan is rechecked against the
+        # bindings the compile advertised, with apply's own predicate, before
+        # the dry-run shortcut and before any write.
+        from ..authoring.workflow import AuthoringWorkflowError, recheck_execution_bindings
+
+        try:
+            recheck_execution_bindings(authoring_bundle, planned)
+        except AuthoringWorkflowError as exc:
+            return _authoring_error_envelope(exc, "apply")
     if dry_run:
         planned["dry_run"] = True
         # SAY what a dry run does not check. Everything a request can decide for

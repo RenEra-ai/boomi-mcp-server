@@ -2039,3 +2039,201 @@ def test_qa_r12_01_two_base_components_under_one_key_are_refused(order):
     assert diagnostic.path == "/intent/base_components/1/key"
     assert COMPOSITION_COMPONENT_KEY_COLLISION in diagnostic.cause_codes
     assert "id-a" not in diagnostic.model_dump_json() and "id-b" not in diagnostic.model_dump_json()
+
+
+# ---------------------------------------------------------------------------
+# B14 (architect evaluation 2): witnesses, each failing at 6829220.
+# ---------------------------------------------------------------------------
+
+_CAP159 = _TESTS / "fixtures" / "boomi" / "replay_identity" / "cap159-s1-reuse-identity"
+_REUSED_REST_ID = "aa5c5042-75d1-4bd3-85df-a65739cb920e"
+
+
+def _reused_rest_xml(url):
+    """The pinned platform capture of the reused REST connection, its stored
+    ``url`` field changed IN-TEST to ``url``."""
+    xml = (_CAP159 / "rest-conn-aa5c5042.xml").read_text()
+    original = 'field id="url" type="string" value="http://host.docker.internal:8081"'
+    assert original in xml
+    from xml.sax.saxutils import quoteattr
+
+    return xml.replace(original, 'field id="url" type="string" value={0}'.format(quoteattr(url)))
+
+
+def _reuse_bound_request(path):
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    material["targets"][1]["operation"]["path"] = path
+    base = _rest_base(
+        {"reference_only": True, "connector_type": "rest", "component_id": _REUSED_REST_ID},
+        component_id=_REUSED_REST_ID,
+    )
+    return recipe_request(raw, material, base_components=[base.model_dump(mode="json")])
+
+
+def _with_account(request, stored_url, action="plan"):
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    def get_xml(_client, component_id, *a, **k):
+        assert component_id == _REUSED_REST_ID
+        return {"component_id": component_id, "version": 2, "xml": _reused_rest_xml(stored_url)}
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(_shared, "component_get_xml", get_xml):
+        return integration_builder.build_integration_action(
+            mock.MagicMock(), "p", action, {"authoring_request": payload}
+        )
+
+
+_REUSE_PATH_POINTER = "/intent/invocations/0/component_material/targets/1/operation/path"
+
+
+@pytest.mark.parametrize("stored", ["http://h.example.invalid/v1?mode=full&", "http://h.example.invalid/v1?"])
+def test_b14_01_a_reuse_path_joined_to_the_stored_base_url_is_judged(stored):
+    """ARCH-r1-03: the stored base URL is READ (the same account read connector
+    replay identity uses) and the authored path is judged JOINED to it."""
+    envelope = _with_account(_reuse_bound_request("provider_key=sample"), stored, "compile")
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False or envelope["authoring_result"]["errors"], served[:400]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served
+    assert _REUSE_PATH_POINTER in served
+    assert "provider_key" not in served.replace("provider_key=sample", "")
+
+
+def test_b14_01_a_reuse_path_under_a_queryless_stored_base_plans():
+    """Control: the same reuse with a query-free stored base URL and a relative
+    path plans — the joined target is clean."""
+    envelope = _with_account(_reuse_bound_request("v1/billing"), "http://h.example.invalid/api/", "compile")
+    assert envelope["_success"] is True, envelope.get("error")
+    assert envelope["authoring_result"]["validation_report"]["is_valid"] is True
+
+
+@pytest.mark.parametrize("path", ["provider_key=sample", "v1/x=1"])
+def test_b14_01_without_the_stored_base_a_reuse_path_fails_closed(path):
+    """No account: the stored base URL is genuinely unknown, so a reuse path
+    that does not start with '/' or carries '=' before any '?' is refused."""
+    with pytest.raises(AuthoringWorkflowError) as caught:
+        plan_authoring_request_v1(_reuse_bound_request(path), profile="p")
+    served = json.dumps([d.model_dump(mode="json") for d in caught.value.diagnostics])
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served and _REUSE_PATH_POINTER in served
+
+
+def test_b14_01_without_the_stored_base_an_absolute_reuse_path_plans():
+    result, _ = plan_authoring_request_v1(_reuse_bound_request("/v1/billing"), profile="p")
+    assert result.validation_report.is_valid
+
+
+def test_b14_03_the_execution_component_plan_is_rechecked_before_any_write():
+    """A same-name connection that appears BETWEEN the compile's component plan
+    and apply's execution plan: apply must refuse before any write."""
+    from unittest import mock
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.categories import integration_builder
+
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "create")
+    base = _rest_base(
+        {"connector_type": "rest", "base_url": "https://b.example.invalid", "auth": "NONE"},
+        name="Shared REST",
+    )
+    request = recipe_request(raw, material, base_components=[base.model_dump(mode="json")])
+    existing = {"component_id": "6f1d2c3b-0000-4000-8000-000000000003", "name": "Shared REST",
+                "type": "connector-settings", "folder_name": "X"}
+    state = {"after_preflight": False}
+
+    def listing(*a, **k):
+        return [dict(existing)] if state["after_preflight"] else []
+
+    real_preflight = workflow.preflight_typed_apply_v1
+
+    def preflight(*a, **k):
+        bundle = real_preflight(*a, **k)
+        state["after_preflight"] = True
+        return bundle
+
+    from boomi_mcp.categories.components import _shared
+
+    capture = (_CAP159 / "rest-conn-aa5c5042.xml").read_text().replace(
+        _REUSED_REST_ID, existing["component_id"]
+    )
+
+    def get_xml(_client, component_id, *a, **k):
+        # The account answers the read-back of the name-matched component
+        # (proven-operable capture, re-keyed in-test to the matched id).
+        return {"component_id": component_id, "version": 2, "xml": capture,
+                "type": "connector-settings"}
+
+    client = mock.MagicMock()
+    with mock.patch.object(integration_builder, "paginate_metadata", listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    with mock.patch.object(integration_builder, "paginate_metadata", listing), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml), \
+            mock.patch.object(workflow, "preflight_typed_apply_v1", preflight), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    assert state["after_preflight"], "the preflight was not reached"
+    assert envelope["_success"] is False, "apply wrote a create the execution plan reuses"
+    assert writes == []
+    assert "/intent/invocations/0/raw_input/targets/1/connection_key" in json.dumps(envelope)
+
+
+def test_b14_04_the_served_c8_guarantee_holds_on_a_mixed_preview():
+    """ARCH-r2 (P3): the served text states exactly what a mixed v1/v2 preview
+    delivers — every row key unique; a recipe ROUTE's in-row references resolve
+    inside its own process; a non-route root's transform row keeps its own
+    source token, which may name no served row."""
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+
+    text = json.dumps(authoring_workflow_contract())
+    assert "every reference resolves inside its own process" not in text
+    assert "a recipe route's in-row references resolve inside its own process" in text
+    assert "keeps its own source token" in text
+    result, _ = plan_authoring_request_v1(
+        _v1_and_v2_request(v2_selects_shared_db=False), profile="p"
+    )
+    preview = result.integration_spec_preview
+    rows = [row.model_dump(mode="json") for row in preview.flows]
+    keys = [row["key"] for row in rows] + [e.key for e in preview.endpoints]
+    assert len(keys) == len(set(keys))
+    served = set(keys)
+    route_owner = "b_process"
+    route_rows = [row for row in rows if row["key"].startswith(route_owner + "/")]
+    assert len(route_rows) >= 5  # non-vacuity
+    for row in route_rows:
+        for field in ("source", "target"):
+            value = row[field]
+            if value in (None, "", "dlq"):
+                continue
+            assert value in served and value.startswith(route_owner + "/"), (row["key"], value)
+
+
+def test_b14_01_sibling_a_material_reuse_by_id_is_judged_against_its_stored_base_url():
+    """Sibling arm: reuse declared in the MATERIAL (by component id) reads the
+    same account record and is judged joined to it."""
+    raw, material = flagship_v2()
+    raw["targets"][1]["binding_mode"] = "reuse"
+    material["targets"][1]["connection"] = {"mode": "reuse", "component_id": _REUSED_REST_ID}
+    material["targets"][1]["operation"]["path"] = "provider_key=sample"
+    envelope = _with_account(
+        recipe_request(raw, material), "http://h.example.invalid/v1?mode=full&", "compile"
+    )
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served and _REUSE_PATH_POINTER in served

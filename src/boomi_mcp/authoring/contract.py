@@ -778,9 +778,12 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "one process root (any root, with or without a route), every "
                 "root's row keys, endpoint keys and every in-row source/target "
                 "naming one of them are qualified as '<process_key>/<key>', so "
-                "no two rows share a key and every reference resolves inside its "
-                "own process; a preview with one root keeps the unqualified "
-                "keys, and a preview with no route is unchanged."
+                "no two rows share a key and a recipe route's in-row references "
+                "resolve inside its own process. A root WITHOUT a route (a v1 or "
+                "direct root) serves only its transform rows, and each such row "
+                "keeps its own source token, which may name no served row. A "
+                "preview with one root keeps the unqualified keys, and a preview "
+                "with no route is unchanged."
             ),
             "derived_endpoints": (
                 "CanonicalIntegrationPreviewV1.endpoints and "

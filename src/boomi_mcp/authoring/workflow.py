@@ -285,6 +285,10 @@ class _NormalizedIntent:
     #: B12-01: ``(base key, request pointer)`` per base a recipe preparer bound
     #: in CREATE mode. Rechecked against the component plan's resolved ids.
     recipe_create_bound_bases: Tuple[Tuple[str, str], ...] = ()
+    #: B14 (ARCH-r1-03): ``(connection key, path, request pointer)`` per recipe
+    #: target bound to a REUSED connection — judged joined to its stored base
+    #: URL once the account read answers it.
+    recipe_reuse_targets: Tuple[Tuple[str, str, str], ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -710,6 +714,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     deferred: Dict[Tuple[str, str], Tuple[str, ...]] = {}
     facts: Dict[str, Any] = {}
     create_bound: List[Tuple[str, str]] = []
+    reuse_targets: List[Tuple[str, str, str]] = []
     invocation_position = {
         invocation.invocation_id: position for position, invocation in enumerate(intent.invocations)
     }
@@ -820,6 +825,16 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
         for key in prepared.selected_base_keys:
             if key not in selected:
                 selected.append(key)
+        for key, path, pointer in getattr(prepared, "reuse_request_targets", ()) or ():
+            reuse_targets.append(
+                (
+                    key,
+                    path,
+                    "/intent/invocations/{0}{1}".format(
+                        invocation_position[invocation.invocation_id], pointer
+                    ),
+                )
+            )
         for key, pointer in getattr(prepared, "create_bound_base_keys", ()) or ():
             create_bound.append(
                 (key, "/intent/invocations/{0}{1}".format(invocation_position[invocation.invocation_id], pointer))
@@ -834,7 +849,11 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     # ARCH-r1-05: the generated specs, and the selected base entries BY KEY —
     # the engine takes those from the catalog it already holds, so a base a v1
     # slot also resolves stays ONE entry (identity carried, not reconstructed).
-    return (tuple(generated), tuple(selected), tuple(create_bound)), deferred, facts
+    return (
+        (tuple(generated), tuple(selected), tuple(create_bound), tuple(reuse_targets)),
+        deferred,
+        facts,
+    )
 
 
 def _normalize_recipe_intent(
@@ -907,7 +926,7 @@ def _normalize_recipe_intent(
     try:
         # The SAME registry `run_recipes` resolves against (looked up at call
         # time, so a test-installed registry governs both).
-        (supporting_specs, selected_base_keys, create_bound_bases), deferred_names, projection_facts = (
+        (supporting_specs, selected_base_keys, create_bound_bases, reuse_targets), deferred_names, projection_facts = (
             _prepare_recipe_components(intent, _engine.production_registry(), catalog_entries)
         )
     except RecipeError as exc:
@@ -1030,6 +1049,7 @@ def _normalize_recipe_intent(
         # Only for a unit the run actually composed under that key.
         recipe_projection_facts=composed_facts,
         recipe_create_bound_bases=tuple(create_bound_bases),
+        recipe_reuse_targets=tuple(reuse_targets),
     )
 
 
@@ -1039,15 +1059,139 @@ def _connections_apply_will_not_write(normalized, conflict_policy, existing_ids)
     Asked of apply's own predicate with the component plan's resolved ids — the
     one authority for "is this a create or a reuse". Offline (no plan) only the
     declared bindings answer."""
+    return _unwritten_connection_keys(
+        normalized.integration_spec.components, conflict_policy, existing_ids
+    )
+
+
+def _unwritten_connection_keys(components, conflict_policy, existing_ids) -> frozenset:
     from ..categories.integration_builder import apply_writes_component_config
 
     return frozenset(
         component.key
-        for component in normalized.integration_spec.components
+        for component in components
         if component.type == "connector-settings"
         and not apply_writes_component_config(
             component, conflict_policy or "reuse", existing_ids=existing_ids
         )
+    )
+
+
+def recheck_execution_bindings(bundle, planned) -> None:
+    """B14 (ARCH-r2 new P2): typed apply's EXECUTION component plan, rechecked.
+
+    Apply builds a second component plan after the compile it reproduced, and
+    the account can change between the two reads (a same-name connection
+    appearing). With apply's own predicate and THIS plan's resolved ids: a base
+    a recipe bound in CREATE mode that apply would now reuse is refused, and so
+    is any connection whose written/reused binding differs from what the
+    compile advertised. Raised before any write; value-free."""
+    from ..categories.integration_builder import planned_existing_ids
+    from ..errors import (
+        AUTHORING_PLAN_STALE,
+        COMPOSITION_CONTRACT_MISMATCH,
+        RECIPE_CONSTRAINT_FAILED,
+    )
+
+    unwritten = _unwritten_connection_keys(
+        bundle.integration_spec.components,
+        bundle.request.intent.conflict_policy,
+        planned_existing_ids(planned),
+    )
+    bad = [(key, pointer) for key, pointer in bundle.create_bound_bases if key in unwritten]
+    if bad:
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            tuple(
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "At apply, the component plan resolves a base connection the "
+                        "recipe input binds in create mode to an existing component; "
+                        "nothing was written."
+                    ),
+                    path=pointer,
+                    subject_kind="recipe",
+                    remediation=(
+                        "Re-plan: bind it in reuse mode as a reference-only base, or "
+                        "give the base a name no existing component carries."
+                    ),
+                    cause_codes=(COMPOSITION_CONTRACT_MISMATCH, RECIPE_CONSTRAINT_FAILED),
+                )
+                for _key, pointer in bad
+            ),
+        )
+    # The drift check is scoped to RECIPE intents: their served endpoint rows
+    # advertise each connection's binding (the generated-connection binding
+    # expectations); a direct intent advertises none, and its apply keeps its
+    # existing behavior.
+    if getattr(bundle.request.intent, "intent_kind", None) != "recipe":
+        return
+    drifted = sorted(unwritten ^ frozenset(bundle.unwritten_connections))
+    if drifted:
+        raise AuthoringWorkflowError(
+            AUTHORING_PLAN_STALE,
+            tuple(
+                _diag(
+                    AUTHORING_PLAN_STALE,
+                    "error",
+                    message=(
+                        "A connection's create/reuse binding at apply differs from "
+                        "the one the compile advertised; nothing was written."
+                    ),
+                    subject_kind="component",
+                    subject_id=key,
+                    remediation="Re-plan and recompile against the account as it is now.",
+                )
+                for key in drifted
+            ),
+        )
+
+
+def _refuse_reused_request_targets(normalized, live_readings) -> None:
+    """B14 (ARCH-r1-03): each recipe path bound to a REUSED connection, judged
+    JOINED to the base URL that connection stores — read by the SAME account
+    read connector-replay identity uses (``live_readings_for_declared_
+    components``), parsed by the route digest's own reader. Where no reading
+    answers (offline, an id-less reuse, a failed read) the judgment fails
+    closed (``fanout.judge_reused_request_target``)."""
+    targets = getattr(normalized, "recipe_reuse_targets", ()) or ()
+    if not targets:
+        return
+    from ..connector_replay.digests import connection_base_url
+    from ..recipes.builtins.fanout import judge_reused_request_target
+
+    bad = []
+    for key, path, pointer in targets:
+        reading = (live_readings or {}).get(key) or {}
+        xml = reading.get("xml") if not reading.get("read_failed") else None
+        stored = connection_base_url(xml) if isinstance(xml, str) else None
+        cause = judge_reused_request_target(stored, path)
+        if cause is not None:
+            bad.append((pointer, cause))
+    if not bad:
+        return
+    raise AuthoringWorkflowError(
+        AUTHORING_COMPILE_BLOCKED,
+        tuple(
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error",
+                message=(
+                    "The operation path, appended to the reused connection's stored "
+                    "base URL, does not form a request target the recipe may emit."
+                ),
+                path=pointer,
+                subject_kind="recipe",
+                remediation=(
+                    "Write the path as an absolute path ('/...') with no '=' before any "
+                    "'?', and keep literal query values in query_parameters."
+                ),
+                cause_codes=(cause,),
+            )
+            for pointer, cause in bad
+        ),
     )
 
 
@@ -2204,6 +2348,7 @@ def _validate_processes(
     # thing that happens is a write. Letting the raise through turned `plan`
     # into a refuser and emptied the report a caller was told to read.
     snapshot_diagnostics: List[AuthoringDiagnosticV1] = []
+    _declared_live: Dict[str, Any] = {}
     try:
         # LIVE READINGS FOR EXPLICITLY NAMED COMPONENTS ONLY (#155 slice F).
         # Without them this snapshot carries no component identity, so a registry
@@ -2640,7 +2785,7 @@ def _validate_processes(
     )
     return (summary, tuple(diagnostics), symbols,
             resolution.capabilities_by_root, snapshot, selected_artifacts, reused_keys,
-            final_names)
+            final_names, dict(_declared_live or {}))
 
 
 def _required_target_coverage_error(
@@ -3098,6 +3243,10 @@ class _PlanInternals:
     #: it. By the owner decision of 2026-09-14 plan and compile degrade in that state, but a typed apply
     #: must not confirm a binding against an account that did not answer.
     component_plan_unjudged: bool = False
+    #: B14 (ARCH-r2 new P2): the connection keys the COMPILE's component plan
+    #: says apply will NOT write (reused) — the binding the served preview and
+    #: endpoints advertised. Apply rechecks its EXECUTION plan against it.
+    unwritten_connections: frozenset = frozenset()
 
 
 def plan_authoring_request_v1(
@@ -3129,6 +3278,7 @@ def plan_authoring_request_v1(
         _artifacts_for_preview,
         _reused_for_preview,
         _names_for_preview,
+        _live_readings,
     ) = _validate_processes(
         normalized,
         request.effect_declarations,
@@ -3146,6 +3296,7 @@ def plan_authoring_request_v1(
         normalized, request.intent.conflict_policy, planned_existing_ids(component_plan)
     )
     _refuse_create_bound_bases_apply_reuses(normalized, _unwritten_connections)
+    _refuse_reused_request_targets(normalized, _live_readings)
     _reused_for_preview = frozenset(_reused_for_preview or ()) | _unwritten_connections
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)
@@ -3420,6 +3571,7 @@ def plan_authoring_request_v1(
         effect_capabilities=effect_capabilities,
         connector_resolution_snapshot=resolution_snapshot,
         component_plan_unjudged=boomi_client is not None and component_plan is None,
+        unwritten_connections=frozenset(_unwritten_connections),
     )
     return result, internals
 
@@ -3891,6 +4043,12 @@ class CompiledBundle:
     #: #153 §7 (AR1-01): the compiled materialization plan per process key.
     #: Apply EXECUTES these; it never rebuilds. Enforced in __post_init__.
     materialization_plans: Mapping[str, Any] = field(default_factory=dict)
+    #: B14 (ARCH-r2 new P2): ``(base key, request pointer)`` per base a recipe
+    #: bound in CREATE mode, and the connection keys the compile's component
+    #: plan judged UNWRITTEN. Apply rechecks both against its EXECUTION
+    #: component plan (``recheck_execution_bindings``) before any write.
+    create_bound_bases: Tuple[Tuple[str, str], ...] = ()
+    unwritten_connections: frozenset = frozenset()
 
     def __post_init__(self) -> None:
         """Refuse a bundle whose spec cannot build what the compile describes.
@@ -4164,6 +4322,10 @@ def preflight_typed_apply_v1(
         compile_result=compile_result,
         request=request,
         materialization_plans=dict(internals.materialization_plans or {}),
+        create_bound_bases=tuple(
+            getattr(internals.normalized, "recipe_create_bound_bases", ()) or ()
+        ),
+        unwritten_connections=frozenset(internals.unwritten_connections),
     )
 
 

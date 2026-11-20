@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15161, "minimum_collected": 15161, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15171, "minimum_collected": 15171, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15619,3 +15619,13 @@
 {"kind": "test", "id": "pytest-015618", "node_id": "tests/test_recipe_fanout_v2.py::test_b12r_slots_aliasing_one_spec_are_one_component", "state": "active"}
 {"kind": "test", "id": "pytest-015619", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r12_01_two_base_components_under_one_key_are_refused[ab]", "state": "active"}
 {"kind": "test", "id": "pytest-015620", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r12_01_two_base_components_under_one_key_are_refused[ba]", "state": "active"}
+{"kind": "test", "id": "pytest-015621", "node_id": "tests/test_issue_157_flows_accounting.py::test_the_flagship_root_topology_and_full_envelope_match_the_legacy_outcome", "state": "active"}
+{"kind": "test", "id": "pytest-015622", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_a_reuse_path_joined_to_the_stored_base_url_is_judged[http://h.example.invalid/v1?mode=full&]", "state": "active"}
+{"kind": "test", "id": "pytest-015623", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_a_reuse_path_joined_to_the_stored_base_url_is_judged[http://h.example.invalid/v1?]", "state": "active"}
+{"kind": "test", "id": "pytest-015624", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_a_reuse_path_under_a_queryless_stored_base_plans", "state": "active"}
+{"kind": "test", "id": "pytest-015625", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_without_the_stored_base_a_reuse_path_fails_closed[provider_key=sample]", "state": "active"}
+{"kind": "test", "id": "pytest-015626", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_without_the_stored_base_a_reuse_path_fails_closed[v1/x=1]", "state": "active"}
+{"kind": "test", "id": "pytest-015627", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_without_the_stored_base_an_absolute_reuse_path_plans", "state": "active"}
+{"kind": "test", "id": "pytest-015628", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_03_the_execution_component_plan_is_rechecked_before_any_write", "state": "active"}
+{"kind": "test", "id": "pytest-015629", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_04_the_served_c8_guarantee_holds_on_a_mixed_preview", "state": "active"}
+{"kind": "test", "id": "pytest-015630", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_sibling_a_material_reuse_by_id_is_judged_against_its_stored_base_url", "state": "active"}

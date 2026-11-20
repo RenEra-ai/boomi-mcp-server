@@ -1190,6 +1190,20 @@ flagship = {
         ),
     },
     "attempts": [a[0] for a in attempts[_flagship_before:]],
+    # ARCH-r1-13 (eval 2): the normalized root's CANONICAL topology and the FULL
+    # envelope, both from the public-path compile in this blocked child.
+    "root": __import__("boomi_mcp.models.process_ir", fromlist=["x"]).canonical_process_ir_json(
+        _unit.process_ir
+    ),
+    "envelope_full": {
+        name: (
+            sorted(value) if name == "depends_on"
+            else _unit.envelope.process_extensions.model_dump(mode="json", exclude_none=True)
+            if name == "process_extensions"
+            else value
+        )
+        for name, value in _unit.envelope.model_dump(mode="json").items()
+    },
 }
 replay_attempts = list(attempts)
 control = "not_refused"

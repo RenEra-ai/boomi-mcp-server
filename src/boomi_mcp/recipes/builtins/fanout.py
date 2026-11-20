@@ -1602,6 +1602,11 @@ class PreparedFanoutV2:
     #: plan's account resolution (a create matched BY NAME is reused), which
     #: only the workflow holds — it rechecks each one against that authority.
     create_bound_base_keys: Tuple[Tuple[str, str], ...] = ()
+    #: B14 (ARCH-r1-03): ``(connection key, path, path pointer)`` per target
+    #: bound to a REUSED connection. Its stored base URL is not in this
+    #: request; the workflow judges the path JOINED to it once the account
+    #: read answers it (:func:`judge_reused_request_target`).
+    reuse_request_targets: Tuple[Tuple[str, str, str], ...] = ()
     deferred_query_parameter_names: Tuple[Tuple[Tuple[str, str], Tuple[str, ...]], ...] = ()
     #: #159 S1 (C8): the trusted facts the #157 projection reads for this
     #: invocation's unit. Their presence is what admits the unit's recipe-route
@@ -1788,6 +1793,53 @@ def _path_continues_a_query(path: str) -> bool:
     Escaped (``%26``) it stays path data."""
     head = path.split("?", 1)[0]
     return any(char in head for char in _PATH_FORBIDDEN_RAW)
+
+
+def _reuse_request_targets_v2(
+    inp: ComposeDbRestFanoutInputV2,
+    ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
+    keys: _FanoutKeysV2,
+) -> Tuple[Tuple[str, str, str], ...]:
+    """Every target whose connection is REUSED: its base URL is stored in the
+    account, so the request target cannot be judged here (ARCH-r1-03)."""
+    found = []
+    for index, (target, (material_index, entry)) in enumerate(zip(inp.targets, ordered_material)):
+        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
+            continue
+        if target.connection_key is not None and target.binding_mode == "create":
+            continue
+        found.append(
+            (
+                keys.targets[index][1],
+                entry.operation.path.strip(),
+                f"/component_material/targets/{material_index}/operation/path",
+            )
+        )
+    return tuple(found)
+
+
+def judge_reused_request_target(stored_base_url: Optional[str], path: str) -> Optional[str]:
+    """The refusal cause for a path appended to a REUSED connection's stored base
+    URL, or ``None`` (B14, ARCH-r1-03).
+
+    With the stored base URL in hand (read from the account): a base that
+    already carries a query or fragment would receive the path INSIDE it, so it
+    is refused; otherwise every joined target meets the grammar, judged only
+    for what the PATH contributes (the stored URL is the account's, not the
+    caller's). Without it (no account, an unreadable or id-less reuse) the
+    rule FAILS CLOSED: the path must start with '/' and carry no '=' before any
+    '?' — the two shapes that could complete a pair a stored query left open."""
+    if stored_base_url is None:
+        head = path.split("?", 1)[0]
+        return _QUERY_NAME_CAUSE if (not path.startswith("/") or "=" in head) else None
+    base = stored_base_url.strip()
+    if "?" in base or "#" in base:
+        return _QUERY_NAME_CAUSE
+    for joined, path_start in _joined_targets(base, path):
+        verdict = _judge_request_target(joined)
+        if verdict.cause is not None and verdict.offset >= path_start:
+            return verdict.cause
+    return None
 
 
 def _joined_targets(base: str, path: str) -> Tuple[Tuple[str, int], ...]:
@@ -2218,6 +2270,7 @@ def prepare_db_rest_fanout_v2(
         supporting_components=tuple(components),
         selected_base_keys=tuple(selected),
         create_bound_base_keys=tuple(create_bound),
+        reuse_request_targets=_reuse_request_targets_v2(inp, ordered_material, keys),
         deferred_query_parameter_names=deferred,
         projection_facts=_projection_facts_v2(inp, keys, authorized.operations),
     )

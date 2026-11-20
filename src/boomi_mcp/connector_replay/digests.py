@@ -33,7 +33,7 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from typing import Final
+from typing import Final, Optional
 from urllib.parse import urlsplit
 
 from boomi_mcp.errors import (
@@ -269,6 +269,28 @@ def _remove_dot_segments(path: str) -> str:
             output.append(path[:end])
             path = path[end:]
     return "".join(output)
+
+
+def connection_base_url(connection_xml: str) -> Optional[str]:
+    """The base URL a connection component STORES (its ``url`` field), or ``None``.
+
+    Read with the SAME parser and field reader the route digest uses
+    (``_parse`` + ``_field_values`` over ``_CONNECTION_FIELDS``), so a caller
+    judging a route against a reused connection reads the identical value. A
+    document carrying a DOCTYPE/ENTITY declaration, an unparseable one, or one
+    with zero or repeated ``url`` fields answers ``None`` — unknown, never a
+    guess (#159 S1, ARCH-r1-03)."""
+    if not isinstance(connection_xml, str):
+        return None
+    lowered = connection_xml.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        return None
+    try:
+        root = _parse(connection_xml, RouteDigestRefused, "connection")
+        fields = _field_values(root, _CONNECTION_FIELDS, RouteDigestRefused)
+    except DigestRefused:
+        return None
+    return fields.get("url")
 
 
 def _require_absolute_http_url(raw: str) -> str:

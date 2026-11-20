@@ -621,3 +621,37 @@ def test_the_legacy_producers_at_head_still_reproduce_the_frozen_rows():
     a legacy producer moved (a #160-owned event) or the freeze drifted.
     """
     assert acct.check_against_tree() == []
+
+
+def test_the_flagship_root_topology_and_full_envelope_match_the_legacy_outcome(batch):
+    """ARCH-r1-13 (eval 2): the blocked child's public-path flagship also carries
+    the normalized root's CANONICAL topology and the FULL envelope; both equal
+    the legacy outcome computed here, unblocked."""
+    from _fanout_v2_support import oracle, respell_oracle_credential_refs
+
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+    from boomi_mcp.models.process_ir import canonical_process_ir_json
+    from boomi_mcp.patterns.recipe_bridge import run_fanout_recipe
+
+    flagship = batch["flagship"]
+    spec = IntegrationSpecV1.model_validate(oracle()["integration_spec"])
+    process = spec.components[-1]
+    legacy = run_fanout_recipe(
+        recipe_id="boomi.compose.db_rest_fanout", components=spec.components, process=process
+    )
+    legacy_root = dict(legacy.composed.process_roots)[process.key]
+    assert flagship.get("root") == canonical_process_ir_json(legacy_root)
+    frozen = respell_oracle_credential_refs(oracle()["integration_spec"]["components"])[-1]
+    expected = {
+        "component_key": frozen["key"],
+        "name": frozen["name"],
+        "action": frozen["action"],
+        "component_id": frozen.get("component_id"),
+        # The envelope types ``description`` as ``str`` (default ``""``): an
+        # absent legacy description IS the envelope's empty one.
+        "description": frozen["config"].get("description") or "",
+        "folder_name": frozen["config"].get("folder_name"),
+        "depends_on": sorted(frozen["depends_on"]),
+        "process_extensions": frozen["config"]["process_extensions"],
+    }
+    assert flagship.get("envelope_full") == expected
