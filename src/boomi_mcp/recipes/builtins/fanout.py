@@ -986,12 +986,65 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
 _REST_SECRET_CODE = "REST_SECRET_VALUE_FORBIDDEN"
 
 
-def _rest_query_pair_is_secret(name: str, value: str) -> bool:
-    """Whether the REST builder refuses ``name=value`` as a plaintext secret.
+#: Words that make a query-parameter NAME a credential wherever they appear.
+_CREDENTIAL_NAME_WORDS = frozenset(
+    {
+        "password", "passwd", "pwd", "passcode", "passphrase", "secret", "secrets",
+        "credential", "credentials", "authorization", "bearer", "apikey",
+        "signature", "sig",
+    }
+)
+#: Word pairs that name a credential (``api_key``, ``private-key``, ``accessKey``).
+_CREDENTIAL_NAME_PAIRS = frozenset({("api", "key"), ("private", "key"), ("access", "key")})
+#: The ONLY words that may qualify ``token`` without making it a credential: a
+#: pagination cursor (``pageToken``, ``nextPageToken``, ``continuationToken``).
+#: Deny by default — ``refresh_token``, ``fooToken`` and a bare ``token`` are
+#: credentials (#159 S1, Codex r3-01).
+_PAGINATION_TOKEN_QUALIFIERS = frozenset(
+    {"page", "next", "prev", "previous", "continuation", "cursor", "sync", "resume", "start"}
+)
 
-    Asks ``RestClientOperationBuilder``'s customProperties validator — the check
-    the emitted operation's ``query_parameters`` meet at build time — on exactly
-    this one pair, and reads only its error CODE."""
+
+def _name_words(name: str) -> Tuple[str, ...]:
+    import re
+
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
+    return tuple(word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word)
+
+
+def _query_name_is_credential(name: str) -> bool:
+    """Whether a query-parameter NAME denotes a credential (deny by default).
+
+    The REST builder's own name list matches whole names only and admits
+    ``refresh_token``; the recipe-input substring scan refuses ``pageToken``.
+    Neither is right for a query NAME, so this one rule judges the name's WORDS:
+    a credential word anywhere, a credential word pair, a bare ``key``, or a
+    ``token`` not qualified by a pagination word."""
+    words = _name_words(name)
+    if not words:
+        return False
+    if words == ("key",) or any(word in _CREDENTIAL_NAME_WORDS for word in words):
+        return True
+    if any(pair in _CREDENTIAL_NAME_PAIRS for pair in zip(words, words[1:])):
+        return True
+    for index, word in enumerate(words):
+        if word in ("token", "tokens"):
+            if index == 0 or words[index - 1] not in _PAGINATION_TOKEN_QUALIFIERS:
+                return True
+    return False
+
+
+def _rest_query_pair_is_secret(name: str, value: str) -> bool:
+    """Whether ``name=value`` carries a plaintext secret.
+
+    Refused when the REST builder refuses the pair — its customProperties
+    validator, the check the emitted operation's ``query_parameters`` meet at
+    build time, read by error CODE only (it also judges the VALUE: JWT, Bearer,
+    long base64) — OR when the name denotes a credential
+    (:func:`_query_name_is_credential`)."""
+    if _query_name_is_credential(name):
+        return True
     error = _rt().RestClientOperationBuilder._validate_dict_param(
         {name: value}, "query_parameters"
     )

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14899, "minimum_collected": 14899, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14927, "minimum_collected": 14927, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15357,3 +15357,31 @@
 {"kind": "test", "id": "pytest-015356", "node_id": "tests/test_recipe_fanout_v2.py::test_a_watermark_name_repeating_a_literal_name_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-015357", "node_id": "tests/test_recipe_fanout_v2.py::test_a_create_base_db_connection_submitted_as_raw_xml_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-015358", "node_id": "tests/test_recipe_fanout_v2.py::test_a_create_base_rest_connection_submitted_as_raw_xml_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-015359", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[refresh_token]", "state": "active"}
+{"kind": "test", "id": "pytest-015360", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[access_token]", "state": "active"}
+{"kind": "test", "id": "pytest-015361", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[id_token]", "state": "active"}
+{"kind": "test", "id": "pytest-015362", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[sessionToken]", "state": "active"}
+{"kind": "test", "id": "pytest-015363", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[fooToken]", "state": "active"}
+{"kind": "test", "id": "pytest-015364", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[client_secret]", "state": "active"}
+{"kind": "test", "id": "pytest-015365", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[db_password]", "state": "active"}
+{"kind": "test", "id": "pytest-015366", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[passphrase]", "state": "active"}
+{"kind": "test", "id": "pytest-015367", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[private_key]", "state": "active"}
+{"kind": "test", "id": "pytest-015368", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[accessKey]", "state": "active"}
+{"kind": "test", "id": "pytest-015369", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[sig]", "state": "active"}
+{"kind": "test", "id": "pytest-015370", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_the_builder_admits_is_refused_as_a_literal[key]", "state": "active"}
+{"kind": "test", "id": "pytest-015371", "node_id": "tests/test_recipe_component_material.py::test_the_witness_names_are_ones_the_builder_admits", "state": "active"}
+{"kind": "test", "id": "pytest-015372", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_in_a_url_query_string_is_refused[refresh_token]", "state": "active"}
+{"kind": "test", "id": "pytest-015373", "node_id": "tests/test_recipe_component_material.py::test_a_credential_name_in_a_url_query_string_is_refused[client_secret]", "state": "active"}
+{"kind": "test", "id": "pytest-015374", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[pageToken-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015375", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[nextPageToken-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015376", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[page_token-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015377", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[continuationToken-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015378", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[cursor-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015379", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[keyword-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015380", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[limit-False]", "state": "active"}
+{"kind": "test", "id": "pytest-015381", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[token-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015382", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[refresh_token-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015383", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[X-API-Key-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015384", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[apiKey-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015385", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[Authorization-True]", "state": "active"}
+{"kind": "test", "id": "pytest-015386", "node_id": "tests/test_recipe_component_material.py::test_the_query_name_rule[password-True]", "state": "active"}

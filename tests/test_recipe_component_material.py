@@ -1205,3 +1205,60 @@ def test_no_retired_spelling_consumer_serves_a_caller_key_at_the_tool_boundary(c
     served = json.dumps(envelope, default=str)
     assert "GOVERNANCE_RETIRED_SPELLING" in served  # the refusal really fired
     assert _KEY_PROBE not in served and _DIGIT_KEY not in served
+
+
+# ---------------------------------------------------------------------------
+# CDX-159-S1-r3-01: a credential NAME the REST builder admits is still refused
+# ---------------------------------------------------------------------------
+
+#: Names the builder's whole-name list ADMITS but that denote a credential.
+_CREDENTIAL_NAMES_THE_BUILDER_ADMITS = (
+    "refresh_token", "access_token", "id_token", "sessionToken", "fooToken",
+    "client_secret", "db_password", "passphrase", "private_key", "accessKey", "sig", "key",
+)
+
+
+@pytest.mark.parametrize("name", _CREDENTIAL_NAMES_THE_BUILDER_ADMITS)
+def test_a_credential_name_the_builder_admits_is_refused_as_a_literal(name):
+    from boomi_mcp.recipes.builtins import fanout
+
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": name, "value_source": "literal", "literal_value": _SECRET_CANARY}
+    ]
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == (
+        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/literal_value"
+    )
+    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+
+
+def test_the_witness_names_are_ones_the_builder_admits():
+    """Non-vacuity: at least the token-shaped witnesses are exactly the builder's gap."""
+    admitted = [n for n in _CREDENTIAL_NAMES_THE_BUILDER_ADMITS if not _builder_refuses(n)]
+    assert {"refresh_token", "fooToken"} <= set(admitted)
+
+
+@pytest.mark.parametrize("name", ["refresh_token", "client_secret"])
+def test_a_credential_name_in_a_url_query_string_is_refused(name):
+    raw, material = flagship_v2()
+    material["targets"][0]["operation"]["path"] += "?" + name + "=" + _SECRET_CANARY
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/component_material/targets/0/operation/path"
+    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "name, credential",
+    [
+        ("pageToken", False), ("nextPageToken", False), ("page_token", False),
+        ("continuationToken", False), ("cursor", False), ("keyword", False), ("limit", False),
+        ("token", True), ("refresh_token", True), ("X-API-Key", True), ("apiKey", True),
+        ("Authorization", True), ("password", True),
+    ],
+)
+def test_the_query_name_rule(name, credential):
+    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+
+    assert _query_name_is_credential(name) is credential
