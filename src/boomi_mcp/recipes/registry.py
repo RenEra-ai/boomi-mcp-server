@@ -32,6 +32,8 @@ import json
 from types import MappingProxyType
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, get_args
 
+from pydantic import BaseModel
+
 from ..build_info import (
     PACKAGE_NAME,
     build_metadata,
@@ -853,6 +855,9 @@ class RecipeRegistry:
         self._descriptors: Dict[Tuple[str, str], RecipeDescriptorV1] = {}
         self._executors: Dict[Tuple[str, str], RecipeExecutorV1] = {}
         self._input_models: Dict[Tuple[str, str], type] = {}
+        #: #159 S1: ``(material model, preparer)`` per registration that
+        #: declares the component-material channel.
+        self._component_preparation: Dict[Tuple[str, str], Tuple[type, Any]] = {}
         #: ``{class: {field: annotation}}`` as it stood WHEN THE GATES RAN.
         #: Everything the gates read is writable afterwards, so the walk reads
         #: this instead of the live class (issue #145, live QA #382).
@@ -953,6 +958,7 @@ class RecipeRegistry:
         self._descriptors = MappingProxyType(self._descriptors)
         self._executors = MappingProxyType(self._executors)
         self._input_models = MappingProxyType(self._input_models)
+        self._component_preparation = MappingProxyType(self._component_preparation)
         self._defaults = MappingProxyType(self._defaults)
         # NESTED TOO. Freezing only the outer mapping left each per-class
         # annotation dict writable, so the record the engine compares against
@@ -1087,6 +1093,11 @@ class RecipeRegistry:
             self._executors[key] = reg.executor
         if reg.input_model is not None:
             self._input_models[key] = reg.input_model
+        if reg.component_material_model is not None:
+            self._component_preparation[key] = (
+                reg.component_material_model,
+                reg.component_preparer,
+            )
 
         self._check_capability_subjects(descriptor)
         self._check_capability_states(descriptor)
@@ -1169,6 +1180,8 @@ class RecipeRegistry:
         if has_executor:
             self._check_executor_shape(reg)
 
+        self._check_component_material(reg)
+
         # DERIVED from the contribution union (issue #159 S1). This was a
         # hand-copied set that had already drifted — it omitted
         # ``recorded_intent``, so a recipe could not declare a kind the union and
@@ -1183,6 +1196,61 @@ class RecipeRegistry:
             raise ValueError(f"{reg.recipe_id!r} declares a duplicate output type")
         if list(reg.output_types) != sorted(reg.output_types):
             raise ValueError(f"{reg.recipe_id!r} output_types must be canonically sorted")
+
+    @staticmethod
+    def _check_component_material(reg: RecipeRegistrationV1) -> None:
+        """The component-material channel's registration gates (#159 S1).
+
+        Both halves or neither; executable recipes only; the material model
+        passes the SAME closedness gates as a recipe input model (no unbounded
+        object, extras forbidden by the compiled validator); the preparer is a
+        plain module-level function, for the same reason an executor must be —
+        its source is what ``implementation_sha256`` can see.
+        """
+        model = reg.component_material_model
+        preparer = reg.component_preparer
+        if model is None and preparer is None:
+            return
+        if model is None or preparer is None:
+            raise ValueError(
+                f"{reg.recipe_id!r} must declare both component_material_model "
+                "and component_preparer, or neither"
+            )
+        if reg.entry_kind != "executable_recipe":
+            raise ValueError(
+                f"{reg.recipe_id!r} may declare component material only as an "
+                "executable_recipe"
+            )
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            raise ValueError(
+                f"{reg.recipe_id!r} component_material_model must be a pydantic model"
+            )
+        try:
+            model.model_rebuild(force=True)
+        except Exception:  # noqa: BLE001 — a model that cannot rebuild is a defect
+            raise ValueError(
+                f"{reg.recipe_id!r} component_material_model cannot be rebuilt"
+            ) from None
+        _check_input_schema_closed(reg.recipe_id, model)
+        _check_input_model_forbids_extras(reg.recipe_id, model)
+        if not inspect.isfunction(preparer) or getattr(preparer, "__closure__", None):
+            raise ValueError(
+                f"{reg.recipe_id!r} component_preparer must be a plain function"
+            )
+        qualname = getattr(preparer, "__qualname__", "")
+        if "." in qualname or "<locals>" in qualname or qualname == "<lambda>":
+            raise ValueError(
+                f"{reg.recipe_id!r} component_preparer must be defined at module level"
+            )
+
+    def component_preparation_for(
+        self, descriptor: RecipeDescriptorV1
+    ) -> Optional[Tuple[type, Any]]:
+        """``(material model, preparer)`` when the registration declares the
+        component-material channel, else ``None`` (#159 S1)."""
+        return self._component_preparation.get(
+            (descriptor.recipe_id, descriptor.recipe_version)
+        )
 
     @staticmethod
     def _check_executor_shape(reg: RecipeRegistrationV1) -> None:

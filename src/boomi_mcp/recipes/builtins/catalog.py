@@ -10,7 +10,8 @@ The four entry kinds are all represented deliberately, because the registry's
 ability to TELL THEM APART is an acceptance criterion, and a kind with no entry
 is a kind nobody tested:
 
-* two executable recipes (the sync presets) and one for the fan-out
+* two executable recipes (the sync presets) and two versions of the fan-out
+  (1.0.0, the default; 2.0.0, typed assembly with a component-material channel)
 * one constraint-only entry
 * one advisory entry — the doctrine pointer, with no executor to call
 * three compatibility adapters, each naming the exact recipe it adapts to
@@ -26,7 +27,14 @@ from ..contracts import (
     RecipeReferenceV1,
     RecipeRegistrationV1,
 )
-from .fanout import ComposeDbRestFanoutInputV1, emit_db_rest_fanout
+from .fanout import (
+    ComposeDbRestFanoutInputV1,
+    ComposeDbRestFanoutInputV2,
+    FanoutComponentMaterialV2,
+    emit_db_rest_fanout,
+    emit_db_rest_fanout_v2,
+    prepare_db_rest_fanout_v2,
+)
 from .sync import (
     SyncRecipeInputV1,
     emit_api_to_api_sync,
@@ -45,6 +53,10 @@ ADAPTER_API_TO_API_SYNC = "boomi.adapter.api_to_api_sync"
 ADAPTER_API_TO_DATABASE_SYNC = "boomi.adapter.api_to_database_sync"
 
 _FANOUT_VERSION = "1.0.0"
+#: #159 S1: registered BESIDE 1.0.0, never as the default. 1.0.0 stays the
+#: default and the ``compose_archetypes`` adapter's exact target through S2; S3
+#: retires the legacy registration and promotes this one.
+_FANOUT_V2_VERSION = "2.0.0"
 _SYNC_VERSION = "0.1.0"
 _CONSTRAINT_VERSION = "1.0.0"
 _ADVISORY_VERSION = "1.0.0"
@@ -145,6 +157,32 @@ PRODUCTION_REGISTRATIONS: Tuple[RecipeRegistrationV1, ...] = (
             _CACHE_RETRIEVE_EMITTER,
         ),
         conflict_policy=_FANOUT_CONFLICT_POLICY,
+    ),
+    # #159 S1: typed assembly. The executor emits one process unit; the trusted
+    # preparer turns the closed component material into every supporting spec.
+    RecipeRegistrationV1(
+        recipe_id=RECIPE_DB_REST_FANOUT,
+        recipe_version=_FANOUT_V2_VERSION,
+        entry_kind="executable_recipe",
+        is_default=False,
+        input_model=ComposeDbRestFanoutInputV2,
+        executor=emit_db_rest_fanout_v2,
+        output_types=(
+            "constraint_requirement",
+            "process_unit",
+            "recorded_intent",
+        ),
+        capability_requirements=(
+            _SOURCE_EMITTER,
+            _TARGET_EMITTER,
+            _MAP_EMITTER,
+            _BRANCH_EMITTER,
+            _CACHE_LOAD_EMITTER,
+            _CACHE_RETRIEVE_EMITTER,
+        ),
+        conflict_policy=_FANOUT_CONFLICT_POLICY,
+        component_material_model=FanoutComponentMaterialV2,
+        component_preparer=prepare_db_rest_fanout_v2,
     ),
     RecipeRegistrationV1(
         recipe_id=RECIPE_API_TO_API_SYNC,

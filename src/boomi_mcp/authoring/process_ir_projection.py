@@ -2431,9 +2431,16 @@ def _recipe_entries(
         recipe_id = str(row["recipe_id"])
         version = str(row.get("recipe_version") or "")
         token = recipe_id.replace(".", "_").replace("-", "_").lower()
+        # One entry per registered VERSION (#159 S1: fan-out 2.0.0 is
+        # registered beside 1.0.0). The default version keeps the established
+        # id, so the citation handle every served remediation already uses is
+        # unchanged; a non-default version is suffixed with its own version.
+        entry_id = f"recipe.{token}"
+        if not row.get("is_default", True):
+            entry_id += ".v" + version.replace(".", "_").replace("-", "_").lower()
         entries.append(
             ProcessIRAuthoringContractEntryV1(
-                contract_entry_id=f"recipe.{token}",
+                contract_entry_id=entry_id,
                 entry_type="recipe",
                 category="recipe",
                 subject=recipe_id,

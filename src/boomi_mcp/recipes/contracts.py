@@ -393,6 +393,15 @@ class RecipeRegistrationV1:
     capability_requirements: Tuple[RecipeCapabilityRequirementV1, ...] = ()
     conflict_policy: Optional[RecipeConflictPolicyV1] = None
     adapter_target: Optional[RecipeReferenceV1] = None
+    #: #159 S1 — the closed COMPONENT MATERIAL channel. A registration that
+    #: declares both may be invoked with a ``component_material`` companion: the
+    #: authoring workflow validates it with ``component_material_model`` (closed,
+    #: strict) and hands it, with the validated recipe input, to
+    #: ``component_preparer``, a TRUSTED server-side function that returns the
+    #: supporting component specs. The executor never receives material. A
+    #: registration that declares neither refuses any material it is sent.
+    component_material_model: Optional[type] = None
+    component_preparer: Optional[Callable[..., Any]] = None
 
 
 # ---------------------------------------------------------------------------

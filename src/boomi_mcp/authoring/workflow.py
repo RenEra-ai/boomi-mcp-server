@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import re as _re
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from contextlib import contextmanager
@@ -48,6 +49,7 @@ from pydantic import ValidationError
 
 from ..errors import (
     GOVERNANCE_PREVIEW_UNREPRESENTABLE,
+    GOVERNANCE_SOURCE_CONFLICT,
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_CAPABILITY_REVISION_MISMATCH,
     AUTHORING_COMPILE_BLOCKED,
@@ -269,6 +271,12 @@ class _NormalizedIntent:
     #: component key on the process_ir route, so an index recomputed here would
     #: name a different unit in the served diagnostic path.
     deferred_watermarks: Tuple[Any, ...] = ()
+    #: #159 S1: which registered code each recipe invocation ran, in invocation
+    #: order — registry-derived, never request-derived. Served, and hashed into
+    #: the semantic payload of a RECIPE intent only.
+    recipe_provenance: Tuple[Any, ...] = ()
+    #: #159 S1: the run's informational, value-free records. Served only.
+    recipe_diagnostics: Tuple[Any, ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -550,6 +558,242 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
     )
 
 
+def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkflowError":
+    """The recipe layer's refusal, carried into this channel VALUE-FREE.
+
+    The recipe layer's own codes travel as causatives; the authoring surface
+    reports which phase blocked, never re-diagnoses the recipe layer's domain
+    (ADR-001 §7). The diagnostic's POINTER is forwarded too (#159 S1, C6): a
+    composition refusal names the cause AND the position that caused it. When
+    the diagnostic names exactly one invocation of this request, its pointer is
+    re-rooted under that invocation (``/intent/invocations/<i>``) so a caller can
+    follow it into the request they wrote.
+    """
+    diagnostics = []
+    for diagnostic in getattr(exc, "diagnostics", ()) or ():
+        # Forwarded ONLY when it can be placed: a pointer the recipe layer
+        # raised without naming the invocation is relative to an input this
+        # surface cannot identify, and serving it bare would point the caller
+        # at the wrong document. Such diagnostics keep the established empty
+        # path.
+        path = ""
+        pointer = getattr(diagnostic, "path", "") or ""
+        invocations = tuple(getattr(diagnostic, "invocation_ids", ()) or ())
+        if pointer and len(invocations) == 1 and invocations[0] in invocation_index:
+            path = "/intent/invocations/{0}{1}".format(
+                invocation_index[invocations[0]], pointer
+            )
+        diagnostics.append(
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error",
+                message="The recipe layer refused to assemble this intent.",
+                path=path,
+                subject_kind="recipe",
+                subject_id=getattr(diagnostic, "target", "") or "",
+                remediation=(
+                    "Fix the recipe input or invocation and re-plan. See "
+                    "cause_codes for the recipe layer's own diagnosis."
+                ),
+                cause_codes=tuple(getattr(diagnostic, "cause_codes", ()) or ())
+                + ((getattr(diagnostic, "code", "") or "",)),
+            )
+        )
+    return AuthoringWorkflowError(
+        AUTHORING_COMPILE_BLOCKED,
+        tuple(diagnostics)
+        or (
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error",
+                message="The recipe layer refused to assemble this intent.",
+                subject_kind="recipe",
+            ),
+        ),
+    )
+
+
+def _declared_material_segments(model: Any) -> frozenset:
+    """Every field name and discriminator tag the material model DECLARES.
+
+    A pointer segment outside this set was authored by the caller — an unknown
+    key, say — and a key name is caller content like any other value."""
+    names = set()
+    try:
+        schema = model.model_json_schema()
+    except Exception:  # noqa: BLE001 — an empty set truncates every pointer, safely
+        return frozenset()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            properties = node.get("properties")
+            if isinstance(properties, Mapping):
+                names.update(str(key) for key in properties)
+            mapping = (node.get("discriminator") or {}).get("mapping")
+            if isinstance(mapping, Mapping):
+                names.update(str(key) for key in mapping)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(schema)
+    return frozenset(names)
+
+
+def _material_pointer(error: Any, model: Any) -> str:
+    """A JSON pointer for a material validation failure — DECLARED structure only.
+
+    Built from the error's ``loc`` (or, for a retired spelling, the refusal's own
+    structural path) and TRUNCATED at the first segment the material model does
+    not declare: an unknown key's NAME is caller content and is never served.
+    The error's ``input`` and message are never read. A truncated pointer still
+    names the closest declared object, so the caller can find the offender.
+    """
+    from ..models.governance_intent import RETIRED_SPELLINGS
+
+    segments: Tuple[str, ...] = ()
+    vocabulary = frozenset()
+    try:
+        errors = error.errors(include_input=False, include_url=False)
+        if errors:
+            first = errors[0]
+            retired = (first.get("ctx") or {}).get("path")
+            if first.get("type") == "governance_retired_spelling" and isinstance(retired, str):
+                segments = tuple(part for part in retired.split("/") if part)
+                # A retired spelling is a server-published name, not caller
+                # content, so the pointer may end ON it.
+                vocabulary = frozenset(RETIRED_SPELLINGS)
+            else:
+                segments = tuple(
+                    str(part)
+                    for part in first.get("loc", ())
+                    if not str(part).startswith("function-")
+                )
+    except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
+        segments = ()
+    declared = _declared_material_segments(model) | vocabulary
+    kept: List[str] = []
+    for segment in segments:
+        if not (segment.isdigit() or segment in declared):
+            break
+        kept.append(segment)
+    return "/component_material" + "".join("/" + part for part in kept)
+
+
+def _prepare_recipe_components(intent, registry, catalog_entries):
+    """Run every declared component preparer, BEFORE any recipe executes (#159 S1).
+
+    For each invocation, against the registration the REGISTRY resolves:
+
+    * a registration that declares no component-material channel refuses any
+      ``component_material`` it is sent (``RECIPE_INPUT_INVALID`` at
+      ``/component_material``) — material is never silently ignored;
+    * one that declares the channel requires the material, validates the recipe
+      input through the engine's own input gate, validates the material with
+      the registration's closed model, and runs its trusted preparer.
+
+    Returns ``(supporting specs, deferred query-parameter names)``. The specs are
+    the generated ones in invocation order, then each base component a preparer
+    selected by key, exactly once. Every refusal is a value-free ``RecipeError``
+    carrying this invocation's id, so the caller sees the cause and the pointer.
+    """
+    from ..recipes.engine import _validate_input
+    from ..recipes.errors import RecipeError, recipe_diagnostic
+    from ..errors import GOVERNANCE_RETIRED_SPELLING, RECIPE_INPUT_INVALID
+
+    generated: List[IntegrationComponentSpec] = []
+    selected: List[str] = []
+    deferred: Dict[str, Tuple[str, ...]] = {}
+    base_catalog = MappingProxyType(dict(catalog_entries))
+
+    def tagged(exc, invocation, prefix=""):
+        """Attribute an untagged diagnostic to this invocation. ``prefix`` roots
+        a pointer the engine's input gate made relative to ``raw_input``."""
+        return RecipeError(
+            tuple(
+                diagnostic.model_copy(
+                    update={
+                        "invocation_ids": (invocation.invocation_id,),
+                        "path": (prefix + diagnostic.path) if diagnostic.path else "",
+                    }
+                )
+                if not diagnostic.invocation_ids
+                else diagnostic
+                for diagnostic in exc.diagnostics
+            )
+        )
+
+    for invocation in intent.invocations:
+        descriptor = registry.resolve(invocation.recipe_id, invocation.recipe_version)
+        preparation = registry.component_preparation_for(descriptor)
+        material = invocation.component_material
+
+        def refuse(target, cause=()):
+            return RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_INPUT_INVALID,
+                        phase="input",
+                        path="/component_material",
+                        target=target,
+                        recipe_ids=(descriptor.recipe_id,),
+                        recipe_versions=(descriptor.recipe_version,),
+                        invocation_ids=(invocation.invocation_id,),
+                        cause_codes=cause,
+                    ),
+                )
+            )
+
+        if preparation is None:
+            if material is not None:
+                raise refuse("component_material_not_declared")
+            continue
+        if material is None:
+            raise refuse("component_material_required")
+        model, preparer = preparation
+        try:
+            validated_input = _validate_input(descriptor, registry, invocation.raw_input)
+        except RecipeError as exc:
+            raise tagged(exc, invocation, "/raw_input") from None
+        try:
+            validated_material = model.model_validate(dict(material))
+        except ValidationError as exc:
+            retired = any(
+                error.get("type") == "governance_retired_spelling"
+                for error in exc.errors(include_input=False, include_url=False)
+            )
+            raise RecipeError(
+                (
+                    recipe_diagnostic(
+                        RECIPE_INPUT_INVALID,
+                        phase="input",
+                        path=_material_pointer(exc, model),
+                        recipe_ids=(descriptor.recipe_id,),
+                        recipe_versions=(descriptor.recipe_version,),
+                        invocation_ids=(invocation.invocation_id,),
+                        cause_codes=(GOVERNANCE_RETIRED_SPELLING,) if retired else (),
+                    ),
+                )
+            ) from None
+        except Exception:  # noqa: BLE001 — model text can echo a material value
+            raise refuse(None) from None
+        try:
+            prepared = preparer(validated_input, validated_material, base_catalog=base_catalog)
+        except RecipeError as exc:
+            raise tagged(exc, invocation) from None
+        generated.extend(prepared.supporting_components)
+        for key in prepared.selected_base_keys:
+            if key not in selected:
+                selected.append(key)
+        for operation_key, names in prepared.deferred_query_parameter_names:
+            deferred[operation_key] = tuple(names)
+
+    supporting = list(generated) + [catalog_entries[key] for key in selected]
+    return tuple(supporting), deferred
+
+
 def _normalize_recipe_intent(
     intent, effect_declarations=None, conflict_policy: str = "reuse"
 ) -> _NormalizedIntent:
@@ -558,13 +802,28 @@ def _normalize_recipe_intent(
     Composition is NOT re-implemented here: ``run_recipes`` owns descriptor
     resolution, ordering, patch composition, the input gate, and the canonical
     validation gate. This function calls it and reads its result.
+
+    #159 S1: a registration that declares the component-material channel has
+    its trusted preparer run first; the specs it generates join the run as
+    ``supporting_components``. A recipe-emitted PROCESS UNIT carries its own
+    envelope and bypasses the interim lift; only bare ``set_process_root``
+    roots are lifted, exactly as before.
     """
+    from ..models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+    from ..recipes import engine as _engine
     from ..recipes.engine import RecipeRequestV1, run_recipes
     from ..recipes.errors import RecipeError
     from ..recipes.materialization import MaterializationCatalog
 
     catalog_entries = {
         component.key: component for component in intent.base_components
+    }
+    invocation_index = {
+        invocation.invocation_id: position
+        for position, invocation in enumerate(intent.invocations)
     }
     requests = [
         RecipeRequestV1(
@@ -575,7 +834,20 @@ def _normalize_recipe_intent(
         )
         for invocation in intent.invocations
     ]
-    connector_metadata = _connector_metadata_from_components(intent.base_components)
+    try:
+        # The SAME registry `run_recipes` resolves against (looked up at call
+        # time, so a test-installed registry governs both).
+        supporting_specs, deferred_names = _prepare_recipe_components(
+            intent, _engine.production_registry(), catalog_entries
+        )
+    except RecipeError as exc:
+        raise _recipe_blocked(exc, invocation_index) from None
+    # Connector metadata covers the prepared specs too: with zero prebuilt
+    # pairs the base components alone would leave every generated connection
+    # and operation without a family/action.
+    connector_metadata = _connector_metadata_from_components(
+        list(intent.base_components) + list(supporting_specs)
+    )
     try:
         # #154 (QA-154-r1-01, second half). A recipe-kind intent assembles AND
         # compiles here, inside normalization — before `_validate_processes` has
@@ -588,49 +860,56 @@ def _normalize_recipe_intent(
             connector_metadata=connector_metadata,
             effect_declarations=effect_declarations,
             conflict_policy=conflict_policy,
+            supporting_components=supporting_specs,
         )
     except RecipeError as exc:
-        # The recipe layer's own codes are carried VALUE-FREE as causatives; the
-        # authoring surface reports which phase blocked, never re-diagnoses the
-        # recipe layer's domain (ADR-001 §7).
-        raise AuthoringWorkflowError(
-            AUTHORING_COMPILE_BLOCKED,
-            tuple(
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message="The recipe layer refused to assemble this intent.",
-                    subject_kind="recipe",
-                    subject_id=getattr(diagnostic, "target", "") or "",
-                    remediation=(
-                        "Fix the recipe input or invocation and re-plan. See "
-                        "cause_codes for the recipe layer's own diagnosis."
-                    ),
-                    cause_codes=tuple(
-                        getattr(diagnostic, "cause_codes", ()) or ()
-                    )
-                    + ((getattr(diagnostic, "code", "") or "",)),
-                )
-                for diagnostic in (getattr(exc, "diagnostics", ()) or ())
-            )
-            or (
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message="The recipe layer refused to assemble this intent.",
-                    subject_kind="recipe",
-                ),
-            ),
-        ) from None
+        raise _recipe_blocked(exc, invocation_index) from None
 
     components = list(result.components)
-    roots = tuple(sorted(result.composed.process_roots, key=lambda pair: pair[0]))
+    unit_keys = {key for key, _unit in result.composed.process_units}
+    roots = tuple(
+        pair
+        for pair in sorted(result.composed.process_roots, key=lambda pair: pair[0])
+        if pair[0] not in unit_keys
+    )
     envelopes = {
         envelope.component_key: envelope
         for envelope in (getattr(intent, "process_envelopes", None) or ())
     }
+    # ONE governance authority per root: a recipe-emitted unit carries its own
+    # envelope, so a typed per-root envelope naming it is a second source.
+    for key in sorted(set(envelopes) & unit_keys):
+        raise AuthoringWorkflowError(
+            GOVERNANCE_SOURCE_CONFLICT,
+            (
+                _diag(
+                    GOVERNANCE_SOURCE_CONFLICT,
+                    "error",
+                    message=(
+                        "A per-root envelope names a process unit whose recipe "
+                        "already supplies its envelope."
+                    ),
+                    path="/intent/process_envelopes",
+                    subject_kind="process",
+                    subject_id=key,
+                    remediation=(
+                        "Drop the envelope; author the unit's governance through "
+                        "the recipe input that emits it."
+                    ),
+                ),
+            ),
+        )
     supporting, authored_units = _lift_recipe_roots_into_units(
         components, roots, envelopes
+    )
+    direct_units = tuple(
+        ProcessAuthoringUnitAuthoredV1(
+            envelope=ProcessComponentEnvelopeAuthoredV1(
+                **unit.envelope.model_dump(mode="python")
+            ),
+            process_ir=unit.process_ir,
+        )
+        for _key, unit in result.composed.process_units
     )
     # #157: the recipe's own recorded-not-wired contributions, converted to the
     # served record. The composer already refused a record for an uncomposed
@@ -645,7 +924,10 @@ def _normalize_recipe_intent(
         for contribution in result.recorded_intents
     )
     resolution = _resolve_governance(
-        authored_units, supporting, extra_recorded_intents=recipe_records
+        tuple(authored_units) + direct_units,
+        list(supporting) + list(result.supporting_components),
+        extra_recorded_intents=recipe_records,
+        deferred_query_parameter_names=deferred_names,
     )
     spec = IntegrationSpecV1(
         name=intent.integration_name,
@@ -660,19 +942,29 @@ def _normalize_recipe_intent(
         # projection keys on component type, and a lifted process contributes no
         # connector family, so passing the full list keeps the mapping identical
         # to what it was before the lift. Governance moves no connector family
-        # or action, so the resolved components project identically.
-        connector_metadata=_connector_metadata_from_components(components),
+        # or action, so the resolved components project identically. The
+        # prepared supporting specs (#159 S1) join it.
+        connector_metadata=_connector_metadata_from_components(
+            components + list(result.supporting_components)
+        ),
         intent_kind="recipe",
         recorded_intents=resolution.recorded_intents,
         deferred_watermarks=resolution.deferred_watermarks,
+        recipe_provenance=tuple(result.invocation_provenance),
+        recipe_diagnostics=tuple(result.diagnostics),
     )
 
 
-def _resolve_governance(units, components, *, extra_recorded_intents=()):
+def _resolve_governance(
+    units, components, *, extra_recorded_intents=(), deferred_query_parameter_names=None
+):
     """Run governance resolution, translating its refusal into this channel."""
     try:
         return resolve_governance(
-            units, components, extra_recorded_intents=extra_recorded_intents
+            units,
+            components,
+            extra_recorded_intents=extra_recorded_intents,
+            deferred_query_parameter_names=deferred_query_parameter_names,
         )
     except GovernanceRefusal as exc:
         raise AuthoringWorkflowError(exc.code, exc.diagnostics) from None
@@ -2555,6 +2847,15 @@ def _normalized_payload(normalized: _NormalizedIntent, request: AuthoringRequest
     # establishes nothing.
     if request.effect_declarations is not None:
         payload["effect_declarations"] = request.effect_declarations.canonical_payload()
+    # #159 S1 (C7). Which REGISTERED code produced a recipe intent's roots: two
+    # recipe versions, or two implementations of one version, can compose
+    # byte-identical IR, and a binding that cannot tell them apart would let an
+    # apply run under code the plan never saw. Added ONLY for the recipe intent,
+    # so the direct intents' payloads — and every hash over them — are unchanged.
+    if request.intent.intent_kind == "recipe":
+        payload["recipe_provenance"] = [
+            record.model_dump(mode="json") for record in normalized.recipe_provenance
+        ]
     return payload
 
 
@@ -2890,6 +3191,8 @@ def plan_authoring_request_v1(
         capability_gaps=gaps,
         required_decisions=decisions,
         recorded_intents=normalized.recorded_intents,
+        recipe_provenance=normalized.recipe_provenance,
+        recipe_diagnostics=normalized.recipe_diagnostics,
     )
     internals = _PlanInternals(
         normalized=normalized,
@@ -3335,6 +3638,8 @@ def compile_authoring_request_v1(
         artifact_fingerprints=fingerprints,
         normalized_intent_digest=normalized_digest,
         recorded_intents=plan_result.recorded_intents,
+        recipe_provenance=plan_result.recipe_provenance,
+        recipe_diagnostics=plan_result.recipe_diagnostics,
     )
     return result, internals
 

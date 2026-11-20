@@ -741,6 +741,44 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "fingerprinting or mutation; a caller-supplied 'flows' is "
                 "refused with GOVERNANCE_FLOWS_OUTPUT_ONLY."
             ),
+            # #159 S1. The recipe intent's typed assembly surface: the served
+            # names of the companion channel and the per-invocation provenance.
+            "component_material": (
+                "RecipeInvocationRequestV1.component_material — the CLOSED "
+                "companion of raw_input for a recipe registration that declares "
+                "the component-material channel (boomi.compose.db_rest_fanout "
+                "2.0.0 today; its schema is published as component_material_schema "
+                "on get_schema_template('recipe:<id>@<version>')). Validated "
+                "against that registration's strict model; refused with "
+                "RECIPE_INPUT_INVALID at /component_material by any registration "
+                "that declares none. A trusted server-side preparer turns it "
+                "into the supporting component specs; it never reaches the "
+                "recipe executor, a contribution, recipe_provenance or a "
+                "diagnostic, and a refusal names the cause code and the pointer, "
+                "never a value."
+            ),
+            "recipe_provenance": (
+                "RecipeInvocationProvenanceV1 — on the recipe intent, which "
+                "REGISTERED code each invocation ran: recipe_id, the resolved "
+                "recipe_version, entry_kind, implementation_sha256 and "
+                "source_revision, in invocation order. Registry-derived, never "
+                "request-derived: an omitted version and an explicit pin that "
+                "resolve to one descriptor record identical provenance. Hashed "
+                "into the recipe intent's semantic payload only, so two recipe "
+                "versions or implementations composing identical IR bind to "
+                "different plan and compile hashes."
+            ),
+            "recipe_diagnostics": (
+                "RecipeRunDiagnosticV1 — informational, value-free records about "
+                "a recipe run's assembled output. Never a failure: a refusal is "
+                "an error diagnostic whose cause_codes carry the recipe layer's "
+                "own code and whose path points into the invocation."
+            ),
+            "recipe_process_unit": (
+                "A recipe may emit a whole process unit (root + envelope). Its "
+                "envelope is the root's ONE governance authority: a "
+                "process_envelopes entry naming it is GOVERNANCE_SOURCE_CONFLICT."
+            ),
             "recorded_intent": (
                 "RecordedIntentV1 — a deliberate declaration (typed watermark "
                 "rule half, runtime hint) the server RECORDS and serves back "

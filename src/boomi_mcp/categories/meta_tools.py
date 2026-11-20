@@ -6724,6 +6724,11 @@ def _recipe_descriptor_schema(reference: str) -> Dict[str, Any]:
         payload["input_schema"] = registry.input_model_for(
             descriptor
         ).model_json_schema()
+        # #159 S1: the closed companion channel's schema, published beside the
+        # input schema of the ONE registration that declares it.
+        preparation = registry.component_preparation_for(descriptor)
+        if preparation is not None:
+            payload["component_material_schema"] = preparation[0].model_json_schema()
     return payload
 
 

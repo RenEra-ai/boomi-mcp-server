@@ -1122,8 +1122,19 @@ def test_every_production_input_model_forbids_extras():
             registration.recipe_id, registration.input_model
         )  # must not raise
         checked += 1
-    # A census pin: a fifth input model must come with a deliberate update here.
-    assert checked == 4
+    # A census pin: a new input model must come with a deliberate update here.
+    # Five since #159 S1 (fan-out 2.0.0 beside 1.0.0), plus ONE component-material
+    # model, which must pass the same gates as an input model.
+    assert checked == 5
+    materials = [
+        registration.component_material_model
+        for registration in PRODUCTION_REGISTRATIONS
+        if registration.component_material_model is not None
+    ]
+    for model in materials:
+        registry_module._check_input_schema_closed("material", model)
+        registry_module._check_input_model_forbids_extras("material", model)
+    assert len(materials) == 1
 
 
 @pytest.mark.parametrize("lie", ["post_hoc_edit", "replaced_config", "lying_get"])
@@ -5052,3 +5063,97 @@ def test_invocation_provenance_is_registry_computed_and_carries_no_input():
     assert _PROVENANCE_SENTINEL not in json.dumps(result.provenance)
     # Default and explicit pin of the same descriptor record the same thing.
     assert run(None).invocation_provenance == run("1.0.0").invocation_provenance
+
+
+# ---------------------------------------------------------------------------
+# #159 S1 — the component-material channel's registration gates
+# ---------------------------------------------------------------------------
+
+
+def _material_registration(**overrides):
+    base = next(
+        reg
+        for reg in catalog.PRODUCTION_REGISTRATIONS
+        if reg.component_material_model is not None
+    )
+    fields = {name: getattr(base, name) for name in base.__dataclass_fields__}
+    fields.update(overrides)
+    return RecipeRegistrationV1(**fields)
+
+
+def _open_material_model():
+    from pydantic import BaseModel, ConfigDict
+
+    class OpenMaterial(BaseModel):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        anything: dict
+
+    return OpenMaterial
+
+
+def _unrebuildable_material_model():
+    from pydantic import BaseModel, ConfigDict
+
+    class Unrebuildable(BaseModel):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+
+        @classmethod
+        def model_rebuild(cls, **kwargs):
+            raise RuntimeError("no schema")
+
+    return Unrebuildable
+
+
+def _nested_preparer():
+    def preparer(inp, material, *, base_catalog):  # pragma: no cover - never called
+        return None
+
+    return preparer
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        pytest.param(lambda: {"component_preparer": None}, "both", id="model_without_preparer"),
+        pytest.param(lambda: {"component_material_model": None}, "both", id="preparer_without_model"),
+        pytest.param(
+            lambda: {"entry_kind": "constraint_only", "output_types": ("constraint_requirement",)},
+            "executable_recipe",
+            id="not_an_executable_recipe",
+        ),
+        pytest.param(lambda: {"component_material_model": dict}, "pydantic model", id="not_a_model"),
+        pytest.param(
+            lambda: {"component_material_model": _unrebuildable_material_model()},
+            "cannot be rebuilt",
+            id="unrebuildable_model",
+        ),
+        pytest.param(
+            lambda: {"component_material_model": _open_material_model()},
+            ".",
+            id="open_model",
+        ),
+        pytest.param(lambda: {"component_preparer": print}, "plain function", id="builtin_preparer"),
+        pytest.param(
+            lambda: {"component_preparer": _nested_preparer()},
+            "module level",
+            id="nested_preparer",
+        ),
+    ],
+)
+def test_a_malformed_component_material_declaration_is_refused_at_construction(
+    overrides, message
+):
+    with pytest.raises(ValueError, match=message):
+        build_test_registry((_material_registration(**overrides()),))
+
+
+def test_component_preparation_is_served_only_for_the_declaring_registration():
+    registry = production_registry()
+    declaring = [
+        descriptor
+        for descriptor in registry.descriptors()
+        if registry.component_preparation_for(descriptor) is not None
+    ]
+    assert [(d.recipe_id, d.recipe_version) for d in declaring] == [
+        ("boomi.compose.db_rest_fanout", "2.0.0")
+    ]

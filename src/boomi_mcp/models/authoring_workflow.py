@@ -86,7 +86,12 @@ from .process_component import (
     ProcessComponentEnvelopeAuthoredV1,
     ProcessExtensionBindingsV1,
 )
-from .recipe_contributions import RecipeComponentKey
+from .recipe_contributions import (
+    RecipeComponentKey,
+    # #159 S1 (C9): server-produced run records, served on both read-only phases.
+    RecipeInvocationProvenanceV1,
+    RecipeRunDiagnosticV1,
+)
 from .process_ir import ProcessIRV1
 from .system_topology import SystemTopologySpecV1
 
@@ -288,6 +293,32 @@ class RecipeInvocationRequestV1(_AuthoringModel):
     invocation_id: NonEmptyString
     raw_input: Dict[str, Any] = Field(default_factory=dict)
     recipe_version: Optional[NonEmptyString] = None
+    #: #159 S1 — the closed COMPONENT MATERIAL companion. Open on the wire for
+    #: the same reason ``raw_input`` is (each registration defines its own
+    #: shape), and NOT unchecked: it is validated against the CLOSED, strict
+    #: model the RESOLVED registration declares, and refused outright
+    #: (``RECIPE_INPUT_INVALID`` at ``/component_material``) by a registration
+    #: that declares none. It carries connection settings, SQL, URLs and
+    #: mapping operations, so it never reaches the recipe executor, a
+    #: contribution, provenance or a diagnostic: a trusted server-side preparer
+    #: turns it into supporting component specs. Its repr is redacted.
+    component_material: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Closed component material for a recipe registration that declares "
+            "the component-material channel (e.g. boomi.compose.db_rest_fanout "
+            "2.0.0). Validated against that registration's published "
+            "component_material_schema; refused by any registration that does "
+            "not declare one. Never echoed in a diagnostic."
+        ),
+    )
+
+    def __repr_args__(self):  # noqa: D105 — pydantic hook
+        for key, value in super().__repr_args__():
+            if key == "component_material" and value is not None:
+                yield key, "..."
+            else:
+                yield key, value
 
 
 class RecipeProcessEnvelopeV1(_AuthoringModel):
@@ -997,6 +1028,14 @@ class _AuthoringResultV1(_AuthoringModel):
     #: #157: recorded-not-wired declarations, served back so a deliberate intent
     #: is readable, never an input to anything hashed or mutated.
     recorded_intents: Tuple[RecordedIntentV1, ...] = ()
+    #: #159 S1 (C7): on the recipe intent, which REGISTERED code each invocation
+    #: ran — recipe id and resolved version, entry kind, implementation digest
+    #: and source revision, in invocation order. Registry-derived, never
+    #: request-derived; empty for the direct intents.
+    recipe_provenance: Tuple[RecipeInvocationProvenanceV1, ...] = ()
+    #: #159 S1: informational, value-free records about the recipe run's
+    #: assembled output. Never failures (a failure is an error diagnostic).
+    recipe_diagnostics: Tuple[RecipeRunDiagnosticV1, ...] = ()
     pipeline_stages: Tuple[str, ...] = ()
     process_cfg: Tuple[ProcessCfgSummaryV1, ...] = ()
     component_dependencies: Tuple[ComponentDependencyEdgeV1, ...] = ()
