@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 9450,
+      "evidence_line": 9460,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -1000,7 +1000,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 1287,
+      "evidence_line": 1605,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-56f8bcbb",
@@ -1009,7 +1009,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3246,
+      "evidence_line": 3575,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-a45c3afb",
@@ -1018,7 +1018,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 2,
-      "evidence_line": 2614,
+      "evidence_line": 2941,
       "form": "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-16a15362",
@@ -1027,7 +1027,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3487,
+      "evidence_line": 3818,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "LT-f9b9e35e",
@@ -1387,7 +1387,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 479,
+      "evidence_line": 484,
       "form": "compose_archetypes(...) [legacy-bearing, src/boomi_mcp/patterns/composition.py]",
       "path": "src/boomi_mcp/categories/integration_authoring.py",
       "row_id": "LT-af96a7cb",
@@ -1396,7 +1396,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10013,
+      "evidence_line": 10023,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d2d552f0",
@@ -1405,7 +1405,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 10910,
+      "evidence_line": 10920,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1414,7 +1414,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11279,
+      "evidence_line": 11289,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1423,7 +1423,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9975,
+      "evidence_line": 9985,
       "form": "preflight_typed_apply_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e0b988c1",
@@ -1441,7 +1441,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6883,
+      "evidence_line": 6891,
       "form": "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-2de2f7a6",
@@ -1450,7 +1450,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7836,
+      "evidence_line": 7846,
       "form": "_check_api_service_route_dependencies(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-20419861",
@@ -1459,7 +1459,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7659,
+      "evidence_line": 7669,
       "form": "_process_component_preflight(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-a902f4d3",
@@ -1468,7 +1468,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7981,
+      "evidence_line": 7991,
       "form": "_resolve_preservation_policy(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aa0c9c33",
@@ -1477,7 +1477,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 6862,
+      "evidence_line": 6870,
       "form": "evaluate_pipeline_authority(...) [legacy-bearing, src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-d3d95fdb",
@@ -1495,7 +1495,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12571,
+      "evidence_line": 12581,
       "form": "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b741b93b",
@@ -1504,7 +1504,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9375,
+      "evidence_line": 9385,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1513,7 +1513,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9450,
+      "evidence_line": 9460,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1576,7 +1576,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12509,
+      "evidence_line": 12519,
       "form": "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e950b4e0",
@@ -1621,7 +1621,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12926,
+      "evidence_line": 12936,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1630,7 +1630,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12918,
+      "evidence_line": 12928,
       "form": "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcb7048c",
@@ -1639,7 +1639,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12922,
+      "evidence_line": 12932,
       "form": "_compile_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-5ad6792c",
@@ -1648,7 +1648,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 12916,
+      "evidence_line": 12926,
       "form": "_plan_authoring(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-b68fe63e",
@@ -1774,7 +1774,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 484,
+      "evidence_line": 496,
       "form": "<expr>('process_kind')",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "PC-ff87edbd",
@@ -1873,7 +1873,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 7159,
+      "evidence_line": 7169,
       "form": "raw_config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-09078af3",
@@ -1882,7 +1882,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 7159,
+      "evidence_line": 7169,
       "form": "raw_config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-5db2f770",
@@ -2044,7 +2044,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 7752,
+      "evidence_line": 7757,
       "form": "dict-literal process_kind='database_to_api_sync'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-afb1406e",
@@ -2053,7 +2053,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8633,
+      "evidence_line": 8638,
       "form": "dict-literal process_kind='sync_pipeline'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-9797a75e",
@@ -2062,7 +2062,7 @@
     {
       "census": "process_kind_producer",
       "count": 2,
-      "evidence_line": 8500,
+      "evidence_line": 8505,
       "form": "dict-literal process_kind='wrapper_subprocess'",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "PP-67bfa71b",
@@ -2476,7 +2476,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 669,
+      "evidence_line": 673,
       "form": "'Component/dependency verification, plus compiler and artifact provenance for typed builds.' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/authoring/contract.py",
       "row_id": "UR-6bb4a0ef",
@@ -2512,7 +2512,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 484,
+      "evidence_line": 496,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/authoring/workflow.py",
       "row_id": "UR-8b2712eb",
@@ -2809,7 +2809,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 11428,
+      "evidence_line": 11438,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -2863,7 +2863,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 7159,
+      "evidence_line": 7169,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-9a34a4e3",
@@ -2872,7 +2872,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 7159,
+      "evidence_line": 7169,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-43bc6a4f",
@@ -2881,7 +2881,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 7683,
+      "evidence_line": 7693,
       "form": "ProcessFlowBuilder (unclassified reference)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-257e0ae4",
@@ -2890,7 +2890,7 @@
     {
       "census": "unclassified_reference",
       "count": 2,
-      "evidence_line": 7158,
+      "evidence_line": 7168,
       "form": "process_kind (unclassified selector name)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-f9bf77bc",
@@ -3160,7 +3160,7 @@
     {
       "census": "unclassified_reference",
       "count": 5,
-      "evidence_line": 8080,
+      "evidence_line": 8085,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/meta_tools.py",
       "row_id": "UR-10de511e",
@@ -4401,7 +4401,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 9450,
+      "evidence_line": 9460,
       "forms": [
         "create_component(...)"
       ],
@@ -4921,7 +4921,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 1287,
+      "evidence_line": 1605,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -4934,7 +4934,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3246,
+      "evidence_line": 3575,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4947,7 +4947,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2614,
+      "evidence_line": 2941,
       "forms": [
         "_legacy_plan_echo(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -4960,7 +4960,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 3487,
+      "evidence_line": 3818,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5324,7 +5324,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 479,
+      "evidence_line": 484,
       "forms": [
         "compose_archetypes(...) [legacy-bearing, src/boomi_mcp/patterns/composition.py]"
       ],
@@ -5337,7 +5337,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9975,
+      "evidence_line": 9985,
       "forms": [
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5366,7 +5366,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 6862,
+      "evidence_line": 6870,
       "forms": [
         "_authored_process_validation_error(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_check_api_service_route_dependencies(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5396,7 +5396,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12571,
+      "evidence_line": 12581,
       "forms": [
         "compile_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5409,7 +5409,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9375,
+      "evidence_line": 9385,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -5441,7 +5441,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12509,
+      "evidence_line": 12519,
       "forms": [
         "plan_authoring_request_v1(...) [legacy-bearing, src/boomi_mcp/authoring/workflow.py]"
       ],
@@ -5494,7 +5494,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 12916,
+      "evidence_line": 12926,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_build_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
@@ -5655,7 +5655,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 484,
+      "evidence_line": 496,
       "forms": [
         "<expr>('process_kind')"
       ],
@@ -5738,7 +5738,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 7159,
+      "evidence_line": 7169,
       "forms": [
         "raw_config.get('process_kind')",
         "raw_config.get('process_type')"
@@ -5877,7 +5877,7 @@
     {
       "census": "process_kind_producer",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 7752,
+      "evidence_line": 7757,
       "forms": [
         "dict-literal process_kind='database_to_api_sync'",
         "dict-literal process_kind='sync_pipeline'",
@@ -6321,7 +6321,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 669,
+      "evidence_line": 673,
       "forms": [
         "'Component/dependency verification, plus compiler and artifact provenance for typed builds.' (unclassified Component-endpoint literal)"
       ],
@@ -6361,7 +6361,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 484,
+      "evidence_line": 496,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -6538,7 +6538,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 11428,
+      "evidence_line": 11438,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -6580,7 +6580,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 7158,
+      "evidence_line": 7168,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)",
@@ -6745,7 +6745,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "retract the served legacy guidance / guard the raw route",
-      "evidence_line": 8080,
+      "evidence_line": 8085,
       "forms": [
         "'process_kind' (unclassified selector literal)"
       ],
@@ -7744,7 +7744,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "f60ad944e129d2376f019f2dc7760cfbdaa7ce059958bce17b457aa45e5e7bca",
+      "sha256": "edf519795f0b9c084d8692e031fd6b3b22b6fbbe2a5b33cebc3fe339ca9a48fc",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7881,11 +7881,11 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:9fd213dc486f1ff01a136b7bf3c8abe0709870ca9d03a6819b0364fec9436ea3",
+          "actual_capability_revision": "sha256:ff9ebfd7516093bb0e25450989ea3c1de0f2349b3c370f02817dae01be9c7999",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:9fd213dc486f1ff01a136b7bf3c8abe0709870ca9d03a6819b0364fec9436ea3",
-        "compiler_revision": "sha256:5f87519fc6275bc633a3a229cfb11f3ad3fe58cd22b0e682e4a83db3e8fac914",
+        "capability_revision": "sha256:ff9ebfd7516093bb0e25450989ea3c1de0f2349b3c370f02817dae01be9c7999",
+        "compiler_revision": "sha256:b381ee74fe7f94e285e1c47f66fd7c202730776ba5bd66ba2b896775e88e1265",
         "contract_version": "2",
         "intent_kinds": [
           "integration_spec",
@@ -7894,7 +7894,7 @@
         ],
         "manifest_version": "1",
         "process_ir_authoring": {
-          "entry_count": 219,
+          "entry_count": 221,
           "entry_counts_by_type": {
             "capability": 34,
             "connector_action": 6,
@@ -7902,8 +7902,8 @@
             "doctrine": 39,
             "node": 25,
             "placement": 10,
-            "recipe": 8,
-            "recipe_contribution": 5,
+            "recipe": 9,
+            "recipe_contribution": 6,
             "semantic_rule": 15,
             "state_visibility": 4
           },
@@ -8123,18 +8123,18 @@
           ]
         },
         "recipe_registry": {
-          "entry_count": 8,
+          "entry_count": 9,
           "entry_kinds": [
             "advisory",
             "compatibility_adapter",
             "constraint_only",
             "executable_recipe"
           ],
-          "registry_revision": "f776ce4745d56c7b644113bef076a7accdf51b72f63f978cd68a848ae95052dd",
+          "registry_revision": "98422b04c21b6cf90880c552e6934a10a1e51361a5d1b264a39b1ea2a0db5410",
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670",
+        "schema_revision": "sha256:62d2739fbe38106a98104c0ec74aad4a6a23565aa20ef96fa5ff5166e35130db",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -8146,21 +8146,21 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:057f26f4870526bcee941a99d1642ce2b05342c27d7db8f11057146c2004714b",
+            "schema_hash": "sha256:d60146979330babee9584a815294ab3545a14aef3a2c6faaa43810dd01b506ae",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:5822d29717b634fae3d00d4cfd5054f545bd9128cbea3db137e29179d525b84d",
+            "schema_hash": "sha256:2435e44c9486bb85382ed001d5c89f69074a2a662bf9afbea5af1c1d29f14d6f",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:3c4cbfe627eec23562026a7b79438ab1773452c66e8a0ca0501c8c5830465406",
+            "schema_hash": "sha256:c34f525daa9c3b65fbb65438b96c1a227a543a510cf7f97195462c48c52126f2",
             "schema_version": "2",
             "selector": "AuthoringRequestV1"
           },
@@ -8174,7 +8174,7 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:93e87b343bffeb5fd732e15a324655b3c70e1a92d130f39316f86bdefc93066f",
+            "schema_hash": "sha256:c9352f93f9527f9dff296e03a4ff909f823d31acf663d2ef2c405d683a816974",
             "schema_version": "1",
             "selector": "DerivedFlowRowV1"
           },
@@ -8251,7 +8251,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:987cda3e1a40aea3a04fa1c393afa663ac759af68c1ac07ff20def547bcced66",
+            "schema_hash": "sha256:4b6dc987de2b61b58c057d0db6a78dbf1eb64c5a438b2c1838c01731833fdc29",
             "selector": "authoring_workflow"
           },
           {
@@ -8270,7 +8270,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:992179b7c7dc4f2ceccd1e283d8954f06b24fbd5bbee5d982c465912e9b9e0d4",
+            "schema_hash": "sha256:d49d647cf38274414ced4797697eb60a68df5a503575278f7da59bdb87f4729a",
             "selector": "recipe_contributions"
           },
           {
@@ -14386,7 +14386,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 116111,
+      "canonical_length": 127509,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -14394,7 +14394,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "4f5bb0043456fb4223943190762a11c59d32767e625768451bba8c799c9d45fd",
+      "sha256": "f5d1dbb034476629009342b0d39a1e31e00af601aab5a97177f7cd38f8ccdbfc",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -14910,10 +14910,19 @@
                   "title": "Components",
                   "type": "array"
                 },
+                "composition_summaries": {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/DerivedCompositionSummaryV1"
+                  },
+                  "description": "Issue #159 S1 — OUTPUT-ONLY composition summaries keyed by process key, derived from each recipe-assembled root. Omitted from the served object when empty. Never hashed, compiled or applied.",
+                  "title": "Composition Summaries",
+                  "type": "object"
+                },
                 "endpoints": {
+                  "default": [],
+                  "description": "Issue #159 S1 — OUTPUT-ONLY endpoint rows for every unit a recipe route assembled with trusted projection facts, read off the route's connection components. Empty otherwise. Never hashed, compiled or applied.",
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/$defs/DerivedEndpointRowV1"
                   },
                   "title": "Endpoints",
                   "type": "array"
@@ -14922,7 +14931,34 @@
                   "default": [],
                   "description": "Issue #157 M12.19 — on the process_ir and recipe intents this is a TYPED, generator-derived, OUTPUT-ONLY projection of the transform rows. It is never authored, never merged with caller rows, and never an input to compilation, fingerprinting or mutation.",
                   "items": {
-                    "$ref": "#/$defs/DerivedTransformFlowV1"
+                    "discriminator": {
+                      "mapping": {
+                        "branch": "#/$defs/DerivedFanoutFlowV1",
+                        "db_get": "#/$defs/DerivedConnectorFlowV1",
+                        "reliability": "#/$defs/DerivedReliabilityFlowV1",
+                        "rest_send": "#/$defs/DerivedConnectorFlowV1",
+                        "transform": "#/$defs/DerivedTransformFlowV1",
+                        "watermark": "#/$defs/DerivedWatermarkFlowV1"
+                      },
+                      "propertyName": "operation"
+                    },
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/DerivedConnectorFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedTransformFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedReliabilityFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedWatermarkFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedFanoutFlowV1"
+                      }
+                    ]
                   },
                   "title": "Flows",
                   "type": "array"
@@ -15740,6 +15776,470 @@
               "title": "DecisionTrueArmV1",
               "type": "object"
             },
+            "DerivedCompositionPartV1": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "db_source",
+                    "transform",
+                    "rest_target"
+                  ],
+                  "title": "Kind",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "kind"
+              ],
+              "title": "DerivedCompositionPartV1",
+              "type": "object"
+            },
+            "DerivedCompositionSummaryV1": {
+              "additionalProperties": false,
+              "description": "The composition's value-free topology summary, derived from the root.",
+              "properties": {
+                "cache_component_key": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Cache Component Key"
+                },
+                "fanout_legs": {
+                  "default": [],
+                  "items": {
+                    "$ref": "#/$defs/DerivedFanoutLegV1"
+                  },
+                  "title": "Fanout Legs",
+                  "type": "array"
+                },
+                "fanout_targets": {
+                  "minimum": 2,
+                  "title": "Fanout Targets",
+                  "type": "integer"
+                },
+                "first_target_part": {
+                  "minLength": 1,
+                  "title": "First Target Part",
+                  "type": "string"
+                },
+                "handoff": {
+                  "enum": [
+                    "document_stream",
+                    "document_cache",
+                    "mixed"
+                  ],
+                  "title": "Handoff",
+                  "type": "string"
+                },
+                "handoff_modes": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": {
+                        "enum": [
+                          "document_stream",
+                          "document_cache"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Handoff Modes"
+                },
+                "parts": {
+                  "items": {
+                    "$ref": "#/$defs/DerivedCompositionPartV1"
+                  },
+                  "title": "Parts",
+                  "type": "array"
+                },
+                "staging_leg": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Staging Leg"
+                },
+                "topology": {
+                  "minLength": 1,
+                  "title": "Topology",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "topology",
+                "handoff",
+                "fanout_targets",
+                "parts",
+                "first_target_part"
+              ],
+              "title": "DerivedCompositionSummaryV1",
+              "type": "object"
+            },
+            "DerivedConnectorFlowV1": {
+              "additionalProperties": false,
+              "description": "A connector step of a recipe-assembled route: the extract or the send.\n\nServed only for a unit whose recipe supplied trusted projection facts\n(:class:`RecipeUnitProjectionFactsV1`); every field is read off the composed\nroot and its components, never off the recipe input.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "enum": [
+                    "db_get",
+                    "rest_send"
+                  ],
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key",
+                "operation"
+              ],
+              "title": "DerivedConnectorFlowV1",
+              "type": "object"
+            },
+            "DerivedEndpointRowV1": {
+              "additionalProperties": false,
+              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves the selector\nit binds by. Never a host, URL, credential or SQL.",
+              "properties": {
+                "auth_mode": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Auth Mode"
+                },
+                "binding_mode": {
+                  "enum": [
+                    "create",
+                    "reuse"
+                  ],
+                  "title": "Binding Mode",
+                  "type": "string"
+                },
+                "component_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Component Id"
+                },
+                "component_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Component Name"
+                },
+                "direction": {
+                  "enum": [
+                    "source",
+                    "target"
+                  ],
+                  "title": "Direction",
+                  "type": "string"
+                },
+                "driver": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Driver"
+                },
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Method"
+                },
+                "type": {
+                  "enum": [
+                    "database",
+                    "rest"
+                  ],
+                  "title": "Type",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "type",
+                "direction",
+                "binding_mode"
+              ],
+              "title": "DerivedEndpointRowV1",
+              "type": "object"
+            },
+            "DerivedFanoutFlowV1": {
+              "additionalProperties": false,
+              "description": "The terminal Branch. ``legs`` counts the ROOT's legs, staging leg included.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "legs": {
+                  "minimum": 2,
+                  "title": "Legs",
+                  "type": "integer"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "branch",
+                  "default": "branch",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key",
+                "legs"
+              ],
+              "title": "DerivedFanoutFlowV1",
+              "type": "object"
+            },
+            "DerivedFanoutLegV1": {
+              "additionalProperties": false,
+              "description": "One non-first fan-out target, at its ACTUAL Branch leg position.",
+              "properties": {
+                "binding_mode": {
+                  "enum": [
+                    "create",
+                    "reuse"
+                  ],
+                  "title": "Binding Mode",
+                  "type": "string"
+                },
+                "expected_status_codes": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Expected Status Codes"
+                },
+                "handoff": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "document_stream",
+                        "document_cache"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Handoff"
+                },
+                "leg": {
+                  "minimum": 1,
+                  "title": "Leg",
+                  "type": "integer"
+                },
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Method"
+                },
+                "part_key": {
+                  "minLength": 1,
+                  "title": "Part Key",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "part_key",
+                "leg",
+                "binding_mode"
+              ],
+              "title": "DerivedFanoutLegV1",
+              "type": "object"
+            },
+            "DerivedReliabilityFlowV1": {
+              "additionalProperties": false,
+              "description": "The route's retry / DLQ posture. ``target`` names the DLQ when the root\nwires a catch path, and is null when it does not.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "reliability",
+                  "default": "reliability",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "title": "DerivedReliabilityFlowV1",
+              "type": "object"
+            },
             "DerivedTransformFlowV1": {
               "additionalProperties": false,
               "description": "The rich `transform` row, derived from the generator and the map components.",
@@ -15878,6 +16378,56 @@
                 "source_schema"
               ],
               "title": "DerivedTransformFlowV1",
+              "type": "object"
+            },
+            "DerivedWatermarkFlowV1": {
+              "additionalProperties": false,
+              "description": "Present exactly when the unit carries a recorded watermark declaration.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "watermark",
+                  "default": "watermark",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "title": "DerivedWatermarkFlowV1",
               "type": "object"
             },
             "DirectFieldMappingV1": {
@@ -17479,6 +18029,118 @@
                 "profile_type"
               ],
               "title": "ProfilePropertySourceV1",
+              "type": "object"
+            },
+            "RecipeInvocationProvenanceV1": {
+              "additionalProperties": false,
+              "description": "Which registered code one recipe invocation actually ran.\n\nEvery field except ``invocation_id`` is copied from the descriptor the\nREGISTRY resolved for the invocation, never from the request: a request that\nnamed no version and one that pinned the default version resolve to the same\ndescriptor and therefore record the same provenance. ``invocation_id`` is the\ncaller's own identifier for the invocation, returned to the caller.\n\nCarries no recipe input, no contribution and no component material — only\nthe identity of the code that produced them.",
+              "properties": {
+                "entry_kind": {
+                  "description": "The resolved descriptor's entry kind",
+                  "minLength": 1,
+                  "title": "Entry Kind",
+                  "type": "string"
+                },
+                "implementation_sha256": {
+                  "description": "The registry-derived digest of the resolved recipe's implementation",
+                  "maxLength": 64,
+                  "minLength": 64,
+                  "title": "Implementation Sha256",
+                  "type": "string"
+                },
+                "invocation_id": {
+                  "description": "The caller-chosen invocation_id of the invocation this record describes",
+                  "title": "Invocation Id",
+                  "type": "string"
+                },
+                "recipe_id": {
+                  "description": "Lower-case semantic identifier chosen by the recipe author",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "title": "Recipe Id",
+                  "type": "string"
+                },
+                "recipe_version": {
+                  "description": "The SemVer version of the descriptor the registry resolved",
+                  "minLength": 1,
+                  "title": "Recipe Version",
+                  "type": "string"
+                },
+                "source_revision": {
+                  "description": "The registry-derived source revision of the recipe layer",
+                  "minLength": 1,
+                  "title": "Source Revision",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "invocation_id",
+                "recipe_id",
+                "recipe_version",
+                "entry_kind",
+                "implementation_sha256",
+                "source_revision"
+              ],
+              "title": "RecipeInvocationProvenanceV1",
+              "type": "object"
+            },
+            "RecipeRunDiagnosticV1": {
+              "additionalProperties": false,
+              "description": "One informational, value-free record about a recipe's assembled output.\n\nNot a failure: a hard failure is a ``RecipeError`` and stops the run. This\nrecord names, for one Branch leg of one recipe-assembled process, which\nrecipe invocation produced the leg and which semantic part of the recipe's\ninput it realizes, so a caller can trace an emitted leg back to its source.\n\nEvery field is a closed literal, a registered identifier, the caller's own\ninvocation id, a semantic key from the caller's own request, or a position.\nNone carries a configuration value, a credential, or component material.",
+              "properties": {
+                "code": {
+                  "const": "RECIPE_LEG_PROVENANCE",
+                  "title": "Code",
+                  "type": "string"
+                },
+                "invocation_id": {
+                  "description": "The caller-chosen invocation_id of the producing invocation",
+                  "title": "Invocation Id",
+                  "type": "string"
+                },
+                "ordinal": {
+                  "description": "1-based position of the leg on the root's terminal Branch",
+                  "minimum": 1,
+                  "title": "Ordinal",
+                  "type": "integer"
+                },
+                "part_key": {
+                  "description": "The semantic part key, from the recipe input, the leg realizes",
+                  "minLength": 1,
+                  "title": "Part Key",
+                  "type": "string"
+                },
+                "process_key": {
+                  "description": "Semantic component key (the ComponentPlan dependency key)",
+                  "title": "Process Key",
+                  "type": "string"
+                },
+                "recipe_id": {
+                  "description": "Lower-case semantic identifier chosen by the recipe author",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "title": "Recipe Id",
+                  "type": "string"
+                },
+                "recipe_version": {
+                  "description": "The SemVer version of the producing recipe, as resolved",
+                  "minLength": 1,
+                  "title": "Recipe Version",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "invocation_id",
+                "recipe_id",
+                "recipe_version",
+                "process_key",
+                "ordinal",
+                "part_key"
+              ],
+              "title": "RecipeRunDiagnosticV1",
               "type": "object"
             },
             "RecordedIntentV1": {
@@ -18948,6 +19610,22 @@
               "title": "Process Cfg",
               "type": "array"
             },
+            "recipe_diagnostics": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/RecipeRunDiagnosticV1"
+              },
+              "title": "Recipe Diagnostics",
+              "type": "array"
+            },
+            "recipe_provenance": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/RecipeInvocationProvenanceV1"
+              },
+              "title": "Recipe Provenance",
+              "type": "array"
+            },
             "recorded_intents": {
               "default": [],
               "items": {
@@ -19006,12 +19684,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9fd213dc486f1ff01a136b7bf3c8abe0709870ca9d03a6819b0364fec9436ea3",
-          "compiler_revision": "sha256:5f87519fc6275bc633a3a229cfb11f3ad3fe58cd22b0e682e4a83db3e8fac914",
+          "capability_revision": "sha256:ff9ebfd7516093bb0e25450989ea3c1de0f2349b3c370f02817dae01be9c7999",
+          "compiler_revision": "sha256:b381ee74fe7f94e285e1c47f66fd7c202730776ba5bd66ba2b896775e88e1265",
           "contract_version": "2",
-          "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670"
+          "schema_revision": "sha256:62d2739fbe38106a98104c0ec74aad4a6a23565aa20ef96fa5ff5166e35130db"
         },
-        "schema_hash": "sha256:057f26f4870526bcee941a99d1642ce2b05342c27d7db8f11057146c2004714b",
+        "schema_hash": "sha256:d60146979330babee9584a815294ab3545a14aef3a2c6faaa43810dd01b506ae",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -19020,7 +19698,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 114785,
+      "canonical_length": 126183,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -19028,7 +19706,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "a451224105339c4fee5d34fd751877b171f66e0637229139bc28219fce853d31",
+      "sha256": "7aec85dda215be0d4981a57500c9980fede7f9c9565cec8f8cd418e1a667da43",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -19495,10 +20173,19 @@
                   "title": "Components",
                   "type": "array"
                 },
+                "composition_summaries": {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/DerivedCompositionSummaryV1"
+                  },
+                  "description": "Issue #159 S1 — OUTPUT-ONLY composition summaries keyed by process key, derived from each recipe-assembled root. Omitted from the served object when empty. Never hashed, compiled or applied.",
+                  "title": "Composition Summaries",
+                  "type": "object"
+                },
                 "endpoints": {
+                  "default": [],
+                  "description": "Issue #159 S1 — OUTPUT-ONLY endpoint rows for every unit a recipe route assembled with trusted projection facts, read off the route's connection components. Empty otherwise. Never hashed, compiled or applied.",
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/$defs/DerivedEndpointRowV1"
                   },
                   "title": "Endpoints",
                   "type": "array"
@@ -19507,7 +20194,34 @@
                   "default": [],
                   "description": "Issue #157 M12.19 — on the process_ir and recipe intents this is a TYPED, generator-derived, OUTPUT-ONLY projection of the transform rows. It is never authored, never merged with caller rows, and never an input to compilation, fingerprinting or mutation.",
                   "items": {
-                    "$ref": "#/$defs/DerivedTransformFlowV1"
+                    "discriminator": {
+                      "mapping": {
+                        "branch": "#/$defs/DerivedFanoutFlowV1",
+                        "db_get": "#/$defs/DerivedConnectorFlowV1",
+                        "reliability": "#/$defs/DerivedReliabilityFlowV1",
+                        "rest_send": "#/$defs/DerivedConnectorFlowV1",
+                        "transform": "#/$defs/DerivedTransformFlowV1",
+                        "watermark": "#/$defs/DerivedWatermarkFlowV1"
+                      },
+                      "propertyName": "operation"
+                    },
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/DerivedConnectorFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedTransformFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedReliabilityFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedWatermarkFlowV1"
+                      },
+                      {
+                        "$ref": "#/$defs/DerivedFanoutFlowV1"
+                      }
+                    ]
                   },
                   "title": "Flows",
                   "type": "array"
@@ -20325,6 +21039,470 @@
               "title": "DecisionTrueArmV1",
               "type": "object"
             },
+            "DerivedCompositionPartV1": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "db_source",
+                    "transform",
+                    "rest_target"
+                  ],
+                  "title": "Kind",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "kind"
+              ],
+              "title": "DerivedCompositionPartV1",
+              "type": "object"
+            },
+            "DerivedCompositionSummaryV1": {
+              "additionalProperties": false,
+              "description": "The composition's value-free topology summary, derived from the root.",
+              "properties": {
+                "cache_component_key": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Cache Component Key"
+                },
+                "fanout_legs": {
+                  "default": [],
+                  "items": {
+                    "$ref": "#/$defs/DerivedFanoutLegV1"
+                  },
+                  "title": "Fanout Legs",
+                  "type": "array"
+                },
+                "fanout_targets": {
+                  "minimum": 2,
+                  "title": "Fanout Targets",
+                  "type": "integer"
+                },
+                "first_target_part": {
+                  "minLength": 1,
+                  "title": "First Target Part",
+                  "type": "string"
+                },
+                "handoff": {
+                  "enum": [
+                    "document_stream",
+                    "document_cache",
+                    "mixed"
+                  ],
+                  "title": "Handoff",
+                  "type": "string"
+                },
+                "handoff_modes": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": {
+                        "enum": [
+                          "document_stream",
+                          "document_cache"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Handoff Modes"
+                },
+                "parts": {
+                  "items": {
+                    "$ref": "#/$defs/DerivedCompositionPartV1"
+                  },
+                  "title": "Parts",
+                  "type": "array"
+                },
+                "staging_leg": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Staging Leg"
+                },
+                "topology": {
+                  "minLength": 1,
+                  "title": "Topology",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "topology",
+                "handoff",
+                "fanout_targets",
+                "parts",
+                "first_target_part"
+              ],
+              "title": "DerivedCompositionSummaryV1",
+              "type": "object"
+            },
+            "DerivedConnectorFlowV1": {
+              "additionalProperties": false,
+              "description": "A connector step of a recipe-assembled route: the extract or the send.\n\nServed only for a unit whose recipe supplied trusted projection facts\n(:class:`RecipeUnitProjectionFactsV1`); every field is read off the composed\nroot and its components, never off the recipe input.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "enum": [
+                    "db_get",
+                    "rest_send"
+                  ],
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key",
+                "operation"
+              ],
+              "title": "DerivedConnectorFlowV1",
+              "type": "object"
+            },
+            "DerivedEndpointRowV1": {
+              "additionalProperties": false,
+              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves the selector\nit binds by. Never a host, URL, credential or SQL.",
+              "properties": {
+                "auth_mode": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Auth Mode"
+                },
+                "binding_mode": {
+                  "enum": [
+                    "create",
+                    "reuse"
+                  ],
+                  "title": "Binding Mode",
+                  "type": "string"
+                },
+                "component_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Component Id"
+                },
+                "component_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Component Name"
+                },
+                "direction": {
+                  "enum": [
+                    "source",
+                    "target"
+                  ],
+                  "title": "Direction",
+                  "type": "string"
+                },
+                "driver": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Driver"
+                },
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Method"
+                },
+                "type": {
+                  "enum": [
+                    "database",
+                    "rest"
+                  ],
+                  "title": "Type",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "type",
+                "direction",
+                "binding_mode"
+              ],
+              "title": "DerivedEndpointRowV1",
+              "type": "object"
+            },
+            "DerivedFanoutFlowV1": {
+              "additionalProperties": false,
+              "description": "The terminal Branch. ``legs`` counts the ROOT's legs, staging leg included.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "legs": {
+                  "minimum": 2,
+                  "title": "Legs",
+                  "type": "integer"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "branch",
+                  "default": "branch",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key",
+                "legs"
+              ],
+              "title": "DerivedFanoutFlowV1",
+              "type": "object"
+            },
+            "DerivedFanoutLegV1": {
+              "additionalProperties": false,
+              "description": "One non-first fan-out target, at its ACTUAL Branch leg position.",
+              "properties": {
+                "binding_mode": {
+                  "enum": [
+                    "create",
+                    "reuse"
+                  ],
+                  "title": "Binding Mode",
+                  "type": "string"
+                },
+                "expected_status_codes": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Expected Status Codes"
+                },
+                "handoff": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "document_stream",
+                        "document_cache"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Handoff"
+                },
+                "leg": {
+                  "minimum": 1,
+                  "title": "Leg",
+                  "type": "integer"
+                },
+                "method": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Method"
+                },
+                "part_key": {
+                  "minLength": 1,
+                  "title": "Part Key",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "part_key",
+                "leg",
+                "binding_mode"
+              ],
+              "title": "DerivedFanoutLegV1",
+              "type": "object"
+            },
+            "DerivedReliabilityFlowV1": {
+              "additionalProperties": false,
+              "description": "The route's retry / DLQ posture. ``target`` names the DLQ when the root\nwires a catch path, and is null when it does not.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "reliability",
+                  "default": "reliability",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "title": "DerivedReliabilityFlowV1",
+              "type": "object"
+            },
             "DerivedTransformFlowV1": {
               "additionalProperties": false,
               "description": "The rich `transform` row, derived from the generator and the map components.",
@@ -20463,6 +21641,56 @@
                 "source_schema"
               ],
               "title": "DerivedTransformFlowV1",
+              "type": "object"
+            },
+            "DerivedWatermarkFlowV1": {
+              "additionalProperties": false,
+              "description": "Present exactly when the unit carries a recorded watermark declaration.",
+              "properties": {
+                "executable": {
+                  "const": false,
+                  "default": false,
+                  "title": "Executable",
+                  "type": "boolean"
+                },
+                "key": {
+                  "minLength": 1,
+                  "title": "Key",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "title": "Name",
+                  "type": "string"
+                },
+                "operation": {
+                  "const": "watermark",
+                  "default": "watermark",
+                  "title": "Operation",
+                  "type": "string"
+                },
+                "source": {
+                  "default": "",
+                  "title": "Source",
+                  "type": "string"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Target"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "title": "DerivedWatermarkFlowV1",
               "type": "object"
             },
             "DirectFieldMappingV1": {
@@ -22066,6 +23294,118 @@
               "title": "ProfilePropertySourceV1",
               "type": "object"
             },
+            "RecipeInvocationProvenanceV1": {
+              "additionalProperties": false,
+              "description": "Which registered code one recipe invocation actually ran.\n\nEvery field except ``invocation_id`` is copied from the descriptor the\nREGISTRY resolved for the invocation, never from the request: a request that\nnamed no version and one that pinned the default version resolve to the same\ndescriptor and therefore record the same provenance. ``invocation_id`` is the\ncaller's own identifier for the invocation, returned to the caller.\n\nCarries no recipe input, no contribution and no component material — only\nthe identity of the code that produced them.",
+              "properties": {
+                "entry_kind": {
+                  "description": "The resolved descriptor's entry kind",
+                  "minLength": 1,
+                  "title": "Entry Kind",
+                  "type": "string"
+                },
+                "implementation_sha256": {
+                  "description": "The registry-derived digest of the resolved recipe's implementation",
+                  "maxLength": 64,
+                  "minLength": 64,
+                  "title": "Implementation Sha256",
+                  "type": "string"
+                },
+                "invocation_id": {
+                  "description": "The caller-chosen invocation_id of the invocation this record describes",
+                  "title": "Invocation Id",
+                  "type": "string"
+                },
+                "recipe_id": {
+                  "description": "Lower-case semantic identifier chosen by the recipe author",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "title": "Recipe Id",
+                  "type": "string"
+                },
+                "recipe_version": {
+                  "description": "The SemVer version of the descriptor the registry resolved",
+                  "minLength": 1,
+                  "title": "Recipe Version",
+                  "type": "string"
+                },
+                "source_revision": {
+                  "description": "The registry-derived source revision of the recipe layer",
+                  "minLength": 1,
+                  "title": "Source Revision",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "invocation_id",
+                "recipe_id",
+                "recipe_version",
+                "entry_kind",
+                "implementation_sha256",
+                "source_revision"
+              ],
+              "title": "RecipeInvocationProvenanceV1",
+              "type": "object"
+            },
+            "RecipeRunDiagnosticV1": {
+              "additionalProperties": false,
+              "description": "One informational, value-free record about a recipe's assembled output.\n\nNot a failure: a hard failure is a ``RecipeError`` and stops the run. This\nrecord names, for one Branch leg of one recipe-assembled process, which\nrecipe invocation produced the leg and which semantic part of the recipe's\ninput it realizes, so a caller can trace an emitted leg back to its source.\n\nEvery field is a closed literal, a registered identifier, the caller's own\ninvocation id, a semantic key from the caller's own request, or a position.\nNone carries a configuration value, a credential, or component material.",
+              "properties": {
+                "code": {
+                  "const": "RECIPE_LEG_PROVENANCE",
+                  "title": "Code",
+                  "type": "string"
+                },
+                "invocation_id": {
+                  "description": "The caller-chosen invocation_id of the producing invocation",
+                  "title": "Invocation Id",
+                  "type": "string"
+                },
+                "ordinal": {
+                  "description": "1-based position of the leg on the root's terminal Branch",
+                  "minimum": 1,
+                  "title": "Ordinal",
+                  "type": "integer"
+                },
+                "part_key": {
+                  "description": "The semantic part key, from the recipe input, the leg realizes",
+                  "minLength": 1,
+                  "title": "Part Key",
+                  "type": "string"
+                },
+                "process_key": {
+                  "description": "Semantic component key (the ComponentPlan dependency key)",
+                  "title": "Process Key",
+                  "type": "string"
+                },
+                "recipe_id": {
+                  "description": "Lower-case semantic identifier chosen by the recipe author",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "title": "Recipe Id",
+                  "type": "string"
+                },
+                "recipe_version": {
+                  "description": "The SemVer version of the producing recipe, as resolved",
+                  "minLength": 1,
+                  "title": "Recipe Version",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "invocation_id",
+                "recipe_id",
+                "recipe_version",
+                "process_key",
+                "ordinal",
+                "part_key"
+              ],
+              "title": "RecipeRunDiagnosticV1",
+              "type": "object"
+            },
             "RecordedIntentV1": {
               "additionalProperties": false,
               "description": "One served, recorded-not-wired declaration bound to one process root.\n\n``status`` is a single-valued literal on purpose: there is no ``wired``\nstate a record could be promoted to. When a declaration becomes executable\nit becomes a ProcessIR node or an envelope binding, not a status flip here.",
@@ -23512,6 +24852,22 @@
               "title": "Process Cfg",
               "type": "array"
             },
+            "recipe_diagnostics": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/RecipeRunDiagnosticV1"
+              },
+              "title": "Recipe Diagnostics",
+              "type": "array"
+            },
+            "recipe_provenance": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/RecipeInvocationProvenanceV1"
+              },
+              "title": "Recipe Provenance",
+              "type": "array"
+            },
             "recorded_intents": {
               "default": [],
               "items": {
@@ -23570,12 +24926,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9fd213dc486f1ff01a136b7bf3c8abe0709870ca9d03a6819b0364fec9436ea3",
-          "compiler_revision": "sha256:5f87519fc6275bc633a3a229cfb11f3ad3fe58cd22b0e682e4a83db3e8fac914",
+          "capability_revision": "sha256:ff9ebfd7516093bb0e25450989ea3c1de0f2349b3c370f02817dae01be9c7999",
+          "compiler_revision": "sha256:b381ee74fe7f94e285e1c47f66fd7c202730776ba5bd66ba2b896775e88e1265",
           "contract_version": "2",
-          "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670"
+          "schema_revision": "sha256:62d2739fbe38106a98104c0ec74aad4a6a23565aa20ef96fa5ff5166e35130db"
         },
-        "schema_hash": "sha256:5822d29717b634fae3d00d4cfd5054f545bd9128cbea3db137e29179d525b84d",
+        "schema_hash": "sha256:2435e44c9486bb85382ed001d5c89f69074a2a662bf9afbea5af1c1d29f14d6f",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -23584,7 +24940,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringRequestV1",
-      "canonical_length": 117304,
+      "canonical_length": 117759,
       "legacy_excerpt": {
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
         "json_schema.$defs.IntegrationSpecV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
@@ -23592,7 +24948,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "8a11618b16e117c6a01616a164a9a76479a352e302c9db0e42f24f5d4c181977",
+      "sha256": "d3486cdeab91e5c38c04c9587d07519ebdfd18fb835580bba69306fa40209c94",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -26336,6 +27692,20 @@
               "additionalProperties": false,
               "description": "One recipe run, as authored on the MCP surface.\n\nMirrors ``boomi_mcp.recipes.engine.RecipeRequestV1`` (a frozen dataclass with\na ``Mapping[str, Any]`` input) without embedding it: that dataclass is not a\npydantic model and its ``raw_input`` is deliberately open, so embedding it\nwould put an unvalidatable ``Any`` on a strict LLM-facing schema.\n\n``raw_input`` stays open here for the same reason it is open there — a\nrecipe defines its own input shape. It is NOT unchecked: the engine's input\ngate scans it for credentials, headers, SQL and raw XML before any recipe\nruns, and rejects with ``RECIPE_INPUT_INVALID``. This model routes to that\ngate rather than duplicating it.",
               "properties": {
+                "component_material": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Closed component material for a recipe registration that declares the component-material channel (e.g. boomi.compose.db_rest_fanout 2.0.0). Validated against that registration's published component_material_schema; refused by any registration that does not declare one. Never echoed in a diagnostic.",
+                  "title": "Component Material"
+                },
                 "invocation_id": {
                   "minLength": 1,
                   "title": "Invocation Id",
@@ -27843,12 +29213,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:9fd213dc486f1ff01a136b7bf3c8abe0709870ca9d03a6819b0364fec9436ea3",
-          "compiler_revision": "sha256:5f87519fc6275bc633a3a229cfb11f3ad3fe58cd22b0e682e4a83db3e8fac914",
+          "capability_revision": "sha256:ff9ebfd7516093bb0e25450989ea3c1de0f2349b3c370f02817dae01be9c7999",
+          "compiler_revision": "sha256:b381ee74fe7f94e285e1c47f66fd7c202730776ba5bd66ba2b896775e88e1265",
           "contract_version": "2",
-          "schema_revision": "sha256:30d3b79caf576e284c8b1ea0cb040ec1b4ac666c482a10865ab14efdada73670"
+          "schema_revision": "sha256:62d2739fbe38106a98104c0ec74aad4a6a23565aa20ef96fa5ff5166e35130db"
         },
-        "schema_hash": "sha256:3c4cbfe627eec23562026a7b79438ab1773452c66e8a0ca0501c8c5830465406",
+        "schema_hash": "sha256:c34f525daa9c3b65fbb65438b96c1a227a543a510cf7f97195462c48c52126f2",
         "schema_name": "AuthoringRequestV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -37961,13 +39331,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe_contributions",
-      "canonical_length": 101890,
+      "canonical_length": 107232,
       "legacy_excerpt": {
         "authoring_note": "These are the ONLY values a registered recipe may return. They carry opaque references and closed enumerations — never configuration, credentials, headers, SQL, raw XML, executable code, JSON pointers, or caller-authored graph edges. Recipe output is validated exactly as direct ProcessIR/topology/component authoring and cannot be exempted."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_contributions",
-      "sha256": "a20ecffd41cb2a4d59bebb7c8021a20f7a7d2a11cd3d6fa1d5e1a45e9f7d4cd3",
+      "sha256": "c4fcb681577d9ecaf9f86e1ecc9ff8b7c4a93de4196034f3049f5ab3308d0496",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -37992,7 +39362,8 @@
           "system_topology_patch",
           "component_contribution",
           "constraint_requirement",
-          "recorded_intent"
+          "recorded_intent",
+          "process_unit"
         ],
         "doctrine_note": "Advisory doctrine may RECOMMEND a recipe by exact reference; it can never be parsed or executed as one. Registry construction rejects an advisory entry that declares an executor, so no advisory descriptor a caller can reach carries one.",
         "json_schema": {
@@ -39950,6 +41321,24 @@
               "title": "PassthroughEntryNodeV1",
               "type": "object"
             },
+            "ProcessAuthoringUnitV1": {
+              "additionalProperties": false,
+              "description": "Exactly ONE process root plus exactly ONE envelope describing it.\n\nThe invariant is carried by the shape rather than by a check: there is no\nroot list and no optional envelope, so a unit cannot express \"no envelope\"\nor \"two roots\" in the first place.",
+              "properties": {
+                "envelope": {
+                  "$ref": "#/$defs/ProcessComponentEnvelopeV1"
+                },
+                "process_ir": {
+                  "$ref": "#/$defs/ProcessIRV1"
+                }
+              },
+              "required": [
+                "envelope",
+                "process_ir"
+              ],
+              "title": "ProcessAuthoringUnitV1",
+              "type": "object"
+            },
             "ProcessCallNodeV1": {
               "additionalProperties": false,
               "description": "Invokes another process, and TERMINATES the path it is on.\n\n``process_ref`` accepts a '$ref:KEY' in-spec child token or a literal\nexisting component id.\n\nWhether execution continues past a call is not decided by this document: it\nis decided by the called process, which hands control back only through the\nreturn-document steps it declares. ProcessIR v1 supports the non-returning\nform, where the call is the end of its path — so a call is authored as a\nTERMINAL, with nothing after it and no trailing stop. Authoring a node after\na call is rejected.\n\nBinding a RETURNING child's return paths is published separately as the\ngated capability ``process_call_return_path_binding``; see the\n``process_ir_authoring`` capability entries.",
@@ -40026,6 +41415,129 @@
                 "callee_process"
               ],
               "title": "ProcessCallRelationV1",
+              "type": "object"
+            },
+            "ProcessComponentEnvelopeV1": {
+              "additionalProperties": false,
+              "description": "Everything apply needs about a process root that is not its semantics.\n\n``name`` and ``action`` are REQUIRED caller-supplied fields in this slice,\nwith no defaults: #157 later adds prefix-derived default names, and until it\ndoes, guessing either one would let a caller create or overwrite a component\nthey did not name. There is deliberately no ``folder_id`` — placement is\nauthored by NAME and resolved to an account-bound id at apply time, so the\npublic contract stays relocatable.",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "create",
+                    "update"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                },
+                "component_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Component Id"
+                },
+                "component_key": {
+                  "description": "Semantic component key (the ComponentPlan dependency key)",
+                  "title": "Component Key",
+                  "type": "string"
+                },
+                "depends_on": {
+                  "default": [],
+                  "items": {
+                    "description": "Semantic component key (the ComponentPlan dependency key)",
+                    "type": "string"
+                  },
+                  "title": "Depends On",
+                  "type": "array"
+                },
+                "description": {
+                  "default": "",
+                  "title": "Description",
+                  "type": "string"
+                },
+                "folder_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Folder Name"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "process_extensions": {
+                  "$ref": "#/$defs/ProcessExtensionBindingsV1"
+                }
+              },
+              "required": [
+                "component_key",
+                "name",
+                "action"
+              ],
+              "title": "ProcessComponentEnvelopeV1",
+              "type": "object"
+            },
+            "ProcessConnectionOverrideV1": {
+              "additionalProperties": false,
+              "description": "Environment-extension overrides declared for ONE connection.",
+              "properties": {
+                "connection_id": {
+                  "description": "Opaque component reference: exact '$ref:KEY' token or literal component id",
+                  "title": "Connection Id",
+                  "type": "string"
+                },
+                "connector_type": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Connector Type"
+                },
+                "fields": {
+                  "items": {
+                    "$ref": "#/$defs/ProcessOverrideFieldV1"
+                  },
+                  "title": "Fields",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "connection_id",
+                "fields"
+              ],
+              "title": "ProcessConnectionOverrideV1",
+              "type": "object"
+            },
+            "ProcessExtensionBindingsV1": {
+              "additionalProperties": false,
+              "description": "Typed process-extension / override bindings for one process root.",
+              "properties": {
+                "connections": {
+                  "default": [],
+                  "items": {
+                    "$ref": "#/$defs/ProcessConnectionOverrideV1"
+                  },
+                  "title": "Connections",
+                  "type": "array"
+                }
+              },
+              "title": "ProcessExtensionBindingsV1",
               "type": "object"
             },
             "ProcessIRPatchV1": {
@@ -40131,6 +41643,38 @@
               "title": "ProcessObjectV1",
               "type": "object"
             },
+            "ProcessOverrideFieldV1": {
+              "additionalProperties": false,
+              "description": "One overrideable connection field in a process extension declaration.",
+              "properties": {
+                "id": {
+                  "title": "Id",
+                  "type": "string"
+                },
+                "label": {
+                  "title": "Label",
+                  "type": "string"
+                },
+                "xpath": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Xpath"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "title": "ProcessOverrideFieldV1",
+              "type": "object"
+            },
             "ProcessPropertyObjectV1": {
               "additionalProperties": false,
               "description": "A shared Process Property component.",
@@ -40191,6 +41735,41 @@
                 "process_property"
               ],
               "title": "ProcessPropertyUseRelationV1",
+              "type": "object"
+            },
+            "ProcessUnitContributionV1": {
+              "additionalProperties": false,
+              "description": "One whole process root plus the envelope that describes it (issue #159).\n\nThe sixth contribution kind. Where a ``set_process_root`` patch hands over a\nbare root and leaves its name, action, folder and extension bindings to be\nsupplied elsewhere, a process unit carries the STRICT\n:class:`~boomi_mcp.models.process_component.ProcessAuthoringUnitV1` — exactly\none ``ProcessIRV1`` root and exactly one envelope — so the recipe that built\nthe root also owns its governance. One authority per root.\n\nThe unit's ``envelope.component_key`` is the root's key in the shared\ncomponent-key namespace. The composer refuses a unit whose key is also\nwritten by another unit, by a ``set_process_root`` patch, by a direct root,\nby a component slot, or that names an existing catalog component; root\npatches (``insert_root_linear_step``, ``append_root_terminal_leg``) apply to\na unit's root exactly as they do to any other root, and the envelope is\ncarried through unchanged.\n\n``unit.envelope.depends_on`` is the ONE position in any contribution where a\ndependency edge may be authored: the integration planner reads a root's\ndeclared edges and refuses a root whose required edges are missing. Only a\nsequence of component keys is admitted there; ``depends_on`` anywhere else in\nthis or any other contribution is still refused by the forbidden-shape scan.",
+              "properties": {
+                "contribution_id": {
+                  "description": "Lower-case semantic identifier chosen by the recipe author",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_.-]*$",
+                  "title": "Contribution Id",
+                  "type": "string"
+                },
+                "contribution_kind": {
+                  "const": "process_unit",
+                  "title": "Contribution Kind",
+                  "type": "string"
+                },
+                "unit": {
+                  "$ref": "#/$defs/ProcessAuthoringUnitV1"
+                },
+                "version": {
+                  "const": "1",
+                  "title": "Version",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "contribution_kind",
+                "version",
+                "contribution_id",
+                "unit"
+              ],
+              "title": "ProcessUnitContributionV1",
               "type": "object"
             },
             "ProfilePropertySourceV1": {
@@ -41652,6 +43231,7 @@
                   "component_contribution": "#/$defs/ComponentContributionV1",
                   "constraint_requirement": "#/$defs/ConstraintRequirementV1",
                   "process_ir_patch": "#/$defs/ProcessIRPatchV1",
+                  "process_unit": "#/$defs/ProcessUnitContributionV1",
                   "recorded_intent": "#/$defs/RecordedIntentContributionV1",
                   "system_topology_patch": "#/$defs/SystemTopologyPatchV1"
                 },
@@ -41672,6 +43252,9 @@
                 },
                 {
                   "$ref": "#/$defs/RecordedIntentContributionV1"
+                },
+                {
+                  "$ref": "#/$defs/ProcessUnitContributionV1"
                 }
               ],
               "title": "Contribution"
@@ -41950,11 +43533,11 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:walked_surface_digest",
-      "canonical_length": 49815,
+      "canonical_length": 49938,
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "943dd439ffa9fcc6f460390b1eab29e2187028810c778619b9e69022336adc67",
+      "sha256": "dcc9828921ce106bc186e8b140a6b5ae66e4b0247a8ab91d2d47418e51238264",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -42236,17 +43819,17 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "8b493b399c7ae8a58bf348b20902c0a495520a38701ffe7bddc8e55118a42e24",
-        "schema_name=AuthoringCompileResultV1": "4f5bb0043456fb4223943190762a11c59d32767e625768451bba8c799c9d45fd",
-        "schema_name=AuthoringPlanResultV1": "a451224105339c4fee5d34fd751877b171f66e0637229139bc28219fce853d31",
-        "schema_name=AuthoringRequestV1": "8a11618b16e117c6a01616a164a9a76479a352e302c9db0e42f24f5d4c181977",
-        "schema_name=AuthoringRevisionBindingV1": "4928bbd808bb43a80661f38fd6a30d904c32ee0769b124c4c1cf65ff82637daf",
-        "schema_name=DerivedFlowRowV1": "9c70b84f1baa2b33328e60a3d121e88d40f5df9ca3f3037f13571ce30826069a",
+        "schema_name=AuthoringBuildProvenanceV1": "12c6682dc4cd1db26b267311aabfd7c3e1739d395fc404e3df647f980bb98ed2",
+        "schema_name=AuthoringCompileResultV1": "f5d1dbb034476629009342b0d39a1e31e00af601aab5a97177f7cd38f8ccdbfc",
+        "schema_name=AuthoringPlanResultV1": "7aec85dda215be0d4981a57500c9980fede7f9c9565cec8f8cd418e1a667da43",
+        "schema_name=AuthoringRequestV1": "d3486cdeab91e5c38c04c9587d07519ebdfd18fb835580bba69306fa40209c94",
+        "schema_name=AuthoringRevisionBindingV1": "1f35614dded56f490ce6862ff4f8ddeefc56818c682b3156f2e052231298c95f",
+        "schema_name=DerivedFlowRowV1": "da6ba476dd138cff0f83d4cfc43e99887cd7a1aa53b37d13ab6cc7a837f4c74a",
         "schema_name=IntegrationSpecV1": "82b9209bfeb9f1df7252621a644024f969b16921b92e2299e47fe11273770c45",
-        "schema_name=ProcessIRV1": "7f7265b7303cc4886e3ac886e6e4c33dee031dc39796b4582aeb3674be6f9cd5",
-        "schema_name=RecordedIntentV1": "de9103d1319c847c2c3e5b1817729f3a80821292e4c708c52c34a5525bad9b2e",
-        "schema_name=SystemTopologySpecV1": "79d9f5341da9f91eafe85e8c1cc834f55b7bc5169e886d5a4d0cd959b06707c6",
-        "schema_name=WatermarkDeclarationV1": "49a20c1b52b5f6bc3b0b5f6dcd266659f9ed6d23f7e2a9269b3c430133caf4b0",
+        "schema_name=ProcessIRV1": "adfea3b09e9f2671c482e8d7eecb163253d73eeacff18d105cf5ca9179bd1c33",
+        "schema_name=RecordedIntentV1": "e22a00a0395f61bfdf2261474ed59446b7e285f9a42557f1228027510bb30290",
+        "schema_name=SystemTopologySpecV1": "aec4b1847cff8986d009e5f96fd4c8702cb880d8f6cabdd81caa37ebe59feb75",
+        "schema_name=WatermarkDeclarationV1": "4cf2c592c7d13ffb27b2994e3c97fa5b5125ade4381d1dbcfe7ba95e9d8ecd8e",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -42255,7 +43838,7 @@
         "schema_name=archetype:http_listener_to_db": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
         "schema_name=archetype:http_listener_to_rest": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "3a0749b4e89cacf8218523f3d151d4e5c642c91167d7e42b970dbcdceef23c0e",
+        "schema_name=authoring_workflow": "d705db59196cff4a0d5d4bcd3348262b7216126ba9924b6d9d462c20d10fcb5c",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -42318,21 +43901,22 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "7ad4fd6da2e37c5e61bdf4c33f0b66994eb7193dbbcfe7470793091d98df7654",
+        "schema_name=process_ir_authoring": "ecbffae789bebf822c4321457641f4093a59d88aa773706e0eec7bb2c2d30c4a",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
-        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "2eedd035d89629a05befcb7c94e241c178ec5ec0206ab140b0aa556978f66b39",
-        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "7dcd63653aaae9c428f8789289991d2b38c13b2780931b9d0d908b441a29e186",
-        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "e691173dfd8a6709accbdde63888da577bcd24a236e7b876ecf74c286c77aa2b",
-        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "380921dfc1caa929c55ebd30cdaac762c6ddd6e3839c54be4454c4471c425ee9",
-        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "678f32e1477d41bb8e208db06940f13813a9a8634ad3da6e7eee0340a0988002",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "25e47ca50f62b3de6a28954308b10d7ea9f1f95b7a4c27a1c7a5ca7984b58e07",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "604c8a8495195a0c2536a84c35d9bc811d4f6c309a548bc8535a1b292be375e1",
-        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "d047b75beb761eb2ac32acae00fea7512494b70c370170a127700cd3ef61f9da",
-        "schema_name=recipe_contributions": "a20ecffd41cb2a4d59bebb7c8021a20f7a7d2a11cd3d6fa1d5e1a45e9f7d4cd3",
-        "schema_name=recipe_registry": "1e9380b3e44d4d8a2e858c59e8b1d0ea6915d35aabcd37f4864842b229ad81cc",
+        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "ec14b7a169831f190092180be0428a1a56088e2eb8a3ea3e1c66bf666bc50a74",
+        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "d3f5cc1e2b6ee8bf5200ca44bdf736527371a9cda2cf39572d4d07fc49508b93",
+        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "6103e3c02fc2698777bce2d7c5598b04444251d4aa2d37483dec97f44c38c8a2",
+        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "29d9c4497dd0f03dbf6591e24e0f0da621fa35a12d0edc2fdb0e142621a1b2ce",
+        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "35213dca817c052b414517f101adaa50e3e570354b74c6523e0f3e2eb32ef3cc",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "9af806bb283bfb4ff2e8cdc17da6466d4404c279373b8343d9563b57d2251472",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "9539ab1c952c6c032b8b2fda8af194d510e1217460c9a804cdcb085e64a7d1d5",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@2.0.0": "baccb0a811f8e7041ed2cdab0dfae5dba4393ff29ea85998e175439a27d4ceed",
+        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "ae6e55cf034c5d446ae8c084c3d663578d5aaafe7f9f6442842fee99025b3942",
+        "schema_name=recipe_contributions": "c4fcb681577d9ecaf9f86e1ecc9ff8b7c4a93de4196034f3049f5ab3308d0496",
+        "schema_name=recipe_registry": "064d719d8824f0251aea34d37983f630d24161ef0f6dd4a9fa59d6447774e3eb",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "b11a7a6b0c7945debe62ac06c6ca26f7ca0e6e007ac450f15721b3c09af36e66",
+        "schema_name=validation_report": "8b133b59bdda76634c3eeed3b8466169f644517dae9e75ef5d52662dfbe5990b",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",
