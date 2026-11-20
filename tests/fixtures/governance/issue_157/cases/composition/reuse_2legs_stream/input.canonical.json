@@ -1,0 +1,159 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay composition/reuse_2legs_stream",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "component_material": {
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a",
+                  "required": true
+                },
+                {
+                  "data_type": "datetime",
+                  "kind": "simple",
+                  "name": "target_b"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "source": {
+            "connection": {
+              "component_id": "<<existing connector id>>",
+              "mode": "reuse"
+            },
+            "read": {
+              "batch_size": 500,
+              "bind_parameters": [
+                {
+                  "direction": "in",
+                  "name": "<<bind parameter name>>"
+                }
+              ],
+              "result_fields": [
+                {
+                  "data_type": "character",
+                  "name": "source_a",
+                  "required": true
+                },
+                {
+                  "data_type": "datetime",
+                  "name": "source_b"
+                }
+              ],
+              "sql": "<<user-authored DB read statement>>"
+            }
+          },
+          "targets": [
+            {
+              "connection": {
+                "component_id": "<<existing REST connection id>>",
+                "mode": "reuse"
+              },
+              "operation": {
+                "path": "/v1/customers",
+                "query_parameters": []
+              },
+              "part_key": "orders"
+            },
+            {
+              "connection": {
+                "component_id": "<<existing REST connection id>>",
+                "mode": "reuse"
+              },
+              "operation": {
+                "path": "/v1/customers",
+                "query_parameters": []
+              },
+              "part_key": "billing"
+            }
+          ],
+          "transform": {
+            "operations": [
+              {
+                "documentation_hint": "carry first column verbatim",
+                "operation_type": "direct",
+                "source_field": "source_a",
+                "target_path": "Root/target_a"
+              },
+              {
+                "function_type": "date_format",
+                "inputs": [
+                  "source_b"
+                ],
+                "operation_type": "map_function",
+                "parameters": [
+                  {
+                    "name": "input_format",
+                    "value": "<<source datetime format>>"
+                  },
+                  {
+                    "name": "output_format",
+                    "value": "<<target datetime format>>"
+                  }
+                ],
+                "target_path": "Root/target_b"
+              }
+            ]
+          },
+          "version": "2"
+        },
+        "invocation_id": "fanout",
+        "raw_input": {
+          "links": [
+            {
+              "from_part": "db",
+              "to_part": "shape"
+            },
+            {
+              "from_part": "shape",
+              "to_part": "orders"
+            },
+            {
+              "from_part": "shape",
+              "to_part": "billing"
+            }
+          ],
+          "naming": {
+            "component_prefix": "CMP"
+          },
+          "process_key": "main_process",
+          "source": {
+            "binding_mode": "reuse",
+            "part_key": "db"
+          },
+          "targets": [
+            {
+              "binding_mode": "reuse",
+              "label": "Orders",
+              "method": "POST",
+              "part_key": "orders"
+            },
+            {
+              "binding_mode": "reuse",
+              "label": "Billing",
+              "method": "POST",
+              "part_key": "billing"
+            }
+          ],
+          "transform": {
+            "map_label": "Map source to JSON payload",
+            "part_key": "shape"
+          },
+          "version": "2"
+        },
+        "recipe_id": "boomi.compose.db_rest_fanout",
+        "recipe_version": "2.0.0"
+      }
+    ]
+  }
+}

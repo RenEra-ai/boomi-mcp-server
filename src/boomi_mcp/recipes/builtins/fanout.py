@@ -318,6 +318,12 @@ from ...models.governance_intent import (
     WatermarkDeclarationV1,
     reject_retired_spellings,
 )
+from ...models.derived_flows import (
+    DerivedCompositionPartV1,
+    RecipeOperationHintV1,
+    RecipeTargetFactV1,
+    RecipeUnitProjectionFactsV1,
+)
 from ...models.integration_models import IntegrationComponentSpec
 from ...models.process_component import (
     ProcessAuthoringUnitV1,
@@ -1036,6 +1042,12 @@ class PreparedFanoutV2:
     supporting_components: Tuple[IntegrationComponentSpec, ...]
     selected_base_keys: Tuple[str, ...] = ()
     deferred_query_parameter_names: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    #: #159 S1 (C8): the trusted facts the #157 projection reads for this
+    #: invocation's unit. Their presence is what admits the unit's recipe-route
+    #: rows. Keys and classifications only, EXCEPT the transform operations'
+    #: documentation hints — caller content from the material, served on the
+    #: transform row exactly where the legacy row served it (repr-redacted).
+    projection_facts: Optional[RecipeUnitProjectionFactsV1] = None
 
     def __repr__(self) -> str:  # noqa: D105
         return (
@@ -1383,6 +1395,67 @@ def prepare_db_rest_fanout_v2(
         supporting_components=tuple(components),
         selected_base_keys=tuple(selected),
         deferred_query_parameter_names=deferred,
+        projection_facts=_projection_facts_v2(inp, keys, material),
+    )
+
+
+#: The route's topology spelling. Pinned against the legacy composition's
+#: served summary by ``test_the_ported_constants_are_pinned_to_the_legacy_composition``.
+_TOPOLOGY_V2 = "db_source->transform->rest_fanout"
+
+
+def _projection_facts_v2(
+    inp: ComposeDbRestFanoutInputV2,
+    keys: _FanoutKeysV2,
+    material: FanoutComponentMaterialV2,
+) -> RecipeUnitProjectionFactsV1:
+    """The trusted facts the #157 projection needs and the root cannot carry.
+
+    Part identities and kinds, which components each part owns (from the SAME
+    key derivation the executor uses), the declared status-code expectations,
+    and each transform operation's ``documentation_hint`` — caller content the
+    legacy flows row served but the legacy (and so the v2) map component never
+    carried; keeping it OFF the map config keeps the generated components
+    byte-identical to the legacy outcome. Leg counts, ordinals, handoff and
+    binding modes are NOT here: the projection derives them from the composed
+    root and components.
+    """
+    return RecipeUnitProjectionFactsV1(
+        process_key=inp.process_key,
+        topology=_TOPOLOGY_V2,
+        parts=(
+            DerivedCompositionPartV1(key=inp.source.part_key, kind="db_source"),
+            DerivedCompositionPartV1(key=inp.transform.part_key, kind="transform"),
+            *(
+                DerivedCompositionPartV1(key=target.part_key, kind="rest_target")
+                for target in inp.targets
+            ),
+        ),
+        source_connection_key=keys.db_connection,
+        source_operation_key=keys.db_get_operation,
+        targets=tuple(
+            RecipeTargetFactV1(
+                part_key=target.part_key,
+                connection_key=connection,
+                operation_key=operation,
+                expected_status_codes=tuple(target.expected_status_codes),
+            )
+            for target, (_prefix, connection, operation) in zip(inp.targets, keys.targets)
+        ),
+        documentation_hints=tuple(
+            RecipeOperationHintV1(
+                operation_type=operation.operation_type,
+                target_path=target_path,
+                documentation_hint=operation.documentation_hint,
+            )
+            for operation in material.transform.operations
+            if operation.documentation_hint is not None
+            for target_path in (
+                operation.outputs
+                if isinstance(operation, FanoutScriptReferenceOperationV2)
+                else (operation.target_path,)
+            )
+        ),
     )
 
 

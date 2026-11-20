@@ -328,6 +328,66 @@ def test_a_binding_from_other_recipe_code_is_stale_at_compile(monkeypatch):
     assert caught.value.code == AUTHORING_PLAN_STALE
 
 
+def _typed_apply(payload):
+    """The typed apply through the TOOL boundary, network faked, writes spied."""
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.categories import integration_builder
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(integration_builder, "paginate_metadata", lambda *a, **k: [])
+        return integration_builder.build_integration_action(
+            MagicMock(),
+            "p",
+            "apply",
+            config={"authoring_request": payload, "dry_run": False},
+        )
+
+
+def test_a_binding_from_other_recipe_code_is_stale_at_typed_apply(monkeypatch):
+    """C7: the binding from one recipe implementation cannot APPLY under another.
+
+    Compiled under one registered implementation, then applied — through the
+    typed apply route, with the binding's capability revision and compile hash —
+    after the same id/version was re-registered with a different executor. The
+    IR is identical; only the recipe provenance in the semantic payload differs.
+    The apply must refuse with AUTHORING_PLAN_STALE on ``compile_hash``, before
+    any write door is touched. The control applies the same binding under the
+    SAME code and gets past the gate, so the refusal is not vacuous.
+    """
+    from _m12_11_support import MutationSpy
+
+    spy = MutationSpy().install(monkeypatch)
+    raw, material = flagship_v2()
+    original = _registry(_registration())
+    monkeypatch.setattr(engine_module, "production_registry", lambda: original)
+    bound, _ = compile_authoring_request_v1(recipe_request(raw, material), profile="p")
+    payload = recipe_request(raw, material).model_dump(mode="json")
+    payload["expected_capability_revision"] = bound.revision_binding.capability_revision
+    payload["expected_compile_hash"] = bound.revision_binding.compile_hash
+
+    from boomi_mcp.authoring.workflow import preflight_typed_apply_v1
+
+    # control: the same code reproduces the binding and passes the gate
+    bundle = preflight_typed_apply_v1(dict(payload), profile="p")
+    assert bundle.compile_result.revision_binding.compile_hash == (
+        bound.revision_binding.compile_hash
+    )
+
+    changed = _registry(_registration(executor=spy_executor))
+    monkeypatch.setattr(engine_module, "production_registry", lambda: changed)
+    result = _typed_apply(payload)
+
+    assert result["_success"] is False
+    assert result["error_code"] == AUTHORING_PLAN_STALE
+    assert result["mutation_performed"] is False
+    with pytest.raises(AuthoringWorkflowError) as caught:
+        preflight_typed_apply_v1(dict(payload), profile="p")
+    assert caught.value.code == AUTHORING_PLAN_STALE
+    assert [d.subject_id for d in caught.value.diagnostics] == ["compile_hash"]
+    assert spy.calls == []
+
+
 def test_direct_intent_payloads_carry_no_recipe_provenance_key():
     from boomi_mcp.authoring.workflow import _NormalizedIntent, _normalized_payload
     from boomi_mcp.models.integration_models import IntegrationSpecV1
@@ -403,6 +463,61 @@ def test_canaries_appear_on_served_results_only_in_the_preview_component_configs
         assert _leaks(json.dumps(dump)) == sorted(CANARIES)
     assert _leaks("\n".join(record.getMessage() for record in caplog.records)) == []
     assert _leaks("\n".join(str(w.message) for w in caught)) == []
+
+
+#: Caller content the legacy flows/endpoint rows SERVED: a transform hint and a
+#: reuse selector. Each has an exact served home and must appear nowhere else.
+HINT_CANARY = "canary-hint-7d2a"
+SELECTOR_CANARY = "canary-selector-7d2a"
+
+
+def test_hint_and_reuse_selector_canaries_appear_only_where_the_rows_serve_them(monkeypatch):
+    """D9 for the #157 projection (#159 S1): the projection facts carry one piece
+    of material — the documentation hint — and the endpoint rows serve a reuse
+    selector. Pin both homes, and assert absence everywhere else, including the
+    facts' and the normalized intent's reprs and the executor's input."""
+    raw, material = flagship_v2()
+    material["transform"]["operations"][0]["documentation_hint"] = HINT_CANARY
+    raw["targets"][1]["binding_mode"] = "reuse"
+    material["targets"][1]["connection"] = {"mode": "reuse", "component_id": SELECTOR_CANARY}
+    SEEN_INPUTS.clear()
+    spying = _registry(_registration(executor=spy_executor))
+    monkeypatch.setattr(engine_module, "production_registry", lambda: spying)
+    result, internals = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    dump = result.model_dump(mode="json")
+    preview = dump["integration_spec_preview"]
+
+    # the homes, measured (non-vacuity)
+    (transform,) = [row for row in preview["flows"] if row["key"] == "transform"]
+    assert [op.get("documentation_hint") for op in transform["operations"]][0] == HINT_CANARY
+    assert [e.get("component_id") for e in preview["endpoints"]].count(SELECTOR_CANARY) == 1
+
+    stripped = copy.deepcopy(dump)
+    for op in [r for r in stripped["integration_spec_preview"]["flows"] if r["key"] == "transform"][0][
+        "operations"
+    ]:
+        op.pop("documentation_hint", None)
+    for endpoint in stripped["integration_spec_preview"]["endpoints"]:
+        endpoint.pop("component_id", None)
+    for component in stripped["integration_spec_preview"]["components"]:
+        component["config"] = "<allowlisted materialization echo>"
+        component["component_id"] = None
+    # the pre-existing served home of every reuse id: the resolved references
+    assert SELECTOR_CANARY in [r["component_id"] for r in stripped["resolved_references"]]
+    for reference in stripped["resolved_references"]:
+        reference["component_id"] = None
+    text = json.dumps(stripped)
+    assert HINT_CANARY not in text and SELECTOR_CANARY not in text
+
+    facts = internals.normalized.recipe_projection_facts
+    assert facts and HINT_CANARY not in repr(facts)
+    assert HINT_CANARY not in repr(internals.normalized)
+    assert SEEN_INPUTS
+    assert all(HINT_CANARY not in seen and SELECTOR_CANARY not in seen for seen in SEEN_INPUTS)
+    assert HINT_CANARY not in json.dumps(
+        [r.model_dump(mode="json") for r in result.recipe_provenance]
+        + [d.model_dump(mode="json") for d in result.recipe_diagnostics]
+    )
 
 
 def _fail_with(edit):

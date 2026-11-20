@@ -1131,3 +1131,315 @@ def test_two_specs_for_one_component_key_are_refused():
     assert diagnostic.cause_codes == ("INTEGRATION_COMPONENT_KEY_DUPLICATE",)
     # Value-free: the diagnostic names the key, never a spec's content.
     assert "Other op" not in str(exc.value) and "Other op" not in repr(diagnostic)
+
+
+# ---------------------------------------------------------------------------
+# #159 S1 (Q5): two recipe roots, one calling the other, through apply
+# ---------------------------------------------------------------------------
+
+#: The callee's process key. The CALLER's executor names it, exactly as a real
+#: recipe would name a sibling root it was handed.
+_CALLEE = "callee_process"
+
+
+def _caller_unit_executor(inp):
+    """A scheduled (No Data) root over the base ``conn``/``op`` that calls the callee.
+
+    One Branch leg reads through the shared operation; the other hands off to
+    ``$ref:callee_process`` in a ``process_call``. The envelope declares the
+    inter-root edge beside its component edges, at the one exempt position (D4).
+    """
+    return (_caller_unit(inp.process_key, ["conn", "op", _CALLEE]),)
+
+
+def _caller_without_its_call_edge_executor(inp):
+    """Deviation 10 control: the ``process_call`` IR edge is NOT declared."""
+    return (_caller_unit(inp.process_key, ["conn", "op"]),)
+
+
+def _caller_unit(process_key, depends_on):
+    return parse_recipe_contribution(
+            {
+                "contribution_kind": "process_unit",
+                "version": "1",
+                "contribution_id": "c.caller",
+                "unit": {
+                    "envelope": {
+                        "component_key": process_key,
+                        "name": "Caller unit",
+                        "action": "create",
+                        "depends_on": list(depends_on),
+                    },
+                    "process_ir": {
+                        "version": "1",
+                        "body": {
+                            "kind": "sequence",
+                            "steps": [
+                                {
+                                    "kind": "branch",
+                                    "label": "call the callee",
+                                    "legs": [
+                                        {
+                                            "steps": [{"kind": "message", "text": "hand off"}],
+                                            "terminal": {
+                                                "kind": "process_call",
+                                                "process_ref": "$ref:" + _CALLEE,
+                                            },
+                                        },
+                                        {
+                                            "steps": [
+                                                {"kind": "connector_call", "operation_ref": "$ref:op"}
+                                            ],
+                                            "terminal": {"kind": "stop"},
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                },
+            }
+        )
+
+
+def _shared_slot(key, component_type):
+    return parse_recipe_contribution(
+        {
+            "contribution_kind": "component_contribution",
+            "version": "1",
+            "contribution_id": "c.slot." + key,
+            "component_key": key,
+            "component_type": component_type,
+            "materialization_mode": "create",
+            "materializer_slot": key,
+        }
+    )
+
+
+def _callee_unit_executor(inp):
+    """A Data Passthrough child that reads through the SAME shared base operation.
+
+    It OWNS the one catalog entry per shared component (the slot headers); the
+    caller reads the same keys without contributing them, so no duplicate writer
+    arises and no composer dedupe rule is needed (Q5). It declares ``conn``
+    although its root names only ``op``: an ordering edge with NO IR token,
+    which the planner must keep (deviation 10).
+    """
+    return _callee(inp.process_key, ["conn", "op"])
+
+
+def _callee_depending_on_its_caller_executor(inp):
+    """Deviation 10 control: a declared edge back to the caller closes a cycle."""
+    return _callee(inp.process_key, ["conn", "op", "caller_process"])
+
+
+def _callee(process_key, depends_on):
+    return (
+        _shared_slot("conn", "connector-settings"),
+        _shared_slot("op", "connector-action"),
+        parse_recipe_contribution(
+            {
+                "contribution_kind": "process_unit",
+                "version": "1",
+                "contribution_id": "c.callee",
+                "unit": {
+                    "envelope": {
+                        "component_key": process_key,
+                        "name": "Callee unit",
+                        "action": "create",
+                        "depends_on": list(depends_on),
+                    },
+                    "process_ir": {
+                        "version": "1",
+                        "body": {
+                            "kind": "sequence",
+                            "steps": [
+                                {"kind": "passthrough", "label": "Receive"},
+                                {"kind": "connector_call", "operation_ref": "$ref:op"},
+                                {"kind": "stop"},
+                            ],
+                        },
+                    },
+                },
+            }
+        ),
+    )
+
+
+def _two_root_registry(caller=None, callee=None):
+    caller = caller or _caller_unit_executor
+    callee_executor = callee or _callee_unit_executor
+    registration = dict(
+        recipe_version="1.0.0",
+        entry_kind="executable_recipe",
+        is_default=True,
+        input_model=SyncRecipeInputV1,
+        output_types=("process_unit",),
+        conflict_policy=RecipeConflictPolicyV1(),
+    )
+    callee = dict(registration, output_types=("component_contribution", "process_unit"))
+    return build_test_registry(
+        (
+            RecipeRegistrationV1(recipe_id="r.callee", executor=callee_executor, **callee),
+            RecipeRegistrationV1(recipe_id="r.caller", executor=caller, **registration),
+        )
+    )
+
+
+def _two_root_request():
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    def invocation(recipe_id, invocation_id, process_key):
+        return {
+            "recipe_id": recipe_id,
+            "invocation_id": invocation_id,
+            "raw_input": dict(_ENGINE_INPUT, process_key=process_key),
+        }
+
+    return AuthoringRequestV1.model_validate(
+        {
+            "intent": {
+                "intent_kind": "recipe",
+                "integration_name": "Q5 two roots",
+                # The CALLER is listed first, so a callee-first write order is
+                # the planner's dependency decision, not the request's order.
+                "invocations": [
+                    invocation("r.caller", "caller", "caller_process"),
+                    invocation("r.callee", "callee", _CALLEE),
+                ],
+                "base_components": [APPLIABLE_CONN, APPLIABLE_OP],
+            }
+        }
+    )
+
+
+def test_two_recipe_roots_share_base_components_and_one_calls_the_other(monkeypatch):
+    """Q5 in-suite: plan, compile and MATERIALIZE two recipe-emitted roots.
+
+    Both roots read the same base connection and operation (one catalog entry
+    each, no composer dedupe rule needed). The caller ends in a ``process_call``
+    to the callee: apply must create the callee FIRST and bind the caller's
+    emitted reference to the id the callee was actually assigned.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.integration_builder import (
+        _BUILD_REGISTRY,
+        build_integration_action,
+    )
+    from boomi_mcp.recipes import engine as engine_module
+
+    registry = _two_root_registry()
+    monkeypatch.setattr(engine_module, "production_registry", lambda: registry)
+    monkeypatch.setattr(integration_builder, "paginate_metadata", lambda *a, **k: [])
+    request = _two_root_request()
+
+    compiled, internals = compile_authoring_request_v1(
+        request, boomi_client=MagicMock(), profile="qa_profile"
+    )
+    assert compiled.validation_report.is_valid
+    spec = internals.normalized.integration_spec
+    assert sorted(u.envelope.component_key for u in spec.processes) == [
+        _CALLEE,
+        "caller_process",
+    ]
+    assert [c.key for c in spec.components].count("conn") == 1
+    assert [c.key for c in spec.components].count("op") == 1
+    edges = {(edge.component_key, edge.depends_on) for edge in compiled.component_dependencies}
+    assert ("caller_process", _CALLEE) in edges
+    assert {("caller_process", "op"), (_CALLEE, "op")} <= edges
+    # the callee's root names only `op`; its declared `conn` edge is kept anyway
+    assert (_CALLEE, "conn") in edges
+
+    payload = request.model_dump(mode="json")
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+
+    created = []
+    counter = {"n": 0}
+
+    def _component(*_args, **_kwargs):
+        counter["n"] += 1
+        return {"_success": True, "component_id": "cid-%d" % counter["n"]}
+
+    def _create(_client, _profile, payload_in, **_kwargs):
+        process_id = "process-%d" % (len(created) + 1)
+        created.append((process_id, payload_in["xml"]))
+        return {"_success": True, "component_id": process_id}
+
+    _BUILD_REGISTRY.clear()
+    try:
+        with patch.object(integration_builder, "_execute_component", side_effect=_component), patch.object(
+            integration_builder, "create_component", side_effect=_create
+        ), patch.object(
+            integration_builder,
+            "component_get_xml",
+            side_effect=lambda _c, component_id, *a, **k: {
+                "type": "process",
+                "xml": dict(created).get(component_id, "<bns:Component/>"),
+            },
+        ):
+            result = build_integration_action(
+                MagicMock(),
+                "qa_profile",
+                "apply",
+                config={"authoring_request": payload, "dry_run": False},
+            )
+    finally:
+        _BUILD_REGISTRY.clear()
+
+    assert result["_success"] is True, result.get("error")
+    assert len(created) == 2
+    (callee_id, callee_xml), (caller_id, caller_xml) = created
+    # The callee was materialized first, and is NOT the caller.
+    assert "hand off" in caller_xml and "hand off" not in callee_xml
+    assert "Receive" in callee_xml
+    # The caller's emitted reference is bound to the callee's ASSIGNED id.
+    assert callee_id in caller_xml
+    assert "$ref:" not in caller_xml
+    assert caller_id not in callee_xml
+
+
+@pytest.mark.parametrize(
+    "caller,callee,cause",
+    [
+        pytest.param(
+            _caller_without_its_call_edge_executor, None, "INTEGRATION_DEPENDENCY_REQUIRED",
+            id="missing_required_ir_edge",
+        ),
+        pytest.param(
+            None, _callee_depending_on_its_caller_executor, "INTEGRATION_DEPENDENCY_CYCLE",
+            id="cyclic_declared_edges",
+        ),
+    ],
+)
+def test_a_missing_or_cyclic_unit_dependency_is_refused_before_any_write(
+    monkeypatch, caller, callee, cause
+):
+    """Deviation 10: the planner reads DECLARED edges. A ``process_call`` whose
+    edge the caller did not declare, and a declared edge that closes a cycle,
+    are each refused at compile — so no binding exists that apply could act on,
+    and no write door is reached."""
+    from unittest.mock import MagicMock
+
+    from _m12_11_support import MutationSpy
+
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError, compile_authoring_request_v1
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.recipes import engine as engine_module
+
+    spy = MutationSpy().install(monkeypatch)
+    registry = _two_root_registry(caller=caller, callee=callee)
+    monkeypatch.setattr(engine_module, "production_registry", lambda: registry)
+    monkeypatch.setattr(integration_builder, "paginate_metadata", lambda *a, **k: [])
+    with pytest.raises(AuthoringWorkflowError) as caught:
+        compile_authoring_request_v1(
+            _two_root_request(), boomi_client=MagicMock(), profile="qa_profile"
+        )
+    assert caught.value.code == "AUTHORING_COMPILE_BLOCKED"
+    assert [d.cause_codes for d in caught.value.diagnostics] == [(cause,)]
+    assert spy.calls == []

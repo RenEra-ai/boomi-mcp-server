@@ -313,9 +313,13 @@ def _watermark_declaration_schema() -> Dict[str, Any]:
 
 
 def _derived_flow_row_schema() -> Dict[str, Any]:
+    """The served row union's schema (#159 S1: a discriminated union on
+    ``operation``, so it is read through a ``TypeAdapter``, not a model)."""
+    from pydantic import TypeAdapter
+
     from ..models.derived_flows import DerivedFlowRowV1
 
-    return DerivedFlowRowV1.model_json_schema()
+    return TypeAdapter(DerivedFlowRowV1).json_schema()
 
 
 def _validation_report_schema() -> Dict[str, Any]:
@@ -739,7 +743,25 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "projection (DerivedFlowRowV1). Never authored, never merged "
                 "with caller rows, never an input to compilation, "
                 "fingerprinting or mutation; a caller-supplied 'flows' is "
-                "refused with GOVERNANCE_FLOWS_OUTPUT_ONLY."
+                "refused with GOVERNANCE_FLOWS_OUTPUT_ONLY. Every unit serves "
+                "its transform rows; a unit assembled by a recipe route that "
+                "supplies trusted projection facts (boomi.compose.db_rest_fanout "
+                "2.0.0) also serves its extract, send, reliability, conditional "
+                "watermark and fan-out rows, in that order, discriminated on "
+                "'operation'."
+            ),
+            "derived_endpoints": (
+                "CanonicalIntegrationPreviewV1.endpoints and "
+                "composition_summaries — OUTPUT-ONLY, served only for units "
+                "assembled by a recipe route with trusted projection facts. "
+                "Endpoints (DerivedEndpointRowV1) are read off each route "
+                "connection component: binding mode, method, and either the "
+                "created connection's classification (driver, auth_mode) or the "
+                "reused one's selector — never a host, URL, credential or SQL. "
+                "composition_summaries is keyed by process key and derived from "
+                "the composed root (leg positions including a staging leg, "
+                "handoff modes, cache key). Neither is hashed, compiled or "
+                "applied; composition_summaries is omitted when empty."
             ),
             # #159 S1. The recipe intent's typed assembly surface: the served
             # names of the companion channel and the per-invocation provenance.

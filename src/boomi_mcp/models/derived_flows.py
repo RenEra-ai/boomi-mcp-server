@@ -32,7 +32,7 @@ because ADR-001 §11 forbids executable script text on a served result.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Literal, Mapping, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, Literal, Mapping, Optional, Tuple, Union, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -267,23 +267,209 @@ class DerivedTransformFlowV1(_DerivedFlowModel):
     direct_field_mappings: Tuple[DirectFieldMappingV1, ...] = ()
 
 
-#: The row kinds the projection can serve. One member today; the tuple exists so
-#: `DERIVED_FLOW_OPERATIONS` is DERIVED from it rather than typed out.
-_DERIVED_FLOW_MEMBERS: Tuple[type, ...] = (DerivedTransformFlowV1,)
+# ---------------------------------------------------------------------------
+# the recipe-route row kinds (#159 S1)
+# ---------------------------------------------------------------------------
 
-DerivedFlowRowV1 = DerivedTransformFlowV1
+
+class DerivedConnectorFlowV1(_DerivedFlowModel):
+    """A connector step of a recipe-assembled route: the extract or the send.
+
+    Served only for a unit whose recipe supplied trusted projection facts
+    (:class:`RecipeUnitProjectionFactsV1`); every field is read off the composed
+    root and its components, never off the recipe input.
+    """
+
+    key: NonEmptyString
+    name: str = ""
+    source: str = ""
+    target: Optional[str] = None
+    operation: Literal["db_get", "rest_send"]
+    executable: Literal[False] = False
+
+
+class DerivedReliabilityFlowV1(_DerivedFlowModel):
+    """The route's retry / DLQ posture. ``target`` names the DLQ when the root
+    wires a catch path, and is null when it does not."""
+
+    key: NonEmptyString
+    name: str = ""
+    source: str = ""
+    target: Optional[str] = None
+    operation: Literal["reliability"] = "reliability"
+    executable: Literal[False] = False
+
+
+class DerivedWatermarkFlowV1(_DerivedFlowModel):
+    """Present exactly when the unit carries a recorded watermark declaration."""
+
+    key: NonEmptyString
+    name: str = ""
+    source: str = ""
+    target: Optional[str] = None
+    operation: Literal["watermark"] = "watermark"
+    executable: Literal[False] = False
+
+
+class DerivedFanoutFlowV1(_DerivedFlowModel):
+    """The terminal Branch. ``legs`` counts the ROOT's legs, staging leg included."""
+
+    key: NonEmptyString
+    name: str = ""
+    source: str = ""
+    target: Optional[str] = None
+    operation: Literal["branch"] = "branch"
+    executable: Literal[False] = False
+    legs: int = Field(ge=2)
+
+
+#: The row kinds the projection can serve. ``DERIVED_FLOW_OPERATIONS`` is
+#: DERIVED from their ``operation`` discriminator literals, never typed out.
+_DERIVED_FLOW_MEMBERS: Tuple[type, ...] = (
+    DerivedConnectorFlowV1,
+    DerivedTransformFlowV1,
+    DerivedReliabilityFlowV1,
+    DerivedWatermarkFlowV1,
+    DerivedFanoutFlowV1,
+)
+
+DerivedFlowRowV1 = Annotated[
+    Union[_DERIVED_FLOW_MEMBERS],  # type: ignore[valid-type]
+    Field(discriminator="operation"),
+]
 
 DERIVED_FLOW_OPERATIONS: Tuple[str, ...] = tuple(
-    member.model_fields["operation"].default for member in _DERIVED_FLOW_MEMBERS
+    operation
+    for member in _DERIVED_FLOW_MEMBERS
+    for operation in get_args(member.model_fields["operation"].annotation)
 )
+
+
+# ---------------------------------------------------------------------------
+# endpoints and composition summaries (#159 S1) — served, output-only
+# ---------------------------------------------------------------------------
+
+
+class DerivedEndpointRowV1(_DerivedFlowModel):
+    """One endpoint of a recipe-assembled route, read off its connection component.
+
+    A created connection serves its classification (``driver`` and ``auth_mode``
+    for a database, ``auth_mode`` for REST); a reused one serves the selector
+    it binds by. Never a host, URL, credential or SQL.
+    """
+
+    key: NonEmptyString
+    type: Literal["database", "rest"]
+    direction: Literal["source", "target"]
+    binding_mode: Literal["create", "reuse"]
+    executable: Literal[False] = False
+    method: Optional[str] = None
+    driver: Optional[str] = None
+    auth_mode: Optional[str] = None
+    component_id: Optional[str] = None
+    component_name: Optional[str] = None
+
+
+class DerivedCompositionPartV1(_DerivedFlowModel):
+    key: NonEmptyString
+    kind: Literal["db_source", "transform", "rest_target"]
+
+
+class DerivedFanoutLegV1(_DerivedFlowModel):
+    """One non-first fan-out target, at its ACTUAL Branch leg position."""
+
+    part_key: NonEmptyString
+    leg: int = Field(ge=1)
+    method: Optional[str] = None
+    binding_mode: Literal["create", "reuse"]
+    expected_status_codes: Optional[Tuple[int, ...]] = None
+    handoff: Optional[Literal["document_stream", "document_cache"]] = None
+
+
+class DerivedCompositionSummaryV1(_DerivedFlowModel):
+    """The composition's value-free topology summary, derived from the root."""
+
+    topology: NonEmptyString
+    handoff: Literal["document_stream", "document_cache", "mixed"]
+    fanout_targets: int = Field(ge=2)
+    parts: Tuple[DerivedCompositionPartV1, ...]
+    first_target_part: NonEmptyString
+    fanout_legs: Tuple[DerivedFanoutLegV1, ...] = ()
+    cache_component_key: Optional[str] = None
+    staging_leg: Optional[int] = None
+    handoff_modes: Optional[Mapping[str, Literal["document_stream", "document_cache"]]] = None
+
+
+# ---------------------------------------------------------------------------
+# trusted projection facts — INTERNAL, never served, never hashed
+# ---------------------------------------------------------------------------
+
+
+class RecipeTargetFactV1(_DerivedFlowModel):
+    part_key: NonEmptyString
+    connection_key: NonEmptyString
+    operation_key: NonEmptyString
+    expected_status_codes: Tuple[int, ...] = ()
+
+
+class RecipeOperationHintV1(_DerivedFlowModel):
+    """A caller's ``documentation_hint`` for one transform operation, by route
+    and target path — served on the transform row's operation summary."""
+
+    operation_type: Literal["direct", "map_function", "map_script"]
+    target_path: NonEmptyString
+    documentation_hint: str
+
+    def __repr_args__(self):  # noqa: D105 — pydantic hook
+        # The hint is caller content from the closed component material: it is
+        # SERVED on the transform row (where the legacy row served it) and
+        # nowhere else, so a repr reaching a log or traceback renders no value.
+        for key, value in super().__repr_args__():
+            yield key, ("..." if key != "operation_type" else value)
+
+
+class RecipeUnitProjectionFactsV1(_DerivedFlowModel):
+    """What a trusted recipe route tells the #157 projection about one unit.
+
+    Supplied by a server-side preparer from its VALIDATED input and material —
+    never by a caller and never by a recipe executor — and only the facts the composed
+    root and components cannot carry: which part is which, which components a
+    part owns, and the declared status-code expectations. Everything else the
+    projection serves (legs, ordinals, handoff, binding modes, endpoint
+    classifications) is DERIVED from the root and components. The presence of
+    facts for a unit is also the TRIGGER: a unit without them is projected
+    exactly as before (its transform rows only).
+
+    Material boundary (D9): every field is a key, a classification or a status
+    code EXCEPT ``documentation_hints``, which carries caller-authored hint text
+    from the component material. That text is served on the transform row's
+    operation summary — where the legacy row served it — and nowhere else; its
+    repr is redacted.
+    """
+
+    process_key: NonEmptyString
+    topology: NonEmptyString
+    parts: Tuple[DerivedCompositionPartV1, ...]
+    source_connection_key: NonEmptyString
+    source_operation_key: NonEmptyString
+    targets: Tuple[RecipeTargetFactV1, ...] = Field(min_length=1)
+    documentation_hints: Tuple[RecipeOperationHintV1, ...] = ()
 
 
 __all__ = [
     "DERIVED_FLOW_OPERATIONS",
     "DbOutputFieldV1",
     "DbReadProfileConfigV1",
+    "DerivedCompositionPartV1",
+    "DerivedCompositionSummaryV1",
+    "DerivedConnectorFlowV1",
+    "DerivedEndpointRowV1",
+    "DerivedFanoutFlowV1",
+    "DerivedFanoutLegV1",
     "DerivedFlowRowV1",
+    "DerivedReliabilityFlowV1",
     "DerivedTransformFlowV1",
+    "DerivedWatermarkFlowV1",
     "DirectFieldMappingV1",
     "DirectOperationSummaryV1",
     "FieldIndexEntryV1",
@@ -294,6 +480,9 @@ __all__ = [
     "MapScriptOperationSummaryV1",
     "PayloadProfileSummaryV1",
     "ProfileLeafSummaryV1",
+    "RecipeOperationHintV1",
+    "RecipeTargetFactV1",
+    "RecipeUnitProjectionFactsV1",
     "SchemaFieldSummaryV1",
     "SourceSchemaSummaryV1",
     "TransformOperationSummaryV1",

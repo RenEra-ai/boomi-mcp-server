@@ -293,3 +293,163 @@ def _required(root, path):
     for segment in path.split("/")[1:]:
         node = next(c for c in node["children"] if c["name"] == segment)
     return bool(node.get("required"))
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: the recipe-route row kinds, endpoints and composition summaries
+# ---------------------------------------------------------------------------
+
+
+def _flagship_projection_inputs():
+    """The flagship v2 plan's normalized units, components and trusted facts."""
+    from _fanout_v2_support import flagship_v2, recipe_request
+
+    result, internals = plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+    normalized = internals.normalized
+    return result, normalized
+
+
+def _project(normalized, *, units=None, components=None, facts=None):
+    from boomi_mcp.authoring.derived_flows import derive_recipe_projection
+
+    return derive_recipe_projection(
+        units if units is not None else normalized.integration_spec.processes,
+        components if components is not None else normalized.integration_spec.components,
+        connector_metadata=normalized.connector_metadata,
+        projection_facts=normalized.recipe_projection_facts if facts is None else facts,
+        recorded_intents=normalized.recorded_intents,
+    )
+
+
+def test_the_recipe_row_spellings_are_the_frozen_legacy_spellings(cases):
+    """Every fixed spelling the recipe route serves is the one the legacy
+    producers froze, measured on every frozen row that carries the key."""
+    from boomi_mcp.authoring.derived_flows import (
+        CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY,
+        ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY,
+        RECIPE_FLOW_ROW_SPELLINGS,
+    )
+
+    seen = {key: set() for key in RECIPE_FLOW_ROW_SPELLINGS}
+    for case in cases.values():
+        for row in case.flow_rows:
+            if row["key"] in seen:
+                seen[row["key"]].add(row["payload"]["name"])
+    assert {key: {name} for key, name in RECIPE_FLOW_ROW_SPELLINGS.items()} == seen
+    extract = [r["payload"] for c in cases.values() for r in c.flow_rows if r["key"] == "extract"]
+    send = [r["payload"] for c in cases.values() for r in c.flow_rows if r["key"] == "send"
+            and r["payload"]["operation"] == "rest_send"]
+    db_extract = {(r["source"], r["operation"]) for r in extract if r["operation"] == "db_get"}
+    assert db_extract == {
+        (
+            ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY[("source", "database")],
+            CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("source", "database")],
+        )
+    }
+    assert {(r["target"], r["operation"]) for r in send} == {
+        (
+            ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY[("target", "rest")],
+            CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("target", "rest")],
+        )
+    }
+
+
+def test_the_operation_vocabulary_is_derived_from_the_discriminator_literals():
+    from typing import get_args
+
+    from pydantic import TypeAdapter
+
+    from boomi_mcp.models import derived_flows as models
+
+    union = get_args(get_args(models.DerivedFlowRowV1)[0])
+    assert set(union) == set(models._DERIVED_FLOW_MEMBERS)
+    assert set(DERIVED_FLOW_OPERATIONS) == {
+        "db_get", "rest_send", "transform", "reliability", "watermark", "branch",
+    }
+    schema = TypeAdapter(models.DerivedFlowRowV1).json_schema()
+    assert schema["discriminator"]["propertyName"] == "operation"
+    assert set(schema["discriminator"]["mapping"]) == set(DERIVED_FLOW_OPERATIONS)
+
+
+def test_recipe_flow_kinds_are_derived_from_the_root_and_components():
+    """The facts TRIGGER the rows and name the parts; the values come from the
+    composed root and components. Mutating the root moves ``legs``; mutating a
+    connection component moves the endpoint's binding mode and selector."""
+    result, normalized = _flagship_projection_inputs()
+    baseline = _project(normalized)
+    assert [row.key for row in baseline.flows] == [
+        "extract", "transform", "send", "reliability", "fanout",
+    ]
+    assert [row.model_dump(mode="json") for row in baseline.flows] == [
+        row.model_dump(mode="json") for row in result.integration_spec_preview.flows
+    ]
+    fanout_row = baseline.flows[-1]
+    (unit,) = normalized.integration_spec.processes
+    branch = unit.process_ir.body.steps[-1]
+    assert fanout_row.legs == len(branch.legs)
+
+    # the ROOT decides the leg count: one more streaming leg, one more leg
+    root = unit.process_ir.model_dump(mode="json")
+    root["body"]["steps"][-1]["legs"].append(copy.deepcopy(root["body"]["steps"][-1]["legs"][0]))
+    wider = unit.model_copy(update={"process_ir": parse_process_ir_v1(root)})
+    assert _project(normalized, units=(wider,)).flows[-1].legs == len(branch.legs) + 1
+
+    # the COMPONENT decides the binding: a reference-only connection is a reuse
+    facts = normalized.recipe_projection_facts[unit.envelope.component_key]
+    key = facts.targets[1].connection_key
+    components = [
+        c.model_copy(update={
+            "component_id": "existing-rest-id",
+            "config": {"reference_only": True, "connector_type": "rest", "component_id": "existing-rest-id"},
+        })
+        if c.key == key else c
+        for c in normalized.integration_spec.components
+    ]
+    reused = _project(normalized, components=components)
+    endpoint = reused.endpoints[2]
+    assert endpoint.binding_mode == "reuse" and endpoint.component_id == "existing-rest-id"
+    assert endpoint.auth_mode is None
+    summary = reused.composition_summaries[unit.envelope.component_key]
+    assert summary.fanout_legs[0].binding_mode == "reuse"
+    assert baseline.composition_summaries[unit.envelope.component_key].fanout_legs[0].binding_mode == "create"
+
+
+def test_a_unit_without_trusted_facts_is_projected_exactly_as_before():
+    """The trigger is the trusted facts, never the shape: the SAME flagship root
+    without them serves its transform row only, and no endpoints or summaries."""
+    _result, normalized = _flagship_projection_inputs()
+    bare = _project(normalized, facts={})
+    assert [row.key for row in bare.flows] == ["transform"]
+    assert bare.endpoints == () and bare.composition_summaries == {}
+    assert [r.model_dump(mode="json") for r in bare.flows] == [
+        r.model_dump(mode="json")
+        for r in derive_transform_flows(
+            normalized.integration_spec.processes,
+            normalized.integration_spec.components,
+            connector_metadata=normalized.connector_metadata,
+        )
+    ]
+
+
+def test_facts_that_do_not_resolve_never_invent_a_row():
+    _result, normalized = _flagship_projection_inputs()
+    (unit,) = normalized.integration_spec.processes
+    facts = normalized.recipe_projection_facts[unit.envelope.component_key]
+    dangling = facts.model_copy(update={"source_connection_key": "no_such_component"})
+    projected = _project(normalized, facts={unit.envelope.component_key: dangling})
+    assert [row.key for row in projected.flows] == ["transform"]
+    assert projected.endpoints == () and projected.composition_summaries == {}
+
+
+def test_the_served_endpoints_and_summaries_are_outside_the_plan_hash():
+    from boomi_mcp.authoring.workflow import _plan_hash_preview
+
+    result, _normalized = _flagship_projection_inputs()
+    preview = result.integration_spec_preview
+    assert preview.endpoints and preview.composition_summaries
+    hashed = _plan_hash_preview(preview)
+    assert hashed["endpoints"] == [] and hashed["flows"] == []
+    assert "composition_summaries" not in hashed
+    # and an empty summary map is OMITTED from the served object entirely
+    empty = preview.model_copy(update={"composition_summaries": {}})
+    assert "composition_summaries" not in empty.model_dump(mode="json")

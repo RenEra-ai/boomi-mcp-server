@@ -37,6 +37,7 @@ from _issue_157_flows_accounting import (  # noqa: E402
     PENDING,
     PRODUCER_MODULES,
     Case,
+    derive_case_endpoints,
     derive_case_projection,
     discharge_case,
     discharge_endpoints,
@@ -96,11 +97,37 @@ def test_manifest_digests_hold():
     assert verify_manifest() == []
 
 
-def test_frozen_row_counts_are_pinned(manifest):
+#: The producers whose rich ``transform`` row #157 discharged, and the producer
+#: #159 S1 discharges WHOLE (every flow and endpoint/provenance row).
+_RICH_PRODUCERS = ("database_to_api_sync", "api_to_api_sync")
+_S1_PRODUCERS = ("composition",)
+
+
+def _owed_discharges(cases):
+    """``(flow, endpoint)`` row identities the replay owes, DERIVED from the
+    corpus and the scope rule — never a hand-typed count."""
+    flows, endpoints = set(), set()
+    for case_id, case in cases.items():
+        for row in case.flow_rows:
+            if case.producer in _S1_PRODUCERS or (
+                case.producer in _RICH_PRODUCERS and row["key"] == "transform"
+            ):
+                flows.add((case_id, row["ordinal"]))
+        if case.producer in _S1_PRODUCERS:
+            endpoints.update((case_id, row["ordinal"]) for row in case.endpoint_rows)
+    return flows, endpoints
+
+
+def test_frozen_row_counts_are_pinned(cases, manifest):
     """The denominator is pinned so a deregistration or regeneration cannot shrink it."""
     assert manifest["frozen_flow_rows"] == 83
     assert manifest["frozen_endpoint_rows"] == 58
-    assert manifest["status_counts"] == {"discharged": 9, "retired": 0, "pending": 132}
+    flows, endpoints = _owed_discharges(cases)
+    discharged = len(flows) + len(endpoints)
+    total = manifest["frozen_flow_rows"] + manifest["frozen_endpoint_rows"]
+    expected = {"discharged": discharged, "retired": 0, "pending": total - discharged}
+    assert acct._status_counts(acct.CORPUS_DIR) == expected
+    assert manifest["status_counts"] == expected
 
 
 def test_every_frozen_row_has_exactly_one_status(cases):
@@ -226,7 +253,9 @@ def test_every_case_discharges_cleanly(cases, derived):
             case, derived[case_id], retirements, served=served[case_id]
         )
         assert report.ok, (case_id, report.problems)
-        endpoint_report = discharge_endpoints(case, [], retirements)
+        with patch(_PAGINATE, lambda *a, **k: []):
+            endpoints = derive_case_endpoints(case)
+        endpoint_report = discharge_endpoints(case, endpoints, retirements)
         assert endpoint_report.ok, (case_id, endpoint_report.problems)
 
 
@@ -246,15 +275,28 @@ def test_the_two_rich_forms_are_discharged_by_full_payload_equality(cases, deriv
 
 
 def test_the_remaining_rows_are_explicitly_pending_for_159_not_labelled_covered(cases, manifest):
-    pending = [
-        (case_id, r["key"])
-        for case_id, case in cases.items()
-        for r in case.flow_rows
-        if case.status(r["ordinal"]) == PENDING
-    ]
-    assert len(pending) == manifest["frozen_flow_rows"] - 9
-    # the five simpler producers and composition are entirely #159's
-    assert all(case.status(r["ordinal"]) == PENDING for case in cases.values() if case.producer not in ("database_to_api_sync", "api_to_api_sync") for r in case.flow_rows)
+    """Every row the replay does not owe is PENDING; every row it owes is discharged.
+
+    The owed set is derived from the corpus and the scope rule
+    (``_owed_discharges``): the rich producers' transform rows (#157) and every
+    composition row (#159 S1). The five simpler producers and the rich
+    producers' other rows stay #159's (S2).
+    """
+    owed_flows, owed_endpoints = _owed_discharges(cases)
+    for case_id, case in cases.items():
+        for row in case.flow_rows:
+            status = case.status(row["ordinal"])
+            assert status == (DISCHARGED if (case_id, row["ordinal"]) in owed_flows else PENDING), (
+                case_id, row["key"], status)
+        for row in case.endpoint_rows:
+            status = case.status(row["ordinal"], side="endpoints")
+            assert status == (
+                DISCHARGED if (case_id, row["ordinal"]) in owed_endpoints else PENDING
+            ), (case_id, row["key"], status)
+    pending_flows = sum(
+        1 for case in cases.values() for r in case.flow_rows if case.status(r["ordinal"]) == PENDING
+    )
+    assert pending_flows == manifest["frozen_flow_rows"] - len(owed_flows)
 
 
 def test_the_replay_never_touches_a_legacy_producer(cases, monkeypatch):
@@ -271,9 +313,128 @@ def test_the_replay_never_touches_a_legacy_producer(cases, monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib, "import_module", spy)
+    # The module's plan cache would answer from a plan made BEFORE the spy was
+    # installed, and the replay would then import nothing for a vacuous reason.
+    monkeypatch.setattr(acct, "_PLAN_CACHE", {})
+    composition = cases["composition/create_2legs_staged"]
     with patch(_PAGINATE, lambda *a, **k: []):
         derive_case_projection(case)
+        derive_case_projection(composition)
+        derive_case_endpoints(composition)
     assert touched == []
+
+
+# ---------------------------------------------------------------------------
+# #159 S1: the import-blocked batch replay
+# ---------------------------------------------------------------------------
+
+
+def _binds_a_reused_connection(case):
+    """Whether the case's canonical request binds an existing connection.
+
+    Read from the fixture itself: a reuse binding mode on a recipe invocation,
+    or a reference-only connector component on a direct request.
+    """
+    intent = (case.input_canonical or {}).get("intent") or {}
+    for invocation in intent.get("invocations") or ():
+        raw = invocation.get("raw_input") or {}
+        modes = [raw.get("source", {}).get("binding_mode")]
+        modes += [target.get("binding_mode") for target in raw.get("targets") or ()]
+        if "reuse" in modes:
+            return True
+    return any(
+        (component.get("config") or {}).get("reference_only")
+        for component in intent.get("components") or ()
+        if "connector" in str(component.get("type"))
+    )
+
+
+@pytest.fixture(scope="module")
+def batch():
+    """ONE fresh child over every canonical case (composition + direct)."""
+    return acct.run_import_blocked_batch(acct.canonical_case_ids())
+
+
+def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived, batch):
+    """The legacy producers blocked, their registrations and source modules
+    deregistered, and the real revision/planning/projection code running: every
+    case still discharges, and its component plan is the one the unblocked tree
+    builds."""
+    retirements = retirement_ids()
+    replayed = batch["cases"]
+    assert set(replayed) == set(acct.canonical_case_ids())
+    assert {case_id.split("/")[0] for case_id in replayed} >= {"composition", *_RICH_PRODUCERS}
+    assert batch["attempts"] == []
+    for case_id, child in replayed.items():
+        case = cases[case_id]
+        report = discharge_case(case, child["flows"], retirements, served=child["served"])
+        assert report.ok, (case_id, report.problems)
+        endpoints = discharge_endpoints(case, child["endpoints"], retirements)
+        assert endpoints.ok, (case_id, endpoints.problems)
+        assert child["flows"] == derived[case_id], case_id
+        # the REAL component plan, compared with the unblocked tree's own
+        with patch(_PAGINATE, lambda *a, **k: []):
+            parent = acct.case_plan_result(case)
+        assert child["plan_valid"] is bool(parent.validation_report.is_valid), case_id
+        assert child["plan_errors"] == sorted({d.code for d in parent.errors}), case_id
+        assert child["component_dependencies"] == len(parent.component_dependencies) > 0, case_id
+        if not _binds_a_reused_connection(case):
+            assert child["plan_valid"] and child["plan_errors"] == [], case_id
+            assert child["compile_valid"] is True, (case_id, child["compile_error"])
+        else:
+            # A reused connection is read back from the ACCOUNT, which this
+            # offline replay has none of — the unblocked tree refuses the same
+            # way. Nothing else may differ.
+            assert child["plan_errors"] == ["CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"], case_id
+    applied = batch["apply"]
+    assert applied["success"] is True, applied
+    assert applied["created_process"] and applied["attempts_during_apply"] == []
+
+
+def test_the_import_blocker_refuses_a_known_forbidden_import(batch):
+    """Non-vacuity: in that same child a deliberate legacy import IS refused, and
+    the simulated deregistration really removed what it claims to."""
+    assert batch["control"] == "refused"
+    assert not any(
+        name.startswith(prefix)
+        for name in batch["layer_modules"]
+        for prefix in acct.LEGACY_PRODUCER_PREFIXES
+    )
+    registered = {tuple(item) for item in batch["registrations"]}
+    assert not any(recipe_id.startswith(acct.ADAPTER_ID_PREFIX) for recipe_id, _v in registered)
+    assert not registered & set(acct.obsolete_registrations())
+    assert ("boomi.compose.db_rest_fanout", "2.0.0") in registered
+
+
+def test_mutant_invented_profile_name_on_a_composition_case_is_refused(cases, derived):
+    """The served-name check is NOT vacuous on a recipe intent: its names come
+    from the baseline naming evidence, so an invented one is caught."""
+    from _issue_157_flows_accounting import derive_served_projection
+
+    case = cases["composition/create_2legs_staged"]
+    with patch(_PAGINATE, lambda *a, **k: []):
+        served = derive_served_projection(case)
+    (transform,) = [row for row in served if row["key"] == "transform"]
+    evidence = case.provenance["naming_evidence"]["profile_names"]
+    assert transform["source_profile_generation"]["component_name"] in evidence
+    assert discharge_case(case, derived[case.case_id], {}, served=served).ok
+    mutant = copy.deepcopy(served)
+    [row for row in mutant if row["key"] == "transform"][0]["source_profile_generation"][
+        "component_name"
+    ] = "CMP Invented Profile"
+    report = discharge_case(case, derived[case.case_id], {}, served=mutant)
+    assert not report.ok and any("authors nowhere" in p for p in report.problems)
+
+
+def test_mutant_endpoint_binding_mode_change_is_refused(cases):
+    case = cases["composition/create_2legs_stream"]
+    with patch(_PAGINATE, lambda *a, **k: []):
+        derived_endpoints = derive_case_endpoints(case)
+    assert discharge_endpoints(case, derived_endpoints, {}).ok
+    mutant = copy.deepcopy(derived_endpoints)
+    mutant[1]["binding_mode"] = "reuse"
+    report = discharge_endpoints(case, mutant, {})
+    assert not report.ok and any("differs" in p for p in report.problems)
 
 
 # ---------------------------------------------------------------------------

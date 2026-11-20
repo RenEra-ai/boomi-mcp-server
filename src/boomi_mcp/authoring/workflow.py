@@ -67,7 +67,7 @@ from .governance import (
     resolve_governance,
     scan_runtime_secrets,
 )
-from .derived_flows import derive_transform_flows
+from .derived_flows import derive_recipe_projection
 from .process_materialization import (
     canonical_plan_material,
     envelope_relocatability_offenders,
@@ -277,6 +277,10 @@ class _NormalizedIntent:
     recipe_provenance: Tuple[Any, ...] = ()
     #: #159 S1: the run's informational, value-free records. Served only.
     recipe_diagnostics: Tuple[Any, ...] = ()
+    #: #159 S1 (C8): process key -> the trusted projection facts a recipe
+    #: route's preparer supplied for that unit. Read ONLY by the served
+    #: projection; never in the semantic payload, never hashed.
+    recipe_projection_facts: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -694,7 +698,8 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
       input through the engine's own input gate, validates the material with
       the registration's closed model, and runs its trusted preparer.
 
-    Returns ``(supporting specs, deferred query-parameter names)``. The specs are
+    Returns ``(supporting specs, deferred query-parameter names, projection
+    facts by process key)``. The specs are
     the generated ones in invocation order, then each base component a preparer
     selected by key, exactly once. Every refusal is a value-free ``RecipeError``
     carrying this invocation's id, so the caller sees the cause and the pointer.
@@ -706,6 +711,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     generated: List[IntegrationComponentSpec] = []
     selected: List[str] = []
     deferred: Dict[str, Tuple[str, ...]] = {}
+    facts: Dict[str, Any] = {}
     base_catalog = MappingProxyType(dict(catalog_entries))
 
     def tagged(exc, invocation, prefix=""):
@@ -789,9 +795,12 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
                 selected.append(key)
         for operation_key, names in prepared.deferred_query_parameter_names:
             deferred[operation_key] = tuple(names)
+        projection = getattr(prepared, "projection_facts", None)
+        if projection is not None:
+            facts[projection.process_key] = projection
 
     supporting = list(generated) + [catalog_entries[key] for key in selected]
-    return tuple(supporting), deferred
+    return tuple(supporting), deferred, facts
 
 
 def _normalize_recipe_intent(
@@ -837,7 +846,7 @@ def _normalize_recipe_intent(
     try:
         # The SAME registry `run_recipes` resolves against (looked up at call
         # time, so a test-installed registry governs both).
-        supporting_specs, deferred_names = _prepare_recipe_components(
+        supporting_specs, deferred_names, projection_facts = _prepare_recipe_components(
             intent, _engine.production_registry(), catalog_entries
         )
     except RecipeError as exc:
@@ -952,6 +961,10 @@ def _normalize_recipe_intent(
         deferred_watermarks=resolution.deferred_watermarks,
         recipe_provenance=tuple(result.invocation_provenance),
         recipe_diagnostics=tuple(result.diagnostics),
+        # Only for a unit the run actually composed under that key.
+        recipe_projection_facts={
+            key: value for key, value in projection_facts.items() if key in unit_keys
+        },
     )
 
 
@@ -1395,17 +1408,25 @@ def _as_served_preview(
     """
     if normalized.intent_kind not in _COMPILING_INTENT_KINDS:
         return spec
-    flows = derive_transform_flows(
+    projection = derive_recipe_projection(
         normalized.integration_spec.processes,
         normalized.integration_spec.components,
         connector_metadata=normalized.connector_metadata,
         selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
         final_names=final_names,
+        projection_facts=normalized.recipe_projection_facts,
+        recorded_intents=normalized.recorded_intents,
     )
-    payload = spec.model_dump(mode="json", exclude={"flows"})
+    payload = spec.model_dump(mode="json", exclude={"flows", "endpoints"})
     payload.pop("preview_kind", None)
-    return CanonicalIntegrationPreviewV1(**payload, flows=flows)
+    payload.pop("composition_summaries", None)
+    return CanonicalIntegrationPreviewV1(
+        **payload,
+        flows=projection.flows,
+        endpoints=projection.endpoints,
+        composition_summaries=dict(projection.composition_summaries),
+    )
 
 
 def _plan_hash_preview(spec_preview) -> Dict[str, Any]:
@@ -1421,6 +1442,11 @@ def _plan_hash_preview(spec_preview) -> Dict[str, Any]:
     if isinstance(spec_preview, CanonicalIntegrationPreviewV1):
         payload.pop("preview_kind", None)
         payload["flows"] = []
+        # #159 S1: the served endpoint rows and composition summaries are a
+        # projection too — reset/dropped EXPLICITLY, so no plan hash depends on
+        # them (an empty default alone would not guarantee that).
+        payload["endpoints"] = []
+        payload.pop("composition_summaries", None)
     return payload
 
 

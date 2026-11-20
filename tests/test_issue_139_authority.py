@@ -244,6 +244,31 @@ def test_strict_zero_authored_preserves_the_inert_view():
     assert _echoed_pipeline(plan) is not None
 
 
+@pytest.mark.parametrize("version", ["1.0", STRICT_VERSION])
+def test_the_pipeline_authority_gate_matches_the_authority(version):
+    """#159 S1 (D8): ``_build_plan`` imports and consults the legacy authority
+    ONLY when the spec authors a top-level pipeline. The gate is sound exactly
+    when the authority decides NOT_APPLICABLE for every spec without one —
+    pinned here against the authority itself, on both surfaces, with the
+    authored process present — and the gate must not be vacuous: with a
+    pipeline the strict surface reaches a real disposition."""
+    import inspect
+
+    from src.boomi_mcp.categories import integration_builder
+
+    components = _agreeing(version)["integration_spec"]["components"]
+    without = IntegrationSpecV1(
+        name="gate", version=version, pipeline=None, components=components
+    )
+    assert evaluate_pipeline_authority(without).disposition == NOT_APPLICABLE
+    with_pipeline = _spec(components, version=version)
+    expected = NOT_APPLICABLE if version != STRICT_VERSION else AGREE
+    assert evaluate_pipeline_authority(with_pipeline).disposition == expected
+    source = inspect.getsource(integration_builder._build_plan)
+    gate = source.index("if spec.pipeline is not None:")
+    assert gate < source.index("from ..compiler.process_ir.legacy_adapters.authority import")
+
+
 def _spec(components, version=STRICT_VERSION, pipeline=None):
     base = _agreeing(version)["integration_spec"]
     return IntegrationSpecV1(

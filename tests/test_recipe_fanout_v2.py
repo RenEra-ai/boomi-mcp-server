@@ -310,6 +310,10 @@ def test_the_ported_constants_are_pinned_to_the_legacy_composition():
     assert fanout._reserved_prefixes_v2() == composition._RESERVED_PREFIXES
     assert fanout._MAX_TARGETS == composition._MAX_FANOUT_TARGETS
     assert fanout._MAX_CACHE_TARGETS == composition._MAX_FANOUT_TARGETS_WITH_CACHE
+    # The route's topology spelling: the legacy arm's served summary, frozen.
+    assert fanout._TOPOLOGY_V2 == (
+        oracle()["integration_spec"]["validation_rules"]["composition"]["topology"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +580,31 @@ def test_a_first_target_deferred_name_is_recorded_and_never_emitted():
         c for c in internals.normalized.integration_spec.components if c.key == "target_rest_operation"
     )
     assert "query_parameters" not in operation.config
+
+
+def test_a_declared_watermark_serves_the_conditional_row_before_the_fanout():
+    """S1 serves the conditional ``watermark`` row on the v2 route — present
+    exactly when the typed declaration is, and placed before ``branch``. None of
+    the six frozen composition cases declares one, so this is its witness."""
+    declared, _ = plan_authoring_request_v1(
+        recipe_request(*_watermarked(first=[_DEFERRED])), profile="p"
+    )
+    plain, _ = plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+
+    def keys(result):
+        return [row.key for row in result.integration_spec_preview.flows]
+
+    assert keys(plain) == ["extract", "transform", "send", "reliability", "fanout"]
+    assert keys(declared) == ["extract", "transform", "send", "reliability", "watermark", "fanout"]
+    (row,) = [r for r in declared.integration_spec_preview.flows if r.key == "watermark"]
+    assert row.model_dump(mode="json") == {
+        "key": "watermark",
+        "name": "Advance watermark",
+        "source": "send",
+        "target": None,
+        "operation": "watermark",
+        "executable": False,
+    }
 
 
 def test_governance_counts_a_deferred_name_only_on_an_owned_operation():

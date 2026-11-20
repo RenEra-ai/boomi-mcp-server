@@ -34,7 +34,6 @@ from ..patterns import (
     PatternRegistryError,
     pattern_validation_error,
 )
-from ..patterns.composition import compose_archetypes
 
 
 # --- #145 M12.10: typed recipe provenance + registry skew --------------------
@@ -474,6 +473,12 @@ def compose_archetypes_action(
             ),
             retryable=False,
         ).to_dict()
+
+    # #159 S1 (D8): imported HERE, inside the legacy action, not at module
+    # scope. The category module is imported by surfaces that never compose
+    # (the revision corpus settles every category module), and a module-level
+    # import kept the legacy composition producer #160 deletes on all of them.
+    from ..patterns.composition import compose_archetypes
 
     try:
         spec = compose_archetypes(parts_list, options_dict)

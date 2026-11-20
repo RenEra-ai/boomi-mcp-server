@@ -68,11 +68,16 @@ from pydantic import (
     StrictInt,
     StringConstraints,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
 
-from .derived_flows import DerivedFlowRowV1
+from .derived_flows import (
+    DerivedCompositionSummaryV1,
+    DerivedEndpointRowV1,
+    DerivedFlowRowV1,
+)
 from .governance_intent import (
     RecordedIntentV1,
     RuntimeHintDeclarationV1,
@@ -1011,6 +1016,32 @@ class CanonicalIntegrationPreviewV1(IntegrationSpecV1):
             "never an input to compilation, fingerprinting or mutation."
         ),
     )
+    endpoints: Tuple[DerivedEndpointRowV1, ...] = Field(  # type: ignore[assignment]
+        default=(),
+        description=(
+            "Issue #159 S1 — OUTPUT-ONLY endpoint rows for every unit a recipe "
+            "route assembled with trusted projection facts, read off the "
+            "route's connection components. Empty otherwise. Never hashed, "
+            "compiled or applied."
+        ),
+    )
+    composition_summaries: Dict[str, DerivedCompositionSummaryV1] = Field(
+        default_factory=dict,
+        description=(
+            "Issue #159 S1 — OUTPUT-ONLY composition summaries keyed by process "
+            "key, derived from each recipe-assembled root. Omitted from the "
+            "served object when empty. Never hashed, compiled or applied."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_summaries(self, handler):
+        """An empty summary map is OMITTED, so a preview with no recipe route
+        serializes byte-identically to the pre-#159 preview."""
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("composition_summaries"):
+            data.pop("composition_summaries", None)
+        return data
 
 
 class _AuthoringResultV1(_AuthoringModel):

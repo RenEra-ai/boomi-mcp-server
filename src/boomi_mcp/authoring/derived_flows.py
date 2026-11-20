@@ -667,10 +667,389 @@ def derive_transform_flows(
     return tuple(rows)
 
 
+# ---------------------------------------------------------------------------
+# the recipe-route projection (#159 S1)
+# ---------------------------------------------------------------------------
+
+
+#: The fixed SPELLINGS of the recipe-route rows: display names, and the row key
+#: each one is served under. Content-free strings the legacy producers served
+#: verbatim; pinned against the frozen #157 composition rows by
+#: ``test_the_recipe_row_spellings_are_the_frozen_legacy_spellings``.
+RECIPE_FLOW_ROW_SPELLINGS: Mapping[str, str] = {
+    "extract": "Read from database",
+    "send": "Send to REST target",
+    "reliability": "Retry / DLQ",
+    "watermark": "Advance watermark",
+    "fanout": "Fan out to REST targets",
+}
+
+#: Connector family -> the endpoint token a route serves for it, per direction.
+#: Closed and pinned like ``SOURCE_TOKEN_BY_FAMILY``: a route over a fourth
+#: family is a decision here, not a silent empty token.
+ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY: Mapping[Tuple[str, str], str] = {
+    ("source", "database"): "db_source",
+    ("target", "rest"): "rest_target",
+}
+
+#: Connector family -> the connector-row ``operation`` for its direction.
+CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY: Mapping[Tuple[str, str], str] = {
+    ("source", "database"): "db_get",
+    ("target", "rest"): "rest_send",
+}
+
+#: The DLQ token the reliability row serves when the root wires a catch path.
+_DLQ_TOKEN = "dlq"
+
+
+class RecipeProjection:
+    """The served projection of one plan: rows, endpoints, composition summaries."""
+
+    __slots__ = ("flows", "endpoints", "composition_summaries")
+
+    def __init__(self, flows, endpoints, composition_summaries) -> None:
+        self.flows = tuple(flows)
+        self.endpoints = tuple(endpoints)
+        self.composition_summaries = dict(composition_summaries)
+
+
+def _served_rest_auth(config: Mapping[str, Any]) -> Optional[str]:
+    """A created REST connection's ``auth`` translated to the SERVED vocabulary.
+
+    Inverted from the ONE create-auth authority the primitives emit through, so
+    a new create-mode auth arrives here without a second table.
+    """
+    from ..patterns.archetype_assembly import _REST_CREATE_AUTH_MAP
+
+    inverse = {wire: served for served, wire in _REST_CREATE_AUTH_MAP.items()}
+    value = config.get("auth")
+    return inverse.get(value) if isinstance(value, str) else None
+
+
+def _family_of(component: Optional[IntegrationComponentSpec], metadata) -> Optional[str]:
+    if component is None:
+        return None
+    family = (metadata.get(component.key) or (None, None))[0]
+    if not family:
+        family = (component.config or {}).get("connector_type")
+    return str(family).lower() if family else None
+
+
+def _endpoint_row(
+    key: str,
+    direction: str,
+    connection: IntegrationComponentSpec,
+    family: str,
+    *,
+    method: Optional[str] = None,
+):
+    """One endpoint row, read off the connection component (never the input)."""
+    from ..models.derived_flows import DerivedEndpointRowV1
+
+    config = connection.config or {}
+    reuse = bool(config.get("reference_only"))
+    row: Dict[str, Any] = {
+        "key": key,
+        "type": family,
+        "direction": direction,
+        "binding_mode": "reuse" if reuse else "create",
+        "executable": False,
+    }
+    if method is not None:
+        row["method"] = method
+    if reuse:
+        component_id = connection.component_id or config.get("component_id")
+        if component_id:
+            row["component_id"] = component_id
+        name = config.get("component_name")
+        if name:
+            row["component_name"] = name
+    elif family == "database":
+        row["driver"] = config.get("driver_id")
+        row["auth_mode"] = config.get("auth_mode")
+    else:
+        row["auth_mode"] = _served_rest_auth(config)
+    return DerivedEndpointRowV1(**row)
+
+
+def _root_steps(unit: Any) -> List[Any]:
+    body = getattr(unit.process_ir, "body", None)
+    return list(getattr(body, "steps", None) or ())
+
+
+def _branch_of(unit: Any) -> Optional[Any]:
+    """The route's terminal Branch: the LAST step of the root's sequence."""
+    steps = _root_steps(unit)
+    if steps and getattr(steps[-1], "kind", None) == "branch":
+        return steps[-1]
+    return None
+
+
+def _leg_positions(branch: Any, facts: Any):
+    """Per target part: its ACTUAL 1-based leg, its handoff, and the staging leg."""
+    positions: Dict[str, Tuple[int, str]] = {}
+    staging: Optional[int] = None
+    cache_key: Optional[str] = None
+    by_operation = {
+        "$ref:" + target.operation_key: target.part_key for target in facts.targets
+    }
+    for index, leg in enumerate(branch.legs, start=1):
+        terminal = leg.terminal
+        kind = getattr(terminal, "kind", None)
+        if kind == "cache_put" and staging is None:
+            staging = index
+            cache_key = _ref_key(getattr(terminal, "cache_ref", None))
+            continue
+        part = by_operation.get(getattr(terminal, "operation_ref", None))
+        if part is None:
+            continue
+        staged = any(getattr(step, "kind", None) == "cache_get" for step in leg.steps)
+        positions[part] = (index, "document_cache" if staged else "document_stream")
+    return positions, staging, cache_key
+
+
+def _with_hints(row: Any, facts: Any) -> Any:
+    """The transform row with the route's ``documentation_hint`` facts applied.
+
+    A hint the map component already carries wins (it is the same content);
+    otherwise each operation summary gains the hint its route and target path
+    name. Rows the facts name nothing for are returned unchanged.
+    """
+    hints = {
+        (hint.operation_type, hint.target_path): hint.documentation_hint
+        for hint in getattr(facts, "documentation_hints", ()) or ()
+    }
+    if not hints or not getattr(row, "operations", None):
+        return row
+    payload = row.model_dump(mode="json", exclude_unset=True)
+    changed = False
+    for summary in payload.get("operations") or ():
+        targets = summary.get("outputs") or [summary.get("target_path")]
+        for target in targets:
+            hint = hints.get((summary.get("operation_type"), target))
+            if hint is not None and summary.get("documentation_hint") is None:
+                summary["documentation_hint"] = hint
+                changed = True
+                break
+    return type(row).model_validate(payload) if changed else row
+
+
+def _route_projection(unit, by_key, metadata, facts, transform_rows, watermarked):
+    """``(rows, endpoints, summary)`` for one fact-carrying unit, or None.
+
+    None — and the unit is then projected as before, transform rows only —
+    whenever a fact cannot be resolved against the composed root and
+    components: the projection never serves a row it could not derive.
+    """
+    from ..models.derived_flows import (
+        DerivedCompositionSummaryV1,
+        DerivedConnectorFlowV1,
+        DerivedFanoutFlowV1,
+        DerivedReliabilityFlowV1,
+        DerivedWatermarkFlowV1,
+    )
+    from ..patterns.primitives._helpers import slugify
+
+    branch = _branch_of(unit)
+    source_connection = by_key.get(facts.source_connection_key)
+    source_family = _family_of(source_connection, metadata)
+    target_components = [
+        (target, by_key.get(target.connection_key), by_key.get(target.operation_key))
+        for target in facts.targets
+    ]
+    if branch is None or source_connection is None or any(
+        connection is None or operation is None for _t, connection, operation in target_components
+    ):
+        return None
+    target_family = _family_of(target_components[0][1], metadata)
+    source_token = ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY.get(("source", source_family or ""))
+    target_token = ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY.get(("target", target_family or ""))
+    if source_token is None or target_token is None:
+        return None
+    positions, staging, cache_key = _leg_positions(branch, facts)
+    if set(positions) != {target.part_key for target in facts.targets}:
+        return None
+
+    transform_rows = [_with_hints(row, facts) for row in transform_rows]
+    transform_key = transform_rows[0].key if transform_rows else "transform"
+    has_catch = any(
+        getattr(node, "kind", None) == "try_catch" for node in _walk_nodes(unit.process_ir)
+    )
+    rows: List[Any] = [
+        DerivedConnectorFlowV1(
+            key="extract",
+            name=RECIPE_FLOW_ROW_SPELLINGS["extract"],
+            source=source_token,
+            target=None,
+            operation=CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("source", source_family)],
+            executable=False,
+        ),
+        *transform_rows,
+        DerivedConnectorFlowV1(
+            key="send",
+            name=RECIPE_FLOW_ROW_SPELLINGS["send"],
+            source=transform_key,
+            target=target_token,
+            operation=CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("target", target_family)],
+            executable=False,
+        ),
+        DerivedReliabilityFlowV1(
+            key="reliability",
+            name=RECIPE_FLOW_ROW_SPELLINGS["reliability"],
+            source="send",
+            target=_DLQ_TOKEN if has_catch else None,
+            operation="reliability",
+            executable=False,
+        ),
+    ]
+    if watermarked:
+        rows.append(
+            DerivedWatermarkFlowV1(
+                key="watermark",
+                name=RECIPE_FLOW_ROW_SPELLINGS["watermark"],
+                source="send",
+                target=None,
+                operation="watermark",
+                executable=False,
+            )
+        )
+    rows.append(
+        DerivedFanoutFlowV1(
+            key="fanout",
+            name=RECIPE_FLOW_ROW_SPELLINGS["fanout"],
+            source=transform_key,
+            target=target_token,
+            operation="branch",
+            executable=False,
+            legs=len(branch.legs),
+        )
+    )
+
+    endpoints = [_endpoint_row(source_token, "source", source_connection, source_family)]
+    summaries_legs = []
+    modes: Dict[str, str] = {}
+    binding_modes: Dict[str, str] = {}
+    for index, (target, connection, operation) in enumerate(target_components):
+        method = (operation.config or {}).get("method")
+        endpoint = _endpoint_row(
+            target_token if index == 0 else "{0}_{1}".format(target_token, slugify(target.part_key)),
+            "target",
+            connection,
+            target_family,
+            method=method,
+        )
+        endpoints.append(endpoint)
+        binding_modes[target.part_key] = endpoint.binding_mode
+        leg, mode = positions[target.part_key]
+        modes[target.part_key] = mode
+        if index == 0:
+            continue
+        leg_summary: Dict[str, Any] = {
+            "part_key": target.part_key,
+            "leg": leg,
+            "method": method,
+            "binding_mode": endpoint.binding_mode,
+        }
+        if target.expected_status_codes:
+            leg_summary["expected_status_codes"] = tuple(target.expected_status_codes)
+        if staging is not None:
+            leg_summary["handoff"] = mode
+        summaries_legs.append(leg_summary)
+    staged = staging is not None
+    summary: Dict[str, Any] = {
+        "topology": facts.topology,
+        "handoff": (
+            "document_stream"
+            if not staged
+            else (
+                "document_cache"
+                if all(mode == "document_cache" for mode in modes.values())
+                else "mixed"
+            )
+        ),
+        "fanout_targets": len(facts.targets),
+        "parts": [part.model_dump() for part in facts.parts],
+        "first_target_part": facts.targets[0].part_key,
+        "fanout_legs": summaries_legs,
+    }
+    if staged:
+        summary["cache_component_key"] = cache_key
+        summary["staging_leg"] = staging
+        summary["handoff_modes"] = dict(modes)
+    return rows, endpoints, DerivedCompositionSummaryV1(**summary)
+
+
+def derive_recipe_projection(
+    units: Sequence[Any],
+    components: Sequence[IntegrationComponentSpec],
+    *,
+    connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
+    selected_artifacts: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    reused_keys: Optional[Any] = None,
+    final_names: Optional[Mapping[str, str]] = None,
+    projection_facts: Optional[Mapping[str, Any]] = None,
+    recorded_intents: Sequence[Any] = (),
+) -> RecipeProjection:
+    """The whole served projection, per unit in key order (#159 S1, C8).
+
+    Every unit serves its transform rows exactly as
+    :func:`derive_transform_flows` does. A unit whose recipe route supplied
+    trusted projection facts ALSO serves, around them, its extract, send,
+    reliability, conditional watermark and fan-out rows, its endpoint rows and
+    one composition summary keyed by its process key. The facts are the
+    trigger and name the parts; every served value is derived from the root
+    and components. Without facts the result is exactly the pre-#159 one.
+    """
+    facts_by_key = dict(projection_facts or {})
+    metadata = dict(connector_metadata or {})
+    by_key = {component.key: component for component in components}
+    from ..models.governance_intent import WatermarkDeclarationV1
+
+    watermarked = {
+        record.process_key
+        for record in recorded_intents or ()
+        if isinstance(getattr(record, "declaration", None), WatermarkDeclarationV1)
+    }
+    flows: List[Any] = []
+    endpoints: List[Any] = []
+    summaries: Dict[str, Any] = {}
+    for unit in sorted(units, key=lambda u: u.envelope.component_key):
+        key = unit.envelope.component_key
+        transform_rows = list(
+            derive_transform_flows(
+                [unit],
+                components,
+                connector_metadata=metadata,
+                selected_artifacts=selected_artifacts,
+                reused_keys=reused_keys,
+                final_names=final_names,
+            )
+        )
+        facts = facts_by_key.get(key)
+        route = (
+            _route_projection(unit, by_key, metadata, facts, transform_rows, key in watermarked)
+            if facts is not None
+            else None
+        )
+        if route is None:
+            flows.extend(transform_rows)
+            continue
+        rows, unit_endpoints, summary = route
+        flows.extend(rows)
+        endpoints.extend(unit_endpoints)
+        summaries[key] = summary
+    return RecipeProjection(flows, endpoints, summaries)
+
+
 __all__ = [
+    "CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY",
+    "ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY",
     "FUTURE_BUILDER_ISSUE_BY_ROUTE",
     "NORMALIZATION_RULES",
+    "RECIPE_FLOW_ROW_SPELLINGS",
+    "RecipeProjection",
     "SOURCE_TOKEN_BY_FAMILY",
+    "derive_recipe_projection",
     "derive_transform_flows",
     "flow_row_digest",
     "normalize_flow_row",

@@ -1,0 +1,17 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_id": "composition/reuse_3legs_staged_all",
+  "derived_by": "tests/_issue_159_composition_fixtures.py",
+  "derived_by_sha256": "0d8ad7abec05ff0e748d036148b41ae3e1b40c42a8b90ccfbbd63cadd2117aac",
+  "executed_at_replay": false,
+  "legacy_input_sha256": "a2bbcb5e8c9104c05b45aa65559819e2a6ab604245fa563dae82a2b63d611726",
+  "method": "legacy compose_archetypes request re-spelled into one pinned fan-out 2.0.0 invocation (raw_input + component_material) by _fanout_v2_support.v2_from_compose_request; zero prebuilt pairs; map label = the frozen transform row's display name",
+  "naming_evidence": {
+    "profile_names": [
+      "CMP DB Read Profile",
+      "CMP Target Profile"
+    ],
+    "source": "baseline compose_archetypes_action, git archive extraction"
+  }
+}

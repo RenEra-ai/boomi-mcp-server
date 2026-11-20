@@ -617,6 +617,32 @@ def retirement_ids() -> Dict[str, Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+#: One public planner result per case input, reused by every derivation below
+#: (the served rows, the normalized rows and the endpoint oracle all read the
+#: SAME plan). Keyed by the canonical input's digest, so an edited fixture is
+#: never answered from a stale plan.
+_PLAN_CACHE: Dict[Tuple[str, str], Any] = {}
+
+
+def case_plan_result(case: Case):
+    """The public planning entry's result for the case's canonical fixture."""
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    if case.input_canonical is None:
+        return None
+    cache_key = (case.case_id, _digest(case.input_canonical))
+    if cache_key not in _PLAN_CACHE:
+        request = AuthoringRequestV1.model_validate(case.input_canonical)
+        result, _internals = plan_authoring_request_v1(
+            request, boomi_client=MagicMock(), profile="issue-157-replay"
+        )
+        _PLAN_CACHE[cache_key] = result
+    return _PLAN_CACHE[cache_key]
+
+
 def derive_served_projection(case: Case) -> List[Dict[str, Any]]:
     """The case's SERVED rows, un-normalized. The name check reads these.
 
@@ -624,17 +650,9 @@ def derive_served_projection(case: Case) -> List[Dict[str, Any]]:
     the profile name there by design — so the name has to be read from what the
     caller actually receives, or nothing checks it at all.
     """
-    from unittest.mock import MagicMock
-
-    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
-    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
-
-    if case.input_canonical is None:
+    result = case_plan_result(case)
+    if result is None:
         return []
-    request = AuthoringRequestV1.model_validate(case.input_canonical)
-    result, _internals = plan_authoring_request_v1(
-        request, boomi_client=MagicMock(), profile="issue-157-replay"
-    )
     return [row.model_dump(mode="json", exclude_unset=True) for row in result.integration_spec_preview.flows]
 
 
@@ -645,18 +663,11 @@ def derive_case_projection(case: Case) -> List[Dict[str, Any]]:
     the replay exercises normalization and governance the way a caller would.
     Callers patch the live metadata boundary; this function is offline.
     """
-    from unittest.mock import MagicMock
-
     from boomi_mcp.authoring.derived_flows import normalize_flow_row
-    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
-    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
-    if case.input_canonical is None:
+    result = case_plan_result(case)
+    if result is None:
         return []
-    request = AuthoringRequestV1.model_validate(case.input_canonical)
-    result, _internals = plan_authoring_request_v1(
-        request, boomi_client=MagicMock(), profile="issue-157-replay"
-    )
     preview = result.integration_spec_preview
     # `exclude_unset`: a field the projection never SET is absent, exactly as
     # the legacy producers omitted absent keys, while a field set to None
@@ -665,6 +676,26 @@ def derive_case_projection(case: Case) -> List[Dict[str, Any]]:
         normalize_flow_row(row.model_dump(mode="json", exclude_unset=True))
         for row in preview.flows
     ]
+
+
+def derive_case_endpoints(case: Case) -> List[Dict[str, Any]]:
+    """The case's served endpoint/provenance sequence, in the frozen oracle's order.
+
+    The endpoint rows, then each composition summary as the
+    ``composition_provenance`` row (``_endpoint_rows`` order). Dumped with
+    ``exclude_unset`` so a key the projection never set is ABSENT — omission and
+    null stay distinct, exactly as the legacy producers served them. The
+    summary's process key is the map key, never part of the compared payload.
+    """
+    result = case_plan_result(case)
+    if result is None:
+        return []
+    preview = result.integration_spec_preview
+    rows = [row.model_dump(mode="json", exclude_unset=True) for row in preview.endpoints]
+    summaries = getattr(preview, "composition_summaries", None) or {}
+    for _process_key, summary in sorted(summaries.items()):
+        rows.append(summary.model_dump(mode="json", exclude_unset=True))
+    return rows
 
 
 class DischargeReport:
@@ -750,6 +781,12 @@ def _profile_name_problems(case, served_rows):
     intent = (case.input_canonical or {}).get("intent") or {}
     conflict_policy = intent.get("conflict_policy") or "reuse"
     authored = set()
+    # A RECIPE intent authors no component: its profile names come from the
+    # frozen naming evidence its provenance recorded from the BASELINE producer
+    # (#159 S1, C2) — never from the code under test.
+    provenance = getattr(case, "provenance", None) or {}
+    evidence = (provenance.get("naming_evidence") or {}).get("profile_names") or ()
+    authored.update(name for name in evidence if isinstance(name, str) and name.strip())
     for component in intent.get("components") or ():
         if not isinstance(component, dict):
             continue
@@ -885,6 +922,268 @@ def discharge_endpoints(case: Case, derived: Sequence[Mapping[str, Any]], retire
     if derived_digests != expected:
         report.problems.append("derived endpoint sequence differs from the discharged sequence")
     return report
+
+
+# ---------------------------------------------------------------------------
+# the import-blocked batch replay (#159 S1)
+# ---------------------------------------------------------------------------
+
+#: The legacy producer modules #160 deletes. The batch child refuses every
+#: import under these prefixes — even one a caller would catch — and filters the
+#: SAME prefixes out of the discovery and registry inputs, so one tuple decides
+#: both what is blocked and what is simulated as deregistered.
+LEGACY_PRODUCER_PREFIXES: Tuple[str, ...] = (
+    "boomi_mcp.patterns.archetypes",
+    "boomi_mcp.patterns.composition",
+    "boomi_mcp.patterns.recipe_bridge",
+    "boomi_mcp.compiler.process_ir.legacy_adapters",
+)
+
+#: The ONE batch child. It installs the blocker BEFORE any ``boomi_mcp`` import,
+#: then simulates the retirement at the discovery and registry INPUTS only —
+#: the package scan no longer sees the blocked modules, the recipe layer's
+#: source-module list drops them, and the obsolete registrations (the
+#: ``boomi.adapter.*`` compatibility adapters and the fan-out version their
+#: legacy surface targets) are filtered — while the real revision, planning and
+#: projection code runs unchanged. It reads the case ids on argv and the
+#: canonical inputs from the committed fixtures.
+BATCH_CHILD_PROGRAM = r'''
+import json, sys
+BLOCKED = tuple(json.loads(sys.argv[1]))
+attempts = []
+
+
+def _blocked(name):
+    return any(name == b or name.startswith(b + ".") for b in BLOCKED)
+
+
+class _Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if _blocked(name):
+            import traceback
+            origin = [
+                "{0}:{1}".format(frame.filename.split("/src/")[-1], frame.lineno)
+                for frame in traceback.extract_stack()
+                if "/src/boomi_mcp/" in frame.filename
+            ]
+            attempts.append([name, origin[-1] if origin else ""])
+            raise ImportError("blocked: " + name)
+        return None
+
+
+sys.meta_path.insert(0, _Blocker())  # BEFORE any boomi_mcp import
+sys.path[:0] = [sys.argv[2], sys.argv[3]]
+
+import importlib
+import pkgutil
+
+
+def _retired_walk(path=None, prefix="", onerror=None):
+    """``pkgutil.walk_packages`` over a tree the retired modules are GONE from.
+
+    Filtering the stock walker's output is not enough: it imports every
+    subpackage to recurse into it, so the blocked package would be imported
+    before the filter ever saw its name.
+    """
+    for info in pkgutil.iter_modules(path, prefix):
+        if _blocked(info.name):
+            continue
+        yield info
+        if not info.ispkg:
+            continue
+        try:
+            module = importlib.import_module(info.name)
+        except ImportError:
+            if onerror is not None:
+                onerror(info.name)
+            continue
+        except Exception:
+            if onerror is not None:
+                onerror(info.name)
+                continue
+            raise
+        sub = getattr(module, "__path__", None)
+        if sub:
+            yield from _retired_walk(sub, info.name + ".", onerror)
+
+
+pkgutil.walk_packages = _retired_walk  # discovery input: the modules are gone
+
+from boomi_mcp.recipes import registry as registry_module
+from boomi_mcp.recipes.builtins import catalog as catalog_module
+
+registry_module.RECIPE_LAYER_MODULES = tuple(
+    name for name in registry_module.RECIPE_LAYER_MODULES if not _blocked(name)
+)
+_OBSOLETE = {tuple(item) for item in json.loads(sys.argv[4])}
+_ADAPTER_PREFIX = sys.argv[5]
+catalog_module.PRODUCTION_REGISTRATIONS = tuple(
+    reg for reg in catalog_module.PRODUCTION_REGISTRATIONS
+    if not reg.recipe_id.startswith(_ADAPTER_PREFIX)
+    and (reg.recipe_id, reg.recipe_version) not in _OBSOLETE
+)
+registry_module._PRODUCTION_REGISTRY = None
+
+from unittest.mock import MagicMock, patch
+import _issue_157_flows_accounting as acct
+from boomi_mcp.authoring.workflow import AuthoringWorkflowError, compile_authoring_request_v1
+from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+APPLY_CASE = sys.argv[6]
+cases = acct.load_cases()
+out = {}
+applied = {}
+with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda *a, **k: []):
+    for case_id in sys.argv[7:]:
+        case = cases[case_id]
+        result = acct.case_plan_result(case)
+        request = AuthoringRequestV1.model_validate(case.input_canonical)
+        try:
+            compiled, _internals = compile_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile="issue-157-replay"
+            )
+            compile_valid, compile_error = bool(compiled.validation_report.is_valid), None
+        except AuthoringWorkflowError as exc:
+            compiled, compile_valid, compile_error = None, False, exc.code
+        if case_id == APPLY_CASE and compiled is not None:
+            # The full typed workflow, apply included, with ONLY the network
+            # boundary faked (the #153 harness shape): every component write
+            # returns a fresh id, the process write records its XML.
+            from boomi_mcp.categories import integration_builder as builder
+            payload = request.model_dump(mode="json")
+            payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+            payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+            before = len(attempts)
+            counter = {"n": 0}
+            created = []
+
+            def _component(*_a, **_k):
+                counter["n"] += 1
+                return {"_success": True, "component_id": "cid-%d" % counter["n"]}
+
+            def _create(_c, _p, payload_in, **_k):
+                created.append(payload_in["xml"])
+                return {"_success": True, "component_id": "process-cid"}
+
+            with patch.object(builder, "_execute_component", side_effect=_component), \
+                    patch.object(builder, "create_component", side_effect=_create), \
+                    patch.object(builder, "component_get_xml", side_effect=lambda _c, cid, *a, **k: {
+                        "type": "process", "xml": created[-1] if created else "<bns:Component/>"}):
+                response = builder.build_integration_action(
+                    MagicMock(), "issue-157-replay", "apply",
+                    config={"authoring_request": payload, "dry_run": False},
+                )
+            applied = {
+                "case_id": case_id,
+                "success": bool(response.get("_success")),
+                "error_code": response.get("error_code"),
+                "created_process": len(created) == 1 and "$ref:" not in created[0],
+                "attempts_during_apply": [a[0] for a in attempts[before:]],
+            }
+        out[case_id] = {
+            "compile_valid": compile_valid,
+            "compile_error": compile_error,
+            # The REAL component plan must succeed, not only the row comparison:
+            # an unexecutable plan step is a served error on this route.
+            "plan_valid": bool(result.validation_report.is_valid),
+            "plan_errors": sorted({d.code for d in result.errors}),
+            "component_dependencies": len(result.component_dependencies),
+            "flows": acct.derive_case_projection(case),
+            "served": acct.derive_served_projection(case),
+            "endpoints": acct.derive_case_endpoints(case),
+        }
+replay_attempts = list(attempts)
+control = "not_refused"
+try:
+    import boomi_mcp.patterns.composition  # noqa: F401 — the deliberate control
+except ImportError:
+    control = "refused"
+print(json.dumps({
+    "attempts": replay_attempts,
+    "control": control,
+    "registrations": sorted(
+        [reg.recipe_id, reg.recipe_version] for reg in catalog_module.PRODUCTION_REGISTRATIONS
+    ),
+    "layer_modules": list(registry_module.RECIPE_LAYER_MODULES),
+    "cases": out,
+    "apply": applied,
+}))
+'''
+
+
+def obsolete_registrations() -> Tuple[Tuple[str, str], ...]:
+    """The non-adapter registrations S1's batch simulates as retired.
+
+    Read from the catalog: an ``adapter_target`` that is SUPERSEDED — another
+    version of the same recipe id is registered beside it — is the legacy
+    surface's pinned target and retires with that surface (today: the fan-out
+    version ``compose_archetypes`` targets, superseded by 2.0.0). A target with
+    no successor (the sync recipes) stays.
+    """
+    from boomi_mcp.recipes.builtins import catalog
+
+    registrations = catalog.PRODUCTION_REGISTRATIONS
+    versions: Dict[str, set] = {}
+    for reg in registrations:
+        versions.setdefault(reg.recipe_id, set()).add(reg.recipe_version)
+    targets = {
+        (reg.adapter_target.recipe_id, reg.adapter_target.recipe_version)
+        for reg in registrations
+        if getattr(reg, "adapter_target", None) is not None
+    }
+    return tuple(
+        sorted(
+            (recipe_id, version)
+            for recipe_id, version in targets
+            if len(versions.get(recipe_id, ())) > 1
+        )
+    )
+
+
+ADAPTER_ID_PREFIX = "boomi.adapter."
+
+
+def canonical_case_ids() -> Tuple[str, ...]:
+    """Every case carrying a canonical fixture — the replayable subset."""
+    return tuple(case_id for case_id, case in sorted(load_cases().items()) if case.input_canonical is not None)
+
+
+#: The one case the batch child also APPLIES (typed, network faked): a staged
+#: composition, so the generated pairs, the cache and the composed root all
+#: materialize under the blocker.
+BATCH_APPLY_CASE = "composition/create_2legs_staged"
+
+
+def run_import_blocked_batch(
+    case_ids: Sequence[str],
+    *,
+    blocked_prefixes: Sequence[str] = LEGACY_PRODUCER_PREFIXES,
+    apply_case: str = BATCH_APPLY_CASE,
+) -> Dict[str, Any]:
+    """Replay ``case_ids`` in ONE fresh child with the legacy producers blocked:
+    plan + compile every case, and apply ``apply_case`` through the typed tool
+    route with only the network boundary faked."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            BATCH_CHILD_PROGRAM,
+            json.dumps(list(blocked_prefixes)),
+            str(ROOT / "src"),
+            str(ROOT / "tests"),
+            json.dumps([list(item) for item in obsolete_registrations()]),
+            ADAPTER_ID_PREFIX,
+            apply_case,
+            *case_ids,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("batch child failed:\n" + completed.stderr[-6000:])
+    return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
 # ---------------------------------------------------------------------------

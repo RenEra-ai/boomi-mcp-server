@@ -1,0 +1,148 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay composition/create_3legs_stream",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "component_material": {
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "children": [
+                {
+                  "data_type": "character",
+                  "kind": "simple",
+                  "name": "target_a"
+                }
+              ],
+              "kind": "object",
+              "name": "Root"
+            }
+          },
+          "source": {
+            "connection": {
+              "credential_ref": "secrets/db/svc_sync",
+              "database": "AppDB",
+              "driver": "microsoft_jdbc",
+              "host": "db.internal",
+              "mode": "create",
+              "username": "svc_sync"
+            },
+            "read": {
+              "result_fields": [
+                {
+                  "data_type": "character",
+                  "name": "source_field_a"
+                }
+              ],
+              "sql": "<<user-authored DB read statement>>"
+            }
+          },
+          "targets": [
+            {
+              "connection": {
+                "base_url": "https://api.example.com",
+                "mode": "create"
+              },
+              "operation": {
+                "path": "/v1/items",
+                "query_parameters": []
+              },
+              "part_key": "orders"
+            },
+            {
+              "connection": {
+                "base_url": "https://api.example.com",
+                "mode": "create"
+              },
+              "operation": {
+                "path": "/v1/items",
+                "query_parameters": []
+              },
+              "part_key": "billing"
+            },
+            {
+              "connection": {
+                "base_url": "https://api.example.com",
+                "mode": "create"
+              },
+              "operation": {
+                "path": "/v1/items",
+                "query_parameters": []
+              },
+              "part_key": "shipping"
+            }
+          ],
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_field": "source_field_a",
+                "target_path": "Root/target_a"
+              }
+            ]
+          },
+          "version": "2"
+        },
+        "invocation_id": "fanout",
+        "raw_input": {
+          "links": [
+            {
+              "from_part": "db",
+              "to_part": "shape"
+            },
+            {
+              "from_part": "shape",
+              "to_part": "orders"
+            },
+            {
+              "from_part": "shape",
+              "to_part": "billing"
+            },
+            {
+              "from_part": "shape",
+              "to_part": "shipping"
+            }
+          ],
+          "naming": {
+            "component_prefix": "CMP"
+          },
+          "process_key": "main_process",
+          "source": {
+            "auth_mode": "username_password",
+            "binding_mode": "create",
+            "part_key": "db"
+          },
+          "targets": [
+            {
+              "binding_mode": "create",
+              "label": "Orders",
+              "method": "POST",
+              "part_key": "orders"
+            },
+            {
+              "binding_mode": "create",
+              "label": "Billing",
+              "method": "POST",
+              "part_key": "billing"
+            },
+            {
+              "binding_mode": "create",
+              "label": "Shipping",
+              "method": "POST",
+              "part_key": "shipping"
+            }
+          ],
+          "transform": {
+            "map_label": "Map source to JSON payload",
+            "part_key": "shape"
+          },
+          "version": "2"
+        },
+        "recipe_id": "boomi.compose.db_rest_fanout",
+        "recipe_version": "2.0.0"
+      }
+    ]
+  }
+}

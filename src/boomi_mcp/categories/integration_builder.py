@@ -6847,41 +6847,51 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # no-op unless the caller explicitly opted in with version="1.1" AND authored
     # a top-level pipeline; version="1.0" keeps its frozen inert-echo behaviour.
     #
-    # Imported lazily on purpose: a module-level import would pull the ProcessIR
-    # compiler package into the server's import graph, breaking the M12
-    # dark-shipping invariant that `import server` never imports the compiler
-    # (tests/test_process_ir_compiler_surface.py).
-    from ..compiler.process_ir.legacy_adapters.authority import (
-        AGREE as AUTHORITY_AGREE,
-        AMBIGUOUS as AUTHORITY_AMBIGUOUS,
-        DISAGREE as AUTHORITY_DISAGREE,
-        NOT_REPRESENTABLE as AUTHORITY_NOT_REPRESENTABLE,
-        evaluate_pipeline_authority,
-    )
+    # #159 S1 (D8): GATED on the authored top-level pipeline. The authority
+    # decides NOT_APPLICABLE for every spec that carries none (whatever its
+    # version — pinned by `test_the_pipeline_authority_gate_matches_the_authority`),
+    # so importing the legacy-adapter package for such a spec decided nothing
+    # and only kept a module #160 deletes on every canonical plan's import path.
+    authority_agreed_key = None
+    authority_agrees = False
+    if spec.pipeline is not None:
+        # Imported lazily on purpose: a module-level import would pull the ProcessIR
+        # compiler package into the server's import graph, breaking the M12
+        # dark-shipping invariant that `import server` never imports the compiler
+        # (tests/test_process_ir_compiler_surface.py).
+        from ..compiler.process_ir.legacy_adapters.authority import (
+            AGREE as AUTHORITY_AGREE,
+            AMBIGUOUS as AUTHORITY_AMBIGUOUS,
+            DISAGREE as AUTHORITY_DISAGREE,
+            NOT_REPRESENTABLE as AUTHORITY_NOT_REPRESENTABLE,
+            evaluate_pipeline_authority,
+        )
 
-    authority = evaluate_pipeline_authority(spec)
-    # AMBIGUITY is structural: ADR-001 §5 counts declared authoring actions, so it
-    # needs no process semantics and "stands even when a process's semantics are
-    # unavailable". It can therefore reject right here, before any live lookup.
-    #
-    # The CONFLICT dispositions are different — they need the process's semantics,
-    # so they are subject to the clean-plan gate and are decided at the end of the
-    # plan instead (see _authored_step_has_validation_error). The decision itself
-    # is already computed, here, from the authored payload alone, so deferring
-    # only WHEN it is reported — never WHETHER — and account contents still cannot
-    # move a payload across the accept/reject boundary.
-    if authority.disposition == AUTHORITY_AMBIGUOUS:
-        return _authority_rejection(authority.disposition)
-    # The conflict dispositions additionally honour the clean-plan gate: if the
-    # authored process would fail its own validation, THAT error is what the
-    # caller needs and an authority conflict must not mask it. Computed
-    # account-independently (see _authored_process_validation_error), so this
-    # whole decision still lands before collision resolution, before any live
-    # lookup, and before any mutation — and no unrelated later plan exit can
-    # suppress an already-computed conflict.
-    if authority.disposition in (AUTHORITY_DISAGREE, AUTHORITY_NOT_REPRESENTABLE):
-        if _authored_process_validation_error(spec, authority.authored_key) is None:
+        authority = evaluate_pipeline_authority(spec)
+        # AMBIGUITY is structural: ADR-001 §5 counts declared authoring actions, so it
+        # needs no process semantics and "stands even when a process's semantics are
+        # unavailable". It can therefore reject right here, before any live lookup.
+        #
+        # The CONFLICT dispositions are different — they need the process's semantics,
+        # so they are subject to the clean-plan gate and are decided at the end of the
+        # plan instead (see _authored_step_has_validation_error). The decision itself
+        # is already computed, here, from the authored payload alone, so deferring
+        # only WHEN it is reported — never WHETHER — and account contents still cannot
+        # move a payload across the accept/reject boundary.
+        if authority.disposition == AUTHORITY_AMBIGUOUS:
             return _authority_rejection(authority.disposition)
+        # The conflict dispositions additionally honour the clean-plan gate: if the
+        # authored process would fail its own validation, THAT error is what the
+        # caller needs and an authority conflict must not mask it. Computed
+        # account-independently (see _authored_process_validation_error), so this
+        # whole decision still lands before collision resolution, before any live
+        # lookup, and before any mutation — and no unrelated later plan exit can
+        # suppress an already-computed conflict.
+        if authority.disposition in (AUTHORITY_DISAGREE, AUTHORITY_NOT_REPRESENTABLE):
+            if _authored_process_validation_error(spec, authority.authored_key) is None:
+                return _authority_rejection(authority.disposition)
+        authority_agrees = authority.disposition == AUTHORITY_AGREE
+        authority_agreed_key = authority.authored_key
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see
@@ -8226,8 +8236,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # above, before any account lookup, so live account contents can move the
     # echoed view between the normalized pipeline and null but can NEVER move a
     # payload across the reject boundary (ADR-001 §5 determinism note).
-    if authority.disposition == AUTHORITY_AGREE and _authored_step_will_reuse(
-        steps, authority.authored_key, conflict_policy
+    if authority_agrees and _authored_step_will_reuse(
+        steps, authority_agreed_key, conflict_policy
     ):
         spec_dump["pipeline"] = None
     result = {
