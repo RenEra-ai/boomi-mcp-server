@@ -583,6 +583,21 @@ def _inherited_schema_digest(selector: str) -> str:
 
 
 
+def _fanout_material_guarantee() -> str:
+    """The fan-out 2.0.0 material guarantee (#159 S1, decision D12), served
+    verbatim from the recipe module, whose published query names it renders.
+    The refusal causes are named here so a caller can act on them."""
+    from ..recipes.builtins.fanout import LITERAL_QUERY_GUARANTEE_V2
+
+    return (
+        LITERAL_QUERY_GUARANTEE_V2
+        + " A credential field, userinfo or JDBC property, or a value the REST "
+        "builder refuses is refused with PLAINTEXT_SECRET_REJECTED; a literal "
+        "query name outside the published names, or inline query syntax that "
+        "cannot be read unambiguously, with FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED."
+    )
+
+
 def authoring_workflow_contract() -> Dict[str, Any]:
     """The workflow CONTRACT — phases, actions, intent kinds, terminology, flags.
 
@@ -781,17 +796,9 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "into the supporting component specs; it never reaches the "
                 "recipe executor, a contribution, recipe_provenance or a "
                 "diagnostic, and a refusal names the cause code and the pointer, "
-                "never a value. A credential boundary refuses "
-                "(PLAINTEXT_SECRET_REJECTED) a credential_ref that is not an "
-                "opaque 'credential://' reference, URL userinfo, a JDBC property "
-                "in a host or database, and any query pair (a literal "
-                "parameter, or one written into a base URL or path) whose NAME "
-                "denotes a credential under the recipe's query-name rule (stated "
-                "on component_material_schema at "
-                "targets[].operation.query_parameters[].literal_value) or that the "
-                "REST operation builder itself refuses as a secret "
-                "(REST_SECRET_VALUE_FORBIDDEN)."
-            ),
+                "never a value. "
+            )
+            + _fanout_material_guarantee(),
             "recipe_provenance": (
                 "RecipeInvocationProvenanceV1 — on the recipe intent, which "
                 "REGISTERED code each invocation ran: recipe_id, the resolved "

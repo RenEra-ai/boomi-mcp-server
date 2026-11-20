@@ -307,6 +307,7 @@ from pydantic import StrictStr as _StrictStr
 from pydantic import ValidationError as _ValidationError
 
 from ...errors import (
+    FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED,
     COMPOSITION_COMPONENT_KEY_COLLISION,
     COMPOSITION_CONTRACT_MISMATCH,
     COMPOSITION_UNSUPPORTED_TOPOLOGY,
@@ -767,6 +768,48 @@ class FanoutTransformMaterialV2(_FanoutMaterialModel):
     operations: Tuple[FanoutTransformOperationV2, ...] = Field(min_length=1)
 
 
+#: D12 (#159 S1, architect decision A): the ONLY names under which fan-out
+#: 2.0.0 emits a literal REST query VALUE — a structured literal parameter, or
+#: a query pair inside ``base_url`` / ``path``. Exact and case-sensitive, after
+#: the trim for a structured name and URL-decoding for an inline one. A
+#: deny-list name classifier cannot close (a provider-specific name carrying an
+#: opaque value is indistinguishable from data), so the vocabulary is CLOSED.
+#: Watermark-sourced names are recorded, never emitted, and are not judged here.
+#: The served text below is RENDERED from this constant.
+LITERAL_QUERY_NAMES_V2: Tuple[str, ...] = ("filter", "limit", "mode", "offset")
+
+#: The value-free cause for a literal query name outside that vocabulary, or
+#: inline query syntax that cannot be read unambiguously.
+_QUERY_NAME_CAUSE = FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED
+
+
+def _published_query_names() -> str:
+    return ", ".join(LITERAL_QUERY_NAMES_V2)
+
+
+#: The architect's served guarantee (D12, "Served contract text"), with the
+#: published names rendered from :data:`LITERAL_QUERY_NAMES_V2`.
+LITERAL_QUERY_GUARANTEE_V2 = (
+    "Fan-out 2.0.0 requires opaque `credential://` references in credential "
+    "fields, rejects URL userinfo and JDBC property injection in checked "
+    "fields, and limits literal REST queries to the published names ({names}) "
+    "and the REST builder\u2019s value rules. Usernames, SQL, map constants, URL "
+    "path text, and values under permitted query names are caller-authored "
+    "data that may be persisted in component configuration or XML, so supply "
+    "only non-secret data in those fields."
+).format(names=_published_query_names())
+
+#: The per-field rule every query-carrying material field states.
+_LITERAL_QUERY_FIELD_RULE = (
+    "A literal REST query value is emitted only under the published names "
+    "({names}): any other name, or inline query syntax that cannot be read "
+    "unambiguously (a pair without '=', an empty or repeated pair, a fragment, "
+    "a name repeated across base_url, path and query_parameters), is refused "
+    "with {cause}; a value the REST operation builder refuses is refused with "
+    "PLAINTEXT_SECRET_REJECTED. " + LITERAL_QUERY_GUARANTEE_V2
+).format(names=_published_query_names(), cause=_QUERY_NAME_CAUSE)
+
+
 class FanoutRestCreateMaterialV2(_FanoutMaterialModel):
     """Create an UNAUTHENTICATED REST connection (secured auth must be reused)."""
 
@@ -774,10 +817,9 @@ class FanoutRestCreateMaterialV2(_FanoutMaterialModel):
     base_url: str = Field(
         min_length=1,
         description=(
-            "Absolute http(s) base URL. Userinfo ('user:password@') and any "
-            "query pair the REST operation builder refuses as a secret "
-            "(REST_SECRET_VALUE_FORBIDDEN) are refused."
-        ),
+            "Absolute http(s) base URL. Userinfo ('user:password@') is refused. "
+        )
+        + _LITERAL_QUERY_FIELD_RULE,
     )
 
 
@@ -787,48 +829,23 @@ FanoutRestConnectionMaterialV2 = _Annotated[
 ]
 
 
-#: The ONE published statement of the query-name rule. Served verbatim in the
-#: material schema and the authoring contract, so the text cannot drift from
-#: the constants below (a test pins both).
-QUERY_NAME_RULE_SUMMARY = (
-    "A query parameter NAME is judged by its words (split at case changes, "
-    "digits and separators). It is a credential when it contains a credential "
-    "word (password, pass, passcode, passphrase, pwd, secret, credential, "
-    "authorization, auth, bearer, apikey, signature, sig, jwt, hmac, sid, otp), "
-    "a key or token word not qualified by a closed non-secret qualifier "
-    "(pagination for token: page, next, skip, since, resumption, continuation, "
-    "cursor, sync, delta, max; data keys for key: sort, partition, cache, "
-    "idempotency, row, range, routing, correlation, dedup, lookup, search), a "
-    "session word, or is a bare code; a credential word directly followed by a "
-    "descriptor word (type, method, name, id, count, algorithm, version, "
-    "expiry, scope, hint) describes the credential rather than carrying it. A "
-    "literal value of true or false is never a credential. Unknown names are "
-    "admitted; the REST operation builder's own name and value checks "
-    "(REST_SECRET_VALUE_FORBIDDEN) apply on top."
-)
-
-
 class FanoutQueryParameterV2(_FanoutMaterialModel):
-    name: str = Field(min_length=1)
-    value_source: _Literal["literal", "watermark"]
-    literal_value: Optional[str] = Field(
-        default=None,
+    name: str = Field(
+        min_length=1,
         description=(
-            "Refused (PLAINTEXT_SECRET_REJECTED) when the name denotes a "
-            "credential or the REST operation builder refuses the pair. "
-        )
-        + QUERY_NAME_RULE_SUMMARY,
+            "Compared after trimming. A literal parameter's name must be one of "
+            "the published names ({names}); a watermark-sourced name is recorded "
+            "and never emitted."
+        ).format(names=_published_query_names()),
     )
+    value_source: _Literal["literal", "watermark"]
+    literal_value: Optional[str] = Field(default=None, description=_LITERAL_QUERY_FIELD_RULE)
 
 
 class FanoutRestOperationMaterialV2(_FanoutMaterialModel):
     path: str = Field(
         min_length=1,
-        description=(
-            "Request path. Userinfo and any query pair whose name denotes a "
-            "credential, or that the REST operation builder refuses, are "
-            "refused (see query_parameters[].literal_value)."
-        ),
+        description="Request path. Userinfo is refused. " + _LITERAL_QUERY_FIELD_RULE,
     )
     query_parameters: Tuple[FanoutQueryParameterV2, ...] = Field(
         default=(),
@@ -882,30 +899,39 @@ class FanoutComponentMaterialV2(_FanoutMaterialModel):
 #       no JDBC property (``;`` / ``=``) — the two ways a password rides a host.
 #   FanoutDbCreateMaterialV2.database         jdbc_property: no ``;`` / ``=``
 #       (a ``;password=...`` suffix lands in the JDBC URL).
-#   FanoutRestCreateMaterialV2.base_url       url: no userinfo, and no query
-#       pair the REST builder refuses as a secret.
+#   FanoutRestCreateMaterialV2.base_url       url: no userinfo; every inline query
+#       pair readable, under a published name, and with a value the REST builder
+#       admits (D12).
 #   FanoutRestOperationMaterialV2.path        url: same rule (a path may carry a
 #       query string, or an authority when written scheme-/protocol-relative).
-#   FanoutQueryParameterV2.literal_value      named_literal: the (name, literal)
-#       pair is refused when the REST builder refuses it as a secret (a literal
-#       ``api_key`` value IS the key).
+#   FanoutQueryParameterV2.name               literal_query_name: a LITERAL
+#       parameter's name must be a published name (D12).
+#   FanoutQueryParameterV2.literal_value      named_literal: the value must pass
+#       the REST builder's value check.
 #
 # Every other field is classified ``None`` with its reason in the table. There
 # is no ``jdbc_options`` (or other open map) in the v2 material: the only maps it
 # can reach are the closed models below.
 #
-# Which REST query pair is a secret is the REST BUILDER's own authority — the
-# customProperties check ``RestClientOperationBuilder`` applies to the very
-# ``query_parameters`` these values become (whole-name key pattern + secret
-# value shapes, ``REST_SECRET_VALUE_FORBIDDEN``) — asked, never re-typed
-# (CDX-r2-02: the recipe-input substring scanner refused ``pageToken``).
+# Literal REST query NAMES are a closed vocabulary (D12,
+# :data:`LITERAL_QUERY_NAMES_V2`); no name classifier exists. Query VALUES are
+# judged by the REST BUILDER's own authority — the customProperties check
+# ``RestClientOperationBuilder`` applies to the very ``query_parameters`` these
+# values become (``REST_SECRET_VALUE_FORBIDDEN``) — asked, never re-typed.
 
 _CREDENTIAL_REFERENCE_PREFIX = "credential://"
 #: The cause a boundary refusal carries: the builders' own code for a plaintext
 #: secret offered where only an opaque reference may cross.
 _PLAINTEXT_SECRET_CAUSE = "PLAINTEXT_SECRET_REJECTED"
 
-_SECRET_RULES = ("credential_reference", "jdbc_host", "jdbc_property", "url", "named_literal")
+_SECRET_RULES = (
+    "credential_reference",
+    "jdbc_host",
+    "jdbc_property",
+    "url",
+    "literal_query_name",
+    "named_literal",
+)
 
 
 def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
@@ -997,8 +1023,8 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
             (FanoutRestCreateMaterialV2, "base_url"): "url",
             (FanoutRestOperationMaterialV2, "path"): "url",
             (FanoutRestOperationMaterialV2, "query_parameters"): None,  # structural (models)
-            # A parameter NAME; it decides how ``literal_value`` is judged.
-            (FanoutQueryParameterV2, "name"): None,
+            # A LITERAL parameter's name must be published (D12).
+            (FanoutQueryParameterV2, "name"): "literal_query_name",
             (FanoutQueryParameterV2, "value_source"): None,  # closed literal
             (FanoutQueryParameterV2, "literal_value"): "named_literal",
         }
@@ -1009,200 +1035,114 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
 _REST_SECRET_CODE = "REST_SECRET_VALUE_FORBIDDEN"
 
 
-#: Words that make a NAME a credential wherever they appear (deny by default).
-_CREDENTIAL_NAME_WORDS = frozenset(
-    {
-        "password", "passwords", "passwd", "pwd", "pass", "passcode", "passphrase",
-        "secret", "secrets", "credential", "credentials", "authorization", "auth",
-        "bearer", "apikey", "signature", "sig", "jwt", "hmac", "sid", "otp",
-        "sessionid", "session",
-    }
-)
-#: ``token`` is a credential unless one of these immediately precedes it.
-_TOKEN_QUALIFIERS = frozenset(
-    {
-        "page", "next", "prev", "previous", "continuation", "cursor", "sync",
-        "resume", "resumption", "start", "skip", "since", "pagination", "delta",
-        "max", "min",
-    }
-)
-#: ``key`` is a credential unless one of these immediately precedes it.
-_KEY_QUALIFIERS = frozenset(
-    {
-        "sort", "partition", "cache", "idempotency", "row", "range", "routing",
-        "correlation", "dedup", "dedupe", "deduplication", "lookup", "search",
-        "primary", "foreign", "hash", "group", "order", "object", "s3",
-    }
-)
-#: A credential word DIRECTLY followed by one of these names an attribute of
-#: the credential, not the credential (``token_type``, ``signature_method``,
-#: ``secret_type``, ``key_id``). ``session_id`` is NOT excused: a session id is
-#: the session credential, so ``id`` excuses only ``key``.
-_DESCRIPTOR_WORDS = frozenset(
-    {
-        "type", "types", "kind", "method", "methods", "name", "names", "count",
-        "algorithm", "version", "expiry", "expires", "expiration", "scope",
-        "scopes", "hint", "status", "scanning", "location", "locations",
-        "resolution", "validity", "format", "length",
-    }
-)
-_ID_WORDS = frozenset({"id", "ids"})
-_FALSE_OR_TRUE = frozenset({"true", "false"})
-
-
-def _name_words(name: str) -> Tuple[str, ...]:
-    """Split ``name`` into lowercase words in ONE linear pass: at separators,
-    at letter/digit changes, at a lower->upper change, and before the last
-    capital of an acronym run (``HTTPServer`` -> ``http``, ``server``)."""
-    words: _List[str] = []
-    current: _List[str] = []
-    previous = ""
-    length = len(name)
-    for index, char in enumerate(name):
-        if not char.isalnum():
-            if current:
-                words.append("".join(current))
-                current = []
-            previous = ""
-            continue
-        boundary = False
-        if current:
-            if char.isdigit() != previous.isdigit():
-                boundary = True
-            elif char.isupper() and previous.islower():
-                boundary = True
-            elif (
-                char.isupper()
-                and previous.isupper()
-                and index + 1 < length
-                and name[index + 1].islower()
-            ):
-                boundary = True
-        if boundary:
-            words.append("".join(current))
-            current = []
-        current.append(char.lower())
-        previous = char
-    if current:
-        words.append("".join(current))
-    return tuple(words)
-
-
-#: Stems a lowercase compound may END with (``accesstoken``, ``clientsecret``).
-_COMPOUND_STEMS = (
-    "passwords", "password", "passwd", "passphrase", "passcode", "secrets", "secret",
-    "credentials", "credential", "signature", "tokens", "token", "keys", "key",
-)
-#: For a ``...key`` compound only these prefixes make it a credential: an
-#: arbitrary ``...key`` word (``monkey``, ``hockey``) is not split.
-_KEY_COMPOUND_PREFIXES = frozenset(
-    {
-        "api", "access", "secret", "private", "auth", "app", "license", "master",
-        "shared", "subscription", "client", "session", "consumer", "encryption",
-        "signing", "developer", "dev",
-    }
-)
-
-
-def _expand_compounds(words: Tuple[str, ...]) -> Tuple[str, ...]:
-    """Split a lowercase compound into ``(prefix, stem)`` so ``accesstoken``
-    is judged like ``access_token`` and ``skiptoken`` like ``skip_token``."""
-    expanded: _List[str] = []
-    for word in words:
-        split = None
-        if word not in _CREDENTIAL_NAME_WORDS:
-            for stem in _COMPOUND_STEMS:
-                if word.endswith(stem) and len(word) > len(stem):
-                    prefix = word[: -len(stem)]
-                    if stem in ("key", "keys") and prefix not in _KEY_COMPOUND_PREFIXES:
-                        break
-                    split = (prefix, stem)
-                    break
-        expanded.extend(split if split else (word,))
-    return tuple(expanded)
-
-
-def _query_name_is_credential(name: str) -> bool:
-    """Whether a query-parameter NAME denotes a credential — see
-    :data:`QUERY_NAME_RULE_SUMMARY`. There is no runtime authority for this fact
-    (the REST builder's whole-name list admits ``refresh_token``), so this rule
-    IS the authority, pinned both ways by the frozen name table in
-    ``tests/test_recipe_component_material.py`` (#159 S1, CDX-r3-01/r4, QA r5/r6)."""
-    words = _expand_compounds(_name_words(name))
-    if words == ("code",):
-        return True
-    for index, word in enumerate(words):
-        following = words[index + 1] if index + 1 < len(words) else ""
-        preceding = words[index - 1] if index else ""
-        if following in _DESCRIPTOR_WORDS:
-            continue
-        if word in _CREDENTIAL_NAME_WORDS:
-            return True
-        if word in ("token", "tokens") and preceding not in _TOKEN_QUALIFIERS:
-            return True
-        if word in ("key", "keys"):
-            if following in _ID_WORDS or preceding in _KEY_QUALIFIERS:
-                continue
-            return True
-        if word == "code" and preceding in ("auth", "authorization", "verification", "otp"):
-            return True
-    return False
-
-
-def _rest_query_pair_is_secret(name: str, value: str) -> bool:
-    """Whether ``name=value`` carries a plaintext secret.
-
-    Refused when the REST builder refuses the pair — its customProperties
+def _rest_query_value_is_secret(name: str, value: str) -> bool:
+    """Whether the REST builder refuses ``name=value`` — its customProperties
     validator, the check the emitted operation's ``query_parameters`` meet at
-    build time, read by error CODE only (it also judges the VALUE: JWT, Bearer,
-    long base64) — OR when the name denotes a credential
-    (:func:`_query_name_is_credential`)."""
-    if value.strip().lower() in _FALSE_OR_TRUE:
-        # A flag (``hide_secret=true``) is never a credential; the builder
-        # still judges the pair below.
-        pass
-    elif _query_name_is_credential(name):
-        return True
+    build time, read by error CODE only. Under a published name this judges
+    the VALUE (JWT, ``Bearer``/``Basic`` schemes, long base64, ``[encrypted]``)."""
     error = _rt().RestClientOperationBuilder._validate_dict_param(
         {name: value}, "query_parameters"
     )
     return getattr(error, "error_code", None) == _REST_SECRET_CODE
 
 
-def _url_carries_a_secret(value: str) -> bool:
-    from urllib.parse import parse_qsl, urlsplit
+class _UnreadableQuery(Exception):
+    """Inline query syntax that cannot be read unambiguously."""
+
+
+def _inline_query_pairs(parts: _Any) -> Tuple[Tuple[str, str, str], ...]:
+    """``(decoded name, decoded value, raw value)`` per inline query pair.
+
+    Strict: a fragment, a second ``?``, an empty pair, a pair without ``=``, a
+    name or value that is not valid percent-encoded UTF-8, and a repeated
+    (decoded) name are UNREADABLE — refused rather than guessed at."""
+    from urllib.parse import unquote
+
+    if parts.fragment:
+        raise _UnreadableQuery()
+    query = parts.query
+    if not query:
+        return ()
+    if "?" in query:
+        raise _UnreadableQuery()
+    pairs = []
+    seen: set = set()
+    for segment in query.split("&"):
+        if not segment or "=" not in segment:
+            raise _UnreadableQuery()
+        raw_name, raw_value = segment.split("=", 1)
+        try:
+            name = unquote(raw_name, errors="strict")
+            value = unquote(raw_value, errors="strict")
+        except UnicodeDecodeError:
+            raise _UnreadableQuery() from None
+        if name in seen:
+            raise _UnreadableQuery()
+        seen.add(name)
+        pairs.append((name, value, raw_value))
+    return tuple(pairs)
+
+
+def _inline_query_names(value: str) -> Tuple[str, ...]:
+    """The decoded inline query names of an already-checked URL (in order)."""
+    from urllib.parse import urlsplit
+
+    try:
+        return tuple(name for name, _v, _r in _inline_query_pairs(urlsplit(value.strip())))
+    except (ValueError, _UnreadableQuery):
+        return ()
+
+
+def _url_cause(value: str) -> Optional[str]:
+    """The refusal cause for a ``base_url`` / ``path``, or ``None`` when clean."""
+    from urllib.parse import urlsplit
 
     try:
         parts = urlsplit(value.strip())
     except ValueError:
-        return True  # unparseable: refused rather than judged clean
+        return _PLAINTEXT_SECRET_CAUSE  # unparseable: refused rather than judged clean
     if "@" in parts.netloc:
-        return True
-    return any(
-        _rest_query_pair_is_secret(name, pair_value)
-        for name, pair_value in parse_qsl(parts.query, keep_blank_values=True)
-    )
+        return _PLAINTEXT_SECRET_CAUSE
+    try:
+        pairs = _inline_query_pairs(parts)
+    except _UnreadableQuery:
+        return _QUERY_NAME_CAUSE
+    for name, value_decoded, value_raw in pairs:
+        if name not in LITERAL_QUERY_NAMES_V2:
+            return _QUERY_NAME_CAUSE
+    for name, value_decoded, value_raw in pairs:
+        if _rest_query_value_is_secret(name, value_decoded) or _rest_query_value_is_secret(
+            name, value_raw
+        ):
+            return _PLAINTEXT_SECRET_CAUSE
+    return None
 
 
-def _breaches(rule: str, value: _Any, owner: _Any) -> bool:
-    """Whether ``value`` (of a field classified ``rule``) carries a plaintext secret."""
+def _breaches(rule: str, value: _Any, owner: _Any) -> Optional[str]:
+    """The refusal CAUSE for ``value`` of a field classified ``rule``, or ``None``."""
     if value is None:
-        return False
+        return None
     text = str(value).strip()
     if rule == "credential_reference":
-        return not (
-            text.startswith(_CREDENTIAL_REFERENCE_PREFIX)
-            and len(text) > len(_CREDENTIAL_REFERENCE_PREFIX)
-        )
+        if text.startswith(_CREDENTIAL_REFERENCE_PREFIX) and len(text) > len(
+            _CREDENTIAL_REFERENCE_PREFIX
+        ):
+            return None
+        return _PLAINTEXT_SECRET_CAUSE
     if rule == "jdbc_host":
-        return any(char in text for char in "@;=")
+        return _PLAINTEXT_SECRET_CAUSE if any(char in text for char in "@;=") else None
     if rule == "jdbc_property":
-        return any(char in text for char in ";=")
+        return _PLAINTEXT_SECRET_CAUSE if any(char in text for char in ";=") else None
     if rule == "url":
-        return _url_carries_a_secret(text)
+        return _url_cause(text)
+    if rule == "literal_query_name":
+        if getattr(owner, "value_source", None) != "literal":
+            return None  # a watermark-sourced name is recorded, never emitted
+        return None if text in LITERAL_QUERY_NAMES_V2 else _QUERY_NAME_CAUSE
     if rule == "named_literal":
-        return _rest_query_pair_is_secret(str(getattr(owner, "name", "") or "").strip(), text)
-    return True  # an unknown rule fails closed
+        name = str(getattr(owner, "name", "") or "").strip()
+        return _PLAINTEXT_SECRET_CAUSE if _rest_query_value_is_secret(name, text) else None
+    return _PLAINTEXT_SECRET_CAUSE  # an unknown rule fails closed
 
 
 def _check_credential_boundary_v2(material: FanoutComponentMaterialV2) -> None:
@@ -1224,8 +1164,9 @@ def _check_credential_boundary_v2(material: FanoutComponentMaterialV2) -> None:
                     raise _refusal(_PLAINTEXT_SECRET_CAUSE, here, phase="input")
                 value = getattr(node, name)
                 rule = classes[key]
-                if rule is not None and _breaches(rule, value, node):
-                    raise _refusal(_PLAINTEXT_SECRET_CAUSE, here, phase="input")
+                cause = _breaches(rule, value, node) if rule is not None else None
+                if cause is not None:
+                    raise _refusal(cause, here, phase="input")
                 walk(value, here)
         elif isinstance(node, (tuple, list)):
             for index, item in enumerate(node):
@@ -1554,6 +1495,45 @@ def _check_base_component(
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
 
 
+def _selected_base_url(base_catalog: _Mapping[str, IntegrationComponentSpec], key: str) -> str:
+    config = (base_catalog[key].config or {}) if key in base_catalog else {}
+    value = config.get("base_url")
+    return value if isinstance(value, str) else ""
+
+
+def _check_query_sources_v2(
+    inp: ComposeDbRestFanoutInputV2,
+    ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+) -> None:
+    """One target's query is ONE name -> value map, assembled from up to three
+    sources: the connection's ``base_url`` (material or selected base), the
+    operation ``path``, and the structured ``query_parameters``. A name an
+    INLINE source repeats from an earlier source is ambiguous (which value is
+    sent?) and is refused with the query-name cause at the later source's
+    declared field (D12). Two STRUCTURED entries sharing a name keep their own
+    refusal (CDX-r2-01). Runs after every source passed its own rule."""
+    for index, (target, (material_index, entry)) in enumerate(zip(inp.targets, ordered_material)):
+        base = f"/component_material/targets/{material_index}"
+        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
+            seen = set(_inline_query_names(entry.connection.base_url))
+        elif target.connection_key is not None and target.binding_mode == "create":
+            seen = set(_inline_query_names(_selected_base_url(base_catalog, target.connection_key)))
+        else:
+            seen = set()
+        path_names = _inline_query_names(entry.operation.path)
+        if seen & set(path_names):
+            raise _refusal(_QUERY_NAME_CAUSE, base + "/operation/path", phase="input")
+        seen |= set(path_names)
+        for qp_index, parameter in enumerate(entry.operation.query_parameters):
+            if parameter.name.strip() in seen:
+                raise _refusal(
+                    _QUERY_NAME_CAUSE,
+                    f"{base}/operation/query_parameters/{qp_index}/name",
+                    phase="input",
+                )
+
+
 def _check_base_auth(
     base_catalog: _Mapping[str, IntegrationComponentSpec],
     key: str,
@@ -1714,8 +1694,18 @@ def prepare_db_rest_fanout_v2(
                     expected=_rt().REST_CREATE_AUTH_MAP["none"],
                     path=f"/raw_input/targets/{index}/connection_key",
                 )
+                # The selected base's base_url is WRITTEN (the plan creates the
+                # component) without the material walk ever seeing it, so it
+                # meets the same userinfo + query-name + value rules here (D12).
+                cause = _url_cause(_selected_base_url(base_catalog, target.connection_key))
+                if cause is not None:
+                    raise _refusal(
+                        cause, f"/raw_input/targets/{index}/connection_key", phase="input"
+                    )
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
+
+    _check_query_sources_v2(inp, ordered_material, base_catalog)
 
     # -- 4. value rules through the authorities ----------------------------
     authorized = _authorize_material_v2(inp, material, ordered_material)

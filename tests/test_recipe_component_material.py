@@ -100,7 +100,7 @@ def canary_v2():
         target["connection"]["base_url"] = CANARIES[f"base_url_{index}"]
         target["operation"]["path"] = CANARIES[f"path_{index}"]
     material["targets"][0]["operation"]["query_parameters"] = [
-        {"name": "q", "value_source": "literal", "literal_value": CANARIES["query_literal"]}
+        {"name": "filter", "value_source": "literal", "literal_value": CANARIES["query_literal"]}
     ]
     return raw, material
 
@@ -881,8 +881,12 @@ SECRET_CAPABLE_FIELDS = {
     ("FanoutDbCreateMaterialV2", "database"),
     ("FanoutRestCreateMaterialV2", "base_url"),
     ("FanoutRestOperationMaterialV2", "path"),
+    ("FanoutQueryParameterV2", "name"),
     ("FanoutQueryParameterV2", "literal_value"),
 }
+
+#: The D12 cause for a literal query name outside the published vocabulary.
+QUERY_NAME_CAUSE = "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED"
 
 
 def _reachable_material_fields():
@@ -961,10 +965,16 @@ def _plant(field):
                 "https://svc:" + _SECRET_CANARY + "@billing.example.invalid"
             )
         elif field == "path":
-            material["targets"][1]["operation"]["path"] = "/v1/bills?api_key=" + _SECRET_CANARY
+            material["targets"][1]["operation"]["path"] = (
+                "/v1/bills?filter=Bearer%20" + _SECRET_CANARY
+            )
+        elif field == "name":
+            material["targets"][1]["operation"]["query_parameters"] = [
+                {"name": _SECRET_CANARY, "value_source": "literal", "literal_value": "x"}
+            ]
         elif field == "literal_value":
             material["targets"][1]["operation"]["query_parameters"] = [
-                {"name": "api_key", "value_source": "literal", "literal_value": _SECRET_CANARY}
+                {"name": "filter", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
             ]
 
     return edit
@@ -976,6 +986,7 @@ _PLANT_POINTERS = {
     "database": "/source/connection/database",
     "base_url": "/targets/1/connection/base_url",
     "path": "/targets/1/operation/path",
+    "name": "/targets/1/operation/query_parameters/0/name",
     "literal_value": "/targets/1/operation/query_parameters/0/literal_value",
 }
 
@@ -997,7 +1008,8 @@ def test_a_plaintext_canary_in_a_secret_capable_field_is_refused_value_free(fiel
             plan_authoring_request_v1(recipe_request(raw, material), profile="p")
     (diagnostic,) = caught.value.diagnostics
     assert diagnostic.path == "/intent/invocations/0/component_material" + _PLANT_POINTERS[field]
-    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+    expected = QUERY_NAME_CAUSE if field == "name" else fanout._PLAINTEXT_SECRET_CAUSE
+    assert expected in diagnostic.cause_codes
     served = json.dumps([d.model_dump(mode="json") for d in caught.value.diagnostics])
     assert _SECRET_CANARY not in served
     assert _SECRET_CANARY not in str(caught.value) and _SECRET_CANARY not in repr(caught.value)
@@ -1044,12 +1056,31 @@ def _builder_refuses(name, value="v"):
 
 @pytest.mark.parametrize("name", _PAGINATION_NAMES)
 def test_a_pagination_query_name_plans_through_the_boundary(name):
-    assert not _builder_refuses(name)  # the authority admits it
+    """D12 (architect decision A) REVERSED this witness: a pagination cursor
+    the REST builder admits is outside fan-out 2.0.0's published literal
+    vocabulary, so it is refused on both arms — intentionally and diagnosably —
+    while a published name in the same positions still plans. (Node id kept so
+    the wave manifest stays a legal successor.)"""
+    assert not _builder_refuses(name)  # the builder alone would admit it
     raw, material = flagship_v2()
     material["targets"][1]["operation"]["query_parameters"] = [
         {"name": name, "value_source": "literal", "literal_value": "abc"}
     ]
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path.endswith("/targets/1/operation/query_parameters/0/name")
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+    assert name not in diagnostic.model_dump_json()
+    raw, material = flagship_v2()
     material["targets"][0]["operation"]["path"] += "?" + name + "=first"
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path.endswith("/targets/0/operation/path")
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+    # Control: a published name in both positions plans.
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "offset", "value_source": "literal", "literal_value": "abc"}
+    ]
+    material["targets"][0]["operation"]["path"] += "?offset=first"
     plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
     assert plan.validation_report.is_valid
 
@@ -1064,10 +1095,12 @@ def test_a_query_name_the_rest_builder_refuses_is_still_refused(name):
         {"name": name, "value_source": "literal", "literal_value": _SECRET_CANARY}
     ]
     (diagnostic,) = _blocked(recipe_request(raw, material))
+    # D12: the NAME is outside the published vocabulary, refused before its value.
     assert diagnostic.path == (
-        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/literal_value"
+        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/name"
     )
-    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+    assert fanout._PLAINTEXT_SECRET_CAUSE not in diagnostic.cause_codes
     assert _SECRET_CANARY not in diagnostic.model_dump_json()
 
 
@@ -1076,10 +1109,11 @@ def test_a_secret_shaped_value_under_a_plain_name_is_refused_by_the_value_rule()
     innocuous name is still a secret."""
     raw, material = flagship_v2()
     material["targets"][1]["operation"]["query_parameters"] = [
-        {"name": "q", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
+        {"name": "filter", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
     ]
     (diagnostic,) = _blocked(recipe_request(raw, material))
     assert diagnostic.path.endswith("/targets/1/operation/query_parameters/0/literal_value")
+    assert "PLAINTEXT_SECRET_REJECTED" in diagnostic.cause_codes
     assert _SECRET_CANARY not in diagnostic.model_dump_json()
 
 
@@ -1227,11 +1261,14 @@ def test_a_credential_name_the_builder_admits_is_refused_as_a_literal(name):
         {"name": name, "value_source": "literal", "literal_value": _SECRET_CANARY}
     ]
     (diagnostic,) = _blocked(recipe_request(raw, material))
+    # D12: refused by the closed vocabulary, not by a name classifier.
     assert diagnostic.path == (
-        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/literal_value"
+        "/intent/invocations/0/component_material/targets/1/operation/query_parameters/0/name"
     )
-    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
-    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+    assert fanout._PLAINTEXT_SECRET_CAUSE not in diagnostic.cause_codes
+    served = diagnostic.model_dump_json()
+    assert _SECRET_CANARY not in served and name not in served
 
 
 def test_the_witness_names_are_ones_the_builder_admits():
@@ -1246,17 +1283,18 @@ def test_a_credential_name_in_a_url_query_string_is_refused(name):
     material["targets"][0]["operation"]["path"] += "?" + name + "=" + _SECRET_CANARY
     (diagnostic,) = _blocked(recipe_request(raw, material))
     assert diagnostic.path == "/intent/invocations/0/component_material/targets/0/operation/path"
-    assert _SECRET_CANARY not in diagnostic.model_dump_json()
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+    served = diagnostic.model_dump_json()
+    assert _SECRET_CANARY not in served and name not in served
 
 
 
 
 # ---------------------------------------------------------------------------
-# The FROZEN query-name table (#159 S1: CDX r2-02/r3-01/r4, QA r4/r5/r6).
-# There is no runtime authority for "is this query NAME a credential", so the
-# rule IS the authority and this table is its bidirectional pin. Every row cites
-# the gate that raised it or the provider convention it encodes — never the
-# implementation. A change to the rule must keep every row.
+# D12 (#159 S1, architect decision A): the word-rule classifier is DELETED. The
+# rows below were its frozen pin; their node ids are kept (the wave manifest
+# must stay a legal successor), and each now asserts the CLOSED vocabulary:
+# every name outside LITERAL_QUERY_NAMES_V2 is refused, whatever it denotes.
 # ---------------------------------------------------------------------------
 
 _FROZEN_CREDENTIAL_NAMES = {
@@ -1310,25 +1348,38 @@ _FROZEN_ORDINARY_NAMES = {
 }
 
 
+def _literal_name_cause(name, value="x"):
+    """The boundary's verdict on ONE structured literal ``name=value``."""
+    from boomi_mcp.recipes.builtins import fanout
+
+    owner = fanout.FanoutQueryParameterV2(name=name, value_source="literal", literal_value=value)
+    return fanout._breaches("literal_query_name", owner.name, owner)
+
+
 @pytest.mark.parametrize("name", sorted(_FROZEN_CREDENTIAL_NAMES))
 def test_the_frozen_credential_names_are_refused(name):
-    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+    from boomi_mcp.recipes.builtins.fanout import LITERAL_QUERY_NAMES_V2
 
-    assert _query_name_is_credential(name), _FROZEN_CREDENTIAL_NAMES[name]
+    assert name not in LITERAL_QUERY_NAMES_V2
+    assert _literal_name_cause(name) == QUERY_NAME_CAUSE, _FROZEN_CREDENTIAL_NAMES[name]
 
 
 @pytest.mark.parametrize("name", sorted(_FROZEN_ORDINARY_NAMES))
 def test_the_frozen_ordinary_names_are_admitted(name):
-    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+    """Under D12 only the PUBLISHED names are admitted; an ordinary name the
+    retired word rule admitted (a cursor, a key id) is now refused."""
+    from boomi_mcp.recipes.builtins.fanout import LITERAL_QUERY_NAMES_V2
 
-    assert not _query_name_is_credential(name), _FROZEN_ORDINARY_NAMES[name]
+    expected = None if name in LITERAL_QUERY_NAMES_V2 else QUERY_NAME_CAUSE
+    assert _literal_name_cause(name) == expected, _FROZEN_ORDINARY_NAMES[name]
 
 
 @pytest.mark.parametrize("arm", ["literal", "path"])
 def test_a_flag_value_under_a_credential_word_is_admitted_on_both_arms(arm):
-    """CDX r4-03: ``hide_secret=true`` asks the API to OMIT secrets; a flag is
-    never a credential. The same name with an opaque value is still refused."""
-    for value, refused in (("true", False), ("abc123opaque", True)):
+    """D12 REVERSED this witness: ``hide_secret``-style flags are outside the
+    published literal vocabulary, so they are refused on both arms whatever
+    the value — a flag value is no exception."""
+    for value in ("true", "abc123opaque"):
         raw, material = flagship_v2()
         if arm == "literal":
             material["targets"][1]["operation"]["query_parameters"] = [
@@ -1336,37 +1387,46 @@ def test_a_flag_value_under_a_credential_word_is_admitted_on_both_arms(arm):
             ]
         else:
             material["targets"][1]["operation"]["path"] += "?hide_secret=" + value
-        if refused:
-            _blocked(recipe_request(raw, material))
-        else:
-            plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
-            assert plan.validation_report.is_valid
+        (diagnostic,) = _blocked(recipe_request(raw, material))
+        assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+        assert "hide_secret" not in diagnostic.model_dump_json()
 
 
 def test_the_name_tokenizer_is_linear():
-    """CDX r4-02: a long acronym run must not stall planning."""
+    """CDX r4-02, kept under D12: the tokenizer is gone; reading a long inline
+    query (a long name, many pairs) must still not stall planning."""
     import time
 
-    from boomi_mcp.recipes.builtins.fanout import _name_words
+    from boomi_mcp.recipes.builtins.fanout import _url_cause
 
     started = time.perf_counter()
-    _name_words("A" * 200_000 + "1")
-    assert time.perf_counter() - started < 1.0
+    assert _url_cause("/v1/x?" + "A" * 200_000 + "1=v") == QUERY_NAME_CAUSE
+    assert _url_cause("/v1/x?" + "&".join("limit%d=1" % i for i in range(20_000))) == (
+        QUERY_NAME_CAUSE
+    )
+    assert time.perf_counter() - started < 2.0
 
 
 def test_the_served_text_states_the_query_name_rule():
-    """CDX r4-04: the rule is published where callers read it, from its constant."""
-    from boomi_mcp.authoring import contract
-    from boomi_mcp.recipes.builtins.fanout import (
-        QUERY_NAME_RULE_SUMMARY,
-        FanoutQueryParameterV2,
-    )
+    """D12: the architect's guarantee is served on the material schema AND the
+    authoring contract, with the published names RENDERED from the constant."""
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+    from boomi_mcp.recipes.builtins import fanout
 
-    description = FanoutQueryParameterV2.model_fields["literal_value"].description
-    assert QUERY_NAME_RULE_SUMMARY in description
-    import inspect
-
-    assert "query-name rule" in inspect.getsource(contract)
+    names = ", ".join(fanout.LITERAL_QUERY_NAMES_V2)
+    guarantee = fanout.LITERAL_QUERY_GUARANTEE_V2
+    assert "the published names (" + names + ")" in guarantee
+    assert guarantee.startswith("Fan-out 2.0.0 requires opaque `credential://` references")
+    for field in (
+        fanout.FanoutQueryParameterV2.model_fields["literal_value"],
+        fanout.FanoutRestOperationMaterialV2.model_fields["path"],
+        fanout.FanoutRestCreateMaterialV2.model_fields["base_url"],
+    ):
+        assert guarantee in field.description
+        assert QUERY_NAME_CAUSE in field.description
+    served = json.dumps(authoring_workflow_contract())
+    assert json.dumps(guarantee)[1:-1] in served
+    assert QUERY_NAME_CAUSE in served
 
 
 @pytest.mark.parametrize(
@@ -1379,6 +1439,264 @@ def test_the_served_text_states_the_query_name_rule():
     ],
 )
 def test_the_query_name_rule(name, credential):
-    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+    """D12: admitted exactly when PUBLISHED (``credential`` is the retired word
+    rule's verdict, kept only so the node id is stable)."""
+    from boomi_mcp.recipes.builtins.fanout import LITERAL_QUERY_NAMES_V2
 
-    assert _query_name_is_credential(name) is credential
+    expected = None if name in LITERAL_QUERY_NAMES_V2 else QUERY_NAME_CAUSE
+    assert _literal_name_cause(name) == expected
+
+
+# ---------------------------------------------------------------------------
+# D12 (#159 S1, architect decision A): a CLOSED literal query vocabulary
+# ---------------------------------------------------------------------------
+
+_ALLOWED = ("filter", "limit", "mode", "offset")
+_UNKNOWN_NAME = "zz_unknown_77c1"
+_VALUE_CANARY = "qv-canary-77c1"
+
+
+def test_the_published_names_are_exactly_the_decision():
+    from boomi_mcp.errors import FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED
+    from boomi_mcp.recipes.builtins.fanout import LITERAL_QUERY_NAMES_V2
+
+    assert LITERAL_QUERY_NAMES_V2 == _ALLOWED
+    assert FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED == QUERY_NAME_CAUSE
+
+
+@pytest.mark.parametrize("arm", ["literal", "path", "base_url"])
+@pytest.mark.parametrize("name", _ALLOWED)
+def test_a_published_name_plans_on_every_arm(name, arm):
+    raw, material = flagship_v2()
+    target = material["targets"][1]
+    if arm == "literal":
+        target["operation"]["query_parameters"] = [
+            {"name": "  " + name + " ", "value_source": "literal", "literal_value": "v1"}
+        ]
+    elif arm == "path":
+        target["operation"]["path"] += "?" + name + "=v1"
+    else:
+        target["connection"]["base_url"] += "/?" + name + "=v1"
+    plan, internals = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+def _selected_rest_base(base_url):
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    return IntegrationComponentSpec(
+        key="shared_rest",
+        type="connector-settings",
+        name="Shared REST",
+        config={"connector_type": "rest", "base_url": base_url, "auth": "NONE"},
+    ).model_dump(mode="json")
+
+
+def _bind_selected_base(raw, material, base_url):
+    raw["targets"][1]["connection_key"] = "shared_rest"
+    material["targets"][1].pop("connection")
+    return recipe_request(raw, material, base_components=[_selected_rest_base(base_url)])
+
+
+def _refused(request, path, cause, *, absent=()):
+    (diagnostic,) = _blocked(request)
+    assert diagnostic.path == path
+    assert cause in diagnostic.cause_codes
+    served = diagnostic.model_dump_json()
+    for text in absent:
+        assert text not in served
+    return diagnostic
+
+
+_M = "/intent/invocations/0/component_material/targets/1"
+
+
+@pytest.mark.parametrize("arm", ["literal", "path", "base_url", "selected_base_url"])
+def test_an_unknown_literal_name_is_refused_on_every_arm(arm):
+    raw, material = flagship_v2()
+    target = material["targets"][1]
+    pair = _UNKNOWN_NAME + "=" + _VALUE_CANARY
+    if arm == "literal":
+        target["operation"]["query_parameters"] = [
+            {"name": _UNKNOWN_NAME, "value_source": "literal", "literal_value": _VALUE_CANARY}
+        ]
+        request, path = recipe_request(raw, material), _M + "/operation/query_parameters/0/name"
+    elif arm == "path":
+        target["operation"]["path"] += "?" + pair
+        request, path = recipe_request(raw, material), _M + "/operation/path"
+    elif arm == "base_url":
+        target["connection"]["base_url"] += "/?" + pair
+        request, path = recipe_request(raw, material), _M + "/connection/base_url"
+    else:
+        request = _bind_selected_base(raw, material, "https://billing.example.invalid/?" + pair)
+        path = "/intent/invocations/0/raw_input/targets/1/connection_key"
+    _refused(request, path, QUERY_NAME_CAUSE, absent=(_UNKNOWN_NAME, _VALUE_CANARY))
+
+
+@pytest.mark.parametrize("name", ["refresh_token", "pw", "JSESSIONID", "id_token_hint", "api_key"])
+def test_a_known_credential_name_is_refused_by_the_closed_vocabulary(name):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": name, "value_source": "literal", "literal_value": _VALUE_CANARY}
+    ]
+    _refused(
+        recipe_request(raw, material),
+        _M + "/operation/query_parameters/0/name",
+        QUERY_NAME_CAUSE,
+        absent=(name, _VALUE_CANARY),
+    )
+
+
+def test_a_percent_encoded_published_name_is_admitted():
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += "?%6C%69%6D%69%74=5"
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("%70%61%67%65=1", id="encoded_unknown_name"),
+        pytest.param("%6C%69%6D%69%74%00=1", id="encoded_name_decoding_to_something_else"),
+        pytest.param("%FF=1", id="undecodable_name"),
+    ],
+)
+def test_an_encoded_inline_name_outside_the_vocabulary_is_refused(query):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += "?" + query
+    _refused(recipe_request(raw, material), _M + "/operation/path", QUERY_NAME_CAUSE)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("limit", id="pair_without_equals"),
+        pytest.param("limit=1&limit=2", id="repeated_inline_name"),
+        pytest.param("limit=1&&mode=2", id="empty_pair"),
+        pytest.param("limit=1&", id="trailing_separator"),
+        pytest.param("limit=1#frag", id="fragment"),
+        pytest.param("limit=1?mode=2", id="second_question_mark"),
+    ],
+)
+def test_ambiguous_inline_query_syntax_is_refused(query):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += "?" + query
+    _refused(recipe_request(raw, material), _M + "/operation/path", QUERY_NAME_CAUSE)
+
+
+@pytest.mark.parametrize(
+    "where, pointer",
+    [
+        pytest.param("path_and_literal", _M + "/operation/query_parameters/0/name", id="path_and_literal"),
+        pytest.param("base_url_and_path", _M + "/operation/path", id="base_url_and_path"),
+        pytest.param(
+            "selected_base_and_path", _M + "/operation/path", id="selected_base_url_and_path"
+        ),
+    ],
+)
+def test_a_name_repeated_across_query_sources_is_refused(where, pointer):
+    raw, material = flagship_v2()
+    target = material["targets"][1]
+    if where == "path_and_literal":
+        target["operation"]["path"] += "?limit=1"
+        target["operation"]["query_parameters"] = [
+            {"name": "limit", "value_source": "literal", "literal_value": "2"}
+        ]
+        request = recipe_request(raw, material)
+    elif where == "base_url_and_path":
+        target["connection"]["base_url"] += "/?limit=1"
+        target["operation"]["path"] += "?limit=2"
+        request = recipe_request(raw, material)
+    else:
+        target["operation"]["path"] += "?limit=2"
+        request = _bind_selected_base(raw, material, "https://billing.example.invalid/?limit=1")
+    _refused(request, pointer, QUERY_NAME_CAUSE)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("Bearer " + _VALUE_CANARY, id="bearer"),
+        pytest.param("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl", id="jwt"),
+    ],
+)
+@pytest.mark.parametrize("arm", ["literal", "path", "selected_base_url"])
+def test_a_builder_rejected_value_under_a_published_name_is_refused(value, arm):
+    from urllib.parse import quote
+
+    raw, material = flagship_v2()
+    target = material["targets"][1]
+    if arm == "literal":
+        target["operation"]["query_parameters"] = [
+            {"name": "filter", "value_source": "literal", "literal_value": value}
+        ]
+        request, path = recipe_request(raw, material), _M + "/operation/query_parameters/0/literal_value"
+    elif arm == "path":
+        target["operation"]["path"] += "?filter=" + quote(value)
+        request, path = recipe_request(raw, material), _M + "/operation/path"
+    else:
+        request = _bind_selected_base(
+            raw, material, "https://billing.example.invalid/?filter=" + quote(value)
+        )
+        path = "/intent/invocations/0/raw_input/targets/1/connection_key"
+    _refused(request, path, "PLAINTEXT_SECRET_REJECTED", absent=(value, quote(value)))
+
+
+def test_selected_base_userinfo_is_refused():
+    raw, material = flagship_v2()
+    request = _bind_selected_base(raw, material, "https://svc:" + _VALUE_CANARY + "@b.example.invalid")
+    _refused(
+        request,
+        "/intent/invocations/0/raw_input/targets/1/connection_key",
+        "PLAINTEXT_SECRET_REJECTED",
+        absent=(_VALUE_CANARY,),
+    )
+
+
+def test_a_selected_base_with_a_clean_base_url_still_binds():
+    raw, material = flagship_v2()
+    request = _bind_selected_base(raw, material, "https://billing.example.invalid/?limit=10")
+    plan, _ = plan_authoring_request_v1(request, profile="p")
+    assert plan.validation_report.is_valid
+
+
+def test_a_watermark_sourced_name_is_not_judged_by_the_vocabulary():
+    raw, material = flagship_v2()
+    raw["watermark"] = {"field": "source_a", "kind": "timestamp", "query_parameter_refs": ["updatedSince"]}
+    material["targets"][0]["operation"]["query_parameters"] = [
+        {"name": "updatedSince", "value_source": "watermark"}
+    ]
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+@pytest.mark.parametrize("arm", ["literal", "path", "selected_base_url"])
+def test_a_query_refusal_happens_before_any_component_is_assembled(arm, monkeypatch):
+    from boomi_mcp.recipes.builtins import fanout
+
+    calls = []
+    for name in ("_emit_db_components_v2", "_emit_transform_components_v2", "_emit_target_components_v2"):
+        real = getattr(fanout, name)
+
+        def spy(*args, _real=real, _name=name, **kwargs):
+            calls.append(_name)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(fanout, name, spy)
+    raw, material = flagship_v2()
+    if arm == "literal":
+        material["targets"][1]["operation"]["query_parameters"] = [
+            {"name": _UNKNOWN_NAME, "value_source": "literal", "literal_value": "x"}
+        ]
+        request = recipe_request(raw, material)
+    elif arm == "path":
+        material["targets"][1]["operation"]["path"] += "?" + _UNKNOWN_NAME + "=x"
+        request = recipe_request(raw, material)
+    else:
+        request = _bind_selected_base(raw, material, "https://b.example.invalid/?" + _UNKNOWN_NAME + "=x")
+    _blocked(request)
+    assert calls == []
+    # Control: the spies DO see a clean plan's assembly.
+    plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+    assert calls

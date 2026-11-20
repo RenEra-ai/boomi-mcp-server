@@ -578,7 +578,8 @@ def _watermarked(first=(), later=(), refs=("since",), declare=True):
 
 
 _DEFERRED = {"name": "since", "value_source": "watermark"}
-_LITERAL = {"name": "since", "value_source": "literal", "literal_value": "x"}
+#: A LITERAL under a published name (D12): ``since`` itself is never a literal.
+_LITERAL = {"name": "limit", "value_source": "literal", "literal_value": "x"}
 
 
 def test_a_first_target_deferred_name_is_recorded_and_never_emitted():
@@ -663,7 +664,7 @@ def test_governance_counts_a_deferred_name_only_on_an_owned_operation():
     [
         pytest.param([], [], ("since",), True, GOVERNANCE_WATERMARK_INCONSISTENT,
                      "/raw_input/watermark/query_parameter_refs/0", id="undeclared_name"),
-        pytest.param([], [_LITERAL], ("since",), True, GOVERNANCE_WATERMARK_INCONSISTENT,
+        pytest.param([], [_LITERAL], ("limit",), True, GOVERNANCE_WATERMARK_INCONSISTENT,
                      "/raw_input/watermark/query_parameter_refs/0", id="declared_only_on_a_later_target"),
         pytest.param([_DEFERRED], [dict(_DEFERRED, name="other")], ("since",), True,
                      COMPOSITION_UNSUPPORTED_TOPOLOGY,
@@ -1328,8 +1329,13 @@ def test_a_repeated_normalized_query_name_is_refused_at_the_second_entry(second)
 
 
 def test_a_watermark_name_repeating_a_literal_name_is_refused():
+    # D12: the literal uses a PUBLISHED name, so it reaches the duplicate check.
     raw, material = _watermarked(
-        first=[_DEFERRED, {"name": " since", "value_source": "literal", "literal_value": "x"}]
+        first=[
+            {"name": "limit", "value_source": "watermark"},
+            {"name": " limit", "value_source": "literal", "literal_value": "x"},
+        ],
+        refs=("limit",),
     )
     with pytest.raises(RecipeError) as caught:
         _prepare(raw, material)
