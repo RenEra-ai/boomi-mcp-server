@@ -80,6 +80,17 @@ class MaterializationCatalog:
         """
         return tuple(sorted({component.key for component in self._entries.values()}))
 
+    def entry_for_key(self, component_key: str) -> Optional[IntegrationComponentSpec]:
+        """The catalog entry carrying ``component_key``, or ``None`` (#159 S1).
+
+        Used to join a preparer-SELECTED base entry by identity; the catalog is
+        the one holder of that entry, so the same object a slot resolves to is
+        the object returned here."""
+        for component in self._entries.values():
+            if component.key == component_key:
+                return component
+        return None
+
     def resolve(
         self,
         slot: str,

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15123, "minimum_collected": 15123, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15152, "minimum_collected": 15152, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15581,3 +15581,32 @@
 {"kind": "test", "id": "pytest-015580", "node_id": "tests/test_recipe_component_material.py::test_an_undecodable_escape_is_pointed_at_the_field_that_holds_it[bad_escape_in_the_path_portion]", "state": "active"}
 {"kind": "test", "id": "pytest-015581", "node_id": "tests/test_recipe_component_material.py::test_an_undecodable_escape_is_pointed_at_the_field_that_holds_it[bad_escape_in_the_base_portion]", "state": "active"}
 {"kind": "test", "id": "pytest-015582", "node_id": "tests/test_recipe_component_material.py::test_the_bad_escape_offset_is_the_escape_itself", "state": "active"}
+{"kind": "test", "id": "pytest-015583", "node_id": "tests/test_issue_157_flows_accounting.py::test_the_pinned_flagship_dispatches_plan_and_compile_in_the_blocked_child", "state": "active"}
+{"kind": "test", "id": "pytest-015584", "node_id": "tests/test_issue_157_flows_accounting.py::test_the_replay_identity_stand_in_is_not_vacuous", "state": "active"}
+{"kind": "test", "id": "pytest-015585", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_01_a_written_base_cannot_be_bound_as_reuse", "state": "active"}
+{"kind": "test", "id": "pytest-015586", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_01_a_create_base_apply_would_reuse_is_not_a_create_binding", "state": "active"}
+{"kind": "test", "id": "pytest-015587", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_01_a_genuine_reference_only_base_still_binds_as_reuse", "state": "active"}
+{"kind": "test", "id": "pytest-015588", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary[plaintext_credential_ref]", "state": "active"}
+{"kind": "test", "id": "pytest-015589", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary[jdbc_property_in_dbname]", "state": "active"}
+{"kind": "test", "id": "pytest-015590", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary[userinfo_in_host]", "state": "active"}
+{"kind": "test", "id": "pytest-015591", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary[jdbc_suffix_key]", "state": "active"}
+{"kind": "test", "id": "pytest-015592", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary[custom_url_key]", "state": "active"}
+{"kind": "test", "id": "pytest-015593", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_03_a_raw_ampersand_in_a_path_is_refused[reuse]", "state": "active"}
+{"kind": "test", "id": "pytest-015594", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_03_a_raw_ampersand_in_a_path_is_refused[create]", "state": "active"}
+{"kind": "test", "id": "pytest-015595", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_03_every_forbidden_raw_path_character_is_refused_and_its_escape_is_data[&]", "state": "active"}
+{"kind": "test", "id": "pytest-015596", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_03_every_forbidden_raw_path_character_is_refused_and_its_escape_is_data[;]", "state": "active"}
+{"kind": "test", "id": "pytest-015597", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_03_an_escaped_ampersand_in_a_path_is_data", "state": "active"}
+{"kind": "test", "id": "pytest-015598", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_04_a_deferred_name_is_scoped_to_its_owning_root", "state": "active"}
+{"kind": "test", "id": "pytest-015599", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_05_a_v1_slot_and_a_v2_selector_on_one_connection_are_not_duplicates", "state": "active"}
+{"kind": "test", "id": "pytest-015600", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_05_the_engine_refuses_a_supporting_copy_of_a_catalog_entry", "state": "active"}
+{"kind": "test", "id": "pytest-015601", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_05_a_generated_key_equal_to_a_base_key_is_a_collision", "state": "active"}
+{"kind": "test", "id": "pytest-015602", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_06_a_mixed_v1_v2_preview_serves_unique_row_keys", "state": "active"}
+{"kind": "test", "id": "pytest-015603", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_07_a_name_only_reuse_selector_is_served_on_the_endpoint", "state": "active"}
+{"kind": "test", "id": "pytest-015604", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_08_a_direct_intent_result_gains_no_recipe_keys", "state": "active"}
+{"kind": "test", "id": "pytest-015605", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_08_a_recipe_intent_result_keeps_its_recipe_keys", "state": "active"}
+{"kind": "test", "id": "pytest-015606", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_09_a_v1_0_spec_with_a_pipeline_never_imports_the_legacy_authority", "state": "active"}
+{"kind": "test", "id": "pytest-015607", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_10_an_ip_literal_endpoint_is_never_echoed_in_served_diagnostics[db_host]", "state": "active"}
+{"kind": "test", "id": "pytest-015608", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_10_an_ip_literal_endpoint_is_never_echoed_in_served_diagnostics[rest_base_url]", "state": "active"}
+{"kind": "test", "id": "pytest-015609", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_11_padded_mapping_names_are_normalized_like_the_legacy_route", "state": "active"}
+{"kind": "test", "id": "pytest-015610", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_11_a_function_family_that_maps_no_input_still_prepares", "state": "active"}
+{"kind": "test", "id": "pytest-015611", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_14_a_duplicate_watermark_ref_is_refused_before_assembly", "state": "active"}

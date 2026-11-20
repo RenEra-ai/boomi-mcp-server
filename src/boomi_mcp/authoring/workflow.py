@@ -685,19 +685,26 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
       input through the engine's own input gate, validates the material with
       the registration's closed model, and runs its trusted preparer.
 
-    Returns ``(supporting specs, deferred query-parameter names, projection
-    facts by process key)``. The specs are
-    the generated ones in invocation order, then each base component a preparer
-    selected by key, exactly once. Every refusal is a value-free ``RecipeError``
-    carrying this invocation's id, so the caller sees the cause and the pointer.
+    Returns ``((generated specs, selected base keys), deferred query-parameter
+    names keyed by (root, operation), projection facts by process key)``. The
+    generated specs are in invocation order; the selected base keys name each
+    base component a preparer selected, exactly once — the engine takes those
+    entries from its own catalog (ARCH-r1-05). Every refusal is a value-free
+    ``RecipeError`` carrying this invocation's id, so the caller sees the cause
+    and the pointer.
     """
     from ..recipes.engine import _validate_input
     from ..recipes.errors import RecipeError, recipe_diagnostic
-    from ..errors import GOVERNANCE_RETIRED_SPELLING, RECIPE_INPUT_INVALID
+    from ..errors import (
+        COMPOSITION_COMPONENT_KEY_COLLISION,
+        GOVERNANCE_RETIRED_SPELLING,
+        RECIPE_CONSTRAINT_FAILED,
+        RECIPE_INPUT_INVALID,
+    )
 
     generated: List[IntegrationComponentSpec] = []
     selected: List[str] = []
-    deferred: Dict[str, Tuple[str, ...]] = {}
+    deferred: Dict[Tuple[str, str], Tuple[str, ...]] = {}
     facts: Dict[str, Any] = {}
     base_catalog = MappingProxyType(dict(catalog_entries))
 
@@ -783,18 +790,40 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
             prepared = preparer(validated_input, validated_material, base_catalog=base_catalog)
         except RecipeError as exc:
             raise tagged(exc, invocation) from None
+        # ARCH-r1-05: a generated key may not take a key the caller's base
+        # catalog already holds. Checked HERE, while the base entry's identity
+        # is still in hand: downstream a base entry no slot resolves is never
+        # seen, so the generated spec silently took its key.
+        for spec in prepared.supporting_components:
+            if spec.key in catalog_entries:
+                raise RecipeError(
+                    (
+                        recipe_diagnostic(
+                            RECIPE_CONSTRAINT_FAILED,
+                            phase="input",
+                            target="component:" + spec.key,
+                            recipe_ids=(descriptor.recipe_id,),
+                            recipe_versions=(descriptor.recipe_version,),
+                            invocation_ids=(invocation.invocation_id,),
+                            cause_codes=(COMPOSITION_COMPONENT_KEY_COLLISION,),
+                        ),
+                    )
+                )
         generated.extend(prepared.supporting_components)
         for key in prepared.selected_base_keys:
             if key not in selected:
                 selected.append(key)
-        for operation_key, names in prepared.deferred_query_parameter_names:
-            deferred[operation_key] = tuple(names)
+        for owner_and_operation, names in prepared.deferred_query_parameter_names:
+            # Keyed by (owning root, operation) — ARCH-r1-04.
+            deferred[tuple(owner_and_operation)] = tuple(names)
         projection = getattr(prepared, "projection_facts", None)
         if projection is not None:
             facts[projection.process_key] = projection
 
-    supporting = list(generated) + [catalog_entries[key] for key in selected]
-    return tuple(supporting), deferred, facts
+    # ARCH-r1-05: the generated specs, and the selected base entries BY KEY —
+    # the engine takes those from the catalog it already holds, so a base a v1
+    # slot also resolves stays ONE entry (identity carried, not reconstructed).
+    return (tuple(generated), tuple(selected)), deferred, facts
 
 
 def _normalize_recipe_intent(
@@ -840,8 +869,8 @@ def _normalize_recipe_intent(
     try:
         # The SAME registry `run_recipes` resolves against (looked up at call
         # time, so a test-installed registry governs both).
-        supporting_specs, deferred_names, projection_facts = _prepare_recipe_components(
-            intent, _engine.production_registry(), catalog_entries
+        (supporting_specs, selected_base_keys), deferred_names, projection_facts = (
+            _prepare_recipe_components(intent, _engine.production_registry(), catalog_entries)
         )
     except RecipeError as exc:
         raise _recipe_blocked(exc, invocation_index) from None
@@ -864,6 +893,7 @@ def _normalize_recipe_intent(
             effect_declarations=effect_declarations,
             conflict_policy=conflict_policy,
             supporting_components=supporting_specs,
+            catalog_supporting_keys=selected_base_keys,
         )
     except RecipeError as exc:
         raise _recipe_blocked(exc, invocation_index) from None
@@ -962,6 +992,18 @@ def _normalize_recipe_intent(
         # Only for a unit the run actually composed under that key.
         recipe_projection_facts=composed_facts,
     )
+
+
+#: The result fields only a RECIPE intent carries (ARCH-r1-08). Set only for a
+#: recipe intent, and the result model omits an unset one from the wire, so a
+#: direct intent's plan/compile result keeps its pre-#159 shape.
+_RECIPE_RESULT_FIELDS = ("recipe_provenance", "recipe_diagnostics")
+
+
+def _recipe_result_fields(normalized) -> Dict[str, Any]:
+    if normalized.intent_kind != "recipe":
+        return {}
+    return {name: getattr(normalized, name) for name in _RECIPE_RESULT_FIELDS}
 
 
 def _leg_provenance_records(result, projection_facts) -> Tuple[Any, ...]:
@@ -3261,8 +3303,7 @@ def plan_authoring_request_v1(
         capability_gaps=gaps,
         required_decisions=decisions,
         recorded_intents=normalized.recorded_intents,
-        recipe_provenance=normalized.recipe_provenance,
-        recipe_diagnostics=normalized.recipe_diagnostics,
+        **_recipe_result_fields(normalized),
     )
     internals = _PlanInternals(
         normalized=normalized,
@@ -3708,8 +3749,11 @@ def compile_authoring_request_v1(
         artifact_fingerprints=fingerprints,
         normalized_intent_digest=normalized_digest,
         recorded_intents=plan_result.recorded_intents,
-        recipe_provenance=plan_result.recipe_provenance,
-        recipe_diagnostics=plan_result.recipe_diagnostics,
+        **{
+            name: getattr(plan_result, name)
+            for name in _RECIPE_RESULT_FIELDS
+            if name in plan_result.model_fields_set
+        },
     )
     return result, internals
 

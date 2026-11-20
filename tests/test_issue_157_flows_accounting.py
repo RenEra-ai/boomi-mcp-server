@@ -378,17 +378,70 @@ def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived
         assert child["plan_valid"] is bool(parent.validation_report.is_valid), case_id
         assert child["plan_errors"] == sorted({d.code for d in parent.errors}), case_id
         assert child["component_dependencies"] == len(parent.component_dependencies) > 0, case_id
-        if not _binds_a_reused_connection(case):
-            assert child["plan_valid"] and child["plan_errors"] == [], case_id
-            assert child["compile_valid"] is True, (case_id, child["compile_error"])
-        else:
-            # A reused connection is read back from the ACCOUNT, which this
-            # offline replay has none of — the unblocked tree refuses the same
-            # way. Nothing else may differ.
-            assert child["plan_errors"] == ["CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"], case_id
+        # ARCH-r1-12: EVERY case — a reused connection included — must plan and
+        # compile for real. A reused connection's account read is answered by
+        # a SHA-pinned platform capture of a proven-operable connection of the
+        # same family (``acct.replay_identity_captures``), in parent and child.
+        assert child["plan_valid"] and child["plan_errors"] == [], (case_id, child["plan_errors"])
+        assert child["compile_valid"] is True, (case_id, child["compile_error"])
+    # Non-vacuity: the reuse cases really are in the batch.
+    assert sum(1 for case_id in replayed if _binds_a_reused_connection(cases[case_id])) == 7
     applied = batch["apply"]
     assert applied["success"] is True, applied
     assert applied["created_process"] and applied["attempts_during_apply"] == []
+
+
+def test_the_pinned_flagship_dispatches_plan_and_compile_in_the_blocked_child(batch):
+    """ARCH-r1-13: the pinned zero-prebuilt-pair flagship through the PUBLIC
+    dispatch (plan -> compile) with the legacy producers import-blocked: both
+    succeed, no forbidden import is attempted, the supporting components equal
+    the frozen oracle (one documented re-spelling) and the process envelope
+    equals the legacy process's."""
+    from _fanout_v2_support import oracle, respell_oracle_credential_refs
+
+    flagship = batch["flagship"]
+    assert flagship["attempts"] == []
+    assert flagship["plan_success"] and flagship["compile_success"] and flagship["compile_valid"]
+    fields = ("key", "type", "action", "name", "config", "depends_on")
+    frozen = respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
+    expected = [{f: c[f] for f in fields} for c in frozen if c["type"] != "process"]
+    assert [{f: c[f] for f in fields} for c in flagship["components"]] == expected
+    process = frozen[-1]
+    envelope = flagship["envelope"]
+    assert (envelope["component_key"], envelope["name"], envelope["action"]) == (
+        process["key"], process["name"], process["action"]
+    )
+    assert envelope["depends_on"] == sorted(process["depends_on"])
+    assert envelope["process_extensions"] == process["config"]["process_extensions"]
+
+
+def test_the_replay_identity_stand_in_is_not_vacuous():
+    """Controls for ARCH-r1-12: without the capture the same reuse case still
+    refuses CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE, and a capture of the WRONG
+    family bound to the placeholder is refused rather than accepted."""
+    from unittest.mock import MagicMock
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    case = load_cases()["composition/reuse_2legs_stream"]
+    request = AuthoringRequestV1.model_validate(case.input_canonical)
+
+    def plan(get_xml):
+        with patch(_PAGINATE, lambda *a, **k: []), patch(acct._GET_XML, get_xml):
+            result, _ = plan_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile="issue-157-replay"
+            )
+        return result
+
+    answers = acct.replay_identity_captures()
+    assert plan(acct.replay_component_get_xml(answers)).validation_report.is_valid
+    refused = plan(acct.replay_component_get_xml({}))
+    assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" in {d.code for d in refused.errors}
+    swapped = dict(answers)
+    swapped["<<existing REST connection id>>"] = answers["<<existing connector id>>"]
+    wrong_family = plan(acct.replay_component_get_xml(swapped))
+    assert not wrong_family.validation_report.is_valid
 
 
 def test_the_import_blocker_refuses_a_known_forbidden_import(batch):

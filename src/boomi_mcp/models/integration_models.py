@@ -45,6 +45,13 @@ class IntegrationComponentSpec(BaseModel):
         return value
 
 
+#: The spec version that opts into the STRICT top-level pipeline surface
+#: (ADR-001 §5). The ONE spelling the planner's import gate reads (#159 S1,
+#: ARCH-r1-09); the legacy authority's ``STRICT_VERSION`` is pinned equal to it
+#: by ``tests/test_issue_139_authority.py``.
+STRICT_PIPELINE_VERSION = "1.1"
+
+
 class IntegrationSpecV1(BaseModel):
     """Canonical JSON contract for integration planning and execution."""
 

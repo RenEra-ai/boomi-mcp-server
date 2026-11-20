@@ -265,7 +265,16 @@ def test_the_pipeline_authority_gate_matches_the_authority(version):
     expected = NOT_APPLICABLE if version != STRICT_VERSION else AGREE
     assert evaluate_pipeline_authority(with_pipeline).disposition == expected
     source = inspect.getsource(integration_builder._build_plan)
-    gate = source.index("if spec.pipeline is not None:")
+    # ARCH-r1-09: the gate also requires the STRICT version — the authority
+    # decides NOT_APPLICABLE for every other version even WITH a pipeline
+    # (asserted just above for 1.0), so the import is skipped there too. The
+    # planner's constant is pinned to the authority's.
+    from src.boomi_mcp.models.integration_models import STRICT_PIPELINE_VERSION
+
+    assert STRICT_PIPELINE_VERSION == STRICT_VERSION
+    gate = source.index(
+        "if spec.pipeline is not None and spec.version == STRICT_PIPELINE_VERSION:"
+    )
     assert gate < source.index("from ..compiler.process_ir.legacy_adapters.authority import")
 
 

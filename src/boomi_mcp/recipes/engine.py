@@ -75,6 +75,7 @@ from pydantic import BaseModel, TypeAdapter
 from typing_extensions import is_typeddict
 
 from ..errors import (
+    COMPOSITION_COMPONENT_KEY_COLLISION,
     INTEGRATION_COMPONENT_KEY_DUPLICATE,
     RECIPE_CONSTRAINT_FAILED,
     RECIPE_REQUEST_INVALID,
@@ -1670,8 +1671,16 @@ def run_recipes(
     effect_declarations: Any = None,
     conflict_policy: str = "reuse",
     supporting_components: Sequence[IntegrationComponentSpec] = (),
+    catalog_supporting_keys: Sequence[str] = (),
 ) -> RecipeRunResultV1:
     """Run, compose, and canonically validate a set of recipe requests.
+
+    ``catalog_supporting_keys`` (#159 S1, ARCH-r1-05) name entries of
+    ``catalog`` a trusted preparer selected for the run BY KEY. They are taken
+    from the catalog itself, so a selected entry a recipe slot ALSO resolves is
+    the SAME entry and joins once — the identity is carried, never rebuilt
+    from a copy, and only a genuinely different spec under one key is a
+    duplicate.
 
     ``supporting_components`` (#159 S1) are complete component specs a TRUSTED
     server-side caller prepared for this run — never anything a recipe executor
@@ -1774,6 +1783,17 @@ def run_recipes(
             )
 
     supporting = tuple(supporting_components)
+    # ARCH-r1-05: a supporting spec may not take a key the CATALOG holds — a
+    # catalog entry joins by key (``catalog_supporting_keys``), never as a copy.
+    catalog_keys = set(catalog.component_keys())
+    for spec in supporting:
+        if spec.key in catalog_keys:
+            raise recipe_error(
+                RECIPE_CONSTRAINT_FAILED,
+                phase="composition",
+                target="component:" + spec.key,
+                cause_codes=(COMPOSITION_COMPONENT_KEY_COLLISION,),
+            )
     composed = compose(
         attributed,
         descriptors,
@@ -1785,6 +1805,12 @@ def run_recipes(
     )
 
     components = _resolve_components(composed, catalog)
+    resolved_keys = {component.key for component in components}
+    supporting = supporting + tuple(
+        entry
+        for entry in (catalog.entry_for_key(key) for key in dict.fromkeys(catalog_supporting_keys))
+        if entry is not None and entry.key not in resolved_keys
+    )
     _refuse_duplicate_component_keys(list(components) + list(supporting))
     # Every downstream gate sees the WHOLE component set: the resolved slots plus
     # the trusted supporting specs (#159 S1). With no supporting specs this is

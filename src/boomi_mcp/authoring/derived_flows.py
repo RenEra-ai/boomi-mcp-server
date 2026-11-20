@@ -735,6 +735,10 @@ def _family_of(component: Optional[IntegrationComponentSpec], metadata) -> Optio
     return str(family).lower() if family else None
 
 
+def _nonblank(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _endpoint_row(
     key: str,
     direction: str,
@@ -762,6 +766,13 @@ def _endpoint_row(
         if component_id:
             row["component_id"] = component_id
         name = config.get("component_name")
+        if not component_id:
+            # ARCH-r1-07: a name-only binding resolves by the component's
+            # TOP-LEVEL name first, then config.component_name — the planner's
+            # own precedence (``integration_builder.resolve_planner_binding``,
+            # ``_first_nonblank_str(comp.name, config.component_name)``). With an
+            # id the id binds and the served row is unchanged.
+            name = connection.name.strip() if _nonblank(connection.name) else name
         if name:
             row["component_name"] = name
     elif family == "database":
@@ -1061,12 +1072,21 @@ def derive_recipe_projection(
     # are qualified by the owning process key. A single route keeps the
     # established wire byte-identical (the #157 composition fixtures and the
     # flagship parity pin it).
-    qualify = sum(1 for _key, _rows, route in projected if route is not None) > 1
+    #
+    # ARCH-r1-06: EVERY projected root counts, with or without facts — a v1 or
+    # direct root's ``transform`` row beside a route's ``transform`` row is the
+    # same ambiguity. So once a preview holds a route AND more than one root,
+    # every root's rows are qualified by its process key. A preview with no
+    # route at all (direct intents only) is unchanged: its pre-#159 shape.
+    routes = sum(1 for _key, _rows, route in projected if route is not None)
+    qualify = routes >= 1 and len(projected) > 1
     flows: List[Any] = []
     endpoints: List[Any] = []
     summaries: Dict[str, Any] = {}
     for key, transform_rows, route in projected:
         if route is None:
+            if qualify:
+                transform_rows, _none = _qualified_route(key, transform_rows, [])
             flows.extend(transform_rows)
             continue
         rows, unit_endpoints, summary = route

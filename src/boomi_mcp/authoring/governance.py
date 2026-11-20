@@ -379,7 +379,7 @@ def resolve_governance(
     *,
     literal_indexes: Optional[Mapping[str, Any]] = None,
     extra_recorded_intents: Sequence[RecordedIntentV1] = (),
-    deferred_query_parameter_names: Optional[Mapping[str, Sequence[str]]] = None,
+    deferred_query_parameter_names: Optional[Mapping[Tuple[str, str], Sequence[str]]] = None,
 ) -> GovernanceResolution:
     """Resolve every authored envelope and derive governance onto its components.
 
@@ -390,12 +390,14 @@ def resolve_governance(
     then the records are assembled. Every step raises on its first refusal;
     nothing is applied partially.
 
-    ``deferred_query_parameter_names`` (#159 S1) maps an OPERATION key to the
-    watermark-sourced query parameter names a trusted component preparer
-    validated for it. Those names are recorded intent and deliberately absent
-    from the operation's emitted config, so the watermark rule's query-parameter
-    half reads them here instead — and only for an operation the declaring root
-    owns, so the scoping stays the rule's own.
+    ``deferred_query_parameter_names`` (#159 S1) maps ``(owning root key,
+    OPERATION key)`` to the watermark-sourced query parameter names a trusted
+    component preparer validated for that root's operation. Those names are
+    recorded intent and deliberately absent from the operation's emitted
+    config, so the watermark rule's query-parameter half reads them here
+    instead — only for an operation the declaring root owns AND only when that
+    root is the one the preparer validated them for (ARCH-r1-04: another root
+    that also reaches the operation may not borrow them).
     """
     components_by_key: Dict[str, IntegrationComponentSpec] = {
         component.key: component for component in components
@@ -558,6 +560,7 @@ def resolve_governance(
                 components_by_key=components_by_key,
                 literal_indexes=literal_indexes,
                 deferred_query_parameter_names=deferred_query_parameter_names,
+                process_key=owner_envelope.component_key,
             ):
                 deferred_watermarks.append(
                     DeferredWatermarkCheck(
@@ -577,6 +580,7 @@ def resolve_governance(
                 components_by_key=components_by_key,
                 literal_indexes=literal_indexes,
                 deferred_query_parameter_names=deferred_query_parameter_names,
+                process_key=envelope.component_key,
             ):
                 deferred_watermarks.append(
                     DeferredWatermarkCheck(
@@ -883,7 +887,8 @@ def validate_watermark_declaration(
     owned_keys: Sequence[str],
     components_by_key: Mapping[str, IntegrationComponentSpec],
     literal_indexes: Optional[Mapping[str, Any]] = None,
-    deferred_query_parameter_names: Optional[Mapping[str, Sequence[str]]] = None,
+    deferred_query_parameter_names: Optional[Mapping[Tuple[str, str], Sequence[str]]] = None,
+    process_key: Optional[str] = None,
 ) -> bool:
     """The two legacy consistency rules, carried onto the typed declaration.
 
@@ -918,8 +923,9 @@ def validate_watermark_declaration(
         if component is not None and component.type == _OPERATION_TYPE:
             available |= _query_parameter_names(component)
             # #159 S1: a preparer-validated watermark-sourced name on THIS owned
-            # operation counts as declared; it is kept out of the emitted config.
-            available |= set(deferred_names.get(key, ()))
+            # operation counts as declared — for the root it was validated for
+            # (ARCH-r1-04); it is kept out of the emitted config.
+            available |= set(deferred_names.get((process_key, key), ()))
     for position, name in enumerate(declaration.query_parameter_refs):
         if name not in available:
             raise _refuse(

@@ -596,6 +596,12 @@ def _fanout_material_guarantee() -> str:
         LITERAL_QUERY_GUARANTEE_V2
         + " "
         + QUERY_GRAMMAR_SENTENCE_V2
+        + " A base component a recipe input selects by key meets the SAME rules "
+        "when apply would write it: a create-mode base must be one apply writes "
+        "under every conflict policy and carry only keys the material can "
+        "express (credential_ref, host, dbname/database and base_url judged as "
+        "in the material); a reuse-mode base must be reference-only (the "
+        "boolean true) and written under no policy."
         + " A credential field, userinfo or JDBC property, or a value the REST "
         "builder refuses is refused with PLAINTEXT_SECRET_REJECTED; a literal "
         "query name outside the published names, or query syntax outside that "
@@ -768,11 +774,13 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "supplies trusted projection facts (boomi.compose.db_rest_fanout "
                 "2.0.0) also serves its extract, send, reliability, conditional "
                 "watermark and fan-out rows, in that order, discriminated on "
-                "'operation'. When a preview carries MORE than one such route, "
-                "each route's row keys, endpoint keys and every in-row "
-                "source/target naming one of them are qualified as "
-                "'<process_key>/<key>', so every reference resolves inside its "
-                "own process; a single route keeps the unqualified keys."
+                "'operation'. When a preview carries such a route AND more than "
+                "one process root (any root, with or without a route), every "
+                "root's row keys, endpoint keys and every in-row source/target "
+                "naming one of them are qualified as '<process_key>/<key>', so "
+                "no two rows share a key and every reference resolves inside its "
+                "own process; a preview with one root keeps the unqualified "
+                "keys, and a preview with no route is unchanged."
             ),
             "derived_endpoints": (
                 "CanonicalIntegrationPreviewV1.endpoints and "
@@ -813,7 +821,9 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "resolve to one descriptor record identical provenance. Hashed "
                 "into the recipe intent's semantic payload only, so two recipe "
                 "versions or implementations composing identical IR bind to "
-                "different plan and compile hashes."
+                "different plan and compile hashes. Served only on a recipe "
+                "intent's result (with recipe_diagnostics); a direct intent's "
+                "result carries neither key."
             ),
             "recipe_diagnostics": (
                 "RecipeRunDiagnosticV1 — informational, value-free records about "

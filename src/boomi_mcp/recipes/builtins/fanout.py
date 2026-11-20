@@ -818,6 +818,9 @@ _URI_TARGET_EXTRA = ":/?[]@!$&'()*+,;=%"
 #: ``&``, ``?`` or ``#``. Escaped (``%2B``, ``%3B``, ``%26``) they are data.
 _QUERY_VALUE_EXTRA = "!$'()*,:@/="
 _HEX_DIGITS = "0123456789abcdefABCDEF"
+#: Raw characters a PATH may not carry before its query (ARCH-r1-03): either
+#: would continue a stored base URL's query as a new pair.
+_PATH_FORBIDDEN_RAW = "&;"
 #: How the bytes of a run of ``%XX`` escapes must decode (r7-03). ONE place:
 #: :func:`_decoded` and :func:`_first_undecodable` decode with these, and the
 #: served sentence renders them.
@@ -836,7 +839,9 @@ QUERY_GRAMMAR_SENTENCE_V2 = (
     "refused in a leading authority; its query must be name=value pairs "
     "separated by '&', each name (after percent-decoding) a published name and "
     "each value only unreserved characters ({unreserved}), %XX escapes and "
-    "{extra}. The stored base_url and the stored path are each judged on their "
+    "{extra}. A path may not carry a raw {path_raw} before its query (a "
+    "stored connection URL may already end in a query); escaped they are data. "
+    "The stored base_url and the stored path are each judged on their "
     "own as well as joined. A structured literal value follows the same value "
     "rule. The two are SENT differently: an inline query value (in base_url or "
     "path) is sent as written, so the server decodes its escapes (%26 arrives "
@@ -849,6 +854,7 @@ QUERY_GRAMMAR_SENTENCE_V2 = (
     extra=" ".join(_QUERY_VALUE_EXTRA),
     errors=_ESCAPE_ERRORS,
     encoding=_ESCAPE_ENCODING.upper(),
+    path_raw=" or ".join("'{0}'".format(char) for char in _PATH_FORBIDDEN_RAW),
 )
 
 #: The per-field rule every query-carrying material field states.
@@ -1579,17 +1585,19 @@ class PreparedFanoutV2:
     order. ``selected_base_keys`` name intent ``base_components`` entries the
     generated specs reference (a base-key connection, a referenced script) —
     the workflow adds those catalog entries to the run exactly once.
-    ``deferred_query_parameter_names`` maps the FIRST target's operation key to
-    the watermark-sourced query parameter names the preparer validated: they
-    are recorded intent, kept OUT of the emitted operation config, and handed
-    to governance's watermark rule scoped to that operation and its root.
+    ``deferred_query_parameter_names`` maps ``(owning root, FIRST target's
+    operation key)`` to the watermark-sourced query parameter names the
+    preparer validated: they are recorded intent, kept OUT of the emitted
+    operation config, and handed to governance's watermark rule scoped to that
+    operation AND its root (ARCH-r1-04: keyed by the operation alone, another
+    root that also reaches the operation could borrow them).
 
     The repr names counts and keys only; component configs carry material.
     """
 
     supporting_components: Tuple[IntegrationComponentSpec, ...]
     selected_base_keys: Tuple[str, ...] = ()
-    deferred_query_parameter_names: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    deferred_query_parameter_names: Tuple[Tuple[Tuple[str, str], Tuple[str, ...]], ...] = ()
     #: #159 S1 (C8): the trusted facts the #157 projection reads for this
     #: invocation's unit. Their presence is what admits the unit's recipe-route
     #: rows. Keys and classifications only, EXCEPT the transform operations'
@@ -1648,16 +1656,133 @@ def _check_base_component(
     config = component.config or {}
     if connector_type is not None and config.get("connector_type") != connector_type:
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
-    if binding_mode is not None and bool(config.get("reference_only")) != (
-        binding_mode == "reuse"
-    ):
+    if binding_mode is None:
+        return
+    # ARCH-r1-01: what a base IS is decided by what apply DOES with it — asked of
+    # apply's own predicate (``apply_writes_component_config``) under EVERY
+    # served conflict policy, never read off a truthy flag. A reuse binding
+    # needs a genuinely reference-only base that apply writes under NO policy
+    # (``reference_only`` the boolean True — a string ``"true"`` beside an
+    # ``update`` action is WRITTEN). A create binding needs a base apply writes
+    # under EVERY policy: one it would reuse (a ``component_id`` under
+    # ``reuse``) stores structured auth/URL fields that describe nothing written.
+    written = _base_written_under(component)
+    if binding_mode == "reuse":
+        if config.get("reference_only") is not True or any(written):
+            raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
+    elif bool(config.get("reference_only")) or not all(written):
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
+
+
+def _served_conflict_policies() -> Tuple[str, ...]:
+    """The conflict policies the authoring surface serves — DERIVED from its model."""
+    from typing import get_args
+
+    from ...models.authoring_workflow import RecipeAuthoringIntentV1
+
+    return tuple(get_args(RecipeAuthoringIntentV1.model_fields["conflict_policy"].annotation))
+
+
+def _base_written_under(component: IntegrationComponentSpec) -> Tuple[bool, ...]:
+    """Per served conflict policy: does apply WRITE this base's configuration?"""
+    from ...categories.integration_builder import apply_writes_component_config
+
+    # ``existing_ids=None``: the recipe layer touches no account (like the
+    # engine), so the answer is the DECLARED one — a create matched to an
+    # existing component by NAME is decided at apply. That only ever counts a
+    # base as written, so its config is checked; it never skips a check.
+    return tuple(
+        bool(apply_writes_component_config(component, policy, existing_ids=None))
+        for policy in _served_conflict_policies()
+    )
+
+
+#: ARCH-r1-02: the config keys a selected CREATE-mode base may carry, per family,
+#: each mapped to the material field whose credential-boundary rule governs it
+#: (so the rule is looked up in ONE table, :func:`_material_field_classes_v2`).
+#: ``None`` = a key that is not a value carrier (closed literal, identity,
+#: placement, or checked by its own rule elsewhere). EVERY OTHER KEY is refused
+#: (fail closed): the material cannot express it, so neither may a selected base
+#: — notably the DB builder's ``additional`` (a JDBC suffix appended verbatim),
+#: ``connection_url``/``custom_class_name`` (the custom-URL shape), ``pooling``,
+#: and the REST builder's ``username``/``credential_ref``/``oauth2``/
+#: ``default_headers`` (a created REST connection is unauthenticated).
+def _selected_base_key_classes() -> _Mapping[str, _Mapping[str, Optional[Tuple[type, str]]]]:
+    shared = {
+        "connector_type": None,  # checked: must equal the family
+        "component_name": None,  # the component's display name
+        "folder_name": None,  # placement
+        "folder_path": None,  # placement
+        "folder_id": None,  # placement
+        "description": None,  # free text: component docs
+        "reference_only": None,  # checked by the binding rule
+        "component_id": None,  # checked by the binding rule (apply's predicate)
+    }
+    return _MappingProxyType(
+        {
+            "database": _MappingProxyType(
+                dict(
+                    shared,
+                    auth_mode=None,  # checked: must equal the declared auth mode
+                    driver_id=(FanoutDbCreateMaterialV2, "driver"),
+                    host=(FanoutDbCreateMaterialV2, "host"),
+                    port=(FanoutDbCreateMaterialV2, "port"),
+                    dbname=(FanoutDbCreateMaterialV2, "database"),
+                    username=(FanoutDbCreateMaterialV2, "username"),
+                    credential_ref=(FanoutDbCreateMaterialV2, "credential_ref"),
+                )
+            ),
+            "rest": _MappingProxyType(
+                dict(
+                    shared,
+                    auth=None,  # checked: must be the unauthenticated wire value
+                    base_url=(FanoutRestCreateMaterialV2, "base_url"),
+                )
+            ),
+        }
+    )
+
+
+def _check_selected_base_config(
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    key: str,
+    *,
+    family: str,
+    path: str,
+) -> None:
+    """The credential boundary over a WRITTEN selected base's config (ARCH-r1-02).
+
+    The same rules the material walk applies (looked up in
+    :func:`_material_field_classes_v2` through the key map above), plus fail
+    closed on any key the material cannot express. Value-free: the pointer is
+    the raw-input field that selected the base."""
+    config = (base_catalog[key].config or {}) if key in base_catalog else {}
+    classes = _material_field_classes_v2()
+    allowed = _selected_base_key_classes()[family]
+    for name, value in config.items():
+        if name not in allowed:
+            raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
+        field = allowed[name]
+        rule = classes.get(field) if field is not None else None
+        cause = _breaches(rule, value, None) if rule is not None else None
+        if cause is not None:
+            raise _refusal(cause, path, phase="input")
 
 
 def _selected_base_url(base_catalog: _Mapping[str, IntegrationComponentSpec], key: str) -> str:
     config = (base_catalog[key].config or {}) if key in base_catalog else {}
     value = config.get("base_url")
     return value if isinstance(value, str) else ""
+
+
+def _path_continues_a_query(path: str) -> bool:
+    """Whether a path's PRE-QUERY portion carries a raw pair separator
+    (:data:`_PATH_FORBIDDEN_RAW`) — ARCH-r1-03. The path is appended to the
+    connection URL, and a stored URL this request cannot see (a reused
+    connection) may already end in a query: ``&k=v`` would then be a pair.
+    Escaped (``%26``) it stays path data."""
+    head = path.split("?", 1)[0]
+    return any(char in head for char in _PATH_FORBIDDEN_RAW)
 
 
 def _joined_targets(base: str, path: str) -> Tuple[Tuple[str, int], ...]:
@@ -1715,6 +1840,8 @@ def _check_request_targets_v2(
             if standalone.cause is not None:
                 raise _refusal(standalone.cause, base_field, phase="input")
         standalone = _judge_request_target(path)
+        if standalone.cause is None and _path_continues_a_query(path):
+            standalone = _TargetVerdict(_QUERY_NAME_CAUSE)
         if standalone.cause is not None:
             raise _refusal(standalone.cause, base_pointer + "/operation/path", phase="input")
         names: set = set()
@@ -1867,6 +1994,12 @@ def prepare_db_rest_fanout_v2(
                 expected=str(inp.source.auth_mode),
                 path="/raw_input/source/auth_mode",
             )
+            _check_selected_base_config(
+                base_catalog,
+                inp.source.connection_key,
+                family="database",
+                path="/raw_input/source/connection_key",
+            )
         selected.append(inp.source.connection_key)
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]] = []
     for index, target in enumerate(inp.targets):
@@ -1901,11 +2034,14 @@ def prepare_db_rest_fanout_v2(
                 # component) without the material walk ever seeing it: its own
                 # userinfo check here; its query is judged JOINED with the path
                 # below (D12, QA r8-01).
-                cause = _userinfo_cause(_selected_base_url(base_catalog, target.connection_key))
-                if cause is not None:
-                    raise _refusal(
-                        cause, f"/raw_input/targets/{index}/connection_key", phase="input"
-                    )
+                # Its config meets the same credential boundary as material
+                # (ARCH-r1-02): base_url's userinfo rule included.
+                _check_selected_base_config(
+                    base_catalog,
+                    target.connection_key,
+                    family="rest",
+                    path=f"/raw_input/targets/{index}/connection_key",
+                )
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
 
@@ -1932,7 +2068,7 @@ def prepare_db_rest_fanout_v2(
     source_fields = {field.name: field for field in result_fields}
     shared_leaves, shared_required = _leaf_contract(material.payload_profile)
     bound_paths: set = set()
-    for op_index, operation in enumerate(material.transform.operations):
+    for op_index, operation in enumerate(authorized.operations):
         pointer = f"/component_material/transform/operations/{op_index}"
         if isinstance(operation, FanoutDirectOperationV2):
             inputs, outputs = [operation.source_field], [operation.target_path]
@@ -1973,7 +2109,7 @@ def prepare_db_rest_fanout_v2(
     # -- 6. the first-target watermark rule --------------------------------
     # Matched on the AUTHORITY-validated parameters (stripped names), in the
     # material's own order, so a pointer index still addresses the request.
-    deferred: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    deferred: Tuple[Tuple[Tuple[str, str], Tuple[str, ...]], ...] = ()
     for position, ((material_index, _entry), (_settings, request)) in enumerate(
         zip(ordered_material, authorized.targets)
     ):
@@ -2000,8 +2136,20 @@ def prepare_db_rest_fanout_v2(
                     f"/component_material/targets/{material_index}/operation/query_parameters",
                     phase="input",
                 )
-            deferred = ((keys.targets[0][2], names),)
+            deferred = (((inp.process_key, keys.targets[0][2]), names),)
     if inp.watermark is not None:
+        # ARCH-r1-14: a repeated ref is refused HERE, at the authored field,
+        # before any component exists (the declaration model would refuse it
+        # later, in the executor, without the pointer).
+        seen_refs: set = set()
+        for ref_index, name in enumerate(inp.watermark.query_parameter_refs):
+            if name in seen_refs:
+                raise _refusal(
+                    GOVERNANCE_WATERMARK_INCONSISTENT,
+                    f"/raw_input/watermark/query_parameter_refs/{ref_index}",
+                    phase="input",
+                )
+            seen_refs.add(name)
         first_material_index, _first_entry = ordered_material[0]
         first_parameters = authorized.targets[0][1].query_parameters
         first_names = {parameter.name for parameter in first_parameters}
@@ -2060,7 +2208,7 @@ def prepare_db_rest_fanout_v2(
         supporting_components=tuple(components),
         selected_base_keys=tuple(selected),
         deferred_query_parameter_names=deferred,
-        projection_facts=_projection_facts_v2(inp, keys, material),
+        projection_facts=_projection_facts_v2(inp, keys, authorized.operations),
     )
 
 
@@ -2080,6 +2228,12 @@ class _AuthorizedMaterialV2:
     #: parameters, batch / row bounds).
     read: _Any
     targets: Tuple[Tuple[_Any, RestSendRequest], ...]
+    #: The transform operations with their mapping names NORMALIZED by the
+    #: legacy operation authorities (``DirectTransformOperation`` /
+    #: ``MapFunctionTransformOperation`` strip ``source_field``, ``inputs``,
+    #: ``target_path`` and the hint) — ARCH-r1-11. Preflight, emission and the
+    #: projection facts read these, never the raw material.
+    operations: Tuple[_Any, ...] = ()
 
     @property
     def result_fields(self) -> Tuple[DBResultField, ...]:
@@ -2215,7 +2369,88 @@ def _authorize_material_v2(
             expected_status_codes=list(target.expected_status_codes),
         )
         targets.append((connection, request))
-    return _AuthorizedMaterialV2(db=db, read=read_operation, targets=tuple(targets))
+    return _AuthorizedMaterialV2(
+        db=db,
+        read=read_operation,
+        targets=tuple(targets),
+        operations=_authorize_operations_v2(material),
+    )
+
+
+def _authorize_operations_v2(material: FanoutComponentMaterialV2) -> Tuple[_Any, ...]:
+    """Each transform operation normalized through its legacy authority (ARCH-r1-11).
+
+    A map-script operation keeps its names as authored: the legacy
+    ``MapScriptTransformOperation`` does not normalize them either."""
+    from ...patterns.archetype_parameters import (
+        DirectTransformOperation,
+        MapFunctionTransformOperation,
+        _stripped_nonblank,
+    )
+
+    normalized: _List[_Any] = []
+    for op_index, operation in enumerate(material.transform.operations):
+        pointer = f"/component_material/transform/operations/{op_index}"
+        if isinstance(operation, FanoutDirectOperationV2):
+            checked = _authority_check(
+                pointer,
+                DirectTransformOperation,
+                operation_type="direct",
+                source_field=operation.source_field,
+                target_path=operation.target_path,
+                documentation_hint=operation.documentation_hint,
+            )
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "source_field": checked.source_field,
+                        "target_path": checked.target_path,
+                        "documentation_hint": checked.documentation_hint,
+                    }
+                )
+            )
+        elif isinstance(operation, FanoutFunctionOperationV2) and not operation.inputs:
+            # A family that maps NO input (``default_value``): the legacy
+            # model requires at least one input and so cannot carry it; its
+            # names are normalized by the SAME function its validators call.
+            try:
+                target_path = _stripped_nonblank(operation.target_path)
+                hint = (
+                    None
+                    if operation.documentation_hint is None
+                    else _stripped_nonblank(operation.documentation_hint)
+                )
+            except ValueError:
+                raise _material_failure(pointer, ValueError()) from None
+            normalized.append(
+                operation.model_copy(update={"target_path": target_path, "documentation_hint": hint})
+            )
+        elif isinstance(operation, FanoutFunctionOperationV2):
+            checked = _authority_check(
+                pointer,
+                MapFunctionTransformOperation,
+                operation_type="map_function",
+                function_type=operation.function_type,
+                inputs=list(operation.inputs),
+                target_path=operation.target_path,
+                parameters=(
+                    {parameter.name: parameter.value for parameter in operation.parameters}
+                    or None
+                ),
+                documentation_hint=operation.documentation_hint,
+            )
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "inputs": tuple(checked.inputs),
+                        "target_path": checked.target_path,
+                        "documentation_hint": checked.documentation_hint,
+                    }
+                )
+            )
+        else:
+            normalized.append(operation)
+    return tuple(normalized)
 
 
 #: The route's topology spelling. Pinned against the legacy composition's
@@ -2226,7 +2461,7 @@ _TOPOLOGY_V2 = "db_source->transform->rest_fanout"
 def _projection_facts_v2(
     inp: ComposeDbRestFanoutInputV2,
     keys: _FanoutKeysV2,
-    material: FanoutComponentMaterialV2,
+    operations: Tuple[_Any, ...],
 ) -> RecipeUnitProjectionFactsV1:
     """The trusted facts the #157 projection needs and the root cannot carry.
 
@@ -2268,7 +2503,7 @@ def _projection_facts_v2(
                 target_path=target_path,
                 documentation_hint=operation.documentation_hint,
             )
-            for operation in material.transform.operations
+            for operation in operations
             if operation.documentation_hint is not None
             for target_path in (
                 operation.outputs
@@ -2388,7 +2623,7 @@ def _emit_transform_components_v2(
     direct: _List[_Dict[str, _Any]] = []
     functions: _List[_Dict[str, _Any]] = []
     scripts: _List[_Dict[str, _Any]] = []
-    for operation in material.transform.operations:
+    for operation in authorized.operations:
         if isinstance(operation, FanoutDirectOperationV2):
             direct.append(
                 {"source_field": operation.source_field, "target_path": operation.target_path}

@@ -623,6 +623,63 @@ def retirement_ids() -> Dict[str, Dict[str, Any]]:
 #: never answered from a stale plan.
 _PLAN_CACHE: Dict[Tuple[str, str], Any] = {}
 
+#: #159 S1 (ARCH-r1-12): the frozen reuse cases name their reused connection by
+#: a PLACEHOLDER id, and a reused component is read back from the ACCOUNT. The
+#: offline replay answers that read with a PLATFORM CAPTURE of a
+#: proven-operable connection of the same family — SHA-pinned bytes under
+#: ``tests/fixtures/boomi/replay_identity/`` whose ``records.json`` names the
+#: placeholders each capture binds and the executions that prove it operable.
+#: The case inputs are unchanged; only the network boundary is answered.
+REPLAY_IDENTITY_DIR = ROOT / "tests" / "fixtures" / "boomi" / "replay_identity"
+
+
+def replay_identity_captures() -> Dict[str, Dict[str, Any]]:
+    """``{placeholder id: get-component answer}``, verified byte for byte."""
+    sums = {}
+    for line in (REPLAY_IDENTITY_DIR / "SHA256SUMS").read_text().splitlines():
+        if line.strip():
+            digest, relative = line.split("  ", 1)
+            sums[relative] = digest
+    on_disk = {
+        str(path.relative_to(REPLAY_IDENTITY_DIR))
+        for path in REPLAY_IDENTITY_DIR.rglob("*")
+        if path.is_file() and path.name != "SHA256SUMS"
+    }
+    if on_disk != set(sums):
+        raise RuntimeError("replay identity captures: file set differs from SHA256SUMS")
+    for relative, digest in sums.items():
+        if hashlib.sha256((REPLAY_IDENTITY_DIR / relative).read_bytes()).hexdigest() != digest:
+            raise RuntimeError("replay identity captures: bytes differ from SHA256SUMS")
+    answers: Dict[str, Dict[str, Any]] = {}
+    for records_path in sorted(REPLAY_IDENTITY_DIR.glob("*/records.json")):
+        for record in json.loads(records_path.read_text()):
+            data = (records_path.parent / (record["capture"] + ".xml")).read_bytes()
+            if hashlib.sha256(data).hexdigest() != record["sha256_archived_bytes"]:
+                raise RuntimeError("replay identity captures: a record's digest is stale")
+            for placeholder in record["binds_placeholder_ids"]:
+                answers[placeholder] = {
+                    "component_id": placeholder,
+                    "version": record["version_marker"],
+                    "xml": data.decode("utf-8"),
+                }
+    return answers
+
+
+def replay_component_get_xml(answers: Optional[Mapping[str, Dict[str, Any]]] = None):
+    """A stand-in for ``_shared.component_get_xml`` answering ONLY bound ids."""
+    bound = dict(replay_identity_captures() if answers is None else answers)
+
+    def component_get_xml(_client, component_id, *_args, **_kwargs):
+        answer = bound.get(str(component_id))
+        if answer is None:
+            raise LookupError("no platform capture is bound to this component id")
+        return dict(answer)
+
+    return component_get_xml
+
+
+_GET_XML = "boomi_mcp.categories.components._shared.component_get_xml"
+
 
 def case_plan_result(case: Case):
     """The public planning entry's result for the case's canonical fixture."""
@@ -635,10 +692,13 @@ def case_plan_result(case: Case):
         return None
     cache_key = (case.case_id, _digest(case.input_canonical))
     if cache_key not in _PLAN_CACHE:
+        from unittest.mock import patch
+
         request = AuthoringRequestV1.model_validate(case.input_canonical)
-        result, _internals = plan_authoring_request_v1(
-            request, boomi_client=MagicMock(), profile="issue-157-replay"
-        )
+        with patch(_GET_XML, replay_component_get_xml()):
+            result, _internals = plan_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile="issue-157-replay"
+            )
         _PLAN_CACHE[cache_key] = result
     return _PLAN_CACHE[cache_key]
 
@@ -1033,7 +1093,8 @@ APPLY_CASE = sys.argv[6]
 cases = acct.load_cases()
 out = {}
 applied = {}
-with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda *a, **k: []):
+with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda *a, **k: []), \
+        patch(acct._GET_XML, acct.replay_component_get_xml()):
     for case_id in sys.argv[7:]:
         case = cases[case_id]
         result = acct.case_plan_result(case)
@@ -1092,6 +1153,44 @@ with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda 
             "served": acct.derive_served_projection(case),
             "endpoints": acct.derive_case_endpoints(case),
         }
+# ARCH-r1-13: the pinned flagship through the PUBLIC dispatch (plan -> compile)
+# in this same blocked child, plus its process envelope from the workflow.
+from _fanout_v2_support import flagship_v2, recipe_request
+from boomi_mcp.categories import integration_builder as _builder
+_flagship_request = recipe_request(*flagship_v2())
+_flagship_payload = _flagship_request.model_dump(mode="json", exclude_none=True)
+_flagship_before = len(attempts)
+with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda *a, **k: []):
+    _plan_env = _builder.build_integration_action(
+        MagicMock(), "issue-157-replay", "plan", {"authoring_request": _flagship_payload}
+    )
+    _compile_env = _builder.build_integration_action(
+        MagicMock(), "issue-157-replay", "compile", {"authoring_request": _flagship_payload}
+    )
+    _compiled, _internals = compile_authoring_request_v1(
+        _flagship_request, boomi_client=MagicMock(), profile="issue-157-replay"
+    )
+(_unit,) = _internals.normalized.integration_spec.processes
+flagship = {
+    "plan_success": bool(_plan_env.get("_success")),
+    "compile_success": bool(_compile_env.get("_success")),
+    "compile_valid": bool(_compiled.validation_report.is_valid),
+    "components": [
+        c for c in _compile_env.get("authoring_result", {}).get(
+            "integration_spec_preview", {}).get("components", [])
+        if c.get("type") != "process"
+    ],
+    "envelope": {
+        "component_key": _unit.envelope.component_key,
+        "name": _unit.envelope.name,
+        "action": _unit.envelope.action,
+        "depends_on": sorted(_unit.envelope.depends_on),
+        "process_extensions": _unit.envelope.process_extensions.model_dump(
+            mode="json", exclude_none=True
+        ),
+    },
+    "attempts": [a[0] for a in attempts[_flagship_before:]],
+}
 replay_attempts = list(attempts)
 control = "not_refused"
 try:
@@ -1107,6 +1206,7 @@ print(json.dumps({
     "layer_modules": list(registry_module.RECIPE_LAYER_MODULES),
     "cases": out,
     "apply": applied,
+    "flagship": flagship,
 }))
 '''
 

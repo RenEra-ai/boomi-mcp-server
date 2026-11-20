@@ -1062,10 +1062,12 @@ class _AuthoringResultV1(_AuthoringModel):
     #: #159 S1 (C7): on the recipe intent, which REGISTERED code each invocation
     #: ran — recipe id and resolved version, entry kind, implementation digest
     #: and source revision, in invocation order. Registry-derived, never
-    #: request-derived; empty for the direct intents.
+    #: request-derived. OMITTED from a direct intent's result (ARCH-r1-08): the
+    #: server sets it only for a recipe intent, and an unset one is not served.
     recipe_provenance: Tuple[RecipeInvocationProvenanceV1, ...] = ()
     #: #159 S1: informational, value-free records about the recipe run's
     #: assembled output. Never failures (a failure is an error diagnostic).
+    #: OMITTED from a direct intent's result, like ``recipe_provenance``.
     recipe_diagnostics: Tuple[RecipeRunDiagnosticV1, ...] = ()
     pipeline_stages: Tuple[str, ...] = ()
     process_cfg: Tuple[ProcessCfgSummaryV1, ...] = ()
@@ -1077,6 +1079,19 @@ class _AuthoringResultV1(_AuthoringModel):
     warnings: Tuple[AuthoringDiagnosticV1, ...] = ()
     capability_gaps: Tuple[CapabilityGapV1, ...] = ()
     required_decisions: Tuple[RequiredDecisionV1, ...] = ()
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_recipe_fields(self, handler):
+        """The recipe-only fields are served exactly when the server SET them —
+        on a recipe intent — so a direct intent's result keeps its pre-#159
+        shape (ARCH-r1-08). The rule is the model's set state, not the value:
+        a recipe run with no records still serves its empty tuple."""
+        data = handler(self)
+        if isinstance(data, dict):
+            for name in ("recipe_provenance", "recipe_diagnostics"):
+                if name not in self.model_fields_set:
+                    data.pop(name, None)
+        return data
 
 
 class AuthoringPlanResultV1(_AuthoringResultV1):

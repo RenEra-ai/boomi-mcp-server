@@ -142,7 +142,11 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionProperty,
 )
 
-from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
+from ..models.integration_models import (
+    STRICT_PIPELINE_VERSION,
+    IntegrationComponentSpec,
+    IntegrationSpecV1,
+)
 from .components._shared import (
     component_get_xml,
     paginate_metadata,
@@ -5069,7 +5073,7 @@ def _lint_connection_hygiene(spec: IntegrationSpecV1) -> List[str]:
                 if host and _is_ip_literal(host):
                     warnings.append(
                         f"[CONNECTION_ENDPOINT_IP_LITERAL] Connection '{comp.key}' "
-                        f"base_url targets IP literal '{host}'; prefer an FQDN — "
+                        "base_url targets an IP literal; prefer an FQDN — "
                         "IP addresses change and break the connection."
                     )
                 if (path and path not in ("", "/")) or query:
@@ -5093,7 +5097,7 @@ def _lint_connection_hygiene(spec: IntegrationSpecV1) -> List[str]:
             if isinstance(host, str) and host.strip() and _is_ip_literal(host):
                 warnings.append(
                     f"[CONNECTION_ENDPOINT_IP_LITERAL] Connection '{comp.key}' host "
-                    f"is IP literal '{host.strip()}'; prefer an FQDN — IP "
+                    "is an IP literal; prefer an FQDN — IP "
                     "addresses change and break the connection."
                 )
             percall = [f for f in ("query", "sql", "statement", "batch_count") if config.get(f)]
@@ -6852,9 +6856,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # version — pinned by `test_the_pipeline_authority_gate_matches_the_authority`),
     # so importing the legacy-adapter package for such a spec decided nothing
     # and only kept a module #160 deletes on every canonical plan's import path.
+    #
+    # ARCH-r1-09: gated on the STRICT version too. The authority decides
+    # NOT_APPLICABLE for any other version (a 1.0 spec with a populated
+    # pipeline is the frozen inert echo), so importing it there decided nothing.
     authority_agreed_key = None
     authority_agrees = False
-    if spec.pipeline is not None:
+    if spec.pipeline is not None and spec.version == STRICT_PIPELINE_VERSION:
         # Imported lazily on purpose: a module-level import would pull the ProcessIR
         # compiler package into the server's import graph, breaking the M12
         # dark-shipping invariant that `import server` never imports the compiler

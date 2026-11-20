@@ -642,12 +642,14 @@ def test_governance_counts_a_deferred_name_only_on_an_owned_operation():
         validate_watermark_declaration(
             declaration, unit_index=0, owned_keys=("op",), components_by_key=components
         )
+    # ARCH-r1-04: keyed by (owning root, operation).
     validate_watermark_declaration(
         declaration,
         unit_index=0,
         owned_keys=("op",),
         components_by_key=components,
-        deferred_query_parameter_names={"op": ("since",)},
+        deferred_query_parameter_names={("root", "op"): ("since",)},
+        process_key="root",
     )
     with pytest.raises(GovernanceRefusal):
         validate_watermark_declaration(
@@ -655,7 +657,17 @@ def test_governance_counts_a_deferred_name_only_on_an_owned_operation():
             unit_index=0,
             owned_keys=(),
             components_by_key=components,
-            deferred_query_parameter_names={"op": ("since",)},
+            deferred_query_parameter_names={("root", "op"): ("since",)},
+            process_key="root",
+        )
+    with pytest.raises(GovernanceRefusal):  # another root reaching the same op
+        validate_watermark_declaration(
+            declaration,
+            unit_index=0,
+            owned_keys=("op",),
+            components_by_key=components,
+            deferred_query_parameter_names={("root", "op"): ("since",)},
+            process_key="other_root",
         )
 
 
@@ -1139,7 +1151,9 @@ def test_whitespace_padded_flagship_still_matches_the_frozen_legacy_oracle():
 def test_a_padded_watermark_name_matches_its_declared_ref_after_validation():
     raw, material = _watermarked(first=[{"name": " since ", "value_source": "watermark"}])
     prepared = _prepare(raw, material)
-    assert prepared.deferred_query_parameter_names == (("target_rest_operation", ("since",)),)
+    assert prepared.deferred_query_parameter_names == (
+        (("main_process", "target_rest_operation"), ("since",)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1375,3 +1389,458 @@ def test_a_create_base_rest_connection_submitted_as_raw_xml_is_refused():
     with pytest.raises(RecipeError) as caught:
         _prepare(raw, material, base=(xml_base,))
     assert caught.value.diagnostics[0].path == "/raw_input/targets/1/connection_key"
+
+
+# ---------------------------------------------------------------------------
+# ARCH-r1 (architect implementation review, eval 1): witnesses. Each was run
+# against the unmodified c49bce8 tree first and failed by assertion there.
+# ---------------------------------------------------------------------------
+
+_SELECTED_POINTER_T1 = "/raw_input/targets/1/connection_key"
+
+
+def _rest_base(config, *, action="create", name="Shared REST", component_id=None):
+    return IntegrationComponentSpec(
+        key="shared_rest",
+        type="connector-settings",
+        name=name,
+        action=action,
+        component_id=component_id,
+        config=config,
+    )
+
+
+def _bind_target_1(raw, material, binding_mode):
+    raw["targets"][1]["binding_mode"] = binding_mode
+    raw["targets"][1]["connection_key"] = "shared_rest"
+    material["targets"][1].pop("connection")
+
+
+def test_arch_r1_01_a_written_base_cannot_be_bound_as_reuse():
+    """ARCH-r1-01: ``action="update"`` + string ``reference_only: "true"`` is
+    WRITTEN by apply, so it is not a reuse; its unchecked URL would be written."""
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    base = _rest_base(
+        {
+            "reference_only": "true",
+            "connector_type": "rest",
+            "base_url": "https://b.example.invalid/?zz_unknown=1",
+            "auth": "NONE",
+        },
+        action="update",
+        component_id="rest-id",
+    )
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(base,))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == _SELECTED_POINTER_T1
+    assert diagnostic.cause_codes == (COMPOSITION_CONTRACT_MISMATCH,)
+
+
+def test_arch_r1_01_a_create_base_apply_would_reuse_is_not_a_create_binding():
+    """A create-mode base carrying a component_id is REUSED under policy
+    ``reuse``: its structured auth/URL describe nothing written — refused."""
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "create")
+    base = _rest_base(
+        {"connector_type": "rest", "base_url": "https://b.example.invalid", "auth": "NONE"},
+        component_id="rest-id",
+    )
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(base,))
+    assert caught.value.diagnostics[0].path == _SELECTED_POINTER_T1
+
+
+def test_arch_r1_01_a_genuine_reference_only_base_still_binds_as_reuse():
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    base = _rest_base({"reference_only": True, "connector_type": "rest", "component_id": "rest-id"})
+    assert "shared_rest" in _prepare(raw, material, base=(base,)).selected_base_keys
+
+
+@pytest.mark.parametrize(
+    "edit, cause",
+    [
+        pytest.param({"credential_ref": "hunter2"}, "PLAINTEXT_SECRET_REJECTED", id="plaintext_credential_ref"),
+        pytest.param({"dbname": "AppDB;password=hunter2"}, "PLAINTEXT_SECRET_REJECTED", id="jdbc_property_in_dbname"),
+        pytest.param({"host": "u@db.example.invalid"}, "PLAINTEXT_SECRET_REJECTED", id="userinfo_in_host"),
+        pytest.param({"additional": ";password=hunter2"}, COMPOSITION_CONTRACT_MISMATCH, id="jdbc_suffix_key"),
+        pytest.param({"connection_url": "jdbc:x"}, COMPOSITION_CONTRACT_MISMATCH, id="custom_url_key"),
+    ],
+)
+def test_arch_r1_02_a_selected_db_create_base_meets_the_credential_boundary(edit, cause):
+    raw, material = _create_bound_source()
+    base = _create_base_db()
+    base = base.model_copy(update={"config": dict(base.config, **edit)})
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(base,))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/raw_input/source/connection_key"
+    assert diagnostic.cause_codes == (cause,)
+    assert "hunter2" not in diagnostic.model_dump_json()
+
+
+@pytest.mark.parametrize("binding", ["reuse", "create"])
+def test_arch_r1_03_a_raw_ampersand_in_a_path_is_refused(binding):
+    raw, material = flagship_v2()
+    if binding == "reuse":
+        raw["targets"][1]["binding_mode"] = "reuse"
+        material["targets"][1]["connection"] = {"mode": "reuse", "component_id": "rest-id"}
+    material["targets"][1]["operation"]["path"] = "/x&provider_key=v"
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material)
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/targets/1/operation/path"
+    assert diagnostic.cause_codes == ("FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED",)
+
+
+@pytest.mark.parametrize("char", list("&;"))
+def test_arch_r1_03_every_forbidden_raw_path_character_is_refused_and_its_escape_is_data(char):
+    from urllib.parse import quote
+
+    from boomi_mcp.recipes.builtins import fanout
+
+    assert char in fanout._PATH_FORBIDDEN_RAW
+    assert "a raw '&' or ';' before its query" in fanout.QUERY_GRAMMAR_SENTENCE_V2
+    raw, material = flagship_v2()
+    raw["targets"][1]["binding_mode"] = "reuse"
+    material["targets"][1]["connection"] = {"mode": "reuse", "component_id": "rest-id"}
+    material["targets"][1]["operation"]["path"] = "/x" + char + "k=v"
+    with pytest.raises(RecipeError):
+        _prepare(raw, material)
+    material["targets"][1]["operation"]["path"] = "/x" + quote(char, safe="") + "k=v"
+    assert _prepare(raw, material).supporting_components
+
+
+def test_arch_r1_03_an_escaped_ampersand_in_a_path_is_data():
+    raw, material = flagship_v2()
+    raw["targets"][1]["binding_mode"] = "reuse"
+    material["targets"][1]["connection"] = {"mode": "reuse", "component_id": "rest-id"}
+    material["targets"][1]["operation"]["path"] = "/x%26y"
+    assert _prepare(raw, material).supporting_components
+
+
+def test_arch_r1_04_a_deferred_name_is_scoped_to_its_owning_root():
+    """The deferred names the workflow hands governance carry their OWNING
+    root, so another root that also reaches the first operation cannot borrow
+    them (two roots, real ownership through resolve_governance)."""
+    from boomi_mcp.authoring import governance
+    from boomi_mcp.authoring.workflow import _prepare_recipe_components
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+    from boomi_mcp.recipes import engine as engine_module
+
+    raw, material = _watermarked(first=[_DEFERRED])
+    request = recipe_request(raw, material)
+    _specs, deferred, _facts = _prepare_recipe_components(
+        request.intent, engine_module.production_registry(), {}
+    )
+
+    def ir():
+        return parse_process_ir_v1(
+            {
+                "version": "1",
+                "body": {
+                    "kind": "sequence",
+                    "steps": [
+                        {
+                            "kind": "source",
+                            "connection_ref": "$ref:target_rest_connection",
+                            "operation_ref": "$ref:target_rest_operation",
+                        },
+                        {"kind": "return_documents"},
+                    ],
+                },
+            }
+        )
+
+    connection = IntegrationComponentSpec(
+        key="target_rest_connection", type="connector-settings", name="C",
+        config={"connector_type": "rest", "base_url": "https://h.example.invalid", "auth": "NONE"},
+    )
+    operation = IntegrationComponentSpec(
+        key="target_rest_operation", type="connector-action", name="O",
+        config={"connector_type": "rest", "method": "GET", "path": "/x", "connection_ref_key": "target_rest_connection"},
+        depends_on=["target_rest_connection"],
+    )
+    profile = IntegrationComponentSpec(
+        key="profile", type="profile.db", name="P",
+        config={"output_fields": [{"name": "f", "data_type": "datetime"}]},
+    )
+    watermark = WatermarkDeclarationV1(
+        source_profile_ref="$ref:profile", field="f", kind="timestamp", query_parameter_refs=("since",)
+    )
+    borrower = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key="other_root", action="create", name="Other Root",
+            depends_on=("target_rest_connection", "target_rest_operation", "profile"),
+            watermark=watermark,
+        ),
+        process_ir=ir(),
+    )
+    with pytest.raises(governance.GovernanceRefusal):
+        governance.resolve_governance(
+            [borrower], [connection, operation, profile], deferred_query_parameter_names=deferred
+        )
+
+
+def _v1_and_v2_request(*, v2_selects_shared_db):
+    """A pinned v1 invocation over the frozen flagship components (all base
+    components) beside a v2 invocation under namespace ``b``."""
+    from _fanout_v2_support import respell_oracle_credential_refs
+
+    components = respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
+    process = components[-1]
+    config = process["config"]
+    branch = next(n for n in config["flow_sequence"] if n["kind"] == "branch")
+    v1_raw = {
+        "version": "1",
+        "process_key": process["key"],
+        "source_connection_ref": config["source"]["connection_id"],
+        "source_operation_ref": config["source"]["operation_id"],
+        "map_ref": next(n for n in config["flow_sequence"] if n["kind"] == "map_ref")["map_ref"],
+        "map_label": "Shared transform",
+        "branch_label": branch["label"],
+        "targets": [
+            {
+                "target_id": "t.%d" % index,
+                "connection_ref": leg["target"]["connection_id"],
+                "operation_ref": leg["target"]["operation_id"],
+                "handoff": "document_stream",
+            }
+            for index, leg in enumerate(branch["legs"])
+        ],
+        "component_slots": [
+            {
+                "contribution_id": "c.%d" % index,
+                "component_key": component["key"],
+                "component_type": component["type"],
+                "materialization_mode": "create",
+                "materializer_slot": component["key"],
+            }
+            for index, component in enumerate(components)
+        ],
+    }
+    raw, material = flagship_v2()
+    raw.update(key_namespace="b", process_key="b_process")
+    raw["naming"]["process_name"] = "Process B"
+    raw["naming"]["component_prefix"] = "BBB"
+    if v2_selects_shared_db:
+        raw["source"]["connection_key"] = "source_db_connection"
+        material["source"].pop("connection")
+    return recipe_request(
+        raw,
+        material,
+        base_components=components,
+        invocation_id="v2",
+        extra_invocations=[
+            {"recipe_id": RECIPE_ID, "recipe_version": "1.0.0", "invocation_id": "v1", "raw_input": v1_raw}
+        ],
+    )
+
+
+def test_arch_r1_05_a_v1_slot_and_a_v2_selector_on_one_connection_are_not_duplicates():
+    result, internals = plan_authoring_request_v1(
+        _v1_and_v2_request(v2_selects_shared_db=True), profile="p"
+    )
+    keys = [c.key for c in internals.normalized.integration_spec.components]
+    assert keys.count("source_db_connection") == 1
+    assert result.validation_report.is_valid, [d.code for d in result.errors]
+
+
+def test_arch_r1_05_the_engine_refuses_a_supporting_copy_of_a_catalog_entry():
+    """The engine's own guard: a catalog entry joins by KEY, never as a copy."""
+    from boomi_mcp.recipes.engine import RecipeRequestV1, run_recipes
+    from boomi_mcp.recipes.materialization import MaterializationCatalog
+
+    raw, material = flagship_v2()
+    prepared = _prepare(raw, material)
+    stray = next(c for c in prepared.supporting_components if c.key == "source_db_read_profile")
+    with pytest.raises(RecipeError) as caught:
+        run_recipes(
+            [RecipeRequestV1(RECIPE_ID, "fanout", raw, V2)],
+            catalog=MaterializationCatalog({"source_db_read_profile": stray}),
+            supporting_components=prepared.supporting_components,
+        )
+    assert COMPOSITION_COMPONENT_KEY_COLLISION in caught.value.diagnostics[0].cause_codes
+
+
+def test_arch_r1_05_a_generated_key_equal_to_a_base_key_is_a_collision():
+    raw, material = flagship_v2()
+    stray = IntegrationComponentSpec(
+        key="source_db_read_profile", type="profile.db", name="Someone else's profile",
+        config={"output_fields": [{"name": "x", "data_type": "character"}]},
+    )
+    with pytest.raises(AuthoringWorkflowError) as caught:
+        plan_authoring_request_v1(
+            recipe_request(raw, material, base_components=[stray.model_dump(mode="json")]),
+            profile="p",
+        )
+    (diagnostic,) = caught.value.diagnostics
+    assert COMPOSITION_COMPONENT_KEY_COLLISION in diagnostic.cause_codes
+
+
+def test_arch_r1_06_a_mixed_v1_v2_preview_serves_unique_row_keys():
+    result, _ = plan_authoring_request_v1(
+        _v1_and_v2_request(v2_selects_shared_db=False), profile="p"
+    )
+    preview = result.integration_spec_preview
+    keys = [row.key for row in preview.flows] + [e.key for e in preview.endpoints]
+    assert len(keys) == len(set(keys)), keys
+    assert result.validation_report.is_valid, [d.code for d in result.errors]
+
+
+def test_arch_r1_07_a_name_only_reuse_selector_is_served_on_the_endpoint():
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    base = _rest_base({"reference_only": True, "connector_type": "rest"}, name="Existing Billing")
+    result, _ = plan_authoring_request_v1(
+        recipe_request(raw, material, base_components=[base.model_dump(mode="json")]), profile="p"
+    )
+    names = [e.component_name for e in result.integration_spec_preview.endpoints]
+    assert "Existing Billing" in names
+
+
+def test_arch_r1_08_a_direct_intent_result_gains_no_recipe_keys():
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    case = (
+        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "database_to_api_sync"
+        / "wm_off_dlq_off_create" / "input.canonical.json"
+    )
+    payload = json.loads(case.read_text())
+    for action in ("plan", "compile"):
+        with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            envelope = integration_builder.build_integration_action(
+                mock.MagicMock(), "p", action, {"authoring_request": payload}
+            )
+        assert envelope["_success"] is True, envelope.get("error")
+        result = envelope["authoring_result"]
+        assert "recipe_provenance" not in result and "recipe_diagnostics" not in result, action
+        # The preview's ``endpoints: []`` is NOT a gained key: measured at the
+        # S1 parent cb7034b, a direct preview already served it.
+        assert result["integration_spec_preview"]["endpoints"] == [], action
+
+
+def test_arch_r1_08_a_recipe_intent_result_keeps_its_recipe_keys():
+    result, _ = plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+    dump = result.model_dump(mode="json")
+    assert "recipe_provenance" in dump and "recipe_diagnostics" in dump
+    assert "endpoints" in dump["integration_spec_preview"]
+
+
+_PIPELINE_CHILD = textwrap.dedent(
+    """
+    import copy, json, sys
+    # The legacy AUTHORITY module only: a 1.0 spec's legacy process CONFIG is
+    # still validated through the legacy bridge, which is a different route.
+    BLOCKED = ("boomi_mcp.compiler.process_ir.legacy_adapters.authority",)
+    attempts = []
+
+    class _Blocker:
+        def find_spec(self, name, path=None, target=None):
+            if any(name == b or name.startswith(b + ".") for b in BLOCKED):
+                attempts.append(name)
+                raise ImportError("blocked: " + name)
+            return None
+
+    sys.meta_path.insert(0, _Blocker())
+    sys.path[:0] = sys.argv[1:2]
+    from unittest.mock import MagicMock, patch
+    fixture = json.load(open(sys.argv[2]))
+    config = copy.deepcopy(fixture["contradictory_pipelines"]["config"])
+    config["integration_spec"]["version"] = "1.0"
+    nested = config["integration_spec"]["components"][0]["config"]["pipeline"]
+    config["integration_spec"]["pipeline"] = copy.deepcopy(nested)
+    from boomi_mcp.categories import integration_builder
+    try:
+        with patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            plan = integration_builder._build_plan(MagicMock(), config)
+        success = plan.get("_success")
+    except ImportError:
+        success = "import_error"
+    print(json.dumps({"attempts": attempts, "success": success}))
+    """
+)
+
+
+def test_arch_r1_09_a_v1_0_spec_with_a_pipeline_never_imports_the_legacy_authority():
+    fixture = _TESTS / "fixtures" / "compatibility" / "issue_135" / "authoring_boundaries.json"
+    completed = subprocess.run(
+        [sys.executable, "-c", _PIPELINE_CHILD, str(_SRC), str(fixture)],
+        capture_output=True, text=True, check=True,
+    )
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert payload["attempts"] == []
+    assert payload["success"] is True
+
+
+@pytest.mark.parametrize("arm", ["db_host", "rest_base_url"])
+def test_arch_r1_10_an_ip_literal_endpoint_is_never_echoed_in_served_diagnostics(arm):
+    """With an account in hand the component plan runs and its lint warnings
+    are forwarded; an IP-literal endpoint must not ride them out."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    raw, material = flagship_v2()
+    if arm == "db_host":
+        literal = "10.71.42.9"
+        material["source"]["connection"]["host"] = literal
+    else:
+        literal = "10.88.13.7"
+        material["targets"][1]["connection"]["base_url"] = "https://" + literal
+    payload = recipe_request(raw, material).model_dump(mode="json", exclude_none=True)
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": payload}
+        )
+    assert envelope["_success"] is True, envelope.get("error")
+    result = envelope["authoring_result"]
+    # Non-vacuity: the lint DID fire and was forwarded.
+    assert "CONNECTION_ENDPOINT_IP_LITERAL" in json.dumps(result["warnings"])
+    for preview in (result["integration_spec_preview"], envelope["integration_spec"]):
+        for component in preview["components"]:
+            component["config"] = None
+    assert literal not in json.dumps(envelope)
+
+
+def test_arch_r1_11_padded_mapping_names_are_normalized_like_the_legacy_route():
+    raw, material = flagship_v2()
+    padded = copy.deepcopy(material)
+    for operation in padded["transform"]["operations"]:
+        if operation["operation_type"] == "direct":
+            operation["source_field"] = "  " + operation["source_field"] + " "
+            operation["target_path"] = " " + operation["target_path"] + "  "
+    assert [_dump(c) for c in _prepare(raw, padded).supporting_components] == [
+        _dump(c) for c in _prepare(raw, material).supporting_components
+    ]
+
+
+def test_arch_r1_11_a_function_family_that_maps_no_input_still_prepares():
+    """``default_value`` maps no input; the legacy model (inputs >= 1) cannot
+    carry it, so its names are normalized without that model."""
+    raw, material = flagship_v2()
+    material["transform"]["operations"][0] = {
+        "operation_type": "map_function",
+        "function_type": "default_value",
+        "inputs": [],
+        "target_path": " " + material["transform"]["operations"][0]["target_path"] + " ",
+        "parameters": [{"name": "value", "value": "x"}],
+    }
+    assert _prepare(raw, material).supporting_components
+
+
+def test_arch_r1_14_a_duplicate_watermark_ref_is_refused_before_assembly():
+    raw, material = _watermarked(first=[_DEFERRED], refs=("since", "since"))
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material)
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/raw_input/watermark/query_parameter_refs/1"
+    assert diagnostic.cause_codes == (GOVERNANCE_WATERMARK_INCONSISTENT,)
