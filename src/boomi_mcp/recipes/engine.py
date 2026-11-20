@@ -1805,11 +1805,8 @@ def run_recipes(
     )
 
     components = _resolve_components(composed, catalog)
-    resolved_keys = {component.key for component in components}
-    supporting = supporting + tuple(
-        entry
-        for entry in (catalog.entry_for_key(key) for key in dict.fromkeys(catalog_supporting_keys))
-        if entry is not None and entry.key not in resolved_keys
+    supporting = supporting + _selected_catalog_entries(
+        catalog, catalog_supporting_keys, components
     )
     _refuse_duplicate_component_keys(list(components) + list(supporting))
     # Every downstream gate sees the WHOLE component set: the resolved slots plus
@@ -1848,6 +1845,42 @@ def run_recipes(
         supporting_components=supporting,
         invocation_provenance=invocation_provenance,
     )
+
+
+def _selected_catalog_entries(
+    catalog: MaterializationCatalog,
+    keys: Sequence[str],
+    resolved: Sequence[IntegrationComponentSpec],
+) -> Tuple[IntegrationComponentSpec, ...]:
+    """The catalog entries a trusted preparer selected BY KEY (#159 S1).
+
+    B12-02: a key two catalog entries carry is AMBIGUOUS and refused — never
+    resolved to whichever comes first. A selected entry is joined once with a
+    resolved slot only when it IS that slot's entry (identity); the same key on
+    a different entry is a collision, not a duplicate to drop."""
+    selected: List[IntegrationComponentSpec] = []
+    resolved_by_key = {component.key: component for component in resolved}
+    for key in dict.fromkeys(keys):
+        entries = catalog.entries_for_key(key)
+        if len(entries) != 1:
+            raise recipe_error(
+                RECIPE_CONSTRAINT_FAILED,
+                phase="composition",
+                target="component:" + key,
+                cause_codes=(COMPOSITION_COMPONENT_KEY_COLLISION,),
+            )
+        (entry,) = entries
+        twin = resolved_by_key.get(key)
+        if twin is None:
+            selected.append(entry)
+        elif twin is not entry:
+            raise recipe_error(
+                RECIPE_CONSTRAINT_FAILED,
+                phase="composition",
+                target="component:" + key,
+                cause_codes=(COMPOSITION_COMPONENT_KEY_COLLISION,),
+            )
+    return tuple(selected)
 
 
 def _provenance_mapping(

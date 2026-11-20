@@ -1597,6 +1597,11 @@ class PreparedFanoutV2:
 
     supporting_components: Tuple[IntegrationComponentSpec, ...]
     selected_base_keys: Tuple[str, ...] = ()
+    #: B12-01: ``(base key, raw-input pointer)`` per selected base bound in
+    #: CREATE mode. Whether apply really writes it depends on the component
+    #: plan's account resolution (a create matched BY NAME is reused), which
+    #: only the workflow holds — it rechecks each one against that authority.
+    create_bound_base_keys: Tuple[Tuple[str, str], ...] = ()
     deferred_query_parameter_names: Tuple[Tuple[Tuple[str, str], Tuple[str, ...]], ...] = ()
     #: #159 S1 (C8): the trusted facts the #157 projection reads for this
     #: invocation's unit. Their presence is what admits the unit's recipe-route
@@ -1946,6 +1951,7 @@ def prepare_db_rest_fanout_v2(
     keys = _fanout_keys_v2(inp)
     naming = inp.naming
     selected: _List[str] = []
+    create_bound: _List[Tuple[str, str]] = []
 
     # -- 2. the credential boundary ----------------------------------------
     _check_credential_boundary_v2(material)
@@ -2000,6 +2006,7 @@ def prepare_db_rest_fanout_v2(
                 family="database",
                 path="/raw_input/source/connection_key",
             )
+            create_bound.append((inp.source.connection_key, "/raw_input/source/connection_key"))
         selected.append(inp.source.connection_key)
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]] = []
     for index, target in enumerate(inp.targets):
@@ -2042,6 +2049,9 @@ def prepare_db_rest_fanout_v2(
                     family="rest",
                     path=f"/raw_input/targets/{index}/connection_key",
                 )
+                create_bound.append(
+                    (target.connection_key, f"/raw_input/targets/{index}/connection_key")
+                )
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
 
@@ -2061,7 +2071,7 @@ def prepare_db_rest_fanout_v2(
     )
 
     # -- 4. value rules through the authorities ----------------------------
-    authorized = _authorize_material_v2(inp, material, ordered_material)
+    authorized = _authorize_material_v2(inp, material, ordered_material, base_catalog)
     result_fields = authorized.result_fields
 
     # -- 5. producer -> consumer contract ----------------------------------
@@ -2207,6 +2217,7 @@ def prepare_db_rest_fanout_v2(
     return PreparedFanoutV2(
         supporting_components=tuple(components),
         selected_base_keys=tuple(selected),
+        create_bound_base_keys=tuple(create_bound),
         deferred_query_parameter_names=deferred,
         projection_facts=_projection_facts_v2(inp, keys, authorized.operations),
     )
@@ -2247,6 +2258,7 @@ def _authorize_material_v2(
     inp: ComposeDbRestFanoutInputV2,
     material: FanoutComponentMaterialV2,
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
+    base_catalog: _Mapping[str, IntegrationComponentSpec] = _MappingProxyType({}),
 ) -> _AuthorizedMaterialV2:
     """Run every value rule through its neutral authority; return what came back."""
     from ...patterns.archetype_parameters import (
@@ -2373,20 +2385,32 @@ def _authorize_material_v2(
         db=db,
         read=read_operation,
         targets=tuple(targets),
-        operations=_authorize_operations_v2(material),
+        operations=_authorize_operations_v2(material, base_catalog),
     )
 
 
-def _authorize_operations_v2(material: FanoutComponentMaterialV2) -> Tuple[_Any, ...]:
+def _authorize_operations_v2(
+    material: FanoutComponentMaterialV2,
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+) -> Tuple[_Any, ...]:
     """Each transform operation normalized through its legacy authority (ARCH-r1-11).
 
-    A map-script operation keeps its names as authored: the legacy
-    ``MapScriptTransformOperation`` does not normalize them either."""
+    A map-script operation goes through ``MapScriptTransformOperation`` (B12-03:
+    it strips ``inputs``/``outputs`` and the hint). Its ``language`` is the
+    REFERENCED script component's own (that component is the source of truth);
+    the reference itself is checked later against the base catalog, so a
+    script with no readable language is normalized by the SAME function the
+    model's validators call rather than by an invented language."""
+    from typing import get_args
+
     from ...patterns.archetype_parameters import (
         DirectTransformOperation,
         MapFunctionTransformOperation,
+        MapScriptTransformOperation,
         _stripped_nonblank,
     )
+
+    languages = get_args(MapScriptTransformOperation.model_fields["language"].annotation)
 
     normalized: _List[_Any] = []
     for op_index, operation in enumerate(material.transform.operations):
@@ -2449,7 +2473,41 @@ def _authorize_operations_v2(material: FanoutComponentMaterialV2) -> Tuple[_Any,
                 )
             )
         else:
-            normalized.append(operation)
+            script = base_catalog.get(operation.script_component_key)
+            language = ((script.config or {}) if script is not None else {}).get("language")
+            if language in languages:
+                checked = _authority_check(
+                    pointer,
+                    MapScriptTransformOperation,
+                    operation_type="map_script",
+                    script_slot=operation.script_component_key,
+                    language=language,
+                    inputs=list(operation.inputs),
+                    outputs=list(operation.outputs),
+                    script_component_ref="$ref:" + operation.script_component_key,
+                    documentation_hint=operation.documentation_hint,
+                )
+                inputs, outputs, hint = checked.inputs, checked.outputs, checked.documentation_hint
+            else:
+                try:
+                    inputs = [_stripped_nonblank(item) for item in operation.inputs]
+                    outputs = [_stripped_nonblank(item) for item in operation.outputs]
+                    hint = (
+                        None
+                        if operation.documentation_hint is None
+                        else _stripped_nonblank(operation.documentation_hint)
+                    )
+                except ValueError:
+                    raise _material_failure(pointer, ValueError()) from None
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "inputs": tuple(inputs),
+                        "outputs": tuple(outputs),
+                        "documentation_hint": hint,
+                    }
+                )
+            )
     return tuple(normalized)
 
 

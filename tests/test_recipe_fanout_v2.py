@@ -1844,3 +1844,134 @@ def test_arch_r1_14_a_duplicate_watermark_ref_is_refused_before_assembly():
     (diagnostic,) = caught.value.diagnostics
     assert diagnostic.path == "/raw_input/watermark/query_parameter_refs/1"
     assert diagnostic.cause_codes == (GOVERNANCE_WATERMARK_INCONSISTENT,)
+
+
+# ---------------------------------------------------------------------------
+# B12 (Codex support review of B11): witnesses, each failing at 55807e2.
+# ---------------------------------------------------------------------------
+
+
+def _account_lists(*entries):
+    """``paginate_metadata`` answering with these existing components."""
+    return lambda *a, **k: [dict(entry) for entry in entries]
+
+
+def test_b12_01_a_create_bound_base_the_plan_reuses_by_name_is_refused():
+    """Under ``reuse`` a selected CREATE-mode base with no declared id is
+    resolved BY NAME to an existing connection by the component plan: apply
+    would discard its config, so the advertised create binding is false."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "create")
+    base = _rest_base(
+        {"connector_type": "rest", "base_url": "https://b.example.invalid", "auth": "NONE"},
+        name="Shared REST",
+    )
+    payload = recipe_request(
+        raw, material, base_components=[base.model_dump(mode="json")]
+    ).model_dump(mode="json", exclude_none=True)
+    existing = {"component_id": "6f1d2c3b-0000-4000-8000-000000000001", "name": "Shared REST",
+                "type": "connector-settings", "folder_name": "X"}
+    with mock.patch.object(integration_builder, "paginate_metadata", _account_lists(existing)):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": payload}
+        )
+    assert envelope["_success"] is False, "a create binding apply would reuse was accepted"
+    assert "COMPOSITION_CONTRACT_MISMATCH" in json.dumps(envelope)
+    assert "/intent/invocations/0/raw_input/targets/1/connection_key" in json.dumps(envelope)
+
+
+def test_b12_01_a_generated_connection_reused_by_name_is_served_as_reuse():
+    """The sibling: a GENERATED create connection the component plan resolves by
+    name is reused by apply; its served endpoint row says so."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    raw, material = flagship_v2()
+    payload = recipe_request(raw, material).model_dump(mode="json", exclude_none=True)
+    existing = {"component_id": "6f1d2c3b-0000-4000-8000-000000000002",
+                "name": "M8DEMO Billing REST Connection", "type": "connector-settings",
+                "folder_name": "X"}
+    with mock.patch.object(integration_builder, "paginate_metadata", _account_lists(existing)):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": payload}
+        )
+    assert envelope["_success"] is True, envelope.get("error")
+    rows = envelope["authoring_result"]["integration_spec_preview"]["endpoints"]
+    (billing,) = [row for row in rows if row["key"] == "rest_target_billing"]
+    assert billing["binding_mode"] == "reuse", billing
+
+
+def test_b12_02_an_ambiguous_catalog_key_is_refused():
+    """Two catalog entries under one component key: a selection by key cannot
+    say which one it means, so it is refused rather than silently resolved."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.recipes.engine import RecipeRequestV1, run_recipes
+    from boomi_mcp.recipes.materialization import MaterializationCatalog
+
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    first = _rest_base({"reference_only": True, "connector_type": "rest", "component_id": "rest-a"})
+    second = _rest_base({"reference_only": True, "connector_type": "rest", "component_id": "rest-b"})
+    prepared = _prepare(raw, material, base=(first,))
+    metadata = _connector_metadata_from_components(list(prepared.supporting_components) + [first])
+
+    def run(entries):
+        return run_recipes(
+            [RecipeRequestV1(RECIPE_ID, "fanout", raw, V2)],
+            catalog=MaterializationCatalog(entries),
+            supporting_components=prepared.supporting_components,
+            catalog_supporting_keys=prepared.selected_base_keys,
+            connector_metadata=metadata,
+        )
+
+    # Control: one entry under the key joins once.
+    assert [c for c in run({"slot.a": first}).supporting_components if c.key == "shared_rest"] == [first]
+    with pytest.raises(RecipeError) as caught:
+        run({"slot.a": first, "slot.b": second})
+    assert COMPOSITION_COMPONENT_KEY_COLLISION in caught.value.diagnostics[0].cause_codes
+
+
+def test_b12_03_script_mapping_names_are_normalized_like_the_legacy_route():
+    raw, material = flagship_v2()
+    material["transform"]["operations"][1] = {
+        "operation_type": "map_script",
+        "script_component_key": "shared_script",
+        "inputs": [" source_b "],
+        "outputs": ["  Root/target_b"],
+        "documentation_hint": "  why  ",
+    }
+    script = IntegrationComponentSpec(
+        key="shared_script", type="script.mapping", name="Shared Script",
+        config={
+            "component_type": "script.mapping", "component_name": "Shared Script",
+            "language": "groovy2", "script_body": "target_b = source_b",
+            "inputs": [{"name": "source_b", "data_type": "character"}],
+            "outputs": [{"name": "target_b"}],
+        },
+    )
+    prepared = _prepare(raw, material, base=(script,))
+    the_map = next(c for c in prepared.supporting_components if c.type == "transform.map")
+    (mapping,) = the_map.config["script_mappings"]
+    assert json.dumps(mapping).count(" source_b ") == 0 and "  Root/target_b" not in json.dumps(mapping)
+    hints = [h.documentation_hint for h in prepared.projection_facts.documentation_hints]
+    assert hints == ["why"]
+
+
+def test_b12_04_a_whitespace_only_id_is_absent_for_the_served_selector():
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    base = _rest_base(
+        {"reference_only": True, "connector_type": "rest", "component_id": "   "},
+        name="Existing Billing",
+    )
+    result, _ = plan_authoring_request_v1(
+        recipe_request(raw, material, base_components=[base.model_dump(mode="json")]), profile="p"
+    )
+    (row,) = [e for e in result.integration_spec_preview.endpoints if e.key == "rest_target_billing"]
+    assert row.component_id is None
+    assert row.component_name == "Existing Billing"

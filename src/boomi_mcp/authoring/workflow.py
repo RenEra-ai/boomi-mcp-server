@@ -282,6 +282,9 @@ class _NormalizedIntent:
     #: route's preparer supplied for that unit. Read ONLY by the served
     #: projection; never in the semantic payload, never hashed.
     recipe_projection_facts: Mapping[str, Any] = field(default_factory=dict)
+    #: B12-01: ``(base key, request pointer)`` per base a recipe preparer bound
+    #: in CREATE mode. Rechecked against the component plan's resolved ids.
+    recipe_create_bound_bases: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -706,6 +709,10 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     selected: List[str] = []
     deferred: Dict[Tuple[str, str], Tuple[str, ...]] = {}
     facts: Dict[str, Any] = {}
+    create_bound: List[Tuple[str, str]] = []
+    invocation_position = {
+        invocation.invocation_id: position for position, invocation in enumerate(intent.invocations)
+    }
     base_catalog = MappingProxyType(dict(catalog_entries))
 
     def tagged(exc, invocation, prefix=""):
@@ -813,6 +820,10 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
         for key in prepared.selected_base_keys:
             if key not in selected:
                 selected.append(key)
+        for key, pointer in getattr(prepared, "create_bound_base_keys", ()) or ():
+            create_bound.append(
+                (key, "/intent/invocations/{0}{1}".format(invocation_position[invocation.invocation_id], pointer))
+            )
         for owner_and_operation, names in prepared.deferred_query_parameter_names:
             # Keyed by (owning root, operation) — ARCH-r1-04.
             deferred[tuple(owner_and_operation)] = tuple(names)
@@ -823,7 +834,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     # ARCH-r1-05: the generated specs, and the selected base entries BY KEY —
     # the engine takes those from the catalog it already holds, so a base a v1
     # slot also resolves stays ONE entry (identity carried, not reconstructed).
-    return (tuple(generated), tuple(selected)), deferred, facts
+    return (tuple(generated), tuple(selected), tuple(create_bound)), deferred, facts
 
 
 def _normalize_recipe_intent(
@@ -869,7 +880,7 @@ def _normalize_recipe_intent(
     try:
         # The SAME registry `run_recipes` resolves against (looked up at call
         # time, so a test-installed registry governs both).
-        (supporting_specs, selected_base_keys), deferred_names, projection_facts = (
+        (supporting_specs, selected_base_keys, create_bound_bases), deferred_names, projection_facts = (
             _prepare_recipe_components(intent, _engine.production_registry(), catalog_entries)
         )
     except RecipeError as exc:
@@ -991,6 +1002,59 @@ def _normalize_recipe_intent(
         + _leg_provenance_records(result, composed_facts),
         # Only for a unit the run actually composed under that key.
         recipe_projection_facts=composed_facts,
+        recipe_create_bound_bases=tuple(create_bound_bases),
+    )
+
+
+def _connections_apply_will_not_write(normalized, conflict_policy, existing_ids) -> frozenset:
+    """Connection keys whose configuration apply will NOT write (B12-01).
+
+    Asked of apply's own predicate with the component plan's resolved ids — the
+    one authority for "is this a create or a reuse". Offline (no plan) only the
+    declared bindings answer."""
+    from ..categories.integration_builder import apply_writes_component_config
+
+    return frozenset(
+        component.key
+        for component in normalized.integration_spec.components
+        if component.type == "connector-settings"
+        and not apply_writes_component_config(
+            component, conflict_policy or "reuse", existing_ids=existing_ids
+        )
+    )
+
+
+def _refuse_create_bound_bases_apply_reuses(normalized, unwritten) -> None:
+    bad = [
+        (key, pointer)
+        for key, pointer in getattr(normalized, "recipe_create_bound_bases", ()) or ()
+        if key in unwritten
+    ]
+    if not bad:
+        return
+    from ..errors import COMPOSITION_CONTRACT_MISMATCH, RECIPE_CONSTRAINT_FAILED
+
+    raise AuthoringWorkflowError(
+        AUTHORING_COMPILE_BLOCKED,
+        tuple(
+            _diag(
+                AUTHORING_COMPILE_BLOCKED,
+                "error",
+                message=(
+                    "A base connection the recipe input binds in create mode is "
+                    "resolved by the component plan to an existing component, so "
+                    "apply would reuse it and discard its configuration."
+                ),
+                path=pointer,
+                subject_kind="recipe",
+                remediation=(
+                    "Bind it in reuse mode as a reference-only base, or give the "
+                    "base a name no existing component carries."
+                ),
+                cause_codes=(COMPOSITION_CONTRACT_MISMATCH, RECIPE_CONSTRAINT_FAILED),
+            )
+            for _key, pointer in bad
+        ),
     )
 
 
@@ -1418,6 +1482,7 @@ def build_integration_spec_preview(
     selected_artifacts: Any = None,
     reused_keys: Any = None,
     final_names: Any = None,
+    existing_ids: Any = None,
 ) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
@@ -1464,6 +1529,7 @@ def build_integration_spec_preview(
         selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
         final_names=final_names,
+        existing_ids=existing_ids,
     )
 
 
@@ -1482,6 +1548,7 @@ def _as_served_preview(
     selected_artifacts: Any = None,
     reused_keys: Any = None,
     final_names: Any = None,
+    existing_ids: Any = None,
 ):
     """The served preview SHAPE for this intent (#157).
 
@@ -1501,6 +1568,7 @@ def _as_served_preview(
         selected_artifacts=selected_artifacts,
         reused_keys=reused_keys,
         final_names=final_names,
+        existing_ids=existing_ids,
         projection_facts=normalized.recipe_projection_facts,
         recorded_intents=normalized.recorded_intents,
     )
@@ -3042,6 +3110,16 @@ def plan_authoring_request_v1(
         boomi_client=boomi_client,
         existing_ids=planned_existing_ids(component_plan),
     )
+    # B12-01: whether apply WRITES each connection is decided by the component
+    # plan's RESOLVED ids (a create matched by name under ``reuse`` is reused),
+    # never inferred from the declaration. A base a recipe bound in CREATE mode
+    # that apply would reuse is refused; the served endpoint rows read the SAME
+    # answer, so their binding mode is what apply does.
+    _unwritten_connections = _connections_apply_will_not_write(
+        normalized, request.intent.conflict_policy, planned_existing_ids(component_plan)
+    )
+    _refuse_create_bound_bases_apply_reuses(normalized, _unwritten_connections)
+    _reused_for_preview = frozenset(_reused_for_preview or ()) | _unwritten_connections
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)
 
@@ -3066,6 +3144,7 @@ def plan_authoring_request_v1(
             selected_artifacts=_artifacts_for_preview,
             reused_keys=_reused_for_preview,
             final_names=_names_for_preview,
+            existing_ids=planned_existing_ids(component_plan),
         )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
@@ -3144,6 +3223,7 @@ def plan_authoring_request_v1(
                     selected_artifacts=_artifacts_for_preview,
                     reused_keys=_reused_for_preview,
                     final_names=_names_for_preview,
+                    existing_ids=planned_existing_ids(component_plan),
                 )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an

@@ -735,10 +735,6 @@ def _family_of(component: Optional[IntegrationComponentSpec], metadata) -> Optio
     return str(family).lower() if family else None
 
 
-def _nonblank(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
-
-
 def _endpoint_row(
     key: str,
     direction: str,
@@ -746,12 +742,23 @@ def _endpoint_row(
     family: str,
     *,
     method: Optional[str] = None,
+    reused: bool = False,
+    existing_ids: Optional[Mapping[str, Any]] = None,
 ):
-    """One endpoint row, read off the connection component (never the input)."""
+    """One endpoint row, read off the connection component (never the input).
+
+    B12-01/04: the binding mode is what apply DOES — ``reused`` carries the
+    component plan's answer (a create it resolved by name is reused) — and the
+    served selector follows the planner's own binding rule
+    (``resolve_planner_binding``: a whitespace-only id is absent, the
+    top-level name precedes ``config.component_name``). The served id is the
+    one the route BINDS — ``_bound_existing_id`` with the component plan's
+    resolved ids (``existing_ids``) when the route has them."""
+    from ..categories.integration_builder import _bound_existing_id, _first_nonblank_str
     from ..models.derived_flows import DerivedEndpointRowV1
 
     config = connection.config or {}
-    reuse = bool(config.get("reference_only"))
+    reuse = bool(config.get("reference_only")) or reused
     row: Dict[str, Any] = {
         "key": key,
         "type": family,
@@ -762,17 +769,15 @@ def _endpoint_row(
     if method is not None:
         row["method"] = method
     if reuse:
-        component_id = connection.component_id or config.get("component_id")
+        component_id = _bound_existing_id(connection, existing_ids)
         if component_id:
             row["component_id"] = component_id
-        name = config.get("component_name")
-        if not component_id:
-            # ARCH-r1-07: a name-only binding resolves by the component's
-            # TOP-LEVEL name first, then config.component_name — the planner's
-            # own precedence (``integration_builder.resolve_planner_binding``,
-            # ``_first_nonblank_str(comp.name, config.component_name)``). With an
-            # id the id binds and the served row is unchanged.
-            name = connection.name.strip() if _nonblank(connection.name) else name
+            # With an id the id binds; a configured name is served beside it.
+            name = _first_nonblank_str(config.get("component_name"))
+        else:
+            # ARCH-r1-07: a name-only binding resolves by the TOP-LEVEL name
+            # first, then config.component_name — the planner's precedence.
+            name = _first_nonblank_str(connection.name, config.get("component_name"))
         if name:
             row["component_name"] = name
     elif family == "database":
@@ -864,7 +869,10 @@ def _with_hints(row: Any, facts: Any) -> Any:
     return type(row).model_validate(payload) if changed else row
 
 
-def _route_projection(unit, by_key, metadata, facts, transform_rows, watermarked):
+def _route_projection(
+    unit, by_key, metadata, facts, transform_rows, watermarked, reused_keys=frozenset(),
+    existing_ids=None,
+):
     """``(rows, endpoints, summary)`` for one fact-carrying unit, or None.
 
     None — and the unit is then projected as before, transform rows only —
@@ -959,7 +967,13 @@ def _route_projection(unit, by_key, metadata, facts, transform_rows, watermarked
         )
     )
 
-    endpoints = [_endpoint_row(source_token, "source", source_connection, source_family)]
+    endpoints = [
+        _endpoint_row(
+            source_token, "source", source_connection, source_family,
+            reused=source_connection.key in reused_keys,
+            existing_ids=existing_ids,
+        )
+    ]
     summaries_legs = []
     modes: Dict[str, str] = {}
     binding_modes: Dict[str, str] = {}
@@ -971,6 +985,8 @@ def _route_projection(unit, by_key, metadata, facts, transform_rows, watermarked
             connection,
             target_family,
             method=method,
+            reused=connection.key in reused_keys,
+            existing_ids=existing_ids,
         )
         endpoints.append(endpoint)
         binding_modes[target.part_key] = endpoint.binding_mode
@@ -1023,6 +1039,7 @@ def derive_recipe_projection(
     final_names: Optional[Mapping[str, str]] = None,
     projection_facts: Optional[Mapping[str, Any]] = None,
     recorded_intents: Sequence[Any] = (),
+    existing_ids: Optional[Mapping[str, Any]] = None,
 ) -> RecipeProjection:
     """The whole served projection, per unit in key order (#159 S1, C8).
 
@@ -1059,7 +1076,11 @@ def derive_recipe_projection(
         )
         facts = facts_by_key.get(key)
         route = (
-            _route_projection(unit, by_key, metadata, facts, transform_rows, key in watermarked)
+            _route_projection(
+                unit, by_key, metadata, facts, transform_rows, key in watermarked,
+                frozenset(reused_keys or ()),
+                existing_ids,
+            )
             if facts is not None
             else None
         )

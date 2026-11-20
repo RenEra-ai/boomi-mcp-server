@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15152, "minimum_collected": 15152, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15157, "minimum_collected": 15157, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15610,3 +15610,8 @@
 {"kind": "test", "id": "pytest-015609", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_11_padded_mapping_names_are_normalized_like_the_legacy_route", "state": "active"}
 {"kind": "test", "id": "pytest-015610", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_11_a_function_family_that_maps_no_input_still_prepares", "state": "active"}
 {"kind": "test", "id": "pytest-015611", "node_id": "tests/test_recipe_fanout_v2.py::test_arch_r1_14_a_duplicate_watermark_ref_is_refused_before_assembly", "state": "active"}
+{"kind": "test", "id": "pytest-015612", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_01_a_create_bound_base_the_plan_reuses_by_name_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-015613", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_01_a_generated_connection_reused_by_name_is_served_as_reuse", "state": "active"}
+{"kind": "test", "id": "pytest-015614", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_02_an_ambiguous_catalog_key_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-015615", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_03_script_mapping_names_are_normalized_like_the_legacy_route", "state": "active"}
+{"kind": "test", "id": "pytest-015616", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_04_a_whitespace_only_id_is_absent_for_the_served_selector", "state": "active"}
