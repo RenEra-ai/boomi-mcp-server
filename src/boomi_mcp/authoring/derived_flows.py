@@ -772,9 +772,12 @@ def _endpoint_row(
         component_id = _bound_existing_id(connection, existing_ids)
         if component_id:
             row["component_id"] = component_id
-            # With an id the id binds; a configured name is served beside it.
+        if _bound_existing_id(connection, None):
+            # A DECLARED id binds; a configured name is served beside it.
             name = _first_nonblank_str(config.get("component_name"))
         else:
+            # The name drove the lookup (even when the plan resolved an id),
+            # so it stays served beside any resolved id (B12 review).
             # ARCH-r1-07: a name-only binding resolves by the TOP-LEVEL name
             # first, then config.component_name — the planner's precedence.
             name = _first_nonblank_str(connection.name, config.get("component_name"))

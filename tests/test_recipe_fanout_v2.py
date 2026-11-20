@@ -1975,3 +1975,67 @@ def test_b12_04_a_whitespace_only_id_is_absent_for_the_served_selector():
     (row,) = [e for e in result.integration_spec_preview.endpoints if e.key == "rest_target_billing"]
     assert row.component_id is None
     assert row.component_name == "Existing Billing"
+
+
+def test_b12r_a_name_selector_stays_served_beside_an_id_the_plan_resolved():
+    """B12 review P3: an account-backed plan resolves a name-only reuse to an
+    id; the name that drove the lookup stays served beside it."""
+    from boomi_mcp.authoring.derived_flows import _endpoint_row
+
+    base = _rest_base({"reference_only": True, "connector_type": "rest"}, name="Existing Billing")
+    row = _endpoint_row(
+        "rest_target_billing", "target", base, "rest", existing_ids={"shared_rest": "id-123"}
+    )
+    assert row.component_id == "id-123"
+    assert row.component_name == "Existing Billing"
+    declared = _rest_base(
+        {"reference_only": True, "connector_type": "rest", "component_id": "id-9"},
+        name="Ignored Top Name",
+    )
+    row = _endpoint_row("rest_target_billing", "target", declared, "rest")
+    assert row.component_id == "id-9"
+    assert row.component_name is None  # a declared id binds; only config.component_name rides beside it
+
+
+def test_b12r_slots_aliasing_one_spec_are_one_component():
+    """B12 review P3: two slots holding the SAME spec object under one key are one
+    component; two DISTINCT specs under one key stay a collision."""
+    from boomi_mcp.recipes.engine import _selected_catalog_entries
+    from boomi_mcp.recipes.errors import RecipeError
+
+    spec = _rest_base({"reference_only": True, "connector_type": "rest"}, name="A")
+
+    class _Catalog:
+        def __init__(self, entries):
+            self._entries = entries
+
+        def entries_for_key(self, key):
+            return self._entries
+
+    assert _selected_catalog_entries(_Catalog((spec, spec)), ["shared_rest"], []) == (spec,)
+    other = _rest_base({"reference_only": True, "connector_type": "rest"}, name="B")
+    with pytest.raises(RecipeError):
+        _selected_catalog_entries(_Catalog((spec, other)), ["shared_rest"], [])
+
+
+@pytest.mark.parametrize("order", ["ab", "ba"])
+def test_qa_r12_01_two_base_components_under_one_key_are_refused(order):
+    """QA-159-S1-r12-01: duplicate base keys used to collapse to the last entry,
+    so list order chose the bound connection. Refused at the request."""
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError
+    from boomi_mcp.errors import COMPOSITION_COMPONENT_KEY_COLLISION
+
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    a = _rest_base({"reference_only": True, "connector_type": "rest", "component_id": "id-a"}, name="A")
+    b = _rest_base({"reference_only": True, "connector_type": "rest", "component_id": "id-b"}, name="B")
+    bases = [a, b] if order == "ab" else [b, a]
+    with pytest.raises(AuthoringWorkflowError) as refused:
+        plan_authoring_request_v1(
+            recipe_request(raw, material, base_components=[x.model_dump(mode="json") for x in bases]),
+            profile="p",
+        )
+    (diagnostic,) = refused.value.diagnostics
+    assert diagnostic.path == "/intent/base_components/1/key"
+    assert COMPOSITION_COMPONENT_KEY_COLLISION in diagnostic.cause_codes
+    assert "id-a" not in diagnostic.model_dump_json() and "id-b" not in diagnostic.model_dump_json()

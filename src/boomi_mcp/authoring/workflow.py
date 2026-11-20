@@ -860,7 +860,34 @@ def _normalize_recipe_intent(
     from ..recipes.engine import RecipeRequestV1, run_recipes
     from ..recipes.errors import RecipeError
     from ..recipes.materialization import MaterializationCatalog
+    from ..errors import COMPOSITION_COMPONENT_KEY_COLLISION
 
+    # QA-159-S1-r12-01: two base components under one key used to collapse to
+    # the LAST (a dict), so which existing connection a route bound depended on
+    # list order and no later guard could see the duplicate. One key, one
+    # component — refused here, at the request, value-free.
+    first_position: Dict[str, int] = {}
+    for position, component in enumerate(intent.base_components):
+        if component.key in first_position:
+            raise AuthoringWorkflowError(
+                AUTHORING_COMPILE_BLOCKED,
+                (
+                    _diag(
+                        AUTHORING_COMPILE_BLOCKED,
+                        "error",
+                        message="Two base components carry the same key.",
+                        path="/intent/base_components/{0}/key".format(position),
+                        subject_kind="recipe",
+                        subject_id="",
+                        remediation=(
+                            "Give every base component a distinct key; a key "
+                            "names exactly one component."
+                        ),
+                        cause_codes=(COMPOSITION_COMPONENT_KEY_COLLISION,),
+                    ),
+                ),
+            )
+        first_position[component.key] = position
     catalog_entries = {
         component.key: component for component in intent.base_components
     }

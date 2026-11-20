@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15157, "minimum_collected": 15157, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15161, "minimum_collected": 15161, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15615,3 +15615,7 @@
 {"kind": "test", "id": "pytest-015614", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_02_an_ambiguous_catalog_key_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-015615", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_03_script_mapping_names_are_normalized_like_the_legacy_route", "state": "active"}
 {"kind": "test", "id": "pytest-015616", "node_id": "tests/test_recipe_fanout_v2.py::test_b12_04_a_whitespace_only_id_is_absent_for_the_served_selector", "state": "active"}
+{"kind": "test", "id": "pytest-015617", "node_id": "tests/test_recipe_fanout_v2.py::test_b12r_a_name_selector_stays_served_beside_an_id_the_plan_resolved", "state": "active"}
+{"kind": "test", "id": "pytest-015618", "node_id": "tests/test_recipe_fanout_v2.py::test_b12r_slots_aliasing_one_spec_are_one_component", "state": "active"}
+{"kind": "test", "id": "pytest-015619", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r12_01_two_base_components_under_one_key_are_refused[ab]", "state": "active"}
+{"kind": "test", "id": "pytest-015620", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r12_01_two_base_components_under_one_key_are_refused[ba]", "state": "active"}

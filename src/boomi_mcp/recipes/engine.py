@@ -1861,7 +1861,9 @@ def _selected_catalog_entries(
     selected: List[IntegrationComponentSpec] = []
     resolved_by_key = {component.key: component for component in resolved}
     for key in dict.fromkeys(keys):
-        entries = catalog.entries_for_key(key)
+        # Slots that alias the SAME spec object are one component (B12 review):
+        # only distinct objects under one key are ambiguous.
+        entries = tuple({id(entry): entry for entry in catalog.entries_for_key(key)}.values())
         if len(entries) != 1:
             raise recipe_error(
                 RECIPE_CONSTRAINT_FAILED,
