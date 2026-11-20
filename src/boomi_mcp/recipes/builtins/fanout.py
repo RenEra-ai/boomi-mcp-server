@@ -818,6 +818,11 @@ _URI_TARGET_EXTRA = ":/?[]@!$&'()*+,;=%"
 #: ``&``, ``?`` or ``#``. Escaped (``%2B``, ``%3B``, ``%26``) they are data.
 _QUERY_VALUE_EXTRA = "!$'()*,:@/="
 _HEX_DIGITS = "0123456789abcdefABCDEF"
+#: How the bytes of a run of ``%XX`` escapes must decode (r7-03). ONE place:
+#: :func:`_decoded` and :func:`_first_undecodable` decode with these, and the
+#: served sentence renders them.
+_ESCAPE_ENCODING = "utf-8"
+_ESCAPE_ERRORS = "strict"
 _TARGET_CHARS = frozenset(_URI_UNRESERVED + _URI_TARGET_EXTRA)
 _VALUE_CHARS = frozenset(_URI_UNRESERVED + _QUERY_VALUE_EXTRA)
 _NAME_CHARS = frozenset(_URI_UNRESERVED + "%")
@@ -827,11 +832,24 @@ QUERY_GRAMMAR_SENTENCE_V2 = (
     "The effective request target (base_url followed by path, judged as "
     "joined) may carry only RFC 3986 characters, with no whitespace, control "
     "character or '#', at most one '?', and '%' only as a two-hex-digit "
-    "escape; its query must be name=value pairs separated by '&', each name "
-    "(after percent-decoding) a published name and each value only "
-    "unreserved characters ({unreserved}), %XX escapes and {extra}; a "
-    "structured literal value follows the same value rule."
-).format(unreserved="A-Z a-z 0-9 " + "-._~", extra=" ".join(_QUERY_VALUE_EXTRA))
+    "escape whose escaped bytes decode as {errors} {encoding}; userinfo is "
+    "refused in a leading authority; its query must be name=value pairs "
+    "separated by '&', each name (after percent-decoding) a published name and "
+    "each value only unreserved characters ({unreserved}), %XX escapes and "
+    "{extra}. The stored base_url and the stored path are each judged on their "
+    "own as well as joined. A structured literal value follows the same value "
+    "rule. The two are SENT differently: an inline query value (in base_url or "
+    "path) is sent as written, so the server decodes its escapes (%26 arrives "
+    "as '&'); a structured literal value is percent-encoded by the platform, "
+    "'%' included, so a %XX in a structured value is sent as those literal "
+    "characters, not as the character it encodes; a structured value is still "
+    "limited to the value alphabet above."
+).format(
+    unreserved="A-Z a-z 0-9 " + "-._~",
+    extra=" ".join(_QUERY_VALUE_EXTRA),
+    errors=_ESCAPE_ERRORS,
+    encoding=_ESCAPE_ENCODING.upper(),
+)
 
 #: The per-field rule every query-carrying material field states.
 _LITERAL_QUERY_FIELD_RULE = (
@@ -1105,9 +1123,34 @@ def _decoded(raw: str) -> Optional[str]:
     from urllib.parse import unquote
 
     try:
-        return unquote(raw, errors="strict")
+        return unquote(raw, encoding=_ESCAPE_ENCODING, errors=_ESCAPE_ERRORS)
     except UnicodeDecodeError:
         return None
+
+
+def _first_undecodable(text: str) -> Optional[int]:
+    """The offset of the first ``%`` whose escaped byte cannot be decoded, or
+    ``None`` (r7-05: so a pointer names the field that holds the bad escape).
+
+    Escapes are decoded per RUN of consecutive ``%XX`` (a multi-byte UTF-8
+    character spans one run; any raw character ends it). Assumes every ``%``
+    already starts a well-formed escape."""
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index] != "%":
+            index += 1
+            continue
+        start = index
+        data = bytearray()
+        while index + 2 < length and text[index] == "%":
+            data.append(int(text[index + 1:index + 3], 16))
+            index += 3
+        try:
+            bytes(data).decode(_ESCAPE_ENCODING, errors=_ESCAPE_ERRORS)
+        except UnicodeDecodeError as exc:
+            return start + 3 * exc.start
+    return None
 
 
 def _value_is_secret(name: str, raw: str) -> bool:
@@ -1146,9 +1189,11 @@ def _judge_request_target(text: str) -> _TargetVerdict:
             return _TargetVerdict(_QUERY_NAME_CAUSE, index)
         if char == "%" and not _escape_ok(text, index):
             return _TargetVerdict(_QUERY_NAME_CAUSE, index)
-    scheme_end = text.find("://")
-    if scheme_end >= 0:
-        authority_start = scheme_end + 3
+    undecodable = _first_undecodable(text)
+    if undecodable is not None:
+        return _TargetVerdict(_QUERY_NAME_CAUSE, undecodable)
+    authority_start = _leading_authority_start(text)
+    if authority_start is not None:
         authority_end = len(text)
         for marker in "/?":
             found = text.find(marker, authority_start)
@@ -1192,6 +1237,25 @@ def _judge_request_target(text: str) -> _TargetVerdict:
     return _TargetVerdict(None, names=tuple(name for _o, name, _v in pairs))
 
 
+def _leading_authority_start(text: str) -> Optional[int]:
+    """Where the target's LEADING authority starts, or ``None`` (r7-02).
+
+    Only a ``scheme://`` AT THE START (RFC 3986 scheme characters) or a
+    scheme-relative ``//`` at the start of a path opens an authority; a
+    ``://`` later in a path is path data (``/v1/tags://alice@example.org``)."""
+    if text.startswith("//"):
+        return 2
+    marker = text.find("://")
+    if marker <= 0:
+        return None
+    scheme = text[:marker]
+    if not scheme[0].isascii() or not scheme[0].isalpha():
+        return None
+    if all(char.isascii() and (char.isalnum() or char in "+-.") for char in scheme):
+        return marker + 3
+    return None
+
+
 def _userinfo_cause(value: str) -> Optional[str]:
     """The PER-FIELD userinfo check (a field's own authority, before joining)."""
     from urllib.parse import urlsplit
@@ -1227,11 +1291,16 @@ def _breaches(rule: str, value: _Any, owner: _Any) -> Optional[str]:
             return None  # a watermark-sourced name is recorded, never emitted
         return None if text in LITERAL_QUERY_NAMES_V2 else _QUERY_NAME_CAUSE
     if rule == "named_literal":
-        # The SAME value grammar as an inline value (QA r8-02), then the builder.
-        if _query_value_violation(text) is not None or _decoded(text) is None:
-            return _QUERY_NAME_CAUSE
         name = str(getattr(owner, "name", "") or "").strip()
-        return _PLAINTEXT_SECRET_CAUSE if _value_is_secret(name, text) else None
+        if getattr(owner, "value_source", None) == "literal":
+            # The SAME value grammar as an inline value (QA r8-02) — only for a
+            # value that is EMITTED (r7-04) — then the builder.
+            if _query_value_violation(text) is not None or _decoded(text) is None:
+                return _QUERY_NAME_CAUSE
+            return _PLAINTEXT_SECRET_CAUSE if _value_is_secret(name, text) else None
+        # A watermark-sourced parameter's literal_value is never emitted, so no
+        # grammar applies; the builder's secret check still does, as before B9.
+        return _PLAINTEXT_SECRET_CAUSE if _rest_query_value_is_secret(name, text) else None
     return _PLAINTEXT_SECRET_CAUSE  # an unknown rule fails closed
 
 
@@ -1618,8 +1687,9 @@ def _check_request_targets_v2(
 ) -> None:
     """Judge each target's EFFECTIVE request target (QA r8-01): the connection
     URL joined with the operation path, exactly as emitted (authority-stripped
-    material; a selected create-mode base's ``base_url`` as written). A reused
-    connection's URL is not in hand, so its path is judged alone.
+    material; a selected create-mode base's ``base_url`` as written), AFTER
+    each stored field is judged on its own (r7-01). A reused connection's URL
+    is not in hand, so its path is judged alone.
 
     The refusal points at the field that CONTRIBUTES the offending text: the
     path when the offset falls in the path's portion, else the base URL (or,
@@ -1636,6 +1706,17 @@ def _check_request_targets_v2(
             base_field = f"/raw_input/targets/{index}/connection_key"
         else:
             base_url, base_field = "", base_pointer + "/operation/path"
+        # r7-01: every PERSISTED field is judged on its own first — the stored
+        # base_url (material or selected base) and the stored path — because
+        # each is written as-is, and appending the path can hide a base value
+        # from the builder's whole-value patterns.
+        if base_url:
+            standalone = _judge_request_target(base_url)
+            if standalone.cause is not None:
+                raise _refusal(standalone.cause, base_field, phase="input")
+        standalone = _judge_request_target(path)
+        if standalone.cause is not None:
+            raise _refusal(standalone.cause, base_pointer + "/operation/path", phase="input")
         names: set = set()
         for joined, path_start in _joined_targets(base_url, path):
             verdict = _judge_request_target(joined)

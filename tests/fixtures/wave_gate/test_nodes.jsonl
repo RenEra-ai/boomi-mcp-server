@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15107, "minimum_collected": 15107, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15123, "minimum_collected": 15123, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15565,3 +15565,19 @@
 {"kind": "test", "id": "pytest-015564", "node_id": "tests/test_recipe_component_material.py::test_an_escaped_separator_is_data_and_is_still_builder_checked", "state": "active"}
 {"kind": "test", "id": "pytest-015565", "node_id": "tests/test_recipe_component_material.py::test_the_parity_corpus_meets_the_grammar", "state": "active"}
 {"kind": "test", "id": "pytest-015566", "node_id": "tests/test_recipe_component_material.py::test_the_served_text_states_the_grammar", "state": "active"}
+{"kind": "test", "id": "pytest-015567", "node_id": "tests/test_recipe_component_material.py::test_a_secret_value_in_a_stored_base_url_query_is_refused_standalone[material_base_url]", "state": "active"}
+{"kind": "test", "id": "pytest-015568", "node_id": "tests/test_recipe_component_material.py::test_a_secret_value_in_a_stored_base_url_query_is_refused_standalone[selected_base_url]", "state": "active"}
+{"kind": "test", "id": "pytest-015569", "node_id": "tests/test_recipe_component_material.py::test_a_clean_base_url_query_still_plans_with_its_path", "state": "active"}
+{"kind": "test", "id": "pytest-015570", "node_id": "tests/test_recipe_component_material.py::test_a_scheme_like_text_inside_a_path_is_path_data[reuse]", "state": "active"}
+{"kind": "test", "id": "pytest-015571", "node_id": "tests/test_recipe_component_material.py::test_a_scheme_like_text_inside_a_path_is_path_data[create]", "state": "active"}
+{"kind": "test", "id": "pytest-015572", "node_id": "tests/test_recipe_component_material.py::test_userinfo_in_a_leading_authority_of_a_reused_path_is_refused[scheme_relative]", "state": "active"}
+{"kind": "test", "id": "pytest-015573", "node_id": "tests/test_recipe_component_material.py::test_userinfo_in_a_leading_authority_of_a_reused_path_is_refused[absolute]", "state": "active"}
+{"kind": "test", "id": "pytest-015574", "node_id": "tests/test_recipe_component_material.py::test_an_escape_that_is_not_strict_utf8_is_refused[inline-%FF]", "state": "active"}
+{"kind": "test", "id": "pytest-015575", "node_id": "tests/test_recipe_component_material.py::test_an_escape_that_is_not_strict_utf8_is_refused[inline-%C3]", "state": "active"}
+{"kind": "test", "id": "pytest-015576", "node_id": "tests/test_recipe_component_material.py::test_an_escape_that_is_not_strict_utf8_is_refused[structured-%FF]", "state": "active"}
+{"kind": "test", "id": "pytest-015577", "node_id": "tests/test_recipe_component_material.py::test_an_escape_that_is_not_strict_utf8_is_refused[structured-%E2%82]", "state": "active"}
+{"kind": "test", "id": "pytest-015578", "node_id": "tests/test_recipe_component_material.py::test_a_valid_multibyte_escape_is_admitted", "state": "active"}
+{"kind": "test", "id": "pytest-015579", "node_id": "tests/test_recipe_component_material.py::test_a_watermark_parameters_unused_literal_value_is_not_judged_by_the_grammar", "state": "active"}
+{"kind": "test", "id": "pytest-015580", "node_id": "tests/test_recipe_component_material.py::test_an_undecodable_escape_is_pointed_at_the_field_that_holds_it[bad_escape_in_the_path_portion]", "state": "active"}
+{"kind": "test", "id": "pytest-015581", "node_id": "tests/test_recipe_component_material.py::test_an_undecodable_escape_is_pointed_at_the_field_that_holds_it[bad_escape_in_the_base_portion]", "state": "active"}
+{"kind": "test", "id": "pytest-015582", "node_id": "tests/test_recipe_component_material.py::test_the_bad_escape_offset_is_the_escape_itself", "state": "active"}

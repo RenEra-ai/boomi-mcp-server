@@ -1767,8 +1767,10 @@ def test_a_structured_literal_value_outside_the_grammar_is_refused(value):
 @pytest.mark.parametrize(
     "base_url, path, pointer_suffix",
     [
+        # r7-01: the STORED base_url is judged on its own first; a bare trailing
+        # '?' is an empty query, so the base (not the path) is refused.
         pytest.param(
-            "https://billing.example.invalid/v1/orders?", "K=S", "/operation/path",
+            "https://billing.example.invalid/v1/orders?", "K=S", "/connection/base_url",
             id="base_ends_with_question_mark",
         ),
         pytest.param(
@@ -1794,7 +1796,8 @@ def test_a_pair_split_across_base_url_and_path_is_refused(base_url, path, pointe
     [
         pytest.param(
             "https://billing.example.invalid/v1/orders?", "K=S",
-            _M + "/operation/path", id="selected_base_ends_with_question_mark",
+            "/intent/invocations/0/raw_input/targets/1/connection_key",
+            id="selected_base_ends_with_question_mark",
         ),
         pytest.param(
             "https://billing.example.invalid/?limit=1", "&K=S",
@@ -1909,6 +1912,15 @@ def test_the_served_text_states_the_grammar():
 
     sentence = fanout.QUERY_GRAMMAR_SENTENCE_V2
     assert " ".join(fanout._QUERY_VALUE_EXTRA) in sentence
+    # QA-159-S1-r9-01 (live: the platform sent `?limit=5&filter=a%2526b`): the
+    # sentence states BOTH sending behaviours.
+    assert "an inline query value (in base_url or path) is sent as written" in sentence
+    assert "the server decodes its escapes" in sentence
+    assert "a structured literal value is percent-encoded by the platform" in sentence
+    assert "a %XX in a structured value is sent as those literal characters" in sentence
+    # The text must not invite a value the grammar refuses (raw space, &, ;, +).
+    assert "unescaped" not in sentence
+    assert "still limited to the value alphabet" in sentence
     for field in (
         fanout.FanoutQueryParameterV2.model_fields["literal_value"],
         fanout.FanoutRestOperationMaterialV2.model_fields["path"],
@@ -1916,3 +1928,154 @@ def test_the_served_text_states_the_grammar():
     ):
         assert sentence in field.description
     assert json.dumps(sentence)[1:-1] in json.dumps(authoring_workflow_contract())
+
+
+# ---------------------------------------------------------------------------
+# B10: Codex r7 — standalone fields, leading authority, strict UTF-8 escapes,
+# watermark literal values, escape pointers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arm", ["material_base_url", "selected_base_url"])
+def test_a_secret_value_in_a_stored_base_url_query_is_refused_standalone(arm):
+    """r7-01: ``?filter=<JWT>`` on the base is persisted as-is; joined with the
+    path the value would read ``<JWT>/v1/billing`` and escape the builder's
+    whole-value pattern, so the stored field is judged on its own."""
+    from boomi_mcp.recipes.builtins import fanout
+
+    base = "https://billing.example.invalid/?filter=" + _JWT
+    path = "/v1/bill.ing"  # a '.' after the JWT breaks the builder's whole-value pattern
+    # Non-vacuity: the JOINED targets alone would pass.
+    for joined, _start in fanout._joined_targets(base, path):
+        assert fanout._judge_request_target(joined).cause is None
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] = path
+    if arm == "material_base_url":
+        material["targets"][1]["connection"]["base_url"] = base
+        request, pointer = recipe_request(raw, material), _M + "/connection/base_url"
+    else:
+        request = _bind_selected_base(raw, material, base)
+        pointer = "/intent/invocations/0/raw_input/targets/1/connection_key"
+    _refused(request, pointer, "PLAINTEXT_SECRET_REJECTED", absent=(_JWT,))
+
+
+def test_a_clean_base_url_query_still_plans_with_its_path():
+    raw, material = flagship_v2()
+    material["targets"][1]["connection"]["base_url"] = "https://billing.example.invalid/?filter=active"
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+@pytest.mark.parametrize("binding", ["reuse", "create"])
+def test_a_scheme_like_text_inside_a_path_is_path_data(binding):
+    """r7-02: ``://`` later in a path opens no authority, so its ``@`` is data."""
+    raw, material = flagship_v2()
+    if binding == "reuse":
+        raw["targets"][1]["binding_mode"] = "reuse"
+        material["targets"][1]["connection"] = {"mode": "reuse", "component_id": "rest-id"}
+    material["targets"][1]["operation"]["path"] = "/v1/tags://alice@example.org"
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("//alice:" + _VALUE_CANARY + "@evil.example.invalid/x", id="scheme_relative"),
+        pytest.param("https://alice:" + _VALUE_CANARY + "@evil.example.invalid/x", id="absolute"),
+    ],
+)
+def test_userinfo_in_a_leading_authority_of_a_reused_path_is_refused(path):
+    raw, material = flagship_v2()
+    raw["targets"][1]["binding_mode"] = "reuse"
+    material["targets"][1]["connection"] = {"mode": "reuse", "component_id": "rest-id"}
+    material["targets"][1]["operation"]["path"] = path
+    _refused(
+        recipe_request(raw, material), _M + "/operation/path", "PLAINTEXT_SECRET_REJECTED",
+        absent=(_VALUE_CANARY,),
+    )
+
+
+@pytest.mark.parametrize(
+    "arm, escape",
+    [
+        ("inline", "%FF"), ("inline", "%C3"), ("structured", "%FF"), ("structured", "%E2%82"),
+    ],
+)
+def test_an_escape_that_is_not_strict_utf8_is_refused(arm, escape):
+    """r7-03: escapes must decode as strict UTF-8 — and the served sentence
+    says so, rendered from the constants the decoder uses."""
+    from boomi_mcp.recipes.builtins import fanout
+
+    raw, material = flagship_v2()
+    if arm == "inline":
+        material["targets"][1]["operation"]["path"] += "?limit=a" + escape
+        pointer = _M + "/operation/path"
+    else:
+        material["targets"][1]["operation"]["query_parameters"] = [
+            {"name": "limit", "value_source": "literal", "literal_value": "a" + escape}
+        ]
+        pointer = _M + "/operation/query_parameters/0/literal_value"
+    _refused(recipe_request(raw, material), pointer, QUERY_NAME_CAUSE)
+    rule = "decode as {0} {1}".format(fanout._ESCAPE_ERRORS, fanout._ESCAPE_ENCODING.upper())
+    assert rule in fanout.QUERY_GRAMMAR_SENTENCE_V2
+
+
+def test_a_valid_multibyte_escape_is_admitted():
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += "?filter=caf%C3%A9"
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+def test_a_watermark_parameters_unused_literal_value_is_not_judged_by_the_grammar():
+    """r7-04: a watermark-sourced literal_value is never emitted, so the value
+    grammar does not apply (``last month`` has a space); the builder's secret
+    check still does, as it did before B9."""
+    raw, material = flagship_v2()
+    raw["watermark"] = {"field": "source_a", "kind": "timestamp", "query_parameter_refs": ["since"]}
+    material["targets"][0]["operation"]["query_parameters"] = [
+        {"name": "since", "value_source": "watermark", "literal_value": "last month"}
+    ]
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+    material["targets"][0]["operation"]["query_parameters"] = [
+        {"name": "since", "value_source": "watermark", "literal_value": "Bearer " + _VALUE_CANARY}
+    ]
+    _refused(
+        recipe_request(raw, material),
+        "/intent/invocations/0/component_material/targets/0/operation/query_parameters/0/literal_value",
+        "PLAINTEXT_SECRET_REJECTED",
+        absent=(_VALUE_CANARY,),
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url, path, pointer_suffix",
+    [
+        pytest.param(
+            "https://billing.example.invalid/?filter=a", "%FF", "/operation/path",
+            id="bad_escape_in_the_path_portion",
+        ),
+        pytest.param(
+            "https://billing.example.invalid/?filter=a%FF", "/v1/billing", "/connection/base_url",
+            id="bad_escape_in_the_base_portion",
+        ),
+    ],
+)
+def test_an_undecodable_escape_is_pointed_at_the_field_that_holds_it(base_url, path, pointer_suffix):
+    """r7-05: the offset of the bad escape itself decides the pointer."""
+    raw, material = flagship_v2()
+    material["targets"][1]["connection"]["base_url"] = base_url
+    material["targets"][1]["operation"]["path"] = path
+    _refused(recipe_request(raw, material), _M + pointer_suffix, QUERY_NAME_CAUSE)
+
+
+def test_the_bad_escape_offset_is_the_escape_itself():
+    from boomi_mcp.recipes.builtins import fanout
+
+    text = "https://h.example.invalid/?filter=a" + "%FF"
+    verdict = fanout._judge_request_target(text)
+    assert verdict.offset == len(text) - 3
+    assert fanout._first_undecodable("ab%C3%A9%FFx") == 8
+    assert fanout._first_undecodable("x%C3%A9") is None
