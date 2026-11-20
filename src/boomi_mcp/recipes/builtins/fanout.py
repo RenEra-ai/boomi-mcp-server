@@ -429,6 +429,8 @@ def _reserved_prefixes_v2() -> frozenset:
 #: components. Pinned against the frozen flagship oracle and the legacy arm's
 #: root by the v2 witness tests.
 _MAP_LABEL_V2 = "Shared transform"
+#: The served transform flow row's default name (the legacy DB-source sync row).
+_TRANSFORM_ROW_NAME_V2 = "Map source to JSON payload"
 _BRANCH_LABEL_V2 = "Fan out"
 _STAGE_LABEL_V2 = "Stage mapped documents"
 _CONSUME_LABEL_V2 = "Consume staged documents"
@@ -494,8 +496,19 @@ class FanoutTransformV2(RecipeInputBase):
     """The shared transform part."""
 
     part_key: RecipeSemanticId
-    #: The label of the composed root's ``map_ref`` step.
-    map_label: Optional[str] = Field(default=None, min_length=1)
+    #: The NAME of the served transform flow row. The composed root's
+    #: ``map_ref`` step label is the legacy constant (``_MAP_LABEL_V2``) and is
+    #: not an input: the legacy composition fixed it, and a name that also moved
+    #: the step made the legacy step-label/row-name pair unreachable.
+    map_label: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The name of the served transform flow row. Defaults to the legacy "
+            "row name. The process map step's label is fixed and is not set by "
+            "this field."
+        ),
+    )
 
 
 class FanoutTargetV2(RecipeInputBase):
@@ -1433,6 +1446,7 @@ def _projection_facts_v2(
         ),
         source_connection_key=keys.db_connection,
         source_operation_key=keys.db_get_operation,
+        transform_row_name=inp.transform.map_label or _TRANSFORM_ROW_NAME_V2,
         targets=tuple(
             RecipeTargetFactV1(
                 part_key=target.part_key,
@@ -1805,7 +1819,7 @@ def _root_v2(inp: ComposeDbRestFanoutInputV2, keys: _FanoutKeysV2) -> ProcessIRV
                     {
                         "kind": "map_ref",
                         "map_ref": f"$ref:{keys.transform_map}",
-                        "label": inp.transform.map_label or _MAP_LABEL_V2,
+                        "label": _MAP_LABEL_V2,
                     },
                     {"kind": "branch", "label": _BRANCH_LABEL_V2, "legs": legs},
                 ],

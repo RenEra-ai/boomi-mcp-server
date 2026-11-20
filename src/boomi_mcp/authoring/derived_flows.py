@@ -871,6 +871,10 @@ def _route_projection(unit, by_key, metadata, facts, transform_rows, watermarked
         return None
 
     transform_rows = [_with_hints(row, facts) for row in transform_rows]
+    if getattr(facts, "transform_row_name", None):
+        transform_rows = [
+            row.model_copy(update={"name": facts.transform_row_name}) for row in transform_rows
+        ]
     transform_key = transform_rows[0].key if transform_rows else "transform"
     has_catch = any(
         getattr(node, "kind", None) == "try_catch" for node in _walk_nodes(unit.process_ir)

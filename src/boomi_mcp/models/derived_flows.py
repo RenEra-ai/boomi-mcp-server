@@ -34,7 +34,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Literal, Mapping, Optional, Tuple, Union, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_serializer,
+    model_validator,
+)
 
 NonEmptyString = Annotated[str, StringConstraints(min_length=1)]
 
@@ -350,7 +357,26 @@ DERIVED_FLOW_OPERATIONS: Tuple[str, ...] = tuple(
 # ---------------------------------------------------------------------------
 
 
-class DerivedEndpointRowV1(_DerivedFlowModel):
+class _OmitUnsetModel(_DerivedFlowModel):
+    """A served row whose UNSET keys are omitted from the wire (C8).
+
+    The legacy composition producer wrote a key only when it had a value to
+    say, so its served dicts omit what this model leaves unset. A key a
+    projector sets — even to an explicit ``None`` — is served; one it never
+    sets is not. The rule is the model's own set/unset state, not a key list,
+    so a field added later follows it without an edit here."""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for name in tuple(data):
+                if name in type(self).model_fields and name not in self.model_fields_set:
+                    data.pop(name)
+        return data
+
+
+class DerivedEndpointRowV1(_OmitUnsetModel):
     """One endpoint of a recipe-assembled route, read off its connection component.
 
     A created connection serves its classification (``driver`` and ``auth_mode``
@@ -370,12 +396,12 @@ class DerivedEndpointRowV1(_DerivedFlowModel):
     component_name: Optional[str] = None
 
 
-class DerivedCompositionPartV1(_DerivedFlowModel):
+class DerivedCompositionPartV1(_OmitUnsetModel):
     key: NonEmptyString
     kind: Literal["db_source", "transform", "rest_target"]
 
 
-class DerivedFanoutLegV1(_DerivedFlowModel):
+class DerivedFanoutLegV1(_OmitUnsetModel):
     """One non-first fan-out target, at its ACTUAL Branch leg position."""
 
     part_key: NonEmptyString
@@ -386,7 +412,7 @@ class DerivedFanoutLegV1(_DerivedFlowModel):
     handoff: Optional[Literal["document_stream", "document_cache"]] = None
 
 
-class DerivedCompositionSummaryV1(_DerivedFlowModel):
+class DerivedCompositionSummaryV1(_OmitUnsetModel):
     """The composition's value-free topology summary, derived from the root."""
 
     topology: NonEmptyString
@@ -452,6 +478,9 @@ class RecipeUnitProjectionFactsV1(_DerivedFlowModel):
     parts: Tuple[DerivedCompositionPartV1, ...]
     source_connection_key: NonEmptyString
     source_operation_key: NonEmptyString
+    #: The NAME the transform row is served under. The row's name is the
+    #: route's to set: the process step's label is a separate, fixed fact.
+    transform_row_name: Optional[NonEmptyString] = None
     targets: Tuple[RecipeTargetFactV1, ...] = Field(min_length=1)
     documentation_hints: Tuple[RecipeOperationHintV1, ...] = ()
 

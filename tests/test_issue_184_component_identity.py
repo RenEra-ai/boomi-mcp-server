@@ -514,7 +514,7 @@ def test_two_updates_of_one_cache_are_refused_on_every_route(second_id):
 
     # The recipe engine: one recipe diagnostic per writing spec.
     with pytest.raises(RecipeError) as recipe:
-        engine._compile_processes(composed=type("C", (), {"process_roots": ()})(),
+        engine._compile_processes(composed=type("C", (), {"process_roots": (), "process_units": ()})(),
                                   components=components, connector_metadata={}, resolver=None)
     assert [(item.target, item.cause_codes) for item in recipe.value.diagnostics] == [
         ("u1", (_CONFLICT,)), ("u2", (_CONFLICT,))]

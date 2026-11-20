@@ -2934,7 +2934,7 @@ def test_the_recipe_boundary_translates_an_identity_refusal(monkeypatch):
         _refuse,
     )
 
-    composed = type("C", (), {"process_roots": ()})()
+    composed = type("C", (), {"process_roots": (), "process_units": ()})()
     with pytest.raises(RecipeError) as raised:
         engine._compile_processes(
             composed=composed, components=(), connector_metadata={}, resolver=None,

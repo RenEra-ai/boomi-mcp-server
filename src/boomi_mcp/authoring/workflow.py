@@ -618,7 +618,7 @@ def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkf
 
 
 def _declared_material_segments(model: Any) -> frozenset:
-    """Every field name and discriminator tag the material model DECLARES.
+    """Every field name the material model DECLARES (discriminator tags excluded).
 
     A pointer segment outside this set was authored by the caller — an unknown
     key, say — and a key name is caller content like any other value."""
@@ -633,9 +633,6 @@ def _declared_material_segments(model: Any) -> frozenset:
             properties = node.get("properties")
             if isinstance(properties, Mapping):
                 names.update(str(key) for key in properties)
-            mapping = (node.get("discriminator") or {}).get("mapping")
-            if isinstance(mapping, Mapping):
-                names.update(str(key) for key in mapping)
             for value in node.values():
                 walk(value)
         elif isinstance(node, (list, tuple)):
@@ -646,43 +643,89 @@ def _declared_material_segments(model: Any) -> frozenset:
     return frozenset(names)
 
 
+def _request_segments(model: Any, loc: Sequence[Any]) -> Tuple[str, ...]:
+    """The REQUEST path a pydantic ``loc`` addresses, walked against the schema.
+
+    pydantic inserts the variant tag of a discriminated union (``create``,
+    ``reuse``) into ``loc``; the tag is a schema fact, not a request key, so it
+    is dropped. A segment that is neither a declared property, an array index
+    into a declared array, nor a declared tag was authored by the caller: the
+    walk stops BEFORE it, so an unknown key's name is never served."""
+    try:
+        schema = model.model_json_schema()
+    except Exception:  # noqa: BLE001 — an empty path truncates the pointer, safely
+        return ()
+    defs = schema.get("$defs") or {}
+
+    def flatten(node: Any) -> List[Mapping]:
+        while isinstance(node, Mapping) and "$ref" in node:
+            node = defs.get(str(node["$ref"]).rsplit("/", 1)[-1], {})
+        if not isinstance(node, Mapping):
+            return []
+        if "discriminator" in node:
+            return [node]
+        members = [m for key in ("anyOf", "oneOf", "allOf") for m in (node.get(key) or ())]
+        if members:
+            return [n for member in members for n in flatten(member)]
+        return [node]
+
+    current = flatten(schema)
+    kept: List[str] = []
+    for part in loc:
+        segment = str(part)
+        if segment.startswith("function-"):
+            continue
+        following: List[Mapping] = []
+        is_tag = False
+        for node in current:
+            mapping = (node.get("discriminator") or {}).get("mapping") or {}
+            if segment in mapping:
+                is_tag = True
+                following.extend(flatten({"$ref": mapping[segment]}))
+            elif segment.isdigit() and node.get("items") is not None:
+                following.extend(flatten(node["items"]))
+            elif segment in (node.get("properties") or {}):
+                following.extend(flatten(node["properties"][segment]))
+        if not following:
+            break
+        if not is_tag:
+            kept.append(segment)
+        current = following
+    return tuple(kept)
+
+
 def _material_pointer(error: Any, model: Any) -> str:
     """A JSON pointer for a material validation failure — DECLARED structure only.
 
     Built from the error's ``loc`` (or, for a retired spelling, the refusal's own
     structural path) and TRUNCATED at the first segment the material model does
     not declare: an unknown key's NAME is caller content and is never served.
+    Union variant tags pydantic puts in ``loc`` are not request locations and
+    are dropped, so the pointer resolves against the request.
     The error's ``input`` and message are never read. A truncated pointer still
     names the closest declared object, so the caller can find the offender.
     """
     from ..models.governance_intent import RETIRED_SPELLINGS
 
-    segments: Tuple[str, ...] = ()
-    vocabulary = frozenset()
     try:
         errors = error.errors(include_input=False, include_url=False)
-        if errors:
-            first = errors[0]
-            retired = (first.get("ctx") or {}).get("path")
-            if first.get("type") == "governance_retired_spelling" and isinstance(retired, str):
-                segments = tuple(part for part in retired.split("/") if part)
-                # A retired spelling is a server-published name, not caller
-                # content, so the pointer may end ON it.
-                vocabulary = frozenset(RETIRED_SPELLINGS)
-            else:
-                segments = tuple(
-                    str(part)
-                    for part in first.get("loc", ())
-                    if not str(part).startswith("function-")
-                )
+        first = errors[0] if errors else None
+        if first is None:
+            return "/component_material"
+        retired = (first.get("ctx") or {}).get("path")
+        if first.get("type") == "governance_retired_spelling" and isinstance(retired, str):
+            # A retired spelling is a server-published name, not caller
+            # content, so the pointer may end ON it.
+            declared = _declared_material_segments(model) | frozenset(RETIRED_SPELLINGS)
+            kept: List[str] = []
+            for segment in (part for part in retired.split("/") if part):
+                if not (segment.isdigit() or segment in declared):
+                    break
+                kept.append(segment)
+        else:
+            kept = list(_request_segments(model, first.get("loc", ())))
     except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
-        segments = ()
-    declared = _declared_material_segments(model) | vocabulary
-    kept: List[str] = []
-    for segment in segments:
-        if not (segment.isdigit() or segment in declared):
-            break
-        kept.append(segment)
+        kept = []
     return "/component_material" + "".join("/" + part for part in kept)
 
 

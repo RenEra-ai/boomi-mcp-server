@@ -870,3 +870,120 @@ def test_a_builder_refusal_is_value_free_and_pointed():
     assert diagnostic.code == RECIPE_CONSTRAINT_FAILED
     assert diagnostic.cause_codes == ("MISSING_DB_QUERY",)
     assert diagnostic.path == "/component_material/source"
+
+
+# ---------------------------------------------------------------------------
+# QA-159-S1-r1: the SERVED wire omits what the legacy producer omits (C8), and
+# the process step label / transform row name are independently reachable
+# ---------------------------------------------------------------------------
+
+
+def _served_plan(raw, material):
+    """The envelope ``build_integration(action='plan')`` serves — the tool dump."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    payload = {
+        "contract_version": "2",
+        "intent": {
+            "intent_kind": "recipe",
+            "integration_name": "r1 wire",
+            "invocations": [
+                {
+                    "recipe_id": RECIPE_ID,
+                    "recipe_version": V2,
+                    "invocation_id": "fanout",
+                    "raw_input": raw,
+                    "component_material": material,
+                }
+            ],
+        },
+    }
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": payload}
+        )
+    assert envelope["_success"] is True, envelope.get("error")
+    return envelope["authoring_result"]["integration_spec_preview"]
+
+
+def test_the_served_wire_omits_the_keys_the_legacy_producer_omits():
+    """Compared on the SERVED dump (never an ``exclude_unset`` projection, which
+    the tool does not serve): exact key sets, and the full rows, against the
+    frozen legacy oracle."""
+    raw, material = flagship_v2()
+    preview = _served_plan(raw, material)
+    legacy = oracle()["integration_spec"]
+    (summary,) = preview["composition_summaries"].values()
+    expected = legacy["validation_rules"]["composition"]
+    assert set(summary) == set(expected)
+    assert [set(leg) for leg in summary["fanout_legs"]] == [
+        set(leg) for leg in expected["fanout_legs"]
+    ]
+    assert summary == expected
+    assert preview["endpoints"] == legacy["endpoints"]
+    assert [set(row) for row in preview["endpoints"]] == [set(row) for row in legacy["endpoints"]]
+    # No explicit null survives on the new surfaces unless the projector set it.
+    assert not [
+        key
+        for row in (*preview["endpoints"], summary, *summary["fanout_legs"])
+        for key, value in row.items()
+        if value is None
+    ]
+
+
+def test_the_omission_follows_the_models_set_state_not_a_key_list():
+    from boomi_mcp.models.derived_flows import DerivedEndpointRowV1, DerivedFanoutLegV1
+
+    base = dict(key="k", type="rest", direction="target", binding_mode="create")
+    assert "method" not in DerivedEndpointRowV1(**base).model_dump(mode="json")
+    # Non-vacuity: the same key, SET to None, is served as null.
+    assert DerivedEndpointRowV1(**base, method=None).model_dump(mode="json")["method"] is None
+    leg = dict(part_key="p", leg=2, binding_mode="reuse")
+    assert "handoff" not in DerivedFanoutLegV1(**leg).model_dump(mode="json")
+    assert DerivedFanoutLegV1(**leg, handoff="document_cache").model_dump(mode="json")[
+        "handoff"
+    ] == "document_cache"
+    # A round trip through the served wire keeps the unset keys unset.
+    served = DerivedEndpointRowV1(**base).model_dump(mode="json")
+    assert DerivedEndpointRowV1.model_validate(served).model_dump(mode="json") == served
+
+
+def test_the_step_label_and_the_row_name_are_pinned_to_the_legacy_pair():
+    (legacy_process,) = [
+        c for c in oracle()["integration_spec"]["components"] if c["type"] == "process"
+    ]
+    step_labels = {
+        step["label"]
+        for step in legacy_process["config"]["flow_sequence"]
+        if step.get("kind") == "map_ref"
+    }
+    assert step_labels == {fanout._MAP_LABEL_V2}
+    (legacy_row,) = [f for f in oracle()["integration_spec"]["flows"] if f["key"] == "transform"]
+    assert legacy_row["name"] == fanout._TRANSFORM_ROW_NAME_V2
+
+
+def _served_pair(raw, material):
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    preview = _served_plan(raw, material)
+    (row,) = [f for f in preview["flows"] if f["key"] == "transform"]
+    result, internals = compile_authoring_request_v1(recipe_request(raw, material), profile="p")
+    (process,) = internals.normalized.integration_spec.processes
+    (step,) = [s for s in process.process_ir.body.steps if s.kind == "map_ref"]
+    return step.label, row["name"]
+
+
+def test_one_request_reproduces_both_the_legacy_step_label_and_row_name():
+    legacy_step = fanout._MAP_LABEL_V2
+    legacy_row = oracle()["integration_spec"]["flows"][1]["name"]
+    raw, material = flagship_v2()
+    # Defaults reach the legacy pair.
+    assert _served_pair(raw, material) == (legacy_step, legacy_row)
+    # A custom name moves ONLY the row; the step label stays the legacy constant.
+    raw["transform"]["map_label"] = "Custom row name"
+    assert _served_pair(raw, material) == (legacy_step, "Custom row name")
+    # The frozen #157 spelling reproduces the legacy pair explicitly.
+    raw["transform"]["map_label"] = legacy_row
+    assert _served_pair(raw, material) == (legacy_step, legacy_row)

@@ -151,7 +151,7 @@ def test_material_is_required_by_a_registration_that_declares_it():
             lambda m: m["source"]["connection"].update(smuggled="x"),
             # Truncated at the last DECLARED segment: the unknown key's name is
             # caller content and is never served.
-            "/intent/invocations/0/component_material/source/connection/create",
+            "/intent/invocations/0/component_material/source/connection",
             None,
             id="unknown_key",
         ),
@@ -186,6 +186,70 @@ def test_the_material_model_is_closed_and_strict(edit, pointer, extra_cause):
     assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
     if extra_cause is not None:
         assert extra_cause in diagnostic.cause_codes
+
+
+def _resolves(request_payload, pointer):
+    """True when the JSON pointer addresses a real location of the request."""
+    node = request_payload
+    for part in pointer.split("/")[1:]:
+        if isinstance(node, list):
+            node = node[int(part)]
+        else:
+            node = node[part]
+    return True
+
+
+@pytest.mark.parametrize(
+    "edit, pointer",
+    [
+        pytest.param(
+            lambda m: m["source"]["connection"].update(port="not-a-port"),
+            "/intent/invocations/0/component_material/source/connection/port",
+            id="create_variant_field",
+        ),
+        pytest.param(
+            lambda m: m["source"]["connection"].update(smuggled="x"),
+            "/intent/invocations/0/component_material/source/connection",
+            id="create_variant_unknown_key",
+        ),
+        pytest.param(
+            lambda m: m["targets"][0]["connection"].update(base_url=7),
+            "/intent/invocations/0/component_material/targets/0/connection/base_url",
+            id="rest_create_variant_field",
+        ),
+        pytest.param(
+            lambda m: m["targets"][0]["operation"].update(path=7),
+            "/intent/invocations/0/component_material/targets/0/operation/path",
+            id="no_tag_control",
+        ),
+    ],
+)
+def test_a_material_pointer_addresses_a_real_request_location(edit, pointer):
+    raw, material = flagship_v2()
+    edit(material)
+    request = recipe_request(raw, material)
+    (diagnostic,) = _blocked(request)
+    assert diagnostic.path == pointer
+    assert _resolves(request.model_dump(mode="json"), diagnostic.path)
+    assert "/create" not in diagnostic.path and "/reuse" not in diagnostic.path
+
+
+def test_a_reuse_variant_error_drops_the_tag_and_keeps_declared_fields():
+    raw, material = flagship_v2()
+    reuse = next(
+        (t for t in material["targets"] if t["connection"].get("mode") == "reuse"), None
+    )
+    if reuse is None:
+        reuse = material["targets"][0]
+        reuse["connection"] = {"mode": "reuse", "component_id": "x", "component_name": "n"}
+    reuse["connection"]["component_id"] = 7
+    index = material["targets"].index(reuse)
+    request = recipe_request(raw, material)
+    (diagnostic,) = _blocked(request)
+    assert diagnostic.path == (
+        f"/intent/invocations/0/component_material/targets/{index}/connection/component_id"
+    )
+    assert _resolves(request.model_dump(mode="json"), diagnostic.path)
 
 
 def test_a_forbidden_raw_input_key_is_pointed_into_the_invocations_raw_input():
