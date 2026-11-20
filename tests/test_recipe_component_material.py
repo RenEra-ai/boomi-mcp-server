@@ -253,11 +253,90 @@ def test_a_reuse_variant_error_drops_the_tag_and_keeps_declared_fields():
 
 
 def test_a_forbidden_raw_input_key_is_pointed_into_the_invocations_raw_input():
+    """The forbidden key is the caller's own key, so since CDX-r1-03 the pointer
+    stops at its nearest DECLARED parent (it used to end ON the key)."""
     raw, material = flagship_v2()
     raw["source"]["host"] = "x"
     (diagnostic,) = _blocked(recipe_request(raw, material))
-    assert diagnostic.path == "/intent/invocations/0/raw_input/source/host"
+    assert diagnostic.path == "/intent/invocations/0/raw_input/source"
     assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-03: a scan pointer never serves a caller-authored key name
+# ---------------------------------------------------------------------------
+
+_KEY_CANARY = "hunter2c4f1"
+
+
+@pytest.mark.parametrize(
+    "edit, owner",
+    [
+        pytest.param(
+            lambda raw: raw["source"].update({"password_" + _KEY_CANARY: "x"}),
+            "source",
+            id="secret_shaped_key",
+        ),
+        pytest.param(
+            lambda raw: raw["source"].update({"wrap_" + _KEY_CANARY: {"api_key": "v"}}),
+            "source",
+            id="forbidden_key_under_an_undeclared_caller_key",
+        ),
+        pytest.param(
+            lambda raw: raw["targets"][1].update({"token_" + _KEY_CANARY: "x"}),
+            "targets/1",
+            id="inside_a_declared_array_item",
+        ),
+    ],
+)
+def test_a_secret_shaped_raw_input_key_is_pointed_at_its_declared_parent(edit, owner, caplog):
+    raw, material = flagship_v2()
+    edit(raw)
+    caplog.set_level(logging.DEBUG)
+    request = recipe_request(raw, material)
+    with pytest.raises(AuthoringWorkflowError) as caught:
+        plan_authoring_request_v1(request, profile="p")
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == f"/intent/invocations/0/raw_input/{owner}"
+    assert _resolves(request.model_dump(mode="json"), diagnostic.path)
+    assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
+    served = json.dumps([d.model_dump(mode="json") for d in caught.value.diagnostics])
+    assert _KEY_CANARY not in served
+    assert _KEY_CANARY not in str(caught.value) and _KEY_CANARY not in repr(caught.value)
+    assert _KEY_CANARY not in "\n".join(record.getMessage() for record in caplog.records)
+
+
+def test_the_engine_envelope_the_legacy_route_serves_never_carries_the_key():
+    """``run_recipes`` -> ``recipe_error_envelope`` is what the legacy compose
+    route serves; the walk lives in the engine, so it covers that route too."""
+    from boomi_mcp.recipes.errors import recipe_error_envelope
+
+    raw, _material = flagship_v2()
+    raw["source"]["password_" + _KEY_CANARY] = "x"
+    with pytest.raises(RecipeError) as caught:
+        run_recipes(
+            [RecipeRequestV1(RECIPE_ID, "fanout", raw, V2)],
+            catalog=MaterializationCatalog({}),
+        )
+    envelope = json.dumps(recipe_error_envelope(caught.value))
+    assert [d.path for d in caught.value.diagnostics] == ["/source"]
+    assert _KEY_CANARY not in envelope and _KEY_CANARY not in str(caught.value)
+    # Non-vacuity: the scan DID find the planted key (the walk is what hid it).
+    from boomi_mcp.models.recipe_contributions import scan_forbidden_recipe_shape
+
+    assert _KEY_CANARY in str(scan_forbidden_recipe_shape(raw)[0])
+
+
+def test_a_retired_spelling_under_a_digit_only_caller_key_does_not_serve_the_key():
+    """The retired-spelling branch of the material pointer walks the raw path
+    with the shared walker: a digit-only DICT key is caller content, not an
+    array index (the CDX-r1-03 sweep found the name-blind digit rule)."""
+    raw, material = flagship_v2()
+    material["source"]["connection"]["904417"] = {"jdbc_options": {"a": "b"}}
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/component_material/source/connection"
+    assert "904417" not in diagnostic.model_dump_json()
+    assert GOVERNANCE_RETIRED_SPELLING in diagnostic.cause_codes
 
 
 def test_a_composition_refusal_reaches_the_caller_with_cause_and_pointer():
@@ -788,3 +867,159 @@ def test_a_v1_raw_input_refusal_names_its_invocations_input():
     # The first refusal is the missing required field: a declared location.
     assert diagnostic.path == "/intent/invocations/0/raw_input/version"
     assert "canary_key_5c1e" not in json.dumps(diagnostic.model_dump(mode="json"))
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-01/02: the credential boundary — ONE check, every secret-capable field
+# ---------------------------------------------------------------------------
+
+#: The enumerated secret-capable set (the structural fix's sibling sweep). A
+#: field joins it only with a rule that can REFUSE plaintext there.
+SECRET_CAPABLE_FIELDS = {
+    ("FanoutDbCreateMaterialV2", "credential_ref"),
+    ("FanoutDbCreateMaterialV2", "host"),
+    ("FanoutDbCreateMaterialV2", "database"),
+    ("FanoutRestCreateMaterialV2", "base_url"),
+    ("FanoutRestOperationMaterialV2", "path"),
+    ("FanoutQueryParameterV2", "literal_value"),
+}
+
+
+def _reachable_material_fields():
+    """Every ``(model, field)`` reachable from the material model — DERIVED."""
+    import typing
+
+    from pydantic import BaseModel
+
+    found, seen = set(), set()
+
+    def models_in(annotation):
+        stack, out = [annotation], []
+        while stack:
+            node = stack.pop()
+            if isinstance(node, type) and issubclass(node, BaseModel):
+                out.append(node)
+                continue
+            origin = typing.get_origin(node)
+            if origin is typing.Annotated:
+                stack.append(typing.get_args(node)[0])
+            elif origin is not typing.Literal:
+                stack.extend(typing.get_args(node))
+        return out
+
+    def walk(model):
+        if model in seen:
+            return
+        seen.add(model)
+        for name, field in model.model_fields.items():
+            found.add((model, name))
+            for nested in models_in(field.annotation):
+                walk(nested)
+
+    walk(FanoutComponentMaterialV2)
+    return found
+
+
+def test_the_credential_boundary_classifies_exactly_the_reachable_material_fields():
+    from boomi_mcp.recipes.builtins import fanout
+
+    table = fanout._material_field_classes_v2()
+    assert set(table) == _reachable_material_fields()
+    secret_capable = {(model.__name__, name) for (model, name), rule in table.items() if rule}
+    assert secret_capable == SECRET_CAPABLE_FIELDS
+    assert {rule for rule in table.values() if rule} <= set(fanout._SECRET_RULES)
+
+
+def test_the_credential_boundary_fails_closed_on_an_unclassified_field(monkeypatch):
+    """Non-vacuity of the fail-closed walk: drop ONE entry and a perfectly valid
+    flagship is refused at exactly that field."""
+    from boomi_mcp.recipes.builtins import fanout
+
+    table = dict(fanout._material_field_classes_v2())
+    table.pop((fanout.FanoutDbReadMaterialV2, "sql"))
+    monkeypatch.setattr(fanout, "_material_field_classes_v2", lambda: table)
+    raw, material = flagship_v2()
+    (diagnostic,) = _blocked(recipe_request(raw, material))
+    assert diagnostic.path == "/intent/invocations/0/component_material/source/read/sql"
+    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+
+
+_SECRET_CANARY = "plaintext-5ecret-9b3d"
+
+
+def _plant(field):
+    def edit(material):
+        connection = material["source"]["connection"]
+        if field == "credential_ref":
+            connection["credential_ref"] = _SECRET_CANARY
+        elif field == "host":
+            connection["host"] = "db.example.invalid;password=" + _SECRET_CANARY
+        elif field == "database":
+            connection["database"] = "AppDB;password=" + _SECRET_CANARY
+        elif field == "base_url":
+            material["targets"][1]["connection"]["base_url"] = (
+                "https://svc:" + _SECRET_CANARY + "@billing.example.invalid"
+            )
+        elif field == "path":
+            material["targets"][1]["operation"]["path"] = "/v1/bills?api_key=" + _SECRET_CANARY
+        elif field == "literal_value":
+            material["targets"][1]["operation"]["query_parameters"] = [
+                {"name": "api_key", "value_source": "literal", "literal_value": _SECRET_CANARY}
+            ]
+
+    return edit
+
+
+_PLANT_POINTERS = {
+    "credential_ref": "/source/connection/credential_ref",
+    "host": "/source/connection/host",
+    "database": "/source/connection/database",
+    "base_url": "/targets/1/connection/base_url",
+    "path": "/targets/1/operation/path",
+    "literal_value": "/targets/1/operation/query_parameters/0/literal_value",
+}
+
+
+def test_the_canary_witness_covers_every_secret_capable_field():
+    assert set(_PLANT_POINTERS) == {name for _model, name in SECRET_CAPABLE_FIELDS}
+
+
+@pytest.mark.parametrize("field", sorted(_PLANT_POINTERS))
+def test_a_plaintext_canary_in_a_secret_capable_field_is_refused_value_free(field, caplog):
+    from boomi_mcp.recipes.builtins import fanout
+
+    raw, material = flagship_v2()
+    _plant(field)(material)
+    caplog.set_level(logging.DEBUG)
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        with pytest.raises(AuthoringWorkflowError) as caught:
+            plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/intent/invocations/0/component_material" + _PLANT_POINTERS[field]
+    assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+    served = json.dumps([d.model_dump(mode="json") for d in caught.value.diagnostics])
+    assert _SECRET_CANARY not in served
+    assert _SECRET_CANARY not in str(caught.value) and _SECRET_CANARY not in repr(caught.value)
+    assert _SECRET_CANARY not in "\n".join(record.getMessage() for record in caplog.records)
+    assert _SECRET_CANARY not in "\n".join(str(w.message) for w in caught_warnings)
+
+
+def test_the_opaque_reference_forms_still_pass_the_boundary():
+    """The control: the flagship (``credential://`` reference, plain host, base
+    URL without userinfo, a literal under a non-secret name) plans cleanly."""
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "mode", "value_source": "literal", "literal_value": "full"}
+    ]
+    plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+
+
+def test_the_neutral_rest_authority_is_unchanged_and_still_admits_userinfo():
+    """CDX-r1-01 is fixed in the v2 boundary, NOT in ``RestCreateSettings``: the
+    legacy route (and its frozen goldens) keep the authority they had."""
+    from boomi_mcp.patterns.archetype_parameters import RestCreateSettings
+
+    settings = RestCreateSettings(base_url="https://u:p@h.example.invalid", auth_mode="none")
+    assert settings.base_url == "https://u:p@h.example.invalid"

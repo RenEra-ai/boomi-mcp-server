@@ -623,32 +623,6 @@ def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkf
     )
 
 
-def _declared_material_segments(model: Any) -> frozenset:
-    """Every field name the material model DECLARES (discriminator tags excluded).
-
-    A pointer segment outside this set was authored by the caller — an unknown
-    key, say — and a key name is caller content like any other value."""
-    names = set()
-    try:
-        schema = model.model_json_schema()
-    except Exception:  # noqa: BLE001 — an empty set truncates every pointer, safely
-        return frozenset()
-
-    def walk(node: Any) -> None:
-        if isinstance(node, Mapping):
-            properties = node.get("properties")
-            if isinstance(properties, Mapping):
-                names.update(str(key) for key in properties)
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, (list, tuple)):
-            for value in node:
-                walk(value)
-
-    walk(schema)
-    return frozenset(names)
-
-
 # The walker is shared with the recipe engine's own input refusals (#159 S1, QA r2-01).
 _request_segments = declared_loc_segments
 
@@ -674,13 +648,15 @@ def _material_pointer(error: Any, model: Any) -> str:
         retired = (first.get("ctx") or {}).get("path")
         if first.get("type") == "governance_retired_spelling" and isinstance(retired, str):
             # A retired spelling is a server-published name, not caller
-            # content, so the pointer may end ON it.
-            declared = _declared_material_segments(model) | frozenset(RETIRED_SPELLINGS)
-            kept: List[str] = []
-            for segment in (part for part in retired.split("/") if part):
-                if not (segment.isdigit() or segment in declared):
-                    break
-                kept.append(segment)
+            # content, so the pointer may end ON it — but only when every
+            # segment ABOVE it is declared structure. The path runs through the
+            # caller's raw mapping, so it is walked with the shared walker in
+            # request mode (#159 S1, CDX-r1-03 sweep): a name-blind "digit or
+            # declared anywhere" test served a caller's digit-only dict key.
+            parts = [part for part in retired.split("/") if part]
+            kept = list(_request_segments(model, parts[:-1], request_path=True))
+            if parts and len(kept) == len(parts) - 1 and parts[-1] in RETIRED_SPELLINGS:
+                kept.append(parts[-1])
         else:
             kept = list(_request_segments(model, first.get("loc", ())))
     except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
@@ -885,6 +861,9 @@ def _normalize_recipe_intent(
 
     components = list(result.components)
     unit_keys = {key for key, _unit in result.composed.process_units}
+    composed_facts = {
+        key: value for key, value in projection_facts.items() if key in unit_keys
+    }
     roots = tuple(
         pair
         for pair in sorted(result.composed.process_roots, key=lambda pair: pair[0])
@@ -969,12 +948,59 @@ def _normalize_recipe_intent(
         recorded_intents=resolution.recorded_intents,
         deferred_watermarks=resolution.deferred_watermarks,
         recipe_provenance=tuple(result.invocation_provenance),
-        recipe_diagnostics=tuple(result.diagnostics),
+        recipe_diagnostics=tuple(result.diagnostics)
+        + _leg_provenance_records(result, composed_facts),
         # Only for a unit the run actually composed under that key.
-        recipe_projection_facts={
-            key: value for key, value in projection_facts.items() if key in unit_keys
-        },
+        recipe_projection_facts=composed_facts,
     )
+
+
+def _leg_provenance_records(result, projection_facts) -> Tuple[Any, ...]:
+    """One ``RECIPE_LEG_PROVENANCE`` record per target leg of each recipe-assembled
+    process (#159 S1, CDX-r1-06).
+
+    Built HERE, where both halves of the fact live: the trusted projection facts
+    name each leg's input part, and the composed root's terminal Branch gives
+    its ACTUAL ordinal through :func:`derived_flows.recipe_leg_ordinals` — the
+    derivation the served ``DerivedFanoutLegV1`` reads, so a staging leg shifts
+    both identically (the staging leg realizes no input part and gets no
+    record). The producing invocation is the one the COMPOSER attributed the
+    unit to; its recipe id and version are the REGISTRY-resolved ones from the
+    run's own invocation provenance. Ordered by process key, then ordinal.
+
+    A unit without trusted facts — fan-out 1.0.0's lifted root, every direct
+    intent — has no recipe-assembled leg identity to report and gets none, the
+    same trigger the served route rows use. Informational only: no plan or
+    compile hash reads ``recipe_diagnostics``.
+    """
+    from ..models.recipe_contributions import RecipeRunDiagnosticV1
+    from .derived_flows import recipe_leg_ordinals
+
+    provenance = {record.invocation_id: record for record in result.invocation_provenance}
+    owners = {
+        attributed.contribution.unit.envelope.component_key: attributed.invocation_id
+        for attributed in result.composed.process_unit_contributions
+    }
+    units = dict(result.composed.process_units)
+    records = []
+    for process_key in sorted(projection_facts):
+        unit = units.get(process_key)
+        owner = provenance.get(owners.get(process_key, ""))
+        if unit is None or owner is None:
+            continue
+        for part_key, ordinal in recipe_leg_ordinals(unit, projection_facts[process_key]):
+            records.append(
+                RecipeRunDiagnosticV1(
+                    code="RECIPE_LEG_PROVENANCE",
+                    invocation_id=owner.invocation_id,
+                    recipe_id=owner.recipe_id,
+                    recipe_version=owner.recipe_version,
+                    process_key=process_key,
+                    ordinal=ordinal,
+                    part_key=part_key,
+                )
+            )
+    return tuple(records)
 
 
 def _resolve_governance(

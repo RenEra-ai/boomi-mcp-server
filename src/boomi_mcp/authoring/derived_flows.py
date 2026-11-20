@@ -808,6 +808,25 @@ def _leg_positions(branch: Any, facts: Any):
     return positions, staging, cache_key
 
 
+def recipe_leg_ordinals(unit: Any, facts: Any) -> Tuple[Tuple[str, int], ...]:
+    """``(part_key, ACTUAL 1-based Branch ordinal)`` per fact-named target leg.
+
+    The SAME derivation the served ``DerivedFanoutLegV1.leg`` reads
+    (:func:`_leg_positions` over the composed root's terminal Branch), so a
+    staging leg shifts these ordinals exactly as it shifts the served ones. The
+    staging leg itself realizes no input part and is not listed. In ordinal
+    order; empty when the root has no terminal Branch.
+    """
+    branch = _branch_of(unit)
+    if branch is None:
+        return ()
+    positions, _staging, _cache_key = _leg_positions(branch, facts)
+    return tuple(
+        (part_key, ordinal)
+        for part_key, (ordinal, _mode) in sorted(positions.items(), key=lambda item: item[1][0])
+    )
+
+
 def _with_hints(row: Any, facts: Any) -> Any:
     """The transform row with the route's ``documentation_hint`` facts applied.
 
@@ -1014,9 +1033,7 @@ def derive_recipe_projection(
         for record in recorded_intents or ()
         if isinstance(getattr(record, "declaration", None), WatermarkDeclarationV1)
     }
-    flows: List[Any] = []
-    endpoints: List[Any] = []
-    summaries: Dict[str, Any] = {}
+    projected: List[Tuple[str, Any, Any]] = []
     for unit in sorted(units, key=lambda u: u.envelope.component_key):
         key = unit.envelope.component_key
         transform_rows = list(
@@ -1035,14 +1052,64 @@ def derive_recipe_projection(
             if facts is not None
             else None
         )
+        projected.append((key, transform_rows, route))
+
+    # CDX-r1-07: every route serves the SAME fixed row keys and endpoint tokens
+    # (``extract``, ``send``, ``db_source``, ...), so two routes in one preview
+    # made every key-based join ambiguous. With MORE THAN ONE route, each
+    # route's row keys, endpoint keys and every in-row reference to one of them
+    # are qualified by the owning process key. A single route keeps the
+    # established wire byte-identical (the #157 composition fixtures and the
+    # flagship parity pin it).
+    qualify = sum(1 for _key, _rows, route in projected if route is not None) > 1
+    flows: List[Any] = []
+    endpoints: List[Any] = []
+    summaries: Dict[str, Any] = {}
+    for key, transform_rows, route in projected:
         if route is None:
             flows.extend(transform_rows)
             continue
         rows, unit_endpoints, summary = route
+        if qualify:
+            rows, unit_endpoints = _qualified_route(key, rows, unit_endpoints)
         flows.extend(rows)
         endpoints.extend(unit_endpoints)
         summaries[key] = summary
     return RecipeProjection(flows, endpoints, summaries)
+
+
+def qualified_route_key(process_key: str, key: str) -> str:
+    """The process-scoped spelling of a route's row or endpoint key."""
+    return "{0}/{1}".format(process_key, key)
+
+
+def _qualified_route(process_key: str, rows: Sequence[Any], endpoints: Sequence[Any]):
+    """One route's rows and endpoints with keys AND references scoped to its process.
+
+    A reference is qualified exactly when it names a row or endpoint of THIS
+    route, so every qualified reference resolves inside its own process. A
+    token naming nothing served (the reliability row's ``dlq``) is left as is.
+    """
+    local = {row.key for row in rows} | {endpoint.key for endpoint in endpoints}
+
+    def scoped(value: Optional[str]) -> Optional[str]:
+        return qualified_route_key(process_key, value) if value in local else value
+
+    qualified_rows = [
+        row.model_copy(
+            update={
+                "key": qualified_route_key(process_key, row.key),
+                "source": scoped(row.source),
+                "target": scoped(row.target),
+            }
+        )
+        for row in rows
+    ]
+    qualified_endpoints = [
+        endpoint.model_copy(update={"key": qualified_route_key(process_key, endpoint.key)})
+        for endpoint in endpoints
+    ]
+    return qualified_rows, qualified_endpoints
 
 
 __all__ = [
@@ -1058,5 +1125,7 @@ __all__ = [
     "flow_row_digest",
     "normalize_flow_row",
     "normalize_operation_summary",
+    "qualified_route_key",
+    "recipe_leg_ordinals",
     "typed_row_from_legacy",
 ]

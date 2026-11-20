@@ -748,7 +748,11 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "supplies trusted projection facts (boomi.compose.db_rest_fanout "
                 "2.0.0) also serves its extract, send, reliability, conditional "
                 "watermark and fan-out rows, in that order, discriminated on "
-                "'operation'."
+                "'operation'. When a preview carries MORE than one such route, "
+                "each route's row keys, endpoint keys and every in-row "
+                "source/target naming one of them are qualified as "
+                "'<process_key>/<key>', so every reference resolves inside its "
+                "own process; a single route keeps the unqualified keys."
             ),
             "derived_endpoints": (
                 "CanonicalIntegrationPreviewV1.endpoints and "
@@ -777,7 +781,11 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "into the supporting component specs; it never reaches the "
                 "recipe executor, a contribution, recipe_provenance or a "
                 "diagnostic, and a refusal names the cause code and the pointer, "
-                "never a value."
+                "never a value. A credential boundary refuses "
+                "(PLAINTEXT_SECRET_REJECTED) a credential_ref that is not an "
+                "opaque 'credential://' reference, URL userinfo, a JDBC property "
+                "in a host or database, and a literal query value under a "
+                "secret-shaped name."
             ),
             "recipe_provenance": (
                 "RecipeInvocationProvenanceV1 — on the recipe intent, which "
@@ -792,9 +800,15 @@ def authoring_workflow_contract() -> Dict[str, Any]:
             ),
             "recipe_diagnostics": (
                 "RecipeRunDiagnosticV1 — informational, value-free records about "
-                "a recipe run's assembled output. Never a failure: a refusal is "
-                "an error diagnostic whose cause_codes carry the recipe layer's "
-                "own code and whose path points into the invocation."
+                "a recipe run's assembled output: one RECIPE_LEG_PROVENANCE "
+                "record per target leg of each recipe-assembled process, at the "
+                "leg's actual Branch ordinal (a staging leg shifts it and gets "
+                "no record), naming the producing invocation and the input part "
+                "the leg realizes; ordered by process key, then ordinal. Never "
+                "hashed. Never a failure: a refusal is an error diagnostic whose "
+                "cause_codes carry the recipe layer's own code and whose path "
+                "points into the invocation, stopping at the nearest declared "
+                "location (a caller-authored key name is never served)."
             ),
             "recipe_process_unit": (
                 "A recipe may emit a whole process unit (root + envelope). Its "

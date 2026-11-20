@@ -269,14 +269,22 @@ def recipe_error_envelope(
     }
 
 
-def declared_loc_segments(model: Any, loc: Sequence[Any]) -> Tuple[str, ...]:
+def declared_loc_segments(
+    model: Any, loc: Sequence[Any], *, request_path: bool = False
+) -> Tuple[str, ...]:
     """The REQUEST path a pydantic ``loc`` addresses, walked against ``model``'s schema.
 
     pydantic inserts the variant tag of a discriminated union (``create``,
     ``reuse``) into ``loc``; the tag is a schema fact, not a request key, so it
     is dropped. A segment that is neither a declared property, an array index
     into a declared array, nor a declared tag was authored by the caller: the
-    walk stops BEFORE it, so an unknown key's name is never served."""
+    walk stops BEFORE it, so an unknown key's name is never served.
+
+    ``request_path=True`` walks a path through the caller's RAW request instead
+    (the forbidden-shape scan's path, #159 S1 CDX-r1-03). A raw path carries no
+    variant tags, so none is dropped: a discriminated union admits a segment
+    any of its variants declares, and a raw key that happens to spell a tag is
+    judged like any other key."""
     try:
         schema = model.model_json_schema()
     except Exception:  # noqa: BLE001 — an empty path truncates the pointer, safely
@@ -288,7 +296,7 @@ def declared_loc_segments(model: Any, loc: Sequence[Any]) -> Tuple[str, ...]:
             node = defs.get(str(node["$ref"]).rsplit("/", 1)[-1], {})
         if not isinstance(node, Mapping):
             return []
-        if "discriminator" in node:
+        if "discriminator" in node and not request_path:
             return [node]
         members = [m for key in ("anyOf", "oneOf", "allOf") for m in (node.get(key) or ())]
         if members:
@@ -299,12 +307,12 @@ def declared_loc_segments(model: Any, loc: Sequence[Any]) -> Tuple[str, ...]:
     kept: List[str] = []
     for part in loc:
         segment = str(part)
-        if segment.startswith("function-"):
+        if not request_path and segment.startswith("function-"):
             continue
         following: List[Mapping] = []
         is_tag = False
         for node in current:
-            mapping = (node.get("discriminator") or {}).get("mapping") or {}
+            mapping = {} if request_path else ((node.get("discriminator") or {}).get("mapping") or {})
             if segment in mapping:
                 is_tag = True
                 following.extend(flatten({"$ref": mapping[segment]}))

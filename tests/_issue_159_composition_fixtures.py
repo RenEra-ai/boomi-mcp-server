@@ -18,7 +18,11 @@ into the closed ``component_material``. The request carries ZERO prebuilt
 connection or operation pairs, so the replay exercises the v2 preparer's pair
 generation. The one added value is the map label, which is the frozen
 transform row's display name (content the legacy row served; the same precedent
-the nine direct fixtures follow).
+the nine direct fixtures follow). The one re-spelled value is a create-mode
+database ``credential_ref``: fan-out 2.0.0's credential boundary admits only the
+opaque ``credential://`` form (CDX-r1-02), so the legacy reference is carried
+verbatim under that scheme (``_fanout_v2_support.v2_credential_ref``). No served
+flow or endpoint row reads it.
 
 **Naming evidence.** The served-name check needs names the request did not get
 from the code under test. A recipe intent authors no component, so the profile

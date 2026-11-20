@@ -51,7 +51,46 @@ def _connection_material(binding: Dict[str, Any], *, rest: bool) -> Dict[str, An
     for key in ("port", "username", "credential_ref"):
         if settings.get(key) is not None:
             material[key] = settings[key]
+    if material.get("credential_ref") is not None:
+        material["credential_ref"] = v2_credential_ref(material["credential_ref"])
     return material
+
+
+#: The opaque reference form the v2 credential boundary admits (CDX-r1-02): the
+#: one the REST and SOAP builders already enforce.
+CREDENTIAL_REFERENCE_PREFIX = "credential://"
+
+
+def v2_credential_ref(legacy: str) -> str:
+    """The ONE re-spelling the v2 split applies to a legacy value.
+
+    The legacy route admitted any non-blank ``credential_ref`` (the frozen
+    flagship carries ``<<opaque credential reference>>``, the #157 composition
+    cases ``secrets/db/svc_sync``); fan-out 2.0.0 admits only the opaque
+    ``credential://`` form. The legacy reference is carried verbatim under that
+    scheme — deterministic, and an already-``credential://`` value is unchanged.
+    """
+    if legacy.startswith(CREDENTIAL_REFERENCE_PREFIX):
+        return legacy
+    return CREDENTIAL_REFERENCE_PREFIX + legacy
+
+
+def respell_oracle_credential_refs(components):
+    """The oracle's component dumps with the SAME re-spelling applied to the one
+    field it touches — a create-mode database connection's ``credential_ref``.
+
+    Applied to the EXPECTED side of a witness, so the comparison still covers
+    every other byte of every config; nothing else is rewritten."""
+    respelled = copy.deepcopy(list(components))
+    for component in respelled:
+        config = component.get("config") or {}
+        if (
+            component.get("type") == "connector-settings"
+            and config.get("connector_type") == "database"
+            and isinstance(config.get("credential_ref"), str)
+        ):
+            config["credential_ref"] = v2_credential_ref(config["credential_ref"])
+    return respelled
 
 
 def _operation(operation: Dict[str, Any]) -> Dict[str, Any]:

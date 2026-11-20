@@ -31,6 +31,7 @@ from _fanout_v2_support import (  # noqa: E402
     flagship_v2,
     oracle,
     recipe_request,
+    respell_oracle_credential_refs,
     v2_from_compose_request,
 )
 
@@ -109,9 +110,12 @@ def test_flagship_supporting_components_match_the_frozen_oracle_with_zero_prebui
     raw, material = flagship_v2()
     prepared = _prepare(raw, material)  # no base components at all
 
+    # The ONE re-spelling the v2 split applies (a legacy credential_ref under
+    # the opaque `credential://` scheme, CDX-r1-02) is applied to the expected
+    # side too; every other byte of every config is compared as frozen.
     expected = [
         {field: component[field] for field in _COMPONENT_FIELDS}
-        for component in oracle()["integration_spec"]["components"]
+        for component in respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
         if component["type"] != "process"
     ]
     assert [_dump(c) for c in prepared.supporting_components] == expected
@@ -213,7 +217,11 @@ def test_the_witness_holds_with_the_legacy_producers_import_blocked():
     assert payload["attempts"] == []
     # Non-vacuity: the blocker in that child really refuses a legacy producer.
     assert payload["control"] == "refused"
-    expected = [c for c in oracle()["integration_spec"]["components"] if c["type"] != "process"]
+    expected = [
+        c
+        for c in respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
+        if c["type"] != "process"
+    ]
     assert payload["components"] == expected
     assert payload["root"] == canonical_process_ir_json(_legacy_root(_oracle_spec()))
 
@@ -244,7 +252,11 @@ def test_a_mixed_staged_composition_root_matches_the_legacy_arm():
         _legacy_root(legacy_spec)
     )
     legacy_supporting = [
-        c.model_dump(mode="json") for c in legacy_spec.components if c.type != "process"
+        c
+        for c in respell_oracle_credential_refs(
+            [c.model_dump(mode="json") for c in legacy_spec.components]
+        )
+        if c["type"] != "process"
     ]
     assert [c.model_dump(mode="json") for c in prepared.supporting_components] == (
         legacy_supporting
@@ -860,16 +872,31 @@ def test_a_base_key_must_name_a_matching_base_component():
 
 
 def test_a_builder_refusal_is_value_free_and_pointed():
-    """The DB read-profile BUILDER (not a contract check) refuses a blank
-    statement; its own code travels as the cause, the pointer names the part."""
+    """The DB connection BUILDER (not a contract check) refuses an auth mode the
+    neutral contract admits but the builder defers; its own code travels as the
+    cause, the pointer names the part. (A blank statement used to be this
+    witness; since CDX-r1-05 the read is validated by its ``DbReadOperation``
+    authority first, exactly as the legacy route does.)"""
+    raw, material = flagship_v2()
+    raw["source"]["auth_mode"] = "windows_integrated"
+    material["source"]["connection"].pop("username")
+    material["source"]["connection"].pop("credential_ref")
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material)
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.code == RECIPE_CONSTRAINT_FAILED
+    assert diagnostic.cause_codes == ("UNSUPPORTED_DB_AUTH_MODE",)
+    assert diagnostic.path == "/component_material/source"
+
+
+def test_a_blank_statement_is_refused_by_the_read_authority_like_the_legacy_route():
     raw, material = flagship_v2()
     material["source"]["read"]["sql"] = "   "
     with pytest.raises(RecipeError) as caught:
         _prepare(raw, material)
     (diagnostic,) = caught.value.diagnostics
-    assert diagnostic.code == RECIPE_CONSTRAINT_FAILED
-    assert diagnostic.cause_codes == ("MISSING_DB_QUERY",)
-    assert diagnostic.path == "/component_material/source"
+    assert diagnostic.code == RECIPE_INPUT_INVALID
+    assert diagnostic.path == "/component_material/source/read"
 
 
 # ---------------------------------------------------------------------------
@@ -987,3 +1014,289 @@ def test_one_request_reproduces_both_the_legacy_step_label_and_row_name():
     # The frozen #157 spelling reproduces the legacy pair explicitly.
     raw["transform"]["map_label"] = legacy_row
     assert _served_pair(raw, material) == (legacy_step, legacy_row)
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-04: a create-mode base connection must carry the declared auth
+# ---------------------------------------------------------------------------
+
+
+def _create_base_db(auth_mode="username_password"):
+    config = {
+        "connector_type": "database",
+        "component_name": "Shared DB",
+        "driver_id": "microsoft_jdbc",
+        "host": "db.example.invalid",
+        "dbname": "AppDB",
+        "username": "svc",
+        "credential_ref": "credential://vault/db",
+    }
+    if auth_mode is not None:
+        config["auth_mode"] = auth_mode
+    return IntegrationComponentSpec(
+        key="shared_db", type="connector-settings", name="Shared DB", config=config
+    )
+
+
+def _create_bound_source(declared="username_password"):
+    raw, material = flagship_v2()
+    raw["source"] = {
+        "part_key": raw["source"]["part_key"],
+        "binding_mode": "create",
+        "auth_mode": declared,
+        "connection_key": "shared_db",
+    }
+    material["source"].pop("connection")
+    return raw, material
+
+
+def test_a_create_base_db_connection_with_the_declared_auth_binds():
+    raw, material = _create_bound_source()
+    prepared = _prepare(raw, material, base=(_create_base_db(),))
+    assert prepared.selected_base_keys[0] == "shared_db"
+
+
+@pytest.mark.parametrize(
+    "base_auth", [pytest.param("windows_integrated", id="mismatch"), pytest.param(None, id="absent")]
+)
+def test_a_create_base_db_connection_with_another_auth_is_refused(base_auth):
+    raw, material = _create_bound_source()
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(_create_base_db(base_auth),))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/raw_input/source/auth_mode"
+    assert diagnostic.cause_codes == (COMPOSITION_CONTRACT_MISMATCH,)
+
+
+@pytest.mark.parametrize("auth, refused", [("NONE", False), ("BASIC", True), (None, True)])
+def test_a_create_base_rest_connection_must_be_unauthenticated(auth, refused):
+    """The sibling: a create-mode REST target declares NO credential override
+    points, so a base connection it binds must be the unauthenticated one."""
+    raw, material = flagship_v2()
+    config = {"connector_type": "rest", "base_url": "https://billing.example.invalid"}
+    if auth is not None:
+        config["auth"] = auth
+    base = IntegrationComponentSpec(
+        key="shared_rest", type="connector-settings", name="Shared REST", config=config
+    )
+    raw["targets"][1]["connection_key"] = "shared_rest"
+    material["targets"][1].pop("connection")
+    if not refused:
+        assert "shared_rest" in _prepare(raw, material, base=(base,)).selected_base_keys
+        return
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(base,))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/raw_input/targets/1/connection_key"
+    assert diagnostic.cause_codes == (COMPOSITION_CONTRACT_MISMATCH,)
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-05: emission and matching read the AUTHORITY-validated values
+# ---------------------------------------------------------------------------
+
+
+def _padded(material):
+    padded = copy.deepcopy(material)
+    connection = padded["source"]["connection"]
+    for key in ("host", "database", "username", "credential_ref"):
+        connection[key] = "  " + connection[key] + " "
+    padded["source"]["read"]["sql"] = "\n " + padded["source"]["read"]["sql"] + "  "
+    for target in padded["targets"]:
+        target["connection"]["base_url"] = " " + target["connection"]["base_url"] + "\t"
+        target["operation"]["path"] = "  " + target["operation"]["path"] + " "
+    padded["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "  mode ", "value_source": "literal", "literal_value": " full  "}
+    ]
+    return padded
+
+
+def test_whitespace_padded_material_emits_exactly_what_the_trimmed_material_emits():
+    raw, material = flagship_v2()
+    trimmed = copy.deepcopy(material)
+    trimmed["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "mode", "value_source": "literal", "literal_value": "full"}
+    ]
+    padded = [_dump(c) for c in _prepare(raw, _padded(material)).supporting_components]
+    assert padded == [_dump(c) for c in _prepare(raw, trimmed).supporting_components]
+    # Non-vacuity: the padding really reached the material the preparer read.
+    assert _padded(material)["targets"][0]["operation"]["path"] != trimmed["targets"][0]["operation"]["path"]
+
+
+def test_whitespace_padded_flagship_still_matches_the_frozen_legacy_oracle():
+    raw, material = flagship_v2()
+    padded = _padded(material)
+    padded["targets"][1]["operation"]["query_parameters"] = []
+    expected = [
+        {field: component[field] for field in _COMPONENT_FIELDS}
+        for component in respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
+        if component["type"] != "process"
+    ]
+    assert [_dump(c) for c in _prepare(raw, padded).supporting_components] == expected
+
+
+def test_a_padded_watermark_name_matches_its_declared_ref_after_validation():
+    raw, material = _watermarked(first=[{"name": " since ", "value_source": "watermark"}])
+    prepared = _prepare(raw, material)
+    assert prepared.deferred_query_parameter_names == (("target_rest_operation", ("since",)),)
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-06: RECIPE_LEG_PROVENANCE, one record per target leg at its ACTUAL ordinal
+# ---------------------------------------------------------------------------
+
+
+def _leg_records(result):
+    return [
+        (d.invocation_id, d.recipe_id, d.recipe_version, d.process_key, d.ordinal, d.part_key)
+        for d in result.recipe_diagnostics
+        if d.code == "RECIPE_LEG_PROVENANCE"
+    ]
+
+
+def test_leg_provenance_on_the_streamed_flagship():
+    result, _ = plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+    assert _leg_records(result) == [
+        ("fanout", RECIPE_ID, V2, "main_process", 1, "orders"),
+        ("fanout", RECIPE_ID, V2, "main_process", 2, "billing"),
+    ]
+
+
+def test_leg_provenance_on_a_staged_flagship_is_shifted_by_the_staging_leg():
+    raw, material = flagship_v2()
+    raw["links"] = [
+        {"from_part": "db", "to_part": "shape"},
+        {"from_part": "shape", "to_part": "orders"},
+        {"from_part": "shape", "to_part": "billing", "handoff": {"mode": "document_cache"}},
+    ]
+    result, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert _leg_records(result) == [
+        ("fanout", RECIPE_ID, V2, "main_process", 1, "orders"),
+        ("fanout", RECIPE_ID, V2, "main_process", 3, "billing"),
+    ]
+    # The SAME ordinal the served composition summary carries for that leg.
+    summary = result.integration_spec_preview.composition_summaries["main_process"]
+    assert summary.staging_leg == 2
+    assert [(leg.part_key, leg.leg) for leg in summary.fanout_legs] == [("billing", 3)]
+
+
+def test_leg_provenance_is_absent_without_recipe_assembled_branch_facts():
+    """A run whose units carry no trusted part facts — fan-out 1.0.0's lifted
+    root, every direct intent — gets no records: the same trigger the served
+    route rows use. Measured by withholding the v2 facts from the SAME run, so
+    the control is the flagship that does produce them."""
+    from boomi_mcp.authoring import workflow
+
+    request = recipe_request(*flagship_v2())
+    with_facts, _ = plan_authoring_request_v1(request, profile="p")
+    assert _leg_records(with_facts)
+
+    real = workflow._prepare_recipe_components
+
+    def without_facts(*args, **kwargs):
+        specs, deferred, _facts = real(*args, **kwargs)
+        return specs, deferred, {}
+
+    import pytest as _pytest
+
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(workflow, "_prepare_recipe_components", without_facts)
+        bare, _ = plan_authoring_request_v1(request, profile="p")
+    assert bare.recipe_diagnostics == ()
+
+
+def test_a_direct_intent_carries_no_leg_provenance():
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    case = (
+        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "database_to_api_sync"
+        / "wm_off_dlq_off_create" / "input.canonical.json"
+    )
+    request = AuthoringRequestV1.model_validate(json.loads(case.read_text()))
+    result, _ = plan_authoring_request_v1(request, profile="p")
+    assert result.recipe_diagnostics == () and result.recipe_provenance == ()
+
+
+def test_leg_provenance_feeds_no_plan_or_compile_hash(monkeypatch):
+    from boomi_mcp.authoring import workflow
+
+    request = recipe_request(*flagship_v2())
+    with_records, _ = compile_authoring_request_v1(request, profile="p")
+    monkeypatch.setattr(workflow, "_leg_provenance_records", lambda *a, **k: ())
+    without, _ = compile_authoring_request_v1(request, profile="p")
+    assert _leg_records(with_records) and not _leg_records(without)
+    bound, unbound = with_records.revision_binding, without.revision_binding
+    assert bound.plan_hash and bound.compile_hash
+    assert (bound.semantic_hash, bound.plan_hash, bound.compile_hash) == (
+        unbound.semantic_hash,
+        unbound.plan_hash,
+        unbound.compile_hash,
+    )
+    assert with_records.normalized_intent_digest == without.normalized_intent_digest
+
+
+# ---------------------------------------------------------------------------
+# CDX-r1-07: multi-route previews scope row and endpoint keys by process
+# ---------------------------------------------------------------------------
+
+
+def _two_route_preview():
+    db, rest = _base_connections()
+    raw_a, material_a = _namespaced("a", "process_a", "Process A")
+    raw_b, material_b = _namespaced("b", "process_b", "Process B")
+    request = recipe_request(
+        raw_a,
+        material_a,
+        base_components=[db.model_dump(mode="json"), rest.model_dump(mode="json")],
+        invocation_id="a",
+        extra_invocations=[
+            {
+                "recipe_id": RECIPE_ID,
+                "recipe_version": V2,
+                "invocation_id": "b",
+                "raw_input": raw_b,
+                "component_material": material_b,
+            }
+        ],
+    )
+    result, _ = plan_authoring_request_v1(request, profile="p")
+    return result
+
+
+def test_two_routes_serve_unique_keys_and_every_reference_resolves_in_its_process():
+    result = _two_route_preview()
+    preview = result.integration_spec_preview
+    rows = [row.model_dump(mode="json") for row in preview.flows]
+    endpoints = [endpoint.model_dump(mode="json") for endpoint in preview.endpoints]
+    keys = [row["key"] for row in rows] + [endpoint["key"] for endpoint in endpoints]
+    assert len(keys) == len(set(keys))
+    served = set(keys)
+    references = 0
+    for row in rows:
+        owner = row["key"].split("/", 1)[0]
+        assert owner in {"process_a", "process_b"}
+        for field in ("source", "target"):
+            value = row[field]
+            if value in (None, "", "dlq"):
+                continue
+            references += 1
+            assert value in served, (row["key"], field, value)
+            assert value.split("/", 1)[0] == owner, (row["key"], field, value)
+    assert references >= 8  # non-vacuity: transform, send, reliability, fanout x2
+    assert set(preview.composition_summaries) == {"process_a", "process_b"}
+    # Leg provenance maps each process to ITS invocation.
+    assert {(d.process_key, d.invocation_id) for d in result.recipe_diagnostics} == {
+        ("process_a", "a"),
+        ("process_b", "b"),
+    }
+
+
+def test_a_single_route_keeps_the_unqualified_wire():
+    result, _ = plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
+    preview = result.integration_spec_preview
+    assert [row.key for row in preview.flows] == ["extract", "transform", "send", "reliability", "fanout"]
+    assert [endpoint.key for endpoint in preview.endpoints] == [
+        "db_source",
+        "rest_target",
+        "rest_target_billing",
+    ]

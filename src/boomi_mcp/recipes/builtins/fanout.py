@@ -606,16 +606,32 @@ class _FanoutMaterialModel(_BaseModel):
 
 
 class FanoutDbCreateMaterialV2(_FanoutMaterialModel):
-    """Create a database connection. Value rules are ``DbCreateSettings``'s."""
+    """Create a database connection. Value rules are ``DbCreateSettings``'s.
+
+    The credential boundary also refuses a ``host`` carrying userinfo or a JDBC
+    property, a ``database`` carrying a JDBC property, and a ``credential_ref``
+    that is not an opaque ``credential://`` reference.
+    """
 
     mode: _Literal["create"]
     driver: _DbDriverV2  # type: ignore[valid-type]
-    host: str = Field(min_length=1)
+    host: str = Field(
+        min_length=1,
+        description="Database host. No userinfo ('@') and no JDBC property (';' or '=').",
+    )
     port: int = Field(default=_DEFAULT_DB_PORT_V2, ge=1, le=65535)
-    database: str = Field(min_length=1)
+    database: str = Field(
+        min_length=1,
+        description="Database (catalog) name. No JDBC property (';' or '=').",
+    )
     username: Optional[str] = None
-    #: An OPAQUE secret-store reference — never the secret itself.
-    credential_ref: Optional[str] = None
+    credential_ref: Optional[str] = Field(
+        default=None,
+        description=(
+            "An OPAQUE secret-store reference of the form 'credential://...', "
+            "never the secret itself; any other value is refused."
+        ),
+    )
 
 
 class FanoutConnectionReuseMaterialV2(_FanoutMaterialModel):
@@ -753,7 +769,13 @@ class FanoutRestCreateMaterialV2(_FanoutMaterialModel):
     """Create an UNAUTHENTICATED REST connection (secured auth must be reused)."""
 
     mode: _Literal["create"]
-    base_url: str = Field(min_length=1)
+    base_url: str = Field(
+        min_length=1,
+        description=(
+            "Absolute http(s) base URL. Userinfo ('user:password@') and "
+            "secret-shaped query-parameter names are refused."
+        ),
+    )
 
 
 FanoutRestConnectionMaterialV2 = _Annotated[
@@ -765,11 +787,17 @@ FanoutRestConnectionMaterialV2 = _Annotated[
 class FanoutQueryParameterV2(_FanoutMaterialModel):
     name: str = Field(min_length=1)
     value_source: _Literal["literal", "watermark"]
-    literal_value: Optional[str] = None
+    literal_value: Optional[str] = Field(
+        default=None,
+        description="Refused under a secret-shaped parameter name (a literal key is a secret).",
+    )
 
 
 class FanoutRestOperationMaterialV2(_FanoutMaterialModel):
-    path: str = Field(min_length=1)
+    path: str = Field(
+        min_length=1,
+        description="Request path. Userinfo and secret-shaped query-parameter names are refused.",
+    )
     query_parameters: Tuple[FanoutQueryParameterV2, ...] = ()
 
 
@@ -797,6 +825,216 @@ class FanoutComponentMaterialV2(_FanoutMaterialModel):
     #: The ONE shared payload profile every target leg sends.
     payload_profile: JSONPayloadProfile
     targets: Tuple[FanoutTargetMaterialV2, ...] = Field(min_length=2, max_length=_MAX_TARGETS)
+
+
+# ---------------------------------------------------------------------------
+# The credential boundary (#159 S1, CDX-r1-01/02 structural fix)
+# ---------------------------------------------------------------------------
+#
+# ONE check, applied to every field of the material that can carry a secret,
+# driven by ONE table that classifies EVERY field of every model reachable from
+# ``FanoutComponentMaterialV2`` (including the shared ``JSONPayloadProfile``
+# tree). The walk reads the table for every field it visits and FAILS CLOSED on
+# a field the table does not classify, so a field added to the material later
+# cannot bypass the boundary silently: ``tests/test_recipe_component_material.py``
+# pins the table's keys to the set derived from the models, and the
+# secret-capable subset to the enumeration below.
+#
+# Secret-capable (a rule that can REFUSE plaintext):
+#   FanoutDbCreateMaterialV2.credential_ref   credential_reference: the opaque
+#       ``credential://`` form the REST/SOAP builders already enforce.
+#   FanoutDbCreateMaterialV2.host             jdbc_host: no userinfo (``@``) and
+#       no JDBC property (``;`` / ``=``) — the two ways a password rides a host.
+#   FanoutDbCreateMaterialV2.database         jdbc_property: no ``;`` / ``=``
+#       (a ``;password=...`` suffix lands in the JDBC URL).
+#   FanoutRestCreateMaterialV2.base_url       url: no userinfo, no secret-shaped
+#       query-parameter name.
+#   FanoutRestOperationMaterialV2.path        url: same rule (a path may carry a
+#       query string, or an authority when written scheme-/protocol-relative).
+#   FanoutQueryParameterV2.literal_value      named_literal: refused under a
+#       secret-shaped parameter name (a literal ``api_key`` value IS the key).
+#
+# Every other field is classified ``None`` with its reason in the table. There
+# is no ``jdbc_options`` (or other open map) in the v2 material: the only maps it
+# can reach are the closed models below.
+#
+# "Secret-shaped" is the recipe layer's own authority
+# (``models.recipe_contributions._FORBIDDEN_KEY_SUBSTRINGS``), never re-typed.
+
+_CREDENTIAL_REFERENCE_PREFIX = "credential://"
+#: The cause a boundary refusal carries: the builders' own code for a plaintext
+#: secret offered where only an opaque reference may cross.
+_PLAINTEXT_SECRET_CAUSE = "PLAINTEXT_SECRET_REJECTED"
+
+_SECRET_RULES = ("credential_reference", "jdbc_host", "jdbc_property", "url", "named_literal")
+
+
+def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
+    """``(model, field) -> rule`` for EVERY material field; ``None`` = not a carrier.
+
+    The reasons for ``None`` are stated per entry. "Free text" entries CAN hold
+    arbitrary characters; they are classified non-carrier because no shape rule
+    can tell a secret from legitimate content there and the contract declares a
+    different, checked channel for the secret (``credential_ref``), not because
+    they are physically incapable of holding one.
+    """
+    from ...patterns.archetype_parameters import JSONProfileNode
+
+    return _MappingProxyType(
+        {
+            (FanoutComponentMaterialV2, "version"): None,  # closed literal
+            (FanoutComponentMaterialV2, "source"): None,  # structural (model)
+            (FanoutComponentMaterialV2, "transform"): None,  # structural (model)
+            (FanoutComponentMaterialV2, "payload_profile"): None,  # structural (model)
+            (FanoutComponentMaterialV2, "targets"): None,  # structural (models)
+            (FanoutDbMaterialV2, "connection"): None,  # structural (variant)
+            (FanoutDbMaterialV2, "read"): None,  # structural (model)
+            (FanoutDbCreateMaterialV2, "mode"): None,  # closed literal
+            (FanoutDbCreateMaterialV2, "driver"): None,  # closed literal
+            (FanoutDbCreateMaterialV2, "host"): "jdbc_host",
+            (FanoutDbCreateMaterialV2, "port"): None,  # bounded integer
+            (FanoutDbCreateMaterialV2, "database"): "jdbc_property",
+            # An identity, emitted as the connection's user; the secret half is
+            # credential_ref. Azure-style ``user@server`` identities are
+            # legitimate, so no shape rule separates a smuggled secret.
+            (FanoutDbCreateMaterialV2, "username"): None,
+            (FanoutDbCreateMaterialV2, "credential_ref"): "credential_reference",
+            (FanoutConnectionReuseMaterialV2, "mode"): None,  # closed literal
+            # Selectors of an EXISTING component (platform id / display name),
+            # served on the endpoint rows by design; they name, never unlock.
+            (FanoutConnectionReuseMaterialV2, "component_id"): None,
+            (FanoutConnectionReuseMaterialV2, "component_name"): None,
+            # Free text: query material emitted into the read profile by design
+            # (the addendum's D1). A literal in it cannot be told from data.
+            (FanoutDbReadMaterialV2, "sql"): None,
+            (FanoutDbReadMaterialV2, "result_fields"): None,  # structural (models)
+            (FanoutDbReadMaterialV2, "bind_parameters"): None,  # structural (models)
+            (FanoutDbReadMaterialV2, "batch_size"): None,  # bounded integer
+            (FanoutDbReadMaterialV2, "max_rows"): None,  # bounded integer
+            # A field name (``DBResultField`` refuses path separators).
+            (FanoutResultFieldV2, "name"): None,
+            (FanoutResultFieldV2, "data_type"): None,  # closed literal
+            (FanoutResultFieldV2, "required"): None,  # boolean
+            (FanoutResultFieldV2, "description"): None,  # free text: profile docs
+            (FanoutBindParameterV2, "name"): None,  # a statement parameter NAME; no value
+            (FanoutBindParameterV2, "direction"): None,  # closed literal
+            (FanoutTransformMaterialV2, "operations"): None,  # structural (variants)
+            (FanoutDirectOperationV2, "operation_type"): None,  # closed literal
+            # Field references, each checked against a DECLARED source field or
+            # payload leaf by the producer -> consumer contract.
+            (FanoutDirectOperationV2, "source_field"): None,
+            (FanoutDirectOperationV2, "target_path"): None,
+            (FanoutDirectOperationV2, "documentation_hint"): None,  # free text: served hint
+            (FanoutFunctionOperationV2, "operation_type"): None,  # closed literal
+            (FanoutFunctionOperationV2, "function_type"): None,  # a registered family name
+            (FanoutFunctionOperationV2, "inputs"): None,  # declared source fields
+            (FanoutFunctionOperationV2, "target_path"): None,  # a declared payload leaf
+            (FanoutFunctionOperationV2, "parameters"): None,  # structural (models)
+            (FanoutFunctionOperationV2, "documentation_hint"): None,  # free text: served hint
+            # A name the family DECLARES (closed by ``FunctionFamily``).
+            (FanoutFunctionParameterV2, "name"): None,
+            # A scalar transform constant emitted into the map by design; its
+            # name is family-declared (never secret-shaped), so no named rule
+            # applies, and a constant cannot be told from a secret by shape.
+            (FanoutFunctionParameterV2, "value"): None,
+            (FanoutScriptReferenceOperationV2, "operation_type"): None,  # closed literal
+            (FanoutScriptReferenceOperationV2, "script_component_key"): None,  # a bounded key
+            (FanoutScriptReferenceOperationV2, "inputs"): None,  # declared source fields
+            (FanoutScriptReferenceOperationV2, "outputs"): None,  # declared payload leaves
+            (FanoutScriptReferenceOperationV2, "documentation_hint"): None,  # free text
+            (JSONPayloadProfile, "format"): None,  # closed literal
+            (JSONPayloadProfile, "root"): None,  # structural (model)
+            (JSONProfileNode, "name"): None,  # a schema node name
+            (JSONProfileNode, "kind"): None,  # closed literal
+            (JSONProfileNode, "data_type"): None,  # closed literal
+            (JSONProfileNode, "required"): None,  # boolean
+            (JSONProfileNode, "description"): None,  # free text: profile docs
+            (JSONProfileNode, "children"): None,  # structural (models)
+            (FanoutTargetMaterialV2, "part_key"): None,  # must equal a raw-input part key
+            (FanoutTargetMaterialV2, "connection"): None,  # structural (variant)
+            (FanoutTargetMaterialV2, "operation"): None,  # structural (model)
+            (FanoutTargetMaterialV2, "expected_payload_profile"): None,  # structural (model)
+            (FanoutRestCreateMaterialV2, "mode"): None,  # closed literal
+            (FanoutRestCreateMaterialV2, "base_url"): "url",
+            (FanoutRestOperationMaterialV2, "path"): "url",
+            (FanoutRestOperationMaterialV2, "query_parameters"): None,  # structural (models)
+            # A parameter NAME; it decides how ``literal_value`` is judged.
+            (FanoutQueryParameterV2, "name"): None,
+            (FanoutQueryParameterV2, "value_source"): None,  # closed literal
+            (FanoutQueryParameterV2, "literal_value"): "named_literal",
+        }
+    )
+
+
+def _secret_shaped(name: str) -> bool:
+    from ...models.recipe_contributions import _FORBIDDEN_KEY_SUBSTRINGS
+
+    lowered = name.lower()
+    return any(sub in lowered for sub in _FORBIDDEN_KEY_SUBSTRINGS)
+
+
+def _url_carries_a_secret(value: str) -> bool:
+    from urllib.parse import parse_qsl, urlsplit
+
+    try:
+        parts = urlsplit(value.strip())
+    except ValueError:
+        return True  # unparseable: refused rather than judged clean
+    if "@" in parts.netloc:
+        return True
+    return any(
+        _secret_shaped(name) for name, _value in parse_qsl(parts.query, keep_blank_values=True)
+    )
+
+
+def _breaches(rule: str, value: _Any, owner: _Any) -> bool:
+    """Whether ``value`` (of a field classified ``rule``) carries a plaintext secret."""
+    if value is None:
+        return False
+    text = str(value).strip()
+    if rule == "credential_reference":
+        return not (
+            text.startswith(_CREDENTIAL_REFERENCE_PREFIX)
+            and len(text) > len(_CREDENTIAL_REFERENCE_PREFIX)
+        )
+    if rule == "jdbc_host":
+        return any(char in text for char in "@;=")
+    if rule == "jdbc_property":
+        return any(char in text for char in ";=")
+    if rule == "url":
+        return _url_carries_a_secret(text)
+    if rule == "named_literal":
+        return _secret_shaped(str(getattr(owner, "name", "") or ""))
+    return True  # an unknown rule fails closed
+
+
+def _check_credential_boundary_v2(material: FanoutComponentMaterialV2) -> None:
+    """Refuse, value-free, the first material field that carries a plaintext secret.
+
+    Walks the validated material; every field visited is looked up in
+    :func:`_material_field_classes_v2`. An unclassified field is refused too
+    (fail closed). The pointer is built from DECLARED field names and indices
+    only, so it never carries caller content.
+    """
+    classes = _material_field_classes_v2()
+
+    def walk(node: _Any, pointer: str) -> None:
+        if isinstance(node, _BaseModel):
+            for name in type(node).model_fields:
+                here = f"{pointer}/{name}"
+                key = (type(node), name)
+                if key not in classes:
+                    raise _refusal(_PLAINTEXT_SECRET_CAUSE, here, phase="input")
+                value = getattr(node, name)
+                rule = classes[key]
+                if rule is not None and _breaches(rule, value, node):
+                    raise _refusal(_PLAINTEXT_SECRET_CAUSE, here, phase="input")
+                walk(value, here)
+        elif isinstance(node, (tuple, list)):
+            for index, item in enumerate(node):
+                walk(item, f"{pointer}/{index}")
+
+    walk(material, "/component_material")
 
 
 # ---------------------------------------------------------------------------
@@ -1119,6 +1357,28 @@ def _check_base_component(
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
 
 
+def _check_base_auth(
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    key: str,
+    *,
+    config_key: str,
+    expected: str,
+    path: str,
+) -> None:
+    """A CREATE-mode base connection's auth must be the one the recipe declares.
+
+    The declared auth decides which credential fields become per-environment
+    override points (``_extension_bindings_v2``), so a base connection whose own
+    config says otherwise would ship credentials nobody can override — or
+    declare override points for credentials it does not have (CDX-r1-04). The
+    builders REQUIRE the auth key on a created connection (no default), so an
+    absent value is a mismatch too.
+    """
+    config = (base_catalog[key].config or {}) if key in base_catalog else {}
+    if config.get(config_key) != expected:
+        raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
+
+
 def _connection_presence(
     raw_key: Optional[str], material: _Any, binding_mode: str, *, path: str
 ) -> None:
@@ -1149,13 +1409,18 @@ def prepare_db_rest_fanout_v2(
     Order is load-bearing, and every refusal is value-free:
 
     1. the material-free topology rules (shared with the executor);
-    2. material <-> input agreement (one material entry per target part key,
-       connection presence and binding mode, base components by key and type);
-    3. value rules through the neutral authority models;
-    4. the producer -> consumer contract (source fields, transform operations,
+    2. the credential boundary (one check over every secret-capable field);
+    3. material <-> input agreement (one material entry per target part key,
+       connection presence and binding mode, base components by key, type and
+       — for a create-mode base connection — auth);
+    4. value rules through the neutral authority models. The VALIDATED values
+       those models return (stripped, normalized) are what every later step
+       matches against and what the components carry (CDX-r1-05) — never the
+       raw material, so v2 emits what the legacy route emits;
+    5. the producer -> consumer contract (source fields, transform operations,
        the shared payload profile, each target's asserted leaf contract);
-    5. the first-target watermark rule;
-    6. ONLY THEN the components, through ``db_extract``, ``field_map`` and
+    6. the first-target watermark rule;
+    7. ONLY THEN the components, through ``db_extract``, ``field_map`` and
        ``rest_send`` — the DB connection/profile/operation, the shared JSON
        profile and map, one REST connection/operation pair per target, and the
        staged-handoff cache when any link stages.
@@ -1165,7 +1430,10 @@ def prepare_db_rest_fanout_v2(
     naming = inp.naming
     selected: _List[str] = []
 
-    # -- 2. agreement ------------------------------------------------------
+    # -- 2. the credential boundary ----------------------------------------
+    _check_credential_boundary_v2(material)
+
+    # -- 3. agreement ------------------------------------------------------
     by_part: _Dict[str, Tuple[int, FanoutTargetMaterialV2]] = {}
     for index, entry in enumerate(material.targets):
         if entry.part_key in by_part:
@@ -1201,6 +1469,14 @@ def prepare_db_rest_fanout_v2(
             connector_type="database",
             binding_mode=inp.source.binding_mode,
         )
+        if inp.source.binding_mode == "create":
+            _check_base_auth(
+                base_catalog,
+                inp.source.connection_key,
+                config_key="auth_mode",
+                expected=str(inp.source.auth_mode),
+                path="/raw_input/source/auth_mode",
+            )
         selected.append(inp.source.connection_key)
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]] = []
     for index, target in enumerate(inp.targets):
@@ -1221,68 +1497,25 @@ def prepare_db_rest_fanout_v2(
                 connector_type="rest",
                 binding_mode=target.binding_mode,
             )
+            if target.binding_mode == "create":
+                # A created REST connection is always unauthenticated (the
+                # extension policy declares no credential fields for it).
+                _check_base_auth(
+                    base_catalog,
+                    target.connection_key,
+                    config_key="auth",
+                    expected=_rt().REST_CREATE_AUTH_MAP["none"],
+                    path=f"/raw_input/targets/{index}/connection_key",
+                )
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
 
-    # -- 3. value rules through the authorities ----------------------------
-    db_connection = material.source.connection
-    if isinstance(db_connection, FanoutDbCreateMaterialV2):
-        _authority_check(
-            "/component_material/source/connection",
-            DbCreateSettings,
-            driver=db_connection.driver,
-            auth_mode=inp.source.auth_mode,
-            host=db_connection.host,
-            port=db_connection.port,
-            database=db_connection.database,
-            username=db_connection.username,
-            credential_ref=db_connection.credential_ref,
-        )
-    for field_index, field in enumerate(material.source.read.result_fields):
-        _authority_check(
-            f"/component_material/source/read/result_fields/{field_index}",
-            DBResultField,
-            name=field.name,
-            data_type=field.data_type,
-            required=field.required,
-            description=field.description,
-        )
-    result_names = [field.name for field in material.source.read.result_fields]
-    if len(set(result_names)) != len(result_names):
-        raise _refusal(
-            COMPOSITION_CONTRACT_MISMATCH,
-            "/component_material/source/read/result_fields",
-            phase="input",
-        )
-    for (material_index, entry), target in zip(ordered_material, inp.targets):
-        base = f"/component_material/targets/{material_index}"
-        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
-            # `RestCreateSettings` is the URL-shape authority; created REST is
-            # always unauthenticated (the auth vocabulary's ONE create mode).
-            _authority_check(
-                base + "/connection",
-                RestCreateSettings,
-                base_url=entry.connection.base_url,
-                auth_mode="none",
-            )
-        for qp_index, parameter in enumerate(entry.operation.query_parameters):
-            _authority_check(
-                f"{base}/operation/query_parameters/{qp_index}",
-                RestQueryParameter,
-                name=parameter.name,
-                value_source=parameter.value_source,
-                literal_value=parameter.literal_value,
-            )
-        _authority_check(
-            base + "/operation",
-            RestSendRequest,
-            method=target.method,
-            path=entry.operation.path,
-            expected_status_codes=list(target.expected_status_codes),
-        )
+    # -- 4. value rules through the authorities ----------------------------
+    authorized = _authorize_material_v2(inp, material, ordered_material)
+    result_fields = authorized.result_fields
 
-    # -- 4. producer -> consumer contract ----------------------------------
-    source_fields = {field.name: field for field in material.source.read.result_fields}
+    # -- 5. producer -> consumer contract ----------------------------------
+    source_fields = {field.name: field for field in result_fields}
     shared_leaves, shared_required = _leaf_contract(material.payload_profile)
     bound_paths: set = set()
     for op_index, operation in enumerate(material.transform.operations):
@@ -1323,18 +1556,22 @@ def prepare_db_rest_fanout_v2(
                 phase="input",
             )
 
-    # -- 5. the first-target watermark rule --------------------------------
+    # -- 6. the first-target watermark rule --------------------------------
+    # Matched on the AUTHORITY-validated parameters (stripped names), in the
+    # material's own order, so a pointer index still addresses the request.
     deferred: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
-    for position, (material_index, entry) in enumerate(ordered_material):
+    for position, ((material_index, _entry), (_settings, request)) in enumerate(
+        zip(ordered_material, authorized.targets)
+    ):
         names = tuple(
             parameter.name
-            for parameter in entry.operation.query_parameters
+            for parameter in request.query_parameters
             if parameter.value_source == "watermark"
         )
         if position > 0 and names:
             first = next(
                 qp_index
-                for qp_index, parameter in enumerate(entry.operation.query_parameters)
+                for qp_index, parameter in enumerate(request.query_parameters)
                 if parameter.value_source == "watermark"
             )
             raise _refusal(
@@ -1351,12 +1588,13 @@ def prepare_db_rest_fanout_v2(
                 )
             deferred = ((keys.targets[0][2], names),)
     if inp.watermark is not None:
-        first_material_index, first_entry = ordered_material[0]
-        first_names = {parameter.name for parameter in first_entry.operation.query_parameters}
+        first_material_index, _first_entry = ordered_material[0]
+        first_parameters = authorized.targets[0][1].query_parameters
+        first_names = {parameter.name for parameter in first_parameters}
         # A watermark-sourced parameter is never emitted; the declaration's refs
         # are the ONLY place it is recorded. One the refs omit would vanish —
         # refused rather than silently dropped.
-        for qp_index, parameter in enumerate(first_entry.operation.query_parameters):
+        for qp_index, parameter in enumerate(first_parameters):
             if (
                 parameter.value_source == "watermark"
                 and parameter.name not in inp.watermark.query_parameter_refs
@@ -1375,25 +1613,25 @@ def prepare_db_rest_fanout_v2(
                     phase="input",
                 )
 
-    # -- 6. components -----------------------------------------------------
+    # -- 7. components -----------------------------------------------------
     context = PrimitiveBuildContext(
         integration_name=naming.component_prefix,
         component_prefix=naming.component_prefix,
         folder_path=naming.folder_name,
     )
     components: _List[IntegrationComponentSpec] = []
-    components.extend(_emit_db_components_v2(inp, material, keys, context))
-    components.extend(_emit_transform_components_v2(inp, material, keys, context))
+    components.extend(_emit_db_components_v2(inp, material, authorized, keys, context))
+    components.extend(_emit_transform_components_v2(inp, material, authorized, keys, context))
 
     modes = _handoff_modes_v2(inp)
     staged = any(mode == "document_cache" for mode in modes.values())
     target_pairs: _List[_List[IntegrationComponentSpec]] = []
-    for index, (target, (material_index, entry)) in enumerate(
-        zip(inp.targets, ordered_material)
+    for index, (target, (material_index, entry), validated) in enumerate(
+        zip(inp.targets, ordered_material, authorized.targets)
     ):
         target_pairs.append(
             _emit_target_components_v2(
-                target, entry, keys.targets[index], keys, context, material_index
+                target, entry, validated, keys.targets[index], keys, context, material_index
             )
         )
     # Legacy order: the base (first) pair, then the staged cache, then the rest.
@@ -1410,6 +1648,146 @@ def prepare_db_rest_fanout_v2(
         deferred_query_parameter_names=deferred,
         projection_facts=_projection_facts_v2(inp, keys, material),
     )
+
+
+@_dataclass(frozen=True, repr=False)
+class _AuthorizedMaterialV2:
+    """The material's values AS THE NEUTRAL AUTHORITIES RETURNED THEM (CDX-r1-05).
+
+    ``db`` is the validated ``DbCreateSettings`` (create) or the validated
+    ``DbConnectionBinding`` (reuse), ``None`` for a base-key binding;
+    ``targets`` is, per target in Branch order, ``(connection authority or
+    None, validated RestSendRequest)``. Emission reads ONLY these. The repr is
+    redacted: the values are material.
+    """
+
+    db: _Any
+    #: The validated ``DbReadOperation`` (statement, result schema, bind
+    #: parameters, batch / row bounds).
+    read: _Any
+    targets: Tuple[Tuple[_Any, RestSendRequest], ...]
+
+    @property
+    def result_fields(self) -> Tuple[DBResultField, ...]:
+        return tuple(self.read.result_schema.fields)
+
+    def __repr__(self) -> str:  # noqa: D105
+        return "_AuthorizedMaterialV2(...)"
+
+
+def _authorize_material_v2(
+    inp: ComposeDbRestFanoutInputV2,
+    material: FanoutComponentMaterialV2,
+    ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
+) -> _AuthorizedMaterialV2:
+    """Run every value rule through its neutral authority; return what came back."""
+    from ...patterns.archetype_parameters import (
+        DbConnectionBinding,
+        DbReadOperation,
+        DbReadParameter,
+        RestConnectionBinding,
+    )
+
+    db_connection = material.source.connection
+    db: _Any = None
+    if isinstance(db_connection, FanoutDbCreateMaterialV2):
+        db = _authority_check(
+            "/component_material/source/connection",
+            DbCreateSettings,
+            driver=db_connection.driver,
+            auth_mode=inp.source.auth_mode,
+            host=db_connection.host,
+            port=db_connection.port,
+            database=db_connection.database,
+            username=db_connection.username,
+            credential_ref=db_connection.credential_ref,
+        )
+    elif isinstance(db_connection, FanoutConnectionReuseMaterialV2):
+        db = _authority_check(
+            "/component_material/source/connection",
+            DbConnectionBinding,
+            mode="reuse",
+            component_id=db_connection.component_id,
+            component_name=db_connection.component_name,
+        )
+    result_fields = tuple(
+        _authority_check(
+            f"/component_material/source/read/result_fields/{field_index}",
+            DBResultField,
+            name=field.name,
+            data_type=field.data_type,
+            required=field.required,
+            description=field.description,
+        )
+        for field_index, field in enumerate(material.source.read.result_fields)
+    )
+    result_names = [field.name for field in result_fields]
+    if len(set(result_names)) != len(result_names):
+        raise _refusal(
+            COMPOSITION_CONTRACT_MISMATCH,
+            "/component_material/source/read/result_fields",
+            phase="input",
+        )
+    read = material.source.read
+    bind_parameters = [
+        _authority_check(
+            f"/component_material/source/read/bind_parameters/{bind_index}",
+            DbReadParameter,
+            name=parameter.name,
+            direction=parameter.direction,
+        )
+        for bind_index, parameter in enumerate(read.bind_parameters)
+    ]
+    read_operation = _authority_check(
+        "/component_material/source/read",
+        DbReadOperation,
+        sql=read.sql,
+        result_schema={"fields": list(result_fields)},
+        parameters=bind_parameters,
+        batch_size=read.batch_size,
+        max_rows=read.max_rows,
+    )
+    targets: _List[Tuple[_Any, RestSendRequest]] = []
+    for (material_index, entry), target in zip(ordered_material, inp.targets):
+        base = f"/component_material/targets/{material_index}"
+        connection: _Any = None
+        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
+            # `RestCreateSettings` is the URL-shape authority; created REST is
+            # always unauthenticated (the auth vocabulary's ONE create mode).
+            connection = _authority_check(
+                base + "/connection",
+                RestCreateSettings,
+                base_url=entry.connection.base_url,
+                auth_mode="none",
+            )
+        elif isinstance(entry.connection, FanoutConnectionReuseMaterialV2):
+            connection = _authority_check(
+                base + "/connection",
+                RestConnectionBinding,
+                mode="reuse",
+                component_id=entry.connection.component_id,
+                component_name=entry.connection.component_name,
+            )
+        parameters = [
+            _authority_check(
+                f"{base}/operation/query_parameters/{qp_index}",
+                RestQueryParameter,
+                name=parameter.name,
+                value_source=parameter.value_source,
+                literal_value=parameter.literal_value,
+            )
+            for qp_index, parameter in enumerate(entry.operation.query_parameters)
+        ]
+        request = _authority_check(
+            base + "/operation",
+            RestSendRequest,
+            method=target.method,
+            path=entry.operation.path,
+            query_parameters=parameters,
+            expected_status_codes=list(target.expected_status_codes),
+        )
+        targets.append((connection, request))
+    return _AuthorizedMaterialV2(db=db, read=read_operation, targets=tuple(targets))
 
 
 #: The route's topology spelling. Pinned against the legacy composition's
@@ -1476,17 +1854,20 @@ def _projection_facts_v2(
 def _emit_db_components_v2(
     inp: ComposeDbRestFanoutInputV2,
     material: FanoutComponentMaterialV2,
+    authorized: _AuthorizedMaterialV2,
     keys: _FanoutKeysV2,
     context: PrimitiveBuildContext,
 ) -> _List[IntegrationComponentSpec]:
-    """Port of ``_build_db_extract_params`` + ``_rt().DbExtractPrimitive``."""
-    read = material.source.read
-    connection = material.source.connection
-    if isinstance(connection, FanoutDbCreateMaterialV2):
+    """Port of ``_build_db_extract_params`` + ``_rt().DbExtractPrimitive``.
+
+    Connection values and result fields are the AUTHORITY-validated ones."""
+    read = authorized.read
+    connection = authorized.db
+    if isinstance(connection, DbCreateSettings):
         connection_params: _Dict[str, _Any] = {
             "mode": "create",
             "driver_id": connection.driver,
-            "auth_mode": inp.source.auth_mode,
+            "auth_mode": connection.auth_mode,
             "host": connection.host,
             "port": connection.port,
             "dbname": connection.database,
@@ -1495,7 +1876,7 @@ def _emit_db_components_v2(
             connection_params["username"] = connection.username
         if connection.credential_ref is not None:
             connection_params["credential_ref"] = connection.credential_ref
-    elif isinstance(connection, FanoutConnectionReuseMaterialV2):
+    elif connection is not None:
         connection_params = {"mode": "reuse"}
         if connection.component_id:
             connection_params["component_id"] = connection.component_id
@@ -1510,13 +1891,13 @@ def _emit_db_components_v2(
         "query": read.sql,
         "output_fields": [
             {"name": field.name, "data_type": field.data_type, "mandatory": field.required}
-            for field in read.result_fields
+            for field in authorized.result_fields
         ],
     }
-    if read.bind_parameters:
+    if read.parameters:
         read_profile["parameters"] = [
             {"name": parameter.name, "mappable": parameter.direction == "in"}
-            for parameter in read.bind_parameters
+            for parameter in read.parameters
         ]
     operation: _Dict[str, _Any] = {}
     if read.batch_size is not None:
@@ -1567,6 +1948,7 @@ def _emit_db_components_v2(
 def _emit_transform_components_v2(
     inp: ComposeDbRestFanoutInputV2,
     material: FanoutComponentMaterialV2,
+    authorized: _AuthorizedMaterialV2,
     keys: _FanoutKeysV2,
     context: PrimitiveBuildContext,
 ) -> _List[IntegrationComponentSpec]:
@@ -1575,7 +1957,6 @@ def _emit_transform_components_v2(
     Map scripts take the primitive's script-component REFERENCE path: the
     script is a base component, referenced by ``$ref``, never inlined.
     """
-    read = material.source.read
     direct: _List[_Dict[str, _Any]] = []
     functions: _List[_Dict[str, _Any]] = []
     scripts: _List[_Dict[str, _Any]] = []
@@ -1618,7 +1999,7 @@ def _emit_transform_components_v2(
                     "source_profile_type": "profile.db",
                     "source_field_index": {
                         field.name: {"data_type": field.data_type, "mappable": True}
-                        for field in read.result_fields
+                        for field in authorized.result_fields
                     },
                 },
                 "target_payload_profile": material.payload_profile.model_dump(),
@@ -1638,23 +2019,28 @@ def _emit_transform_components_v2(
 def _emit_target_components_v2(
     target: FanoutTargetV2,
     material: FanoutTargetMaterialV2,
+    validated: Tuple[_Any, RestSendRequest],
     target_keys: Tuple[str, str, str],
     keys: _FanoutKeysV2,
     context: PrimitiveBuildContext,
     material_index: int,
 ) -> _List[IntegrationComponentSpec]:
-    """Port of ``_fanout_target_params`` + ``_rt().RestSendWithRetryPrimitive``."""
+    """Port of ``_fanout_target_params`` + ``_rt().RestSendWithRetryPrimitive``.
+
+    The base URL, reuse selector, path and query parameters are the
+    AUTHORITY-validated values (``validated``), exactly as the legacy route
+    emits ``settings.base_url`` / ``send.path`` / ``qp.name`` (CDX-r1-05)."""
     prefix, connection_key, operation_key = target_keys
     base = f"/component_material/targets/{material_index}"
     label = _derived_label_v2(target)
-    connection = material.connection
-    if isinstance(connection, FanoutRestCreateMaterialV2):
+    connection, request = validated
+    if isinstance(connection, RestCreateSettings):
         connection_params: _Dict[str, _Any] = {
             "mode": "create",
             "base_url": connection.base_url,
             "auth": _rt().REST_CREATE_AUTH_MAP["none"],
         }
-    elif isinstance(connection, FanoutConnectionReuseMaterialV2):
+    elif connection is not None:
         connection_params = {"mode": "reuse"}
         if connection.component_id:
             connection_params["component_id"] = connection.component_id
@@ -1664,14 +2050,14 @@ def _emit_target_components_v2(
         connection_params = {"mode": "reuse", "component_id": connection_key}
     operation: _Dict[str, _Any] = {
         "method": target.method,
-        "path": material.operation.path,
+        "path": request.path,
         # Every leg sends the ONE shared payload profile the transform produces.
         "request_profile_id": f"$ref:{keys.target_profile}",
         "request_profile_type": "json",
     }
     literal = {
         parameter.name: parameter.literal_value
-        for parameter in material.operation.query_parameters
+        for parameter in request.query_parameters
         if parameter.value_source == "literal" and parameter.literal_value is not None
     }
     if literal:

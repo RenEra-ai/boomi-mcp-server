@@ -135,8 +135,12 @@ class RecipeRunResultV1:
     ``provenance`` is the established mapping (``registry_revision`` plus one
     ``recipes`` entry per invocation). It is DERIVED from the ordered, typed
     ``invocation_provenance`` tuple, so the two cannot disagree; the mapping's
-    shape is unchanged. ``diagnostics`` are informational run records, never
-    failures — a failure raises ``RecipeError``.
+    shape is unchanged. ``diagnostics`` are informational run records the
+    ENGINE itself produces, never failures — a failure raises ``RecipeError``.
+    The engine produces none today: the ``RECIPE_LEG_PROVENANCE`` records need
+    the trusted projection facts (which input part each leg realizes), which
+    only the authoring workflow holds, so it derives them there and serves
+    them after these (#159 S1, CDX-r1-06).
     """
 
     composed: ComposedContributionsV1
@@ -248,10 +252,19 @@ def _validate_input(descriptor: RecipeDescriptorV1, registry: RecipeRegistry, ra
     found = scan_forbidden_recipe_shape(dict(raw))
     if found is not None:
         path, _reason = found
+        # The scan reports the caller's own key (``password_hunter2``), and a
+        # caller-authored key name is content like any value: the pointer is
+        # walked against the input model and stops at the nearest DECLARED
+        # location (#159 S1, CDX-r1-03). The model lookup keeps its own
+        # ordering — a refusal here is still the scan's.
+        try:
+            scan_model = registry.input_model_for(descriptor)
+        except RecipeError:
+            scan_model = None
         raise recipe_error(
             RECIPE_INPUT_INVALID,
             phase="input",
-            path=_pointer(path),
+            path=_declared_scan_pointer(path, scan_model) if scan_model is not None else "",
             recipe_ids=(descriptor.recipe_id,),
             recipe_versions=(descriptor.recipe_version,),
         )
@@ -381,6 +394,22 @@ def _declared_input_pointer(error: Any, model: Any) -> str:
         if not errors:
             return ""
         segments = declared_loc_segments(model, errors[0].get("loc", ()))
+    except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
+        return ""
+    return _pointer(tuple(segments)) if segments else ""
+
+
+def _declared_scan_pointer(path: Tuple[Any, ...], model: Any) -> str:
+    """Where in ``raw_input`` the forbidden-shape scan stopped — DECLARED structure only.
+
+    The scan's path runs through the caller's RAW mapping, so EVERY segment —
+    the offending key included, and any undeclared key above it — may be
+    caller-authored. The path is walked against the input model's schema and
+    stops at the nearest DECLARED location: the offending key is never served,
+    only the declared object that holds it. Empty (the established value) when
+    nothing above it is declared."""
+    try:
+        segments = declared_loc_segments(model, path, request_path=True)
     except Exception:  # noqa: BLE001 — a pointer is best-effort, never a leak path
         return ""
     return _pointer(tuple(segments)) if segments else ""

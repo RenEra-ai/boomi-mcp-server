@@ -3,7 +3,7 @@
   "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
   "case_id": "composition/create_2legs_stream",
   "derived_by": "tests/_issue_159_composition_fixtures.py",
-  "derived_by_sha256": "0d8ad7abec05ff0e748d036148b41ae3e1b40c42a8b90ccfbbd63cadd2117aac",
+  "derived_by_sha256": "0dcf49e05fde5a925eba8df072497ec2ae520a0a2291c2c9434b72c5bba93c13",
   "executed_at_replay": false,
   "legacy_input_sha256": "654caeb9098fb4e7a5d27251f2b82e4130f8bd5025038fae25cb14af02a9d99b",
   "method": "legacy compose_archetypes request re-spelled into one pinned fan-out 2.0.0 invocation (raw_input + component_material) by _fanout_v2_support.v2_from_compose_request; zero prebuilt pairs; map label = the frozen transform row's display name",

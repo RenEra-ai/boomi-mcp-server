@@ -22,7 +22,7 @@
           },
           "source": {
             "connection": {
-              "credential_ref": "secrets/db/svc_sync",
+              "credential_ref": "credential://secrets/db/svc_sync",
               "database": "AppDB",
               "driver": "microsoft_jdbc",
               "host": "db.internal",
