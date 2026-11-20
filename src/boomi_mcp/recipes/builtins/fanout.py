@@ -787,15 +787,37 @@ FanoutRestConnectionMaterialV2 = _Annotated[
 ]
 
 
+#: The ONE published statement of the query-name rule. Served verbatim in the
+#: material schema and the authoring contract, so the text cannot drift from
+#: the constants below (a test pins both).
+QUERY_NAME_RULE_SUMMARY = (
+    "A query parameter NAME is judged by its words (split at case changes, "
+    "digits and separators). It is a credential when it contains a credential "
+    "word (password, pass, passcode, passphrase, pwd, secret, credential, "
+    "authorization, auth, bearer, apikey, signature, sig, jwt, hmac, sid, otp), "
+    "a key or token word not qualified by a closed non-secret qualifier "
+    "(pagination for token: page, next, skip, since, resumption, continuation, "
+    "cursor, sync, delta, max; data keys for key: sort, partition, cache, "
+    "idempotency, row, range, routing, correlation, dedup, lookup, search), a "
+    "session word, or is a bare code; a credential word directly followed by a "
+    "descriptor word (type, method, name, id, count, algorithm, version, "
+    "expiry, scope, hint) describes the credential rather than carrying it. A "
+    "literal value of true or false is never a credential. Unknown names are "
+    "admitted; the REST operation builder's own name and value checks "
+    "(REST_SECRET_VALUE_FORBIDDEN) apply on top."
+)
+
+
 class FanoutQueryParameterV2(_FanoutMaterialModel):
     name: str = Field(min_length=1)
     value_source: _Literal["literal", "watermark"]
     literal_value: Optional[str] = Field(
         default=None,
         description=(
-            "Refused when the REST operation builder refuses the (name, value) "
-            "pair as a secret (REST_SECRET_VALUE_FORBIDDEN): a literal key is a secret."
-        ),
+            "Refused (PLAINTEXT_SECRET_REJECTED) when the name denotes a "
+            "credential or the REST operation builder refuses the pair. "
+        )
+        + QUERY_NAME_RULE_SUMMARY,
     )
 
 
@@ -803,8 +825,9 @@ class FanoutRestOperationMaterialV2(_FanoutMaterialModel):
     path: str = Field(
         min_length=1,
         description=(
-            "Request path. Userinfo and any query pair the REST operation "
-            "builder refuses as a secret are refused."
+            "Request path. Userinfo and any query pair whose name denotes a "
+            "credential, or that the REST operation builder refuses, are "
+            "refused (see query_parameters[].literal_value)."
         ),
     )
     query_parameters: Tuple[FanoutQueryParameterV2, ...] = Field(
@@ -986,52 +1009,143 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
 _REST_SECRET_CODE = "REST_SECRET_VALUE_FORBIDDEN"
 
 
-#: Words that make a query-parameter NAME a credential wherever they appear.
+#: Words that make a NAME a credential wherever they appear (deny by default).
 _CREDENTIAL_NAME_WORDS = frozenset(
     {
-        "password", "passwd", "pwd", "passcode", "passphrase", "secret", "secrets",
-        "credential", "credentials", "authorization", "bearer", "apikey",
-        "signature", "sig",
+        "password", "passwords", "passwd", "pwd", "pass", "passcode", "passphrase",
+        "secret", "secrets", "credential", "credentials", "authorization", "auth",
+        "bearer", "apikey", "signature", "sig", "jwt", "hmac", "sid", "otp",
+        "sessionid", "session",
     }
 )
-#: Word pairs that name a credential (``api_key``, ``private-key``, ``accessKey``).
-_CREDENTIAL_NAME_PAIRS = frozenset({("api", "key"), ("private", "key"), ("access", "key")})
-#: The ONLY words that may qualify ``token`` without making it a credential: a
-#: pagination cursor (``pageToken``, ``nextPageToken``, ``continuationToken``).
-#: Deny by default — ``refresh_token``, ``fooToken`` and a bare ``token`` are
-#: credentials (#159 S1, Codex r3-01).
-_PAGINATION_TOKEN_QUALIFIERS = frozenset(
-    {"page", "next", "prev", "previous", "continuation", "cursor", "sync", "resume", "start"}
+#: ``token`` is a credential unless one of these immediately precedes it.
+_TOKEN_QUALIFIERS = frozenset(
+    {
+        "page", "next", "prev", "previous", "continuation", "cursor", "sync",
+        "resume", "resumption", "start", "skip", "since", "pagination", "delta",
+        "max", "min",
+    }
 )
+#: ``key`` is a credential unless one of these immediately precedes it.
+_KEY_QUALIFIERS = frozenset(
+    {
+        "sort", "partition", "cache", "idempotency", "row", "range", "routing",
+        "correlation", "dedup", "dedupe", "deduplication", "lookup", "search",
+        "primary", "foreign", "hash", "group", "order", "object", "s3",
+    }
+)
+#: A credential word DIRECTLY followed by one of these names an attribute of
+#: the credential, not the credential (``token_type``, ``signature_method``,
+#: ``secret_type``, ``key_id``). ``session_id`` is NOT excused: a session id is
+#: the session credential, so ``id`` excuses only ``key``.
+_DESCRIPTOR_WORDS = frozenset(
+    {
+        "type", "types", "kind", "method", "methods", "name", "names", "count",
+        "algorithm", "version", "expiry", "expires", "expiration", "scope",
+        "scopes", "hint", "status", "scanning", "location", "locations",
+        "resolution", "validity", "format", "length",
+    }
+)
+_ID_WORDS = frozenset({"id", "ids"})
+_FALSE_OR_TRUE = frozenset({"true", "false"})
 
 
 def _name_words(name: str) -> Tuple[str, ...]:
-    import re
+    """Split ``name`` into lowercase words in ONE linear pass: at separators,
+    at letter/digit changes, at a lower->upper change, and before the last
+    capital of an acronym run (``HTTPServer`` -> ``http``, ``server``)."""
+    words: _List[str] = []
+    current: _List[str] = []
+    previous = ""
+    length = len(name)
+    for index, char in enumerate(name):
+        if not char.isalnum():
+            if current:
+                words.append("".join(current))
+                current = []
+            previous = ""
+            continue
+        boundary = False
+        if current:
+            if char.isdigit() != previous.isdigit():
+                boundary = True
+            elif char.isupper() and previous.islower():
+                boundary = True
+            elif (
+                char.isupper()
+                and previous.isupper()
+                and index + 1 < length
+                and name[index + 1].islower()
+            ):
+                boundary = True
+        if boundary:
+            words.append("".join(current))
+            current = []
+        current.append(char.lower())
+        previous = char
+    if current:
+        words.append("".join(current))
+    return tuple(words)
 
-    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
-    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
-    return tuple(word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word)
+
+#: Stems a lowercase compound may END with (``accesstoken``, ``clientsecret``).
+_COMPOUND_STEMS = (
+    "passwords", "password", "passwd", "passphrase", "passcode", "secrets", "secret",
+    "credentials", "credential", "signature", "tokens", "token", "keys", "key",
+)
+#: For a ``...key`` compound only these prefixes make it a credential: an
+#: arbitrary ``...key`` word (``monkey``, ``hockey``) is not split.
+_KEY_COMPOUND_PREFIXES = frozenset(
+    {
+        "api", "access", "secret", "private", "auth", "app", "license", "master",
+        "shared", "subscription", "client", "session", "consumer", "encryption",
+        "signing", "developer", "dev",
+    }
+)
+
+
+def _expand_compounds(words: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Split a lowercase compound into ``(prefix, stem)`` so ``accesstoken``
+    is judged like ``access_token`` and ``skiptoken`` like ``skip_token``."""
+    expanded: _List[str] = []
+    for word in words:
+        split = None
+        if word not in _CREDENTIAL_NAME_WORDS:
+            for stem in _COMPOUND_STEMS:
+                if word.endswith(stem) and len(word) > len(stem):
+                    prefix = word[: -len(stem)]
+                    if stem in ("key", "keys") and prefix not in _KEY_COMPOUND_PREFIXES:
+                        break
+                    split = (prefix, stem)
+                    break
+        expanded.extend(split if split else (word,))
+    return tuple(expanded)
 
 
 def _query_name_is_credential(name: str) -> bool:
-    """Whether a query-parameter NAME denotes a credential (deny by default).
-
-    The REST builder's own name list matches whole names only and admits
-    ``refresh_token``; the recipe-input substring scan refuses ``pageToken``.
-    Neither is right for a query NAME, so this one rule judges the name's WORDS:
-    a credential word anywhere, a credential word pair, a bare ``key``, or a
-    ``token`` not qualified by a pagination word."""
-    words = _name_words(name)
-    if not words:
-        return False
-    if words == ("key",) or any(word in _CREDENTIAL_NAME_WORDS for word in words):
-        return True
-    if any(pair in _CREDENTIAL_NAME_PAIRS for pair in zip(words, words[1:])):
+    """Whether a query-parameter NAME denotes a credential — see
+    :data:`QUERY_NAME_RULE_SUMMARY`. There is no runtime authority for this fact
+    (the REST builder's whole-name list admits ``refresh_token``), so this rule
+    IS the authority, pinned both ways by the frozen name table in
+    ``tests/test_recipe_component_material.py`` (#159 S1, CDX-r3-01/r4, QA r5/r6)."""
+    words = _expand_compounds(_name_words(name))
+    if words == ("code",):
         return True
     for index, word in enumerate(words):
-        if word in ("token", "tokens"):
-            if index == 0 or words[index - 1] not in _PAGINATION_TOKEN_QUALIFIERS:
-                return True
+        following = words[index + 1] if index + 1 < len(words) else ""
+        preceding = words[index - 1] if index else ""
+        if following in _DESCRIPTOR_WORDS:
+            continue
+        if word in _CREDENTIAL_NAME_WORDS:
+            return True
+        if word in ("token", "tokens") and preceding not in _TOKEN_QUALIFIERS:
+            return True
+        if word in ("key", "keys"):
+            if following in _ID_WORDS or preceding in _KEY_QUALIFIERS:
+                continue
+            return True
+        if word == "code" and preceding in ("auth", "authorization", "verification", "otp"):
+            return True
     return False
 
 
@@ -1043,7 +1157,11 @@ def _rest_query_pair_is_secret(name: str, value: str) -> bool:
     build time, read by error CODE only (it also judges the VALUE: JWT, Bearer,
     long base64) — OR when the name denotes a credential
     (:func:`_query_name_is_credential`)."""
-    if _query_name_is_credential(name):
+    if value.strip().lower() in _FALSE_OR_TRUE:
+        # A flag (``hide_secret=true``) is never a credential; the builder
+        # still judges the pair below.
+        pass
+    elif _query_name_is_credential(name):
         return True
     error = _rt().RestClientOperationBuilder._validate_dict_param(
         {name: value}, "query_parameters"

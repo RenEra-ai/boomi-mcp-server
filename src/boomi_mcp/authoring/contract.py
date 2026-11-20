@@ -785,8 +785,11 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "(PLAINTEXT_SECRET_REJECTED) a credential_ref that is not an "
                 "opaque 'credential://' reference, URL userinfo, a JDBC property "
                 "in a host or database, and any query pair (a literal "
-                "parameter, or one written into a base URL or path) the REST "
-                "operation builder itself refuses as a secret "
+                "parameter, or one written into a base URL or path) whose NAME "
+                "denotes a credential under the recipe's query-name rule (stated "
+                "on component_material_schema at "
+                "targets[].operation.query_parameters[].literal_value) or that the "
+                "REST operation builder itself refuses as a secret "
                 "(REST_SECRET_VALUE_FORBIDDEN)."
             ),
             "recipe_provenance": (

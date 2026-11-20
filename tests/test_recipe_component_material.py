@@ -1249,6 +1249,126 @@ def test_a_credential_name_in_a_url_query_string_is_refused(name):
     assert _SECRET_CANARY not in diagnostic.model_dump_json()
 
 
+
+
+# ---------------------------------------------------------------------------
+# The FROZEN query-name table (#159 S1: CDX r2-02/r3-01/r4, QA r4/r5/r6).
+# There is no runtime authority for "is this query NAME a credential", so the
+# rule IS the authority and this table is its bidirectional pin. Every row cites
+# the gate that raised it or the provider convention it encodes — never the
+# implementation. A change to the rule must keep every row.
+# ---------------------------------------------------------------------------
+
+_FROZEN_CREDENTIAL_NAMES = {
+    # QA r5-01 / CDX r3-01: names the REST builder's whole-name list admits
+    "refresh_token": "QA r5-01", "auth_token": "QA r5-01", "access_token": "QA r5-01",
+    "id_token": "QA r5-01", "sessionToken": "QA r5-01", "private_key": "QA r5-01",
+    "passphrase": "QA r5-01", "api_secret": "QA r5-01", "X-Client-Secret": "QA r5-01",
+    "X-Client_Secret": "QA r4", "fooToken": "deny-by-default token", "token": "bare token",
+    # QA r6-01: provider credential names the word rule must catch
+    "subscription-key": "QA r6-01 Azure APIM", "auth": "QA r6-01 Firebase",
+    "auth_key": "QA r6-01", "authKey": "QA r6-01", "app_key": "QA r6-01",
+    "license_key": "QA r6-01", "master_key": "QA r6-01", "shared_key": "QA r6-01",
+    "session_id": "QA r6-01", "sessionid": "QA r6-01", "sid": "QA r6-01",
+    "jwt": "QA r6-01", "pass": "QA r6-01", "hmac": "QA r6-01", "code": "QA r6-01 OAuth code",
+    # OAuth / AWS / Azure / Google conventions (QA r6 hunt)
+    "client_secret": "OAuth2", "oauth_token": "OAuth1", "oauth_signature": "OAuth1",
+    "X-Amz-Signature": "AWS SigV4", "X-Amz-Security-Token": "AWS STS", "Signature": "AWS SigV2",
+    "X-Amz-Credential": "AWS SigV4 (fail-closed: rides with X-Amz-Signature)",
+    "sig": "Azure SAS", "key": "Google API key", "api_key": "API key", "apiKey": "API key",
+    "X-API-Key": "API key", "Authorization": "HTTP auth", "password": "password",
+    "passcode": "passcode", "secret_key": "secret key", "db_password": "B4 report",
+    "accessKey": "access key",
+    # advisor B6 checklist: position-sensitive names that must stay refused
+    "secret_value": "advisor", "secretKey": "advisor", "secret_access_key": "advisor",
+    "token_value": "advisor", "passwordConfirm": "advisor", "password2": "advisor",
+    "client_secret_basic": "advisor",
+    # lowercase compounds
+    "accesstoken": "compound", "clientsecret": "compound", "authtoken": "compound",
+    "apitoken": "compound",
+}
+
+_FROZEN_ORDINARY_NAMES = {
+    # CDX r2-02 / r4-01 / QA r6-02: pagination cursors
+    "pageToken": "CDX r2-02", "nextPageToken": "CDX r2-02", "page_token": "CDX r2-02",
+    "pagination_token": "CDX r4-01 X API", "continuationToken": "pagination",
+    "NextContinuationToken": "QA r6 S3", "nextToken": "QA r6", "syncToken": "QA r6",
+    "skipToken": "QA r6-02 Graph", "resumptionToken": "QA r6-02 OAI-PMH",
+    "sinceToken": "QA r6-02", "$skiptoken": "QA r6 OData", "$deltatoken": "QA r6 OData",
+    # QA r6-02 / CDX r4-03: descriptors of a credential, not the credential
+    "max_tokens": "QA r6-02", "token_type": "QA r6-02 OAuth",
+    "signature_method": "QA r6-02", "oauth_signature_method": "QA r6-02 OAuth1",
+    "secret_type": "CDX r4-03 GitHub", "key_id": "QA r6", "AWSAccessKeyId": "QA r6-02 key id",
+    # QA r6: ordinary names
+    "cursor": "QA r6", "limit": "QA r6", "keyword": "QA r6", "mode": "QA r6", "q": "QA r6",
+    "sort_key": "QA r6", "partitionKey": "QA r6", "idempotency_key": "QA r6", "monkey": "QA r6",
+    "X-Amz-Algorithm": "QA r6 AWS", "X-Amz-Date": "QA r6 AWS", "X-Amz-SignedHeaders": "QA r6 AWS",
+    "client_id": "QA r6 OAuth", "state": "QA r6 OAuth", "nonce": "QA r6 OAuth",
+    "redirect_uri": "QA r6 OAuth", "code_challenge": "QA r6 PKCE",
+    "sv": "QA r6 Azure SAS", "se": "QA r6 Azure SAS", "sp": "QA r6 Azure SAS",
+    "sr": "QA r6 Azure SAS", "country_code": "ordinary", "hockey": "ordinary", "passport": "ordinary",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_FROZEN_CREDENTIAL_NAMES))
+def test_the_frozen_credential_names_are_refused(name):
+    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+
+    assert _query_name_is_credential(name), _FROZEN_CREDENTIAL_NAMES[name]
+
+
+@pytest.mark.parametrize("name", sorted(_FROZEN_ORDINARY_NAMES))
+def test_the_frozen_ordinary_names_are_admitted(name):
+    from boomi_mcp.recipes.builtins.fanout import _query_name_is_credential
+
+    assert not _query_name_is_credential(name), _FROZEN_ORDINARY_NAMES[name]
+
+
+@pytest.mark.parametrize("arm", ["literal", "path"])
+def test_a_flag_value_under_a_credential_word_is_admitted_on_both_arms(arm):
+    """CDX r4-03: ``hide_secret=true`` asks the API to OMIT secrets; a flag is
+    never a credential. The same name with an opaque value is still refused."""
+    for value, refused in (("true", False), ("abc123opaque", True)):
+        raw, material = flagship_v2()
+        if arm == "literal":
+            material["targets"][1]["operation"]["query_parameters"] = [
+                {"name": "hide_secret", "value_source": "literal", "literal_value": value}
+            ]
+        else:
+            material["targets"][1]["operation"]["path"] += "?hide_secret=" + value
+        if refused:
+            _blocked(recipe_request(raw, material))
+        else:
+            plan, _ = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+            assert plan.validation_report.is_valid
+
+
+def test_the_name_tokenizer_is_linear():
+    """CDX r4-02: a long acronym run must not stall planning."""
+    import time
+
+    from boomi_mcp.recipes.builtins.fanout import _name_words
+
+    started = time.perf_counter()
+    _name_words("A" * 200_000 + "1")
+    assert time.perf_counter() - started < 1.0
+
+
+def test_the_served_text_states_the_query_name_rule():
+    """CDX r4-04: the rule is published where callers read it, from its constant."""
+    from boomi_mcp.authoring import contract
+    from boomi_mcp.recipes.builtins.fanout import (
+        QUERY_NAME_RULE_SUMMARY,
+        FanoutQueryParameterV2,
+    )
+
+    description = FanoutQueryParameterV2.model_fields["literal_value"].description
+    assert QUERY_NAME_RULE_SUMMARY in description
+    import inspect
+
+    assert "query-name rule" in inspect.getsource(contract)
+
+
 @pytest.mark.parametrize(
     "name, credential",
     [
