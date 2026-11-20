@@ -799,15 +799,50 @@ LITERAL_QUERY_GUARANTEE_V2 = (
     "only non-secret data in those fields."
 ).format(names=_published_query_names())
 
+# The request-target GRAMMAR (#159 S1, B9 structural fix for CDX r6-01..04,
+# QA r8-01/02): an ALLOWLIST of what may be EMITTED, not an enumeration of
+# refused syntax. ONE function owns it (:func:`_query_value_violation` for a
+# value, :func:`_judge_request_target` for a whole target), inline and
+# structured values both call it, and the served sentence is rendered from
+# these constants.
+_URI_UNRESERVED = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+#: Every character an EMITTED request target may carry raw: RFC 3986
+#: unreserved + reserved, and ``%`` only as a two-hex-digit escape. ``#`` is
+#: NOT here (a fragment never reaches the server; text after it would be
+#: persisted and ignored), nor whitespace or control characters.
+_URI_TARGET_EXTRA = ":/?[]@!$&'()*+,;=%"
+#: The characters a query VALUE may carry raw besides unreserved and a valid
+#: ``%XX``: never ``+`` (form space), ``;`` (a pair separator to some servers),
+#: ``&``, ``?`` or ``#``. Escaped (``%2B``, ``%3B``, ``%26``) they are data.
+_QUERY_VALUE_EXTRA = "!$'()*,:@/="
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+_TARGET_CHARS = frozenset(_URI_UNRESERVED + _URI_TARGET_EXTRA)
+_VALUE_CHARS = frozenset(_URI_UNRESERVED + _QUERY_VALUE_EXTRA)
+_NAME_CHARS = frozenset(_URI_UNRESERVED + "%")
+
+#: The ONE rendered statement of the grammar.
+QUERY_GRAMMAR_SENTENCE_V2 = (
+    "The effective request target (base_url followed by path, judged as "
+    "joined) may carry only RFC 3986 characters, with no whitespace, control "
+    "character or '#', at most one '?', and '%' only as a two-hex-digit "
+    "escape; its query must be name=value pairs separated by '&', each name "
+    "(after percent-decoding) a published name and each value only "
+    "unreserved characters ({unreserved}), %XX escapes and {extra}; a "
+    "structured literal value follows the same value rule."
+).format(unreserved="A-Z a-z 0-9 " + "-._~", extra=" ".join(_QUERY_VALUE_EXTRA))
+
 #: The per-field rule every query-carrying material field states.
 _LITERAL_QUERY_FIELD_RULE = (
     "A literal REST query value is emitted only under the published names "
-    "({names}): any other name, or inline query syntax that cannot be read "
-    "unambiguously (a pair without '=', an empty or repeated pair, a fragment, "
-    "a name repeated across base_url, path and query_parameters), is refused "
-    "with {cause}; a value the REST operation builder refuses is refused with "
-    "PLAINTEXT_SECRET_REJECTED. " + LITERAL_QUERY_GUARANTEE_V2
-).format(names=_published_query_names(), cause=_QUERY_NAME_CAUSE)
+    "({names}): any other name, or query syntax outside the grammar below "
+    "(including a name repeated across base_url, path and query_parameters), "
+    "is refused with {cause}; a value the REST operation builder refuses is "
+    "refused with PLAINTEXT_SECRET_REJECTED. "
+).format(names=_published_query_names(), cause=_QUERY_NAME_CAUSE) + (
+    QUERY_GRAMMAR_SENTENCE_V2 + " " + LITERAL_QUERY_GUARANTEE_V2
+)
 
 
 class FanoutRestCreateMaterialV2(_FanoutMaterialModel):
@@ -1046,76 +1081,126 @@ def _rest_query_value_is_secret(name: str, value: str) -> bool:
     return getattr(error, "error_code", None) == _REST_SECRET_CODE
 
 
-class _UnreadableQuery(Exception):
-    """Inline query syntax that cannot be read unambiguously."""
+def _escape_ok(text: str, index: int) -> bool:
+    """Whether ``text[index]`` (a ``%``) starts a valid two-hex-digit escape."""
+    escape = text[index + 1:index + 3]
+    return len(escape) == 2 and all(char in _HEX_DIGITS for char in escape)
 
 
-def _inline_query_pairs(parts: _Any) -> Tuple[Tuple[str, str, str], ...]:
-    """``(decoded name, decoded value, raw value)`` per inline query pair.
+def _query_value_violation(raw: str) -> Optional[int]:
+    """THE value grammar: the offset of the first character a query VALUE may
+    not carry raw, or ``None``. Allowed: unreserved, a valid ``%XX`` escape,
+    and :data:`_QUERY_VALUE_EXTRA`. Inline and structured values both call this."""
+    for index, char in enumerate(raw):
+        if char == "%":
+            if not _escape_ok(raw, index):
+                return index
+        elif char not in _VALUE_CHARS:
+            return index
+    return None
 
-    Strict: a fragment, a second ``?``, an empty pair, a pair without ``=``, a
-    name or value that is not valid percent-encoded UTF-8, and a repeated
-    (decoded) name are UNREADABLE — refused rather than guessed at."""
+
+def _decoded(raw: str) -> Optional[str]:
+    """``raw`` percent-decoded ONCE, as strict UTF-8; ``None`` if undecodable."""
     from urllib.parse import unquote
 
-    if parts.fragment:
-        raise _UnreadableQuery()
-    query = parts.query
-    if not query:
-        return ()
-    if "?" in query:
-        raise _UnreadableQuery()
-    pairs = []
-    seen: set = set()
-    for segment in query.split("&"):
-        if not segment or "=" not in segment:
-            raise _UnreadableQuery()
-        raw_name, raw_value = segment.split("=", 1)
-        try:
-            name = unquote(raw_name, errors="strict")
-            value = unquote(raw_value, errors="strict")
-        except UnicodeDecodeError:
-            raise _UnreadableQuery() from None
-        if name in seen:
-            raise _UnreadableQuery()
-        seen.add(name)
-        pairs.append((name, value, raw_value))
-    return tuple(pairs)
-
-
-def _inline_query_names(value: str) -> Tuple[str, ...]:
-    """The decoded inline query names of an already-checked URL (in order)."""
-    from urllib.parse import urlsplit
-
     try:
-        return tuple(name for name, _v, _r in _inline_query_pairs(urlsplit(value.strip())))
-    except (ValueError, _UnreadableQuery):
-        return ()
+        return unquote(raw, errors="strict")
+    except UnicodeDecodeError:
+        return None
 
 
-def _url_cause(value: str) -> Optional[str]:
-    """The refusal cause for a ``base_url`` / ``path``, or ``None`` when clean."""
+def _value_is_secret(name: str, raw: str) -> bool:
+    """The REST builder's value check on the raw AND the once-decoded value."""
+    decoded = _decoded(raw)
+    return _rest_query_value_is_secret(name, raw) or (
+        decoded is not None and _rest_query_value_is_secret(name, decoded)
+    )
+
+
+@_dataclass(frozen=True)
+class _TargetVerdict:
+    """A request-target judgment: ``cause``/``offset`` of the first refusal
+    (``None`` when clean) and the decoded query names it carries."""
+
+    cause: Optional[str]
+    offset: int = 0
+    names: Tuple[str, ...] = ()
+
+
+def _judge_request_target(text: str) -> _TargetVerdict:
+    """THE request-target grammar, applied to exactly the text that is EMITTED.
+
+    1. every character is an RFC 3986 target character (``#``, whitespace and
+       control characters never are), a ``%`` starts a valid escape, at most
+       one ``?``, and no userinfo before the path;
+    2. the query (after the ``?``) is ``pair ("&" pair)*`` with
+       ``pair = name "=" value``: a raw name of unreserved characters and
+       escapes that DECODES to a published name, never repeated, and a value
+       that meets :func:`_query_value_violation`; an empty query is refused;
+    3. only then each value meets the REST builder's value check (raw and
+       once-decoded) — ``PLAINTEXT_SECRET_REJECTED``.
+    """
+    for index, char in enumerate(text):
+        if char not in _TARGET_CHARS:
+            return _TargetVerdict(_QUERY_NAME_CAUSE, index)
+        if char == "%" and not _escape_ok(text, index):
+            return _TargetVerdict(_QUERY_NAME_CAUSE, index)
+    scheme_end = text.find("://")
+    if scheme_end >= 0:
+        authority_start = scheme_end + 3
+        authority_end = len(text)
+        for marker in "/?":
+            found = text.find(marker, authority_start)
+            if found >= 0:
+                authority_end = min(authority_end, found)
+        at = text.find("@", authority_start, authority_end)
+        if at >= 0:
+            return _TargetVerdict(_PLAINTEXT_SECRET_CAUSE, at)
+    mark = text.find("?")
+    if mark < 0:
+        return _TargetVerdict(None)
+    second = text.find("?", mark + 1)
+    if second >= 0:
+        return _TargetVerdict(_QUERY_NAME_CAUSE, second)
+    query_start = mark + 1
+    if query_start == len(text):
+        return _TargetVerdict(_QUERY_NAME_CAUSE, mark)
+    pairs: _List[Tuple[int, str, str]] = []
+    seen: set = set()
+    offset = query_start
+    for segment in text[query_start:].split("&"):
+        if "=" not in segment:
+            return _TargetVerdict(_QUERY_NAME_CAUSE, offset)
+        raw_name, raw_value = segment.split("=", 1)
+        if any(char not in _NAME_CHARS for char in raw_name):
+            return _TargetVerdict(_QUERY_NAME_CAUSE, offset)
+        name = _decoded(raw_name)
+        if name is None or name not in LITERAL_QUERY_NAMES_V2 or name in seen:
+            return _TargetVerdict(_QUERY_NAME_CAUSE, offset)
+        seen.add(name)
+        violation = _query_value_violation(raw_value)
+        if violation is not None or _decoded(raw_value) is None:
+            return _TargetVerdict(
+                _QUERY_NAME_CAUSE, offset + len(raw_name) + 1 + (violation or 0)
+            )
+        pairs.append((offset, name, raw_value))
+        offset += len(segment) + 1
+    for pair_offset, name, raw_value in pairs:
+        if _value_is_secret(name, raw_value):
+            return _TargetVerdict(_PLAINTEXT_SECRET_CAUSE, pair_offset)
+    return _TargetVerdict(None, names=tuple(name for _o, name, _v in pairs))
+
+
+def _userinfo_cause(value: str) -> Optional[str]:
+    """The PER-FIELD userinfo check (a field's own authority, before joining)."""
     from urllib.parse import urlsplit
 
     try:
         parts = urlsplit(value.strip())
     except ValueError:
         return _PLAINTEXT_SECRET_CAUSE  # unparseable: refused rather than judged clean
-    if "@" in parts.netloc:
-        return _PLAINTEXT_SECRET_CAUSE
-    try:
-        pairs = _inline_query_pairs(parts)
-    except _UnreadableQuery:
-        return _QUERY_NAME_CAUSE
-    for name, value_decoded, value_raw in pairs:
-        if name not in LITERAL_QUERY_NAMES_V2:
-            return _QUERY_NAME_CAUSE
-    for name, value_decoded, value_raw in pairs:
-        if _rest_query_value_is_secret(name, value_decoded) or _rest_query_value_is_secret(
-            name, value_raw
-        ):
-            return _PLAINTEXT_SECRET_CAUSE
-    return None
+    return _PLAINTEXT_SECRET_CAUSE if "@" in parts.netloc else None
 
 
 def _breaches(rule: str, value: _Any, owner: _Any) -> Optional[str]:
@@ -1134,14 +1219,19 @@ def _breaches(rule: str, value: _Any, owner: _Any) -> Optional[str]:
     if rule == "jdbc_property":
         return _PLAINTEXT_SECRET_CAUSE if any(char in text for char in ";=") else None
     if rule == "url":
-        return _url_cause(text)
+        # Per-field userinfo only: the query grammar is judged on the JOINED
+        # target (base_url + path), which only the preparer can assemble.
+        return _userinfo_cause(text)
     if rule == "literal_query_name":
         if getattr(owner, "value_source", None) != "literal":
             return None  # a watermark-sourced name is recorded, never emitted
         return None if text in LITERAL_QUERY_NAMES_V2 else _QUERY_NAME_CAUSE
     if rule == "named_literal":
+        # The SAME value grammar as an inline value (QA r8-02), then the builder.
+        if _query_value_violation(text) is not None or _decoded(text) is None:
+            return _QUERY_NAME_CAUSE
         name = str(getattr(owner, "name", "") or "").strip()
-        return _PLAINTEXT_SECRET_CAUSE if _rest_query_value_is_secret(name, text) else None
+        return _PLAINTEXT_SECRET_CAUSE if _value_is_secret(name, text) else None
     return _PLAINTEXT_SECRET_CAUSE  # an unknown rule fails closed
 
 
@@ -1501,35 +1591,67 @@ def _selected_base_url(base_catalog: _Mapping[str, IntegrationComponentSpec], ke
     return value if isinstance(value, str) else ""
 
 
-def _check_query_sources_v2(
+def _joined_targets(base: str, path: str) -> Tuple[Tuple[str, int], ...]:
+    """The request target(s) a base URL and a path can be joined into, each
+    with the offset where the PATH's contribution starts.
+
+    The REST Client operation path is APPENDED to the connection URL (the
+    builders' own contract: "Path appended onto the connection's base_url ...
+    REST Client preserves the path verbatim"); whether the runtime inserts a
+    single ``/`` at the boundary is not documented, and the route digest
+    (``connector_replay.digests._effective_path``) models that slash join. Both
+    are judged, so a split that is clean under one join cannot smuggle a pair
+    under the other."""
+    if not base:
+        return ((path, 0),)
+    concatenated = (base + path, len(base))
+    trimmed = base.rstrip("/")
+    slashed = (trimmed + "/" + path.lstrip("/"), len(trimmed))
+    return (concatenated,) if slashed[0] == concatenated[0] else (concatenated, slashed)
+
+
+def _check_request_targets_v2(
     inp: ComposeDbRestFanoutInputV2,
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
+    authorized_paths: _Mapping[int, Tuple[str, str]],
     base_catalog: _Mapping[str, IntegrationComponentSpec],
 ) -> None:
-    """One target's query is ONE name -> value map, assembled from up to three
-    sources: the connection's ``base_url`` (material or selected base), the
-    operation ``path``, and the structured ``query_parameters``. A name an
-    INLINE source repeats from an earlier source is ambiguous (which value is
-    sent?) and is refused with the query-name cause at the later source's
-    declared field (D12). Two STRUCTURED entries sharing a name keep their own
-    refusal (CDX-r2-01). Runs after every source passed its own rule."""
+    """Judge each target's EFFECTIVE request target (QA r8-01): the connection
+    URL joined with the operation path, exactly as emitted (authority-stripped
+    material; a selected create-mode base's ``base_url`` as written). A reused
+    connection's URL is not in hand, so its path is judged alone.
+
+    The refusal points at the field that CONTRIBUTES the offending text: the
+    path when the offset falls in the path's portion, else the base URL (or,
+    for a selected base, the raw-input ``connection_key`` that selected it).
+    A structured parameter repeating an inline name is refused at its name.
+    """
     for index, (target, (material_index, entry)) in enumerate(zip(inp.targets, ordered_material)):
-        base = f"/component_material/targets/{material_index}"
+        base_pointer = f"/component_material/targets/{material_index}"
+        base_url, path = authorized_paths[index]
         if isinstance(entry.connection, FanoutRestCreateMaterialV2):
-            seen = set(_inline_query_names(entry.connection.base_url))
+            base_field = base_pointer + "/connection/base_url"
         elif target.connection_key is not None and target.binding_mode == "create":
-            seen = set(_inline_query_names(_selected_base_url(base_catalog, target.connection_key)))
+            base_url = _selected_base_url(base_catalog, target.connection_key)
+            base_field = f"/raw_input/targets/{index}/connection_key"
         else:
-            seen = set()
-        path_names = _inline_query_names(entry.operation.path)
-        if seen & set(path_names):
-            raise _refusal(_QUERY_NAME_CAUSE, base + "/operation/path", phase="input")
-        seen |= set(path_names)
+            base_url, base_field = "", base_pointer + "/operation/path"
+        names: set = set()
+        for joined, path_start in _joined_targets(base_url, path):
+            verdict = _judge_request_target(joined)
+            if verdict.cause is not None:
+                field = (
+                    base_pointer + "/operation/path"
+                    if verdict.offset >= path_start
+                    else base_field
+                )
+                raise _refusal(verdict.cause, field, phase="input")
+            names.update(verdict.names)
         for qp_index, parameter in enumerate(entry.operation.query_parameters):
-            if parameter.name.strip() in seen:
+            if parameter.name.strip() in names:
                 raise _refusal(
                     _QUERY_NAME_CAUSE,
-                    f"{base}/operation/query_parameters/{qp_index}/name",
+                    f"{base_pointer}/operation/query_parameters/{qp_index}/name",
                     phase="input",
                 )
 
@@ -1695,9 +1817,10 @@ def prepare_db_rest_fanout_v2(
                     path=f"/raw_input/targets/{index}/connection_key",
                 )
                 # The selected base's base_url is WRITTEN (the plan creates the
-                # component) without the material walk ever seeing it, so it
-                # meets the same userinfo + query-name + value rules here (D12).
-                cause = _url_cause(_selected_base_url(base_catalog, target.connection_key))
+                # component) without the material walk ever seeing it: its own
+                # userinfo check here; its query is judged JOINED with the path
+                # below (D12, QA r8-01).
+                cause = _userinfo_cause(_selected_base_url(base_catalog, target.connection_key))
                 if cause is not None:
                     raise _refusal(
                         cause, f"/raw_input/targets/{index}/connection_key", phase="input"
@@ -1705,7 +1828,20 @@ def prepare_db_rest_fanout_v2(
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
 
-    _check_query_sources_v2(inp, ordered_material, base_catalog)
+    _check_request_targets_v2(
+        inp,
+        ordered_material,
+        {
+            index: (
+                entry.connection.base_url.strip()
+                if isinstance(entry.connection, FanoutRestCreateMaterialV2)
+                else "",
+                entry.operation.path.strip(),
+            )
+            for index, (_material_index, entry) in enumerate(ordered_material)
+        },
+        base_catalog,
+    )
 
     # -- 4. value rules through the authorities ----------------------------
     authorized = _authorize_material_v2(inp, material, ordered_material)

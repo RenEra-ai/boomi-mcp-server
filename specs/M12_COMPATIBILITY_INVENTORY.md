@@ -2169,7 +2169,7 @@ rather than aspirational.
 | LG-a1863ac0 | unclassified_reference | server.py | <module> | 3 | 390 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-219d141b | unclassified_reference | src/boomi_mcp/arrange/model.py | select_canvas | 1 | 113 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-ac9e4212 | unclassified_reference | src/boomi_mcp/authoring/connector_resolution_snapshot.py | stored_document_cache_profile._start | 1 | 1480 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 688 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-8cf67bd6 | unclassified_reference | src/boomi_mcp/authoring/contract.py | authoring_workflow_contract | 1 | 693 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-6993ec78 | unclassified_reference | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 2 | 105 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-88502416 | unclassified_reference | src/boomi_mcp/authoring/revision_corpus.py | <module> | 1 | 990 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-0a2735c3 | unclassified_reference | src/boomi_mcp/authoring/workflow.py | _normalize_intent | 1 | 497 | #160 | residue: a watched name mentioned in a shape the census does not classify |

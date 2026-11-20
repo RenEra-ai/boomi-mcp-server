@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15079, "minimum_collected": 15079, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15107, "minimum_collected": 15107, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15537,3 +15537,31 @@
 {"kind": "test", "id": "pytest-015536", "node_id": "tests/test_recipe_component_material.py::test_a_query_refusal_happens_before_any_component_is_assembled[literal]", "state": "active"}
 {"kind": "test", "id": "pytest-015537", "node_id": "tests/test_recipe_component_material.py::test_a_query_refusal_happens_before_any_component_is_assembled[path]", "state": "active"}
 {"kind": "test", "id": "pytest-015538", "node_id": "tests/test_recipe_component_material.py::test_a_query_refusal_happens_before_any_component_is_assembled[selected_base_url]", "state": "active"}
+{"kind": "test", "id": "pytest-015539", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_01_form_plus_bearer]", "state": "active"}
+{"kind": "test", "id": "pytest-015540", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_02_semicolon_smuggle]", "state": "active"}
+{"kind": "test", "id": "pytest-015541", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_03_malformed_escape]", "state": "active"}
+{"kind": "test", "id": "pytest-015542", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_03_trailing_percent]", "state": "active"}
+{"kind": "test", "id": "pytest-015543", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_04_bare_trailing_hash]", "state": "active"}
+{"kind": "test", "id": "pytest-015544", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_04_tab]", "state": "active"}
+{"kind": "test", "id": "pytest-015545", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_04_cr]", "state": "active"}
+{"kind": "test", "id": "pytest-015546", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r6_04_lf]", "state": "active"}
+{"kind": "test", "id": "pytest-015547", "node_id": "tests/test_recipe_component_material.py::test_an_inline_query_outside_the_grammar_is_refused[r8_02_inline_semicolon_pair]", "state": "active"}
+{"kind": "test", "id": "pytest-015548", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[r8_02_ampersand_pair]", "state": "active"}
+{"kind": "test", "id": "pytest-015549", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[r8_02_semicolon_pair]", "state": "active"}
+{"kind": "test", "id": "pytest-015550", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[r6_01_form_plus_bearer]", "state": "active"}
+{"kind": "test", "id": "pytest-015551", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[r6_03_malformed_escape]", "state": "active"}
+{"kind": "test", "id": "pytest-015552", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[r6_03_trailing_percent]", "state": "active"}
+{"kind": "test", "id": "pytest-015553", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[hash]", "state": "active"}
+{"kind": "test", "id": "pytest-015554", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[question_mark]", "state": "active"}
+{"kind": "test", "id": "pytest-015555", "node_id": "tests/test_recipe_component_material.py::test_a_structured_literal_value_outside_the_grammar_is_refused[tab]", "state": "active"}
+{"kind": "test", "id": "pytest-015556", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_base_url_and_path_is_refused[base_ends_with_question_mark]", "state": "active"}
+{"kind": "test", "id": "pytest-015557", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_base_url_and_path_is_refused[base_query_continued_by_path]", "state": "active"}
+{"kind": "test", "id": "pytest-015558", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_base_url_and_path_is_refused[offending_pair_in_the_base]", "state": "active"}
+{"kind": "test", "id": "pytest-015559", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_a_selected_base_and_path_is_refused[selected_base_ends_with_question_mark]", "state": "active"}
+{"kind": "test", "id": "pytest-015560", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_a_selected_base_and_path_is_refused[selected_base_query_continued_by_path]", "state": "active"}
+{"kind": "test", "id": "pytest-015561", "node_id": "tests/test_recipe_component_material.py::test_a_pair_split_across_a_selected_base_and_path_is_refused[offending_pair_in_the_selected_base]", "state": "active"}
+{"kind": "test", "id": "pytest-015562", "node_id": "tests/test_recipe_component_material.py::test_every_ascii_character_outside_the_value_alphabet_is_refused_in_a_value", "state": "active"}
+{"kind": "test", "id": "pytest-015563", "node_id": "tests/test_recipe_component_material.py::test_a_trailing_whitespace_the_authority_strips_is_not_what_is_judged", "state": "active"}
+{"kind": "test", "id": "pytest-015564", "node_id": "tests/test_recipe_component_material.py::test_an_escaped_separator_is_data_and_is_still_builder_checked", "state": "active"}
+{"kind": "test", "id": "pytest-015565", "node_id": "tests/test_recipe_component_material.py::test_the_parity_corpus_meets_the_grammar", "state": "active"}
+{"kind": "test", "id": "pytest-015566", "node_id": "tests/test_recipe_component_material.py::test_the_served_text_states_the_grammar", "state": "active"}

@@ -974,7 +974,8 @@ def _plant(field):
             ]
         elif field == "literal_value":
             material["targets"][1]["operation"]["query_parameters"] = [
-                {"name": "filter", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
+                # Escaped space: the value GRAMMAR admits it, the BUILDER refuses it.
+                {"name": "filter", "value_source": "literal", "literal_value": "Bearer%20" + _SECRET_CANARY}
             ]
 
     return edit
@@ -1109,7 +1110,7 @@ def test_a_secret_shaped_value_under_a_plain_name_is_refused_by_the_value_rule()
     innocuous name is still a secret."""
     raw, material = flagship_v2()
     material["targets"][1]["operation"]["query_parameters"] = [
-        {"name": "filter", "value_source": "literal", "literal_value": "Bearer " + _SECRET_CANARY}
+        {"name": "filter", "value_source": "literal", "literal_value": "Bearer%20" + _SECRET_CANARY}
     ]
     (diagnostic,) = _blocked(recipe_request(raw, material))
     assert diagnostic.path.endswith("/targets/1/operation/query_parameters/0/literal_value")
@@ -1397,13 +1398,14 @@ def test_the_name_tokenizer_is_linear():
     query (a long name, many pairs) must still not stall planning."""
     import time
 
-    from boomi_mcp.recipes.builtins.fanout import _url_cause
+    from boomi_mcp.recipes.builtins.fanout import _judge_request_target
 
     started = time.perf_counter()
-    assert _url_cause("/v1/x?" + "A" * 200_000 + "1=v") == QUERY_NAME_CAUSE
-    assert _url_cause("/v1/x?" + "&".join("limit%d=1" % i for i in range(20_000))) == (
-        QUERY_NAME_CAUSE
-    )
+    assert _judge_request_target("/v1/x?" + "A" * 200_000 + "1=v").cause == QUERY_NAME_CAUSE
+    assert _judge_request_target("/v1/x?limit=" + "a-" * 100_000).cause is None
+    assert _judge_request_target(
+        "/v1/x?" + "&".join("limit%d=1" % i for i in range(20_000))
+    ).cause == QUERY_NAME_CAUSE
     assert time.perf_counter() - started < 2.0
 
 
@@ -1628,8 +1630,10 @@ def test_a_builder_rejected_value_under_a_published_name_is_refused(value, arm):
     raw, material = flagship_v2()
     target = material["targets"][1]
     if arm == "literal":
+        # Written escaped, as the value grammar requires (a raw space is a
+        # grammar refusal); the BUILDER then refuses the decoded credential.
         target["operation"]["query_parameters"] = [
-            {"name": "filter", "value_source": "literal", "literal_value": value}
+            {"name": "filter", "value_source": "literal", "literal_value": quote(value)}
         ]
         request, path = recipe_request(raw, material), _M + "/operation/query_parameters/0/literal_value"
     elif arm == "path":
@@ -1700,3 +1704,215 @@ def test_a_query_refusal_happens_before_any_component_is_assembled(arm, monkeypa
     # Control: the spies DO see a clean plan's assembly.
     plan_authoring_request_v1(recipe_request(*flagship_v2()), profile="p")
     assert calls
+
+
+# ---------------------------------------------------------------------------
+# B9: the request-target GRAMMAR, judged on what is EMITTED
+# (CDX r6-01..04, QA r8-01/02)
+# ---------------------------------------------------------------------------
+
+_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl"
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        pytest.param("?filter=Bearer+" + _JWT, id="r6_01_form_plus_bearer"),
+        pytest.param("?limit=1;page=2", id="r6_02_semicolon_smuggle"),
+        pytest.param("?limit=%ZZ", id="r6_03_malformed_escape"),
+        pytest.param("?limit=1%", id="r6_03_trailing_percent"),
+        pytest.param("?limit=1#", id="r6_04_bare_trailing_hash"),
+        pytest.param("?lim\tit=1", id="r6_04_tab"),
+        # Internal: a TRAILING CR is stripped by the path authority before
+        # emission (``RestSendRequest`` trims), so it is never persisted.
+        pytest.param("?limit=1\r&mode=2", id="r6_04_cr"),
+        pytest.param("?lim\nit=1", id="r6_04_lf"),
+        pytest.param("?limit=1;K=S", id="r8_02_inline_semicolon_pair"),
+    ],
+)
+def test_an_inline_query_outside_the_grammar_is_refused(suffix):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += suffix
+    _refused(
+        recipe_request(raw, material), _M + "/operation/path", QUERY_NAME_CAUSE, absent=(_JWT,)
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("1&K=S", id="r8_02_ampersand_pair"),
+        pytest.param("1;K=S", id="r8_02_semicolon_pair"),
+        pytest.param("Bearer+" + _JWT, id="r6_01_form_plus_bearer"),
+        pytest.param("1%ZZ", id="r6_03_malformed_escape"),
+        pytest.param("1%", id="r6_03_trailing_percent"),
+        pytest.param("1#x", id="hash"),
+        pytest.param("1?x", id="question_mark"),
+        pytest.param("a\tb", id="tab"),
+    ],
+)
+def test_a_structured_literal_value_outside_the_grammar_is_refused(value):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["query_parameters"] = [
+        {"name": "filter", "value_source": "literal", "literal_value": value}
+    ]
+    _refused(
+        recipe_request(raw, material),
+        _M + "/operation/query_parameters/0/literal_value",
+        QUERY_NAME_CAUSE,
+        absent=(_JWT,),
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url, path, pointer_suffix",
+    [
+        pytest.param(
+            "https://billing.example.invalid/v1/orders?", "K=S", "/operation/path",
+            id="base_ends_with_question_mark",
+        ),
+        pytest.param(
+            "https://billing.example.invalid/?limit=1", "&K=S", "/operation/path",
+            id="base_query_continued_by_path",
+        ),
+        pytest.param(
+            "https://billing.example.invalid/?K=S", "/v1/billing", "/connection/base_url",
+            id="offending_pair_in_the_base",
+        ),
+    ],
+)
+def test_a_pair_split_across_base_url_and_path_is_refused(base_url, path, pointer_suffix):
+    """QA r8-01: base_url and path are judged JOINED, as the request is sent."""
+    raw, material = flagship_v2()
+    material["targets"][1]["connection"]["base_url"] = base_url
+    material["targets"][1]["operation"]["path"] = path
+    _refused(recipe_request(raw, material), _M + pointer_suffix, QUERY_NAME_CAUSE)
+
+
+@pytest.mark.parametrize(
+    "base_url, path, pointer",
+    [
+        pytest.param(
+            "https://billing.example.invalid/v1/orders?", "K=S",
+            _M + "/operation/path", id="selected_base_ends_with_question_mark",
+        ),
+        pytest.param(
+            "https://billing.example.invalid/?limit=1", "&K=S",
+            _M + "/operation/path", id="selected_base_query_continued_by_path",
+        ),
+        pytest.param(
+            "https://billing.example.invalid/?K=S", "/v1/billing",
+            "/intent/invocations/0/raw_input/targets/1/connection_key",
+            id="offending_pair_in_the_selected_base",
+        ),
+    ],
+)
+def test_a_pair_split_across_a_selected_base_and_path_is_refused(base_url, path, pointer):
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] = path
+    _refused(_bind_selected_base(raw, material, base_url), pointer, QUERY_NAME_CAUSE)
+
+
+def _value_alphabet():
+    from boomi_mcp.recipes.builtins import fanout
+
+    return set(fanout._URI_UNRESERVED) | set(fanout._QUERY_VALUE_EXTRA)
+
+
+def test_every_ascii_character_outside_the_value_alphabet_is_refused_in_a_value():
+    """NON-VACUITY of the value grammar: iterate the whole ASCII range. Every
+    character outside the alphabet is refused in an inline value AND a
+    structured literal; every character inside it is admitted by the grammar
+    (the control that proves the sweep can pass)."""
+    from boomi_mcp.recipes.builtins import fanout
+
+    alphabet = _value_alphabet()
+    refused_inline, refused_structured, admitted = [], [], []
+    for code in range(128):
+        char = chr(code)
+        if char == "%":
+            continue  # only as an escape; covered by the malformed-escape witnesses
+        value = "a" + char + "b"
+        inline = fanout._judge_request_target("/v1/x?limit=" + value).cause
+        owner = fanout.FanoutQueryParameterV2(name="limit", value_source="literal", literal_value=value)
+        structured = fanout._breaches("named_literal", value, owner)
+        if char in alphabet:
+            assert inline is None and structured is None, repr(char)
+            admitted.append(char)
+        else:
+            assert inline == QUERY_NAME_CAUSE, repr(char)
+            assert structured == QUERY_NAME_CAUSE, repr(char)
+            refused_inline.append(char)
+            refused_structured.append(char)
+    assert {"+", ";", "&", "?", "#", " ", "\t", "\r", "\n", "\x00"} <= set(refused_inline)
+    assert len(admitted) == len(alphabet)
+
+
+def test_a_trailing_whitespace_the_authority_strips_is_not_what_is_judged():
+    """What is judged is what is EMITTED: the path authority trims ends, so a
+    trailing CR/LF never reaches the component; an internal one does, and is
+    refused."""
+    raw, material = flagship_v2()
+    material["targets"][1]["operation"]["path"] += "?limit=1\r\n"
+    plan, internals = plan_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert plan.validation_report.is_valid
+    operation = next(
+        c for c in internals.normalized.integration_spec.components
+        if c.key == "target_billing_rest_operation"
+    )
+    assert operation.config["path"].endswith("?limit=1")
+
+
+def test_an_escaped_separator_is_data_and_is_still_builder_checked():
+    from boomi_mcp.recipes.builtins import fanout
+
+    assert fanout._judge_request_target("/x?filter=a%26b%3Bc%2Bd%23e").cause is None
+    assert fanout._judge_request_target("/x?filter=Bearer%20" + _JWT).cause == (
+        "PLAINTEXT_SECRET_REJECTED"
+    )
+
+
+def test_the_parity_corpus_meets_the_grammar():
+    """The frozen flagship and the six #157 composition inputs: every joined
+    request target and every literal value is inside the grammar."""
+    import glob
+
+    from _fanout_v2_support import oracle, v2_from_compose_request
+    from boomi_mcp.recipes.builtins import fanout
+
+    requests = [oracle()["compose_request"]]
+    cases = sorted(
+        glob.glob(
+            str(_TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "composition" / "*")
+        )
+    )
+    assert len(cases) == 6
+    for case in cases:
+        requests.append(json.loads((Path(case) / "input.legacy.json").read_text())["input"])
+    judged = 0
+    for request in requests:
+        _raw, material = v2_from_compose_request(request)
+        for target in material["targets"]:
+            base = (target.get("connection") or {}).get("base_url", "")
+            for joined, _start in fanout._joined_targets(base, target["operation"]["path"]):
+                assert fanout._judge_request_target(joined).cause is None, joined
+                judged += 1
+            for parameter in target["operation"]["query_parameters"]:
+                if parameter.get("value_source") == "literal":
+                    assert fanout._query_value_violation(parameter["literal_value"]) is None
+    assert judged >= 7
+
+
+def test_the_served_text_states_the_grammar():
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+    from boomi_mcp.recipes.builtins import fanout
+
+    sentence = fanout.QUERY_GRAMMAR_SENTENCE_V2
+    assert " ".join(fanout._QUERY_VALUE_EXTRA) in sentence
+    for field in (
+        fanout.FanoutQueryParameterV2.model_fields["literal_value"],
+        fanout.FanoutRestOperationMaterialV2.model_fields["path"],
+        fanout.FanoutRestCreateMaterialV2.model_fields["base_url"],
+    ):
+        assert sentence in field.description
+    assert json.dumps(sentence)[1:-1] in json.dumps(authoring_workflow_contract())

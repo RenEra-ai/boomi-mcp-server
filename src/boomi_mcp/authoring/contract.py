@@ -587,14 +587,19 @@ def _fanout_material_guarantee() -> str:
     """The fan-out 2.0.0 material guarantee (#159 S1, decision D12), served
     verbatim from the recipe module, whose published query names it renders.
     The refusal causes are named here so a caller can act on them."""
-    from ..recipes.builtins.fanout import LITERAL_QUERY_GUARANTEE_V2
+    from ..recipes.builtins.fanout import (
+        LITERAL_QUERY_GUARANTEE_V2,
+        QUERY_GRAMMAR_SENTENCE_V2,
+    )
 
     return (
         LITERAL_QUERY_GUARANTEE_V2
+        + " "
+        + QUERY_GRAMMAR_SENTENCE_V2
         + " A credential field, userinfo or JDBC property, or a value the REST "
         "builder refuses is refused with PLAINTEXT_SECRET_REJECTED; a literal "
-        "query name outside the published names, or inline query syntax that "
-        "cannot be read unambiguously, with FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED."
+        "query name outside the published names, or query syntax outside that "
+        "grammar, with FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED."
     )
 
 
