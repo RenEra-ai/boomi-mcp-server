@@ -3187,3 +3187,26 @@ def test_b18_04_apply_reports_a_family_flip_and_a_stored_query_together():
     assert "/intent/invocations/0/component_material/targets/0/connection" in served
     assert _RAW_BINDING_POINTER not in served  # no URL verdict for the mismatched target
     assert "x=1" not in served
+
+
+def test_b18r_an_unparseable_stored_component_gets_an_account_remedy():
+    """B18 review P3: the account answered but its stored document did not parse;
+    the remedy points at the STORED component, never at submitted XML."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        UNPARSEABLE_STORED_COMPONENT_REMEDIATION,
+        ConnectorIdentityError,
+        build_connector_resolution_snapshot,
+    )
+    from boomi_mcp.authoring.workflow import connector_identity_diagnostics
+
+    base = _rest_base({"reference_only": True, "connector_type": "rest"}, component_id="id-1")
+    with pytest.raises(ConnectorIdentityError) as refused:
+        build_connector_resolution_snapshot(
+            [base],
+            live_component_xml={"shared_rest": "<not-a-component"},
+            reused_keys=["shared_rest"],
+        )
+    diagnostics, _ = connector_identity_diagnostics(refused.value)
+    (diagnostic,) = diagnostics
+    assert diagnostic.remediation == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
+    assert "Submitted component XML" not in diagnostic.remediation

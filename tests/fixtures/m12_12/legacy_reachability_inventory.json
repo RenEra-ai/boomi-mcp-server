@@ -2467,7 +2467,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 1514,
+      "evidence_line": 1523,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/authoring/connector_resolution_snapshot.py",
       "row_id": "UR-7c713fe5",
@@ -6308,7 +6308,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 1514,
+      "evidence_line": 1523,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],

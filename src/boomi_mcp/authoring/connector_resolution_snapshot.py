@@ -64,6 +64,14 @@ UNREADABLE_REUSE_REMEDIATION = (
     "select a component the account can read."
 )
 
+#: B18 review: the account ANSWERED, but the stored document did not parse — a
+#: fault in the stored component, not in anything the request submitted.
+UNPARSEABLE_STORED_COMPONENT_REMEDIATION = (
+    "The account returned this component, but its stored document could not be "
+    "parsed, so nothing about it could be checked. Repair the stored component "
+    "in the account, or bind or select a component whose stored document is valid."
+)
+
 
 class ConnectorIdentityError(Exception):
     """A connector component's identity cannot be stood behind.
@@ -976,6 +984,7 @@ def build_connector_resolution_snapshot(
                             "here to check it against."
                         ).format(key),
                         component_key=key,
+                        remediation=UNPARSEABLE_STORED_COMPONENT_REMEDIATION,
                     )
                 )
                 continue
