@@ -1144,19 +1144,68 @@ def recheck_execution_bindings(bundle, planned) -> None:
         )
 
 
-def stored_connection_xml_reader(boomi_client, readings=None):
+class BudgetedComponentReads:
+    """Account reads of components by resolved id under ONE wall-clock budget (B16-3).
+
+    The budget is the component GET deadline (``_component_get_deadline_seconds``),
+    spent across every read a route makes through this object, exactly as
+    ``_enrich_references`` spends it: each read is handed the REMAINING slice
+    as its own deadline, and once less than a second remains no new read
+    starts. Several stalled reads therefore cannot sum past the platform
+    request timeout. A read that fails, times out or is never started answers
+    ``None`` (cached per id, so a component is asked at most once) and the
+    caller treats it as UNAVAILABLE — the stored-URL judge then fails closed."""
+
+    def __init__(self, boomi_client):
+        from ..categories.components import _shared
+
+        self._client = boomi_client
+        self._budget = float(_shared._component_get_deadline_seconds())
+        self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
+
+    def fetch(self, component_id) -> Optional[Dict[str, Any]]:
+        import time as _time
+
+        from ..categories.integration_builder import canonical_component_id
+
+        wanted = canonical_component_id(component_id)
+        if not wanted or self._client is None:
+            return None
+        if wanted in self._cache:
+            return self._cache[wanted]
+        result = None
+        if self._budget >= 1:
+            # Looked up at call time: the one platform read every route uses.
+            from ..categories.components import _shared
+
+            started = _time.monotonic()
+            try:
+                fetched = _shared.component_get_xml(
+                    self._client, wanted, deadline_seconds=int(self._budget)
+                )
+            except Exception:  # noqa: BLE001 - an unreadable component answers nothing
+                fetched = None
+            finally:
+                self._budget -= _time.monotonic() - started
+            if isinstance(fetched, dict) and isinstance(fetched.get("xml"), str) and fetched["xml"]:
+                result = fetched
+        self._cache[wanted] = result
+        return result
+
+
+def stored_connection_xml_reader(boomi_client, readings=None, reads=None):
     """``read(key, component_id) -> xml or None`` for a connection apply REUSES (B15).
 
     ``readings`` are the route's own account readings, keyed by spec key
-    (compile: the declared-id readings connector replay identity uses; apply:
-    the pre-write pass's ``_live_connector_xml``). A reading answers only when
-    it read the SAME component the plan resolved; any other key — resolved by
-    name, gated out of that pass, or read by a different predicate — is read
-    on demand by the resolved id, once. ``None`` means the account could not
-    answer (no client, a failed read): the judge then fails closed."""
+    (compile: the readings connector identity validation was given; apply: the
+    pre-write pass's ``_live_connector_xml``). A reading answers only when it
+    read the SAME component the plan resolved; any other key is read on demand
+    by the resolved id through ``reads`` (:class:`BudgetedComponentReads`, one
+    shared deadline budget). ``None`` means the account could not answer (no
+    client, a failed, timed-out or unstarted read): the judge fails closed."""
     from ..categories.integration_builder import canonical_component_id
 
-    cache: Dict[str, Optional[str]] = {}
+    reads = reads if reads is not None else BudgetedComponentReads(boomi_client)
 
     def read(key, component_id):
         wanted = canonical_component_id(component_id)
@@ -1169,26 +1218,65 @@ def stored_connection_xml_reader(boomi_client, readings=None):
             xml = reading.get("xml")
             if isinstance(xml, str) and xml:
                 return xml
-        if wanted in cache:
-            return cache[wanted]
-        xml = None
-        if boomi_client is not None:
-            # Looked up at call time: the one platform read every route uses.
-            from ..categories.components import _shared
-
-            try:
-                fetched = _shared.component_get_xml(boomi_client, wanted)
-            except Exception:  # noqa: BLE001 - an unreadable component answers nothing
-                fetched = None
-            if isinstance(fetched, dict) and isinstance(fetched.get("xml"), str) and fetched["xml"]:
-                xml = fetched["xml"]
-        cache[wanted] = xml
-        return xml
+        fetched = reads.fetch(wanted)
+        return fetched["xml"] if fetched is not None else None
 
     return read
 
 
-def judge_recipe_rest_targets(targets, components, conflict_policy, existing_ids, read_stored_xml) -> None:
+def _resolved_recipe_target_readings(
+    normalized, conflict_policy, existing_ids, reads, already=None
+) -> Dict[str, Any]:
+    """The account reading of each recipe REST target's connection that apply
+    REUSES under a binding the request does not declare by id (B16-1): bound
+    by name, or a create the plan binds to a same-name component. Read ONCE,
+    by the component plan's resolved id, and handed to BOTH connector identity
+    validation (``_validate_processes``) and the stored-URL judge — one
+    reading, one authority. A key ``already`` holding a successful reading of
+    the SAME resolved component (the top-level declared-id reading) is not
+    read again; any other binding — by name, by a config-only id, a create
+    bound to a same-name component — is. Only successful reads are returned; an unreadable one stays unknown (the judge fails
+    closed on it; ``reads`` caches the failure so it is not asked again)."""
+    from ..categories.integration_builder import _bound_existing_id, canonical_component_id
+
+    targets = getattr(normalized, "recipe_rest_targets", ()) or ()
+    if not targets:
+        return {}
+    components = normalized.integration_spec.components
+    by_key = {component.key: component for component in components}
+    unwritten = _unwritten_connection_keys(components, conflict_policy, existing_ids)
+    readings: Dict[str, Any] = {}
+    for key, _path, _path_pointer, _binding_pointer in targets:
+        component = by_key.get(key)
+        if component is None or key not in unwritten or key in readings:
+            continue
+        resolved = _bound_existing_id(component, existing_ids)
+        if not resolved:
+            continue
+        held = (already or {}).get(key)
+        if (
+            isinstance(held, dict)
+            and not held.get("read_failed")
+            and isinstance(held.get("xml"), str)
+            and canonical_component_id(held.get("component_id")) == canonical_component_id(resolved)
+        ):
+            continue
+        fetched = reads.fetch(resolved)
+        if fetched is None:
+            continue
+        version = fetched.get("version")
+        readings[key] = {
+            "component_id": fetched.get("component_id") or resolved,
+            "component_version": None if version is None else str(version),
+            "xml": fetched["xml"],
+            "read_failed": False,
+        }
+    return readings
+
+
+def judge_recipe_rest_targets(
+    targets, components, conflict_policy, existing_ids, read_stored_xml, identity_refused=()
+) -> None:
     """THE judge of every recipe REST target against the connection apply
     actually requests through (B15; B14 ARCH-r1-03).
 
@@ -1202,7 +1290,10 @@ def judge_recipe_rest_targets(targets, components, conflict_policy, existing_ids
     plan's ids and at apply with the execution plan's ids and fresh readings,
     before the first write. Raises a value-free AUTHORING_COMPILE_BLOCKED: a
     stored base carrying a query or fragment is pointed at the BINDING, a
-    path at the PATH, each with its own remediation (B15-4)."""
+    path at the PATH, each with its own remediation (B15-4). A connection
+    connector identity validation already refused (``identity_refused``: a
+    family or binding mismatch read from the same reading) is that
+    authority's refusal, not a URL to judge (B16-1)."""
     targets = tuple(targets or ())
     if not targets:
         return
@@ -1214,7 +1305,7 @@ def judge_recipe_rest_targets(targets, components, conflict_policy, existing_ids
     unwritten = _unwritten_connection_keys(components, conflict_policy, existing_ids)
     bad = []
     for key, path, path_pointer, binding_pointer in targets:
-        if key not in unwritten or key not in by_key:
+        if key not in unwritten or key not in by_key or key in identity_refused:
             continue
         component_id = _bound_existing_id(by_key[key], existing_ids)
         xml = read_stored_xml(key, component_id) if component_id else None
@@ -2372,8 +2463,15 @@ def _validate_processes(
     literal_indexes: Any = None,
     boomi_client: Any = None,
     existing_ids: Any = None,
+    target_reads: Any = None,
 ) -> Tuple[ValidationReportSummaryV1, Tuple[AuthoringDiagnosticV1, ...], Any, Any, Any, Any, Any, Any]:
     """Run the unified #143 semantic validator over every authored process.
+
+    ``target_reads`` (B16-1/3, :class:`BudgetedComponentReads`): each recipe
+    REST target's connection the component plan resolved, read by that
+    resolved id unless a declared reading already holds it, joins the
+    readings below — so connector identity judges the SAME reading the
+    stored-URL judge reads, under one deadline budget.
 
     Uses ``validate_process_ir``, which REPORTS and does not raise on a bad
     payload — planning must be able to hand a caller everything wrong with their
@@ -2414,16 +2512,23 @@ def _validate_processes(
     # into a refuser and emptied the report a caller was told to read.
     snapshot_diagnostics: List[AuthoringDiagnosticV1] = []
     _declared_live: Dict[str, Any] = {}
+    _identity_refused: set = set()
     try:
-        # LIVE READINGS FOR EXPLICITLY NAMED COMPONENTS ONLY (#155 slice F).
-        # Without them this snapshot carries no component identity, so a registry
-        # record can never be placed here and an evidenced retried write refuses
-        # for want of evidence it has no way to present. Reading only the
-        # components the author already named as existing keeps a create-only
-        # plan at exactly its previous platform-call count.
+        # LIVE READINGS FOR EXPLICITLY NAMED COMPONENTS (#155 slice F), PLUS
+        # each recipe REST target's connection the component plan resolved
+        # (B16-1). Without them this snapshot carries no component identity, so
+        # a registry record can never be placed here and an evidenced retried
+        # write refuses for want of evidence it has no way to present. A
+        # create-only plan still reads nothing; a recipe target apply REUSES is
+        # read once, and that one reading serves identity and the URL judge.
         _declared_live = live_readings_for_declared_components(
             boomi_client, normalized.integration_spec.components
         )
+        if target_reads is not None:
+            _declared_live.update(_resolved_recipe_target_readings(
+                normalized, conflict_policy or "reuse", existing_ids, target_reads,
+                already=_declared_live,
+            ))
         # THE REUSE SET, from the one authority, not the set that read live.
         # This parameter's own contract names `_will_reuse_at_apply`; the live
         # readings are a different question, and under `conflict_policy="clone"`
@@ -2474,6 +2579,7 @@ def _validate_processes(
             (), declared={}
         )
         for failure in snapshot_error.failures:
+            _identity_refused.add(failure.component_key)
             snapshot_diagnostics.append(
                 _diag(
                     failure.code,
@@ -2850,7 +2956,7 @@ def _validate_processes(
     )
     return (summary, tuple(diagnostics), symbols,
             resolution.capabilities_by_root, snapshot, selected_artifacts, reused_keys,
-            final_names, dict(_declared_live or {}))
+            final_names, dict(_declared_live or {}), frozenset(_identity_refused))
 
 
 def _required_target_coverage_error(
@@ -3334,6 +3440,7 @@ def plan_authoring_request_v1(
     from ..categories.integration_builder import planned_existing_ids
 
     component_plan = _legacy_plan_echo(normalized, request, boomi_client, raw=True)
+    _target_reads = BudgetedComponentReads(boomi_client)
     (
         validation,
         validation_diagnostics,
@@ -3344,6 +3451,7 @@ def plan_authoring_request_v1(
         _reused_for_preview,
         _names_for_preview,
         _live_readings,
+        _identity_refused,
     ) = _validate_processes(
         normalized,
         request.effect_declarations,
@@ -3351,6 +3459,9 @@ def plan_authoring_request_v1(
         literal_indexes=_literal_profile_indexes(boomi_client, normalized),
         boomi_client=boomi_client,
         existing_ids=planned_existing_ids(component_plan),
+        # B16-1: ONE reading per plan-resolved recipe REST target, judged by
+        # connector identity AND the stored-URL judge; B16-3: one budget.
+        target_reads=_target_reads,
     )
     # B12-01: whether apply WRITES each connection is decided by the component
     # plan's RESOLVED ids (a create matched by name under ``reuse`` is reused),
@@ -3366,7 +3477,8 @@ def plan_authoring_request_v1(
         normalized.integration_spec.components,
         request.intent.conflict_policy,
         planned_existing_ids(component_plan),
-        stored_connection_xml_reader(boomi_client, _live_readings),
+        stored_connection_xml_reader(boomi_client, _live_readings, reads=_target_reads),
+        identity_refused=_identity_refused,
     )
     _reused_for_preview = frozenset(_reused_for_preview or ()) | _unwritten_connections
     topology_diagnostics = _validate_topology(request, normalized, profile)

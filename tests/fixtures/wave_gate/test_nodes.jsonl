@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15183, "minimum_collected": 15183, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15192, "minimum_collected": 15192, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15641,3 +15641,12 @@
 {"kind": "test", "id": "pytest-015640", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_03_control_an_unchanged_clean_stored_url_reaches_the_write_loop[generated_reused_by_name]", "state": "active"}
 {"kind": "test", "id": "pytest-015641", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_04_a_stored_base_refusal_and_a_path_refusal_are_told_apart", "state": "active"}
 {"kind": "test", "id": "pytest-015642", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_the_stored_url_reader_answers_only_what_the_account_read", "state": "active"}
+{"kind": "test", "id": "pytest-015643", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_01_a_name_bound_rest_target_resolving_to_another_family_is_an_identity_refusal[/v1/billing-name]", "state": "active"}
+{"kind": "test", "id": "pytest-015644", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_01_a_name_bound_rest_target_resolving_to_another_family_is_an_identity_refusal[/v1/billing-config_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015645", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_01_a_name_bound_rest_target_resolving_to_another_family_is_an_identity_refusal[v1/billing-name]", "state": "active"}
+{"kind": "test", "id": "pytest-015646", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_01_a_name_bound_rest_target_resolving_to_another_family_is_an_identity_refusal[v1/billing-config_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015647", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_01_apply_refuses_a_family_flip_by_identity_before_judging_any_url", "state": "active"}
+{"kind": "test", "id": "pytest-015648", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_02_a_blank_stored_url_is_unavailable_and_fails_closed[]", "state": "active"}
+{"kind": "test", "id": "pytest-015649", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_02_a_blank_stored_url_is_unavailable_and_fails_closed[   ]", "state": "active"}
+{"kind": "test", "id": "pytest-015650", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_02_control_a_blank_stored_url_admits_an_absolute_path", "state": "active"}
+{"kind": "test", "id": "pytest-015651", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_03_stored_url_reads_share_one_deadline_budget", "state": "active"}

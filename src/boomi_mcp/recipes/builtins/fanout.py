@@ -1845,10 +1845,12 @@ def judge_reused_request_target(
     is refused as the STORED BASE's fault, whatever the path; otherwise every
     joined target meets the grammar, judged only for what the PATH contributes
     (the stored URL is the account's, not the caller's). Without it (no
-    account, an unresolved, id-less or unreadable reuse) the rule FAILS CLOSED
+    account, an unresolved, id-less or unreadable reuse, a blank stored url) the rule FAILS CLOSED
     on the path: it must start with '/' and carry no '=' before any '?' — the
     two shapes that could complete a pair a stored query left open."""
-    if stored_base_url is None:
+    if stored_base_url is None or not stored_base_url.strip():
+        # B16-2: a blank or whitespace stored url is no base URL at all —
+        # unavailable, so the fail-closed rule judges the path.
         head = path.split("?", 1)[0]
         if not path.startswith("/") or "=" in head:
             return (_QUERY_NAME_CAUSE, REUSED_TARGET_PATH)

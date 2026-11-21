@@ -2526,3 +2526,178 @@ def test_b15_01_the_stored_url_reader_answers_only_what_the_account_read():
         judge("/v1/billing", lambda _key, _id: _reused_rest_xml("http://h.example.invalid/api#frag"))
     (diag,) = caught.value.diagnostics
     assert diag.path == "/p/binding" and "no query and no fragment" in diag.remediation
+
+
+# ---------------------------------------------------------------------------
+# B16 (Codex review of B15): witnesses, each failing at 572d2d8.
+# ---------------------------------------------------------------------------
+
+_DB_CONN_ID = "7773fe1e-9242-4155-9a1b-c6a610b1ef3b"
+
+
+def _account_by_id(answers, listing):
+    """The account: ``listing`` is ``[(name, id)]`` for the component listing,
+    ``answers`` maps id -> the XML the read returns (pinned captures only)."""
+    import contextlib
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    def paginate(*a, **k):
+        return [{"component_id": cid, "name": name, "type": "connector-settings", "folder_name": "X"}
+                for name, cid in listing]
+
+    def get_xml(_client, component_id, *a, **k):
+        if component_id not in answers:
+            raise LookupError("no capture bound to this id")
+        return {"component_id": component_id, "version": 1, "xml": answers[component_id],
+                "type": "connector-settings"}
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(mock.patch.object(integration_builder, "paginate_metadata", paginate))
+    stack.enter_context(mock.patch.object(_shared, "component_get_xml", get_xml))
+    stack.enter_context(mock.patch.object(integration_builder, "component_get_xml", get_xml))
+    return stack
+
+
+def _other_family_reuse(binding, path):
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    material["targets"][1]["operation"]["path"] = path
+    config = {"reference_only": True, "connector_type": "rest"}
+    if binding == "config_id":
+        config["component_id"] = _DB_CONN_ID
+    base = _rest_base(config, name=_REUSED_NAME)
+    return recipe_request(raw, material, base_components=[base.model_dump(mode="json")])
+
+
+@pytest.mark.parametrize("binding", ["name", "config_id"])
+@pytest.mark.parametrize("path", ["/v1/billing", "v1/billing"])
+def test_b16_01_a_name_bound_rest_target_resolving_to_another_family_is_an_identity_refusal(binding, path):
+    """B16-1: the REST target's binding (a name, or an id carried only in
+    config) resolves to an account component of ANOTHER family (the pinned,
+    proven-operable DATABASE connection capture). Connector identity validation
+    reads the SAME resolved reading the URL judge reads, so compile refuses
+    with the identity code — never a URL verdict (the relative-path arm would
+    be refused by the URL judge if it ran first), never a compile success that
+    apply later refuses (the absolute-path arm)."""
+    db_xml = (_CAP159 / "db-conn-7773fe1e.xml").read_text()
+    envelope = _public(
+        _other_family_reuse(binding, path), "compile",
+        _account_by_id({_DB_CONN_ID: db_xml}, [(_REUSED_NAME, _DB_CONN_ID)]),
+    )
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False, served[:600]
+    assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in served
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" not in served
+
+
+def test_b16_01_apply_refuses_a_family_flip_by_identity_before_judging_any_url():
+    """Apply: the name resolves to the REST connection at compile and in the
+    compile replay, then to the DATABASE capture for the execution read. The
+    identity resolution refuses first (pre-write, zero writes); the URL judge,
+    which would refuse the relative path on the unreadable base, never
+    speaks."""
+    from unittest import mock
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.categories import integration_builder
+
+    db_xml = (_CAP159 / "db-conn-7773fe1e.xml").read_text()
+    answers = {_REUSED_REST_ID: _reused_rest_xml("http://h.example.invalid/api/"), _DB_CONN_ID: db_xml}
+    listing = [(_REUSED_NAME, _REUSED_REST_ID)]
+    request = _name_bound_reuse("base", "v1/billing")
+    client = mock.MagicMock()
+    with _account_by_id(answers, listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    real_preflight = workflow.preflight_typed_apply_v1
+    state = {"after_preflight": False}
+
+    def preflight(*a, **k):
+        bundle = real_preflight(*a, **k)
+        state["after_preflight"] = True
+        listing[:] = [(_REUSED_NAME, _DB_CONN_ID)]
+        return bundle
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    with _account_by_id(answers, listing), \
+            mock.patch.object(workflow, "preflight_typed_apply_v1", preflight), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    served = json.dumps(envelope)
+    assert state["after_preflight"], "the preflight was not reached"
+    assert writes == []
+    assert envelope["_success"] is False
+    assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in served, served[:800]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" not in served
+
+
+@pytest.mark.parametrize("stored", ["", "   "])
+def test_b16_02_a_blank_stored_url_is_unavailable_and_fails_closed(stored):
+    """B16-2: a blank or whitespace stored ``url`` is NOT a base URL; the path
+    is then judged by the fail-closed rule, so a relative path is refused."""
+    envelope = _public(
+        _name_bound_reuse("base", "v1/billing"), "compile",
+        _account_by_id({_REUSED_REST_ID: _reused_rest_xml(stored)}, [(_REUSED_NAME, _REUSED_REST_ID)]),
+    )
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False, served[:600]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served and _REUSE_PATH_POINTER in served
+
+
+def test_b16_02_control_a_blank_stored_url_admits_an_absolute_path():
+    envelope = _public(
+        _name_bound_reuse("base", "/v1/billing"), "compile",
+        _account_by_id({_REUSED_REST_ID: _reused_rest_xml("  ")}, [(_REUSED_NAME, _REUSED_REST_ID)]),
+    )
+    assert envelope["_success"] is True, json.dumps(envelope)[:600]
+
+
+def test_b16_03_stored_url_reads_share_one_deadline_budget(monkeypatch):
+    """B16-3: on-demand stored-URL reads share ONE wall-clock budget (the
+    component GET deadline, as ``_enrich_references`` does): each read is
+    handed the remaining slice, no new read starts once it is spent, and an
+    unread target falls back to the fail-closed rule (a relative path is
+    refused; nothing about the account is echoed)."""
+    import time
+    from unittest import mock
+
+    from boomi_mcp.authoring.workflow import judge_recipe_rest_targets, stored_connection_xml_reader
+    from boomi_mcp.categories.components import _shared
+
+    monkeypatch.setenv(_shared._DEADLINE_ENV, "2")
+    deadlines = []
+
+    def stalled(_client, component_id, deadline_seconds=None, *a, **k):
+        deadlines.append(deadline_seconds)
+        time.sleep(1.2)
+        raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 1.2)
+
+    ids = ["0000000{0}-0000-4000-8000-000000000000".format(n) for n in range(3)]
+    comps = [
+        IntegrationComponentSpec(key="rest_{0}".format(n), type="connector-settings", name="R{0}".format(n),
+                                 action="create", component_id=cid,
+                                 config={"reference_only": True, "connector_type": "rest", "component_id": cid})
+        for n, cid in enumerate(ids)
+    ]
+    targets = [("rest_{0}".format(n), "/v1/x", "/p/{0}".format(n), "/b/{0}".format(n)) for n in range(3)]
+    with mock.patch.object(_shared, "component_get_xml", stalled):
+        judge_recipe_rest_targets(targets, comps, "reuse", None, stored_connection_xml_reader(object(), {}))
+    assert len(deadlines) == 1, deadlines  # the budget (2 s) admits one stalled read
+    assert deadlines[0] == 2
+    targets[2] = ("rest_2", "v1/x", "/p/2", "/b/2")
+    with mock.patch.object(_shared, "component_get_xml", stalled), pytest.raises(AuthoringWorkflowError) as caught:
+        judge_recipe_rest_targets(targets, comps, "reuse", None, stored_connection_xml_reader(object(), {}))
+    (diag,) = caught.value.diagnostics
+    assert diag.path == "/p/2" and "absolute path" in diag.remediation
