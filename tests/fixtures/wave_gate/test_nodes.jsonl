@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15217, "minimum_collected": 15217, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15228, "minimum_collected": 15228, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15675,3 +15675,14 @@
 {"kind": "test", "id": "pytest-015674", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_04_profile_reads_of_component_planning_and_validation_share_one_budget", "state": "active"}
 {"kind": "test", "id": "pytest-015675", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_05_the_served_grammar_states_the_reuse_rules_it_enforces", "state": "active"}
 {"kind": "test", "id": "pytest-015676", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_06_malformed_stored_xml_through_the_getter_is_unparseable_not_unanswered", "state": "active"}
+{"kind": "test", "id": "pytest-015677", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_the_hashed_reference_evidence_carries_the_planner_binding[name]", "state": "active"}
+{"kind": "test", "id": "pytest-015678", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_the_hashed_reference_evidence_carries_the_planner_binding[config_name]", "state": "active"}
+{"kind": "test", "id": "pytest-015679", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_the_hashed_reference_evidence_carries_the_planner_binding[id]", "state": "active"}
+{"kind": "test", "id": "pytest-015680", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_the_hashed_reference_evidence_carries_the_planner_binding[config_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015681", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_a_name_that_rebinds_before_apply_moves_the_compile_hash[name]", "state": "active"}
+{"kind": "test", "id": "pytest-015682", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_01_a_name_that_rebinds_before_apply_moves_the_compile_hash[config_name]", "state": "active"}
+{"kind": "test", "id": "pytest-015683", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget", "state": "active"}
+{"kind": "test", "id": "pytest-015684", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_03_a_malformed_stored_base_carrying_a_delimiter_is_refused[?mode=full]", "state": "active"}
+{"kind": "test", "id": "pytest-015685", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_03_a_malformed_stored_base_carrying_a_delimiter_is_refused[#frag]", "state": "active"}
+{"kind": "test", "id": "pytest-015686", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered[]", "state": "active"}
+{"kind": "test", "id": "pytest-015687", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered[\\xff\\xfe<bns:Component/>]", "state": "active"}

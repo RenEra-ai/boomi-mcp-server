@@ -1246,15 +1246,23 @@ class BudgetedComponentReads:
                     self._client, wanted, deadline_seconds=self._budget
                 )
             except _shared.StoredComponentXmlUnparseable as unparseable:
-                # B20-6: the account ANSWERED with a document that does not
-                # parse. Kept as the reading, so every consumer's own parser
-                # classifies it UNPARSEABLE — never "the account did not answer".
-                fetched = {"component_id": wanted, "xml": unparseable.raw_xml}
+                # B20-6 / B21-4: the account ANSWERED with a response that does
+                # not parse (or is empty, or does not decode). Kept as a reading
+                # MARKED unparseable — independent of whether any text survived
+                # — so it is classified UNPARSEABLE, never "did not answer".
+                fetched = {
+                    "component_id": wanted,
+                    "xml": unparseable.raw_xml or "",
+                    "unparseable": True,
+                }
             except Exception:  # noqa: BLE001 - an unreadable component answers nothing
                 fetched = None
             finally:
                 self._budget -= _time.monotonic() - started
-            if isinstance(fetched, dict) and isinstance(fetched.get("xml"), str) and fetched["xml"]:
+            if isinstance(fetched, dict) and (
+                fetched.get("unparseable")
+                or (isinstance(fetched.get("xml"), str) and fetched["xml"])
+            ):
                 result = fetched
         self._cache[wanted] = result
         return result
@@ -1340,6 +1348,7 @@ def _resolved_recipe_target_readings(
             "component_id": fetched.get("component_id") or resolved,
             "component_version": None if version is None else str(version),
             "xml": fetched["xml"],
+            "unparseable": bool(fetched.get("unparseable")),
             "read_failed": False,
         }
     return readings
@@ -2266,8 +2275,17 @@ def build_resolved_reference_summary(
     *,
     boomi_client: Any = None,
     authored_refs: Sequence[str] = (),
+    bound_ids: Optional[Mapping[str, Optional[str]]] = None,
 ) -> Tuple[ResolvedReferenceSummaryV1, ...]:
     """Read-only reference evidence, sanitized.
+
+    ``bound_ids`` (#159 S1 B21-1) is the COMPONENT PLANNER's binding of every
+    participant (``_component_bindings``) — top-level id or name, config
+    ``component_id`` or ``component_name``. Where it binds a key, that id IS
+    the evidence (and its version marker is read by it): the plan hash then
+    moves whenever the planner resolves a participant differently, whichever
+    spelling bound it. Re-deriving the binding here from the top-level fields
+    alone missed the config spellings.
 
     Two sources, in order of authority: a component the plan itself declares
     (resolved locally, no call), and — only when a client is supplied — an
@@ -2315,6 +2333,9 @@ def build_resolved_reference_summary(
 
     for key, component in sorted(declared.items()):
         component_id: Optional[str] = component.component_id
+        planner_bound = (bound_ids or {}).get(key)
+        if planner_bound:
+            component_id = planner_bound
         version_marker: Optional[str] = None
         # A `$ref` naming a component THIS PLAN declares is resolved by the
         # compiler's symbol table whether or not that component exists yet.
@@ -3793,6 +3814,11 @@ def plan_authoring_request_v1(
                 for _key, ir in normalized.process_roots
             ]
             + [normalized.integration_spec.model_dump(mode="json")]
+        ),
+        # B21-1: the planner's binding of every participant, so the hashed
+        # evidence covers what apply will bind whatever spelling bound it.
+        bound_ids=_component_bindings(
+            normalized.integration_spec, planned_existing_ids(component_plan)
         ),
     )
     # Surfaced at PLAN time, not first discovered at apply: a caller must be

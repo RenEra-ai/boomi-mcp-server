@@ -970,8 +970,11 @@ def build_connector_resolution_snapshot(
                 continue
             resolved.append(identity.model_copy(update={"source": "config"}))
             continue
-        if live_document and action != "update":
-            live_read = live_identity_from_component_xml(key, live_document)
+        # B21-4: a response MARKED unparseable (empty, undecodable, or not
+        # XML) is judged by the same strict reader as any other document, so it
+        # is refused UNPARSEABLE even when no text survived it.
+        if (live_document or reading.get("unparseable")) and action != "update":
+            live_read = live_identity_from_component_xml(key, live_document or "")
             if not live_read.readable:
                 # FETCHED AND UNREADABLE IS NOT SILENCE. The refusal below covers
                 # a fetch that failed; this covers a fetch that SUCCEEDED and
@@ -1514,6 +1517,7 @@ def live_readings_for_declared_components(boomi_client, components, reads=None) 
             "component_id": fetched.get("component_id") or str(component_id),
             "component_version": None if version is None else str(version),
             "xml": fetched.get("xml"),
+            "unparseable": bool(fetched.get("unparseable")),
             "read_failed": False,
         }
     return readings

@@ -71,8 +71,9 @@ class phase_reads:
 class StoredComponentXmlUnparseable(ET.ParseError):
     """A component GET SUCCEEDED, but the document the account returned does not
     parse (#159 S1 B20-6). Distinct from a failed or timed-out read: the account
-    answered. Carries the returned text (``raw_xml``) so a caller classifying the
-    reading can hand it to its own parser; never logged or served."""
+    answered. Carries the returned text (``raw_xml``; empty when the body was
+    empty or did not decode) so a caller classifying the reading can hand it to
+    its own parser; never logged or served."""
 
     def __init__(self, component_id: str, raw_xml: str):
         self.component_id = component_id
@@ -269,7 +270,14 @@ def component_get_xml(
     except Exception as exc:
         raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
 
-    raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+    # #159 S1 B21-4: an EMPTY body, or one that does not decode as UTF-8, from a
+    # GET that succeeded is a malformed RESPONSE, not an unanswered read.
+    if not raw:
+        raise StoredComponentXmlUnparseable(component_id, "")
+    try:
+        raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+    except UnicodeDecodeError as exc:
+        raise StoredComponentXmlUnparseable(component_id, "") from exc
     try:
         root = ET.fromstring(raw_xml)
     except ET.ParseError as exc:

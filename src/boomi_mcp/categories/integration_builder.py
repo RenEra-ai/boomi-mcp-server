@@ -8795,7 +8795,17 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy, re
                 live[key] = reading
                 continue
         xml = fetched.get("xml") if isinstance(fetched, dict) else None
-        if isinstance(xml, str) and xml:
+        if isinstance(fetched, dict) and fetched.get("unparseable"):
+            # #159 S1 B21-4: the account answered with a malformed response —
+            # recorded as such, not as a failed read.
+            reading = {
+                "xml": xml or "",
+                "unparseable": True,
+                "component_id": fetched.get("component_id") or component_id,
+                "component_version": None,
+                "read_failed": False,
+            }
+        elif isinstance(xml, str) and xml:
             # KEEP WHAT THE FETCH ALREADY TOLD US. The id and version came back
             # with the bytes and were discarded, so any consumer needing to say
             # WHICH component in WHICH revision it resolved had nothing to say
@@ -10243,15 +10253,19 @@ def _apply_plan(
     # Issue #95 M7.5: re-resolve literal existing-profile UUID indexes (supplied
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
-    literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
-    selected_profile_indexes = _resolve_selected_profile_indexes(
-        boomi_client,
-        spec,
-        reused_keys=_keys_reused_at_apply(
-            spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
-        ),
-        conflict_policy=conflict_policy,
-    )
+    # #159 S1 B21-2: the refresh is charged to the SAME phase budget as the
+    # execution plan's discovery (``_apply_reads``) — a profile that plan read
+    # moments ago in this phase is not read again.
+    with phase_reads(_apply_reads):
+        literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
+        selected_profile_indexes = _resolve_selected_profile_indexes(
+            boomi_client,
+            spec,
+            reused_keys=_keys_reused_at_apply(
+                spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+            ),
+            conflict_policy=conflict_policy,
+        )
 
 
     # Apply re-resolves those indexes, and live discovery can DRIFT from plan

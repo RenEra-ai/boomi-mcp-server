@@ -1896,6 +1896,13 @@ def judge_reused_request_target(
     account, an unresolved, id-less or unreadable reuse, a blank stored url) the rule FAILS CLOSED
     on the path: it must start with '/' and carry no '=' before any '?' — the
     two shapes that could complete a pair a stored query left open."""
+    # B21-3: ONE ordering. A READABLE stored value carrying a delimiter is
+    # refused for reuse FIRST, whether or not it is a well-formed absolute URL
+    # (``https:///base?mode=full`` still has a query the path would land in).
+    if stored_base_url is not None and any(
+        char in stored_base_url for char in _STORED_BASE_FORBIDDEN
+    ):
+        return (_QUERY_NAME_CAUSE, REUSED_TARGET_STORED_BASE)
     if stored_base_url is None or not _stored_base_is_known(stored_base_url):
         # B16-2 / B20-1: no concrete base (blank, the unresolved placeholder,
         # not an absolute http(s) URL) — unknown, so the fail-closed rule
@@ -1908,8 +1915,6 @@ def judge_reused_request_target(
             return (_QUERY_NAME_CAUSE, REUSED_TARGET_PATH)
         return None
     base = stored_base_url.strip()
-    if any(char in base for char in _STORED_BASE_FORBIDDEN):
-        return (_QUERY_NAME_CAUSE, REUSED_TARGET_STORED_BASE)
     for joined, path_start in _joined_targets(base, path):
         verdict = _judge_request_target(joined)
         if verdict.cause is not None and verdict.offset >= path_start:

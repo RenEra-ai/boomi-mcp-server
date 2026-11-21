@@ -3502,3 +3502,159 @@ def test_b20_06_malformed_stored_xml_through_the_getter_is_unparseable_not_unans
     (diag,) = [d for d in envelope["authoring_diagnostics"] if d["code"] == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"]
     assert diag["remediation"] == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
     assert diag["remediation"] != UNREADABLE_REUSE_REMEDIATION
+
+
+# ---------------------------------------------------------------------------
+# B21 (Codex review of B20): witnesses, each failing at 91c196c.
+# ---------------------------------------------------------------------------
+
+
+def _base_bound_by(form):
+    """A reuse-mode selected base bound by each of the four binding forms."""
+    raw, material = flagship_v2()
+    _bind_target_1(raw, material, "reuse")
+    material["targets"][1]["operation"]["path"] = "/v1/billing"
+    config = {"reference_only": True, "connector_type": "rest"}
+    name = None
+    component_id = None
+    if form == "config_name":
+        config["component_name"] = _REUSED_NAME
+    elif form == "name":
+        name = _REUSED_NAME
+    elif form == "config_id":
+        config["component_id"] = _REUSED_REST_ID
+    else:
+        component_id = _REUSED_REST_ID
+    base = IntegrationComponentSpec(
+        key="shared_rest", type="connector-settings", name=name, action="create",
+        component_id=component_id, config=config,
+    )
+    return recipe_request(raw, material, base_components=[base.model_dump(mode="json", exclude_none=True)])
+
+
+@pytest.mark.parametrize("form", ["name", "config_name", "id", "config_id"])
+def test_b21_01_the_hashed_reference_evidence_carries_the_planner_binding(form):
+    """B21-1 sweep: for EVERY binding form, the served (and plan-hashed)
+    reference evidence names the component the PLANNER bound."""
+    clean = _reused_rest_xml("http://h.example.invalid/api/")
+    envelope = _public(
+        _base_bound_by(form), "compile",
+        _account_by_id({_REUSED_REST_ID: clean}, [(_REUSED_NAME, _REUSED_REST_ID)]),
+    )
+    assert envelope["_success"] is True, json.dumps(envelope)[:600]
+    (reference,) = [r for r in envelope["authoring_result"]["resolved_references"]
+                    if r["ref"] == "$ref:shared_rest"]
+    assert reference["component_id"] == _REUSED_REST_ID, reference
+
+
+@pytest.mark.parametrize("form", ["name", "config_name"])
+def test_b21_01_a_name_that_rebinds_before_apply_moves_the_compile_hash(form):
+    """B21-1: the caller compiles while the name binds A; before apply the SAME
+    name binds B. The compile replay and the execution plan both see B, so only
+    the compile hash can tell — it covers the planner's binding, so apply
+    refuses as stale before any write."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    clean = _reused_rest_xml("http://h.example.invalid/api/")
+    answers = {_REUSED_REST_ID: clean, _B_REST_ID: clean.replace(_REUSED_REST_ID, _B_REST_ID)}
+    listing = [(_REUSED_NAME, _REUSED_REST_ID)]
+    request = _base_bound_by(form)
+    client = mock.MagicMock()
+    with _account_by_id(answers, listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    listing[0] = (_REUSED_NAME, _B_REST_ID)
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    with _account_by_id(answers, listing), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    served = json.dumps(envelope)
+    assert writes == [], "apply wrote under a compile hash that covered another binding"
+    assert envelope["_success"] is False
+    assert "AUTHORING_PLAN_STALE" in served, served[:800]
+    assert _B_REST_ID not in served and _REUSED_REST_ID not in served
+
+
+def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatch):
+    """B21-2: apply's pre-write refresh of reused/literal profile indexes is
+    charged to the SAME phase budget as the execution plan's discovery: every
+    profile read is handed a deadline, and none is read twice."""
+    import time
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    monkeypatch.setenv(_shared._DEADLINE_ENV, "2")
+    calls = []
+
+    def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
+        calls.append((component_id, deadline_seconds))
+        time.sleep(min(1.2, deadline_seconds) if deadline_seconds is not None else 1.2)
+        raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 1.2)
+
+    spec = {"integration_name": "Raw", "components": [
+        {"key": "prof", "type": "profile.json", "name": "Existing Profile", "action": "create",
+         "component_id": _JSON_PROFILE_ID, "config": {"reference_only": True}},
+    ]}
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: {"_success": True, "component_id": "x"}):
+        integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
+        )
+    profile_reads = [c for c in calls if c[0] == _JSON_PROFILE_ID]
+    assert profile_reads, "non-vacuity: the reused profile was read"
+    assert all(deadline is not None for _cid, deadline in profile_reads), profile_reads
+    assert len(profile_reads) == 1, profile_reads
+
+
+@pytest.mark.parametrize("delimiter", ["?mode=full", "#frag"])
+def test_b21_03_a_malformed_stored_base_carrying_a_delimiter_is_refused(delimiter):
+    """B21-3: a READABLE stored url carrying '?' or '#' is refused for reuse
+    even when it is not a well-formed absolute URL (no host): the delimiter rule
+    is judged on the raw stored value BEFORE the unknown-base fallback."""
+    envelope = _public(
+        _reuse_bound_request("/orders"), "compile",
+        _account_by_id({_REUSED_REST_ID: _reused_rest_xml("https:///base" + delimiter)}, []),
+    )
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False, served[:600]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served
+    assert _RAW_BINDING_POINTER in served
+    assert "https:///base" not in served and delimiter not in served  # value-free
+
+
+@pytest.mark.parametrize("body", [b"", b"\xff\xfe<bns:Component/>"])
+def test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered(body):
+    """B21-4: a successful GET whose body is empty, or does not decode as
+    UTF-8, is a malformed RESPONSE — through the real getter it is classified
+    UNPARSEABLE, never "the account did not answer"."""
+    from unittest import mock
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import UNPARSEABLE_STORED_COMPONENT_REMEDIATION
+    from boomi_mcp.categories import integration_builder
+
+    client = mock.MagicMock()
+    client.component.get_component.return_value = body
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "compile",
+            {"authoring_request": _reuse_bound_request("/v1/billing").model_dump(mode="json", exclude_none=True)},
+        )
+    assert client.component.get_component.called
+    (diag,) = [d for d in envelope["authoring_diagnostics"] if d["code"] == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"]
+    assert diag["remediation"] == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
