@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15171, "minimum_collected": 15171, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15183, "minimum_collected": 15183, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15629,3 +15629,15 @@
 {"kind": "test", "id": "pytest-015628", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_03_the_execution_component_plan_is_rechecked_before_any_write", "state": "active"}
 {"kind": "test", "id": "pytest-015629", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_04_the_served_c8_guarantee_holds_on_a_mixed_preview", "state": "active"}
 {"kind": "test", "id": "pytest-015630", "node_id": "tests/test_recipe_fanout_v2.py::test_b14_01_sibling_a_material_reuse_by_id_is_judged_against_its_stored_base_url", "state": "active"}
+{"kind": "test", "id": "pytest-015631", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_a_name_bound_reuse_the_plan_resolves_is_read_and_judged[base]", "state": "active"}
+{"kind": "test", "id": "pytest-015632", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_a_name_bound_reuse_the_plan_resolves_is_read_and_judged[material]", "state": "active"}
+{"kind": "test", "id": "pytest-015633", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_a_name_bound_reuse_the_account_cannot_resolve_fails_closed[base]", "state": "active"}
+{"kind": "test", "id": "pytest-015634", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_a_name_bound_reuse_the_account_cannot_resolve_fails_closed[material]", "state": "active"}
+{"kind": "test", "id": "pytest-015635", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_02_a_generated_connection_reused_by_name_is_judged_against_its_stored_url", "state": "active"}
+{"kind": "test", "id": "pytest-015636", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_02_control_a_generated_connection_reused_under_a_clean_stored_url_plans", "state": "active"}
+{"kind": "test", "id": "pytest-015637", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_03_apply_rejudges_the_stored_url_from_its_fresh_execution_read[base_by_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015638", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_03_apply_rejudges_the_stored_url_from_its_fresh_execution_read[generated_reused_by_name]", "state": "active"}
+{"kind": "test", "id": "pytest-015639", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_03_control_an_unchanged_clean_stored_url_reaches_the_write_loop[base_by_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015640", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_03_control_an_unchanged_clean_stored_url_reaches_the_write_loop[generated_reused_by_name]", "state": "active"}
+{"kind": "test", "id": "pytest-015641", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_04_a_stored_base_refusal_and_a_path_refusal_are_told_apart", "state": "active"}
+{"kind": "test", "id": "pytest-015642", "node_id": "tests/test_recipe_fanout_v2.py::test_b15_01_the_stored_url_reader_answers_only_what_the_account_read", "state": "active"}

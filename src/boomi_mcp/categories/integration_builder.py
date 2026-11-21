@@ -10440,6 +10440,27 @@ def _apply_plan(
     _reused_component_keys = _keys_reused_at_apply(
         spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
+    # B15: EVERY recipe REST target judged again, against the EXECUTION plan's
+    # ids and the stored URLs this pass reads (fresh; a key the pass did not
+    # read is read on demand by its resolved id) — the account can change
+    # between the compile replay and here. Before the first write; value-free.
+    if authoring_bundle is not None and getattr(authoring_bundle, "rest_targets", ()):
+        from ..authoring.workflow import (
+            AuthoringWorkflowError as _TargetRefusal,
+            judge_recipe_rest_targets,
+            stored_connection_xml_reader,
+        )
+
+        try:
+            judge_recipe_rest_targets(
+                authoring_bundle.rest_targets,
+                spec.components,
+                conflict_policy,
+                existing_ids,
+                stored_connection_xml_reader(boomi_client, _pre_write_live_xml),
+            )
+        except _TargetRefusal as exc:
+            return _authoring_error_envelope(exc, "apply")
     # ONE resolution for the whole apply, and UNCONDITIONAL. The live READ above
     # is gated on there being a root to compile, because nothing reads those
     # bytes otherwise; the RESOLUTION is not, because it also decides whether the

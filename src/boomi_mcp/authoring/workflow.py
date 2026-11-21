@@ -285,10 +285,10 @@ class _NormalizedIntent:
     #: B12-01: ``(base key, request pointer)`` per base a recipe preparer bound
     #: in CREATE mode. Rechecked against the component plan's resolved ids.
     recipe_create_bound_bases: Tuple[Tuple[str, str], ...] = ()
-    #: B14 (ARCH-r1-03): ``(connection key, path, request pointer)`` per recipe
-    #: target bound to a REUSED connection — judged joined to its stored base
-    #: URL once the account read answers it.
-    recipe_reuse_targets: Tuple[Tuple[str, str, str], ...] = ()
+    #: B15: ``(connection key, path, path pointer, binding pointer)`` per
+    #: recipe REST target, every one — the component plan decides which are
+    #: reused (``judge_recipe_rest_targets``), never the declaration.
+    recipe_rest_targets: Tuple[Tuple[str, str, str, str], ...] = ()
 
     @property
     def process_roots(self) -> Tuple[Tuple[str, Any], ...]:
@@ -714,7 +714,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     deferred: Dict[Tuple[str, str], Tuple[str, ...]] = {}
     facts: Dict[str, Any] = {}
     create_bound: List[Tuple[str, str]] = []
-    reuse_targets: List[Tuple[str, str, str]] = []
+    rest_targets: List[Tuple[str, str, str, str]] = []
     invocation_position = {
         invocation.invocation_id: position for position, invocation in enumerate(intent.invocations)
     }
@@ -825,16 +825,11 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
         for key in prepared.selected_base_keys:
             if key not in selected:
                 selected.append(key)
-        for key, path, pointer in getattr(prepared, "reuse_request_targets", ()) or ():
-            reuse_targets.append(
-                (
-                    key,
-                    path,
-                    "/intent/invocations/{0}{1}".format(
-                        invocation_position[invocation.invocation_id], pointer
-                    ),
-                )
-            )
+        prefix = "/intent/invocations/{0}".format(invocation_position[invocation.invocation_id])
+        for key, path, path_pointer, binding_pointer in (
+            getattr(prepared, "rest_request_targets", ()) or ()
+        ):
+            rest_targets.append((key, path, prefix + path_pointer, prefix + binding_pointer))
         for key, pointer in getattr(prepared, "create_bound_base_keys", ()) or ():
             create_bound.append(
                 (key, "/intent/invocations/{0}{1}".format(invocation_position[invocation.invocation_id], pointer))
@@ -850,7 +845,7 @@ def _prepare_recipe_components(intent, registry, catalog_entries):
     # the engine takes those from the catalog it already holds, so a base a v1
     # slot also resolves stays ONE entry (identity carried, not reconstructed).
     return (
-        (tuple(generated), tuple(selected), tuple(create_bound), tuple(reuse_targets)),
+        (tuple(generated), tuple(selected), tuple(create_bound), tuple(rest_targets)),
         deferred,
         facts,
     )
@@ -926,7 +921,7 @@ def _normalize_recipe_intent(
     try:
         # The SAME registry `run_recipes` resolves against (looked up at call
         # time, so a test-installed registry governs both).
-        (supporting_specs, selected_base_keys, create_bound_bases, reuse_targets), deferred_names, projection_facts = (
+        (supporting_specs, selected_base_keys, create_bound_bases, rest_targets), deferred_names, projection_facts = (
             _prepare_recipe_components(intent, _engine.production_registry(), catalog_entries)
         )
     except RecipeError as exc:
@@ -1049,7 +1044,7 @@ def _normalize_recipe_intent(
         # Only for a unit the run actually composed under that key.
         recipe_projection_facts=composed_facts,
         recipe_create_bound_bases=tuple(create_bound_bases),
-        recipe_reuse_targets=tuple(reuse_targets),
+        recipe_rest_targets=tuple(rest_targets),
     )
 
 
@@ -1149,27 +1144,103 @@ def recheck_execution_bindings(bundle, planned) -> None:
         )
 
 
-def _refuse_reused_request_targets(normalized, live_readings) -> None:
-    """B14 (ARCH-r1-03): each recipe path bound to a REUSED connection, judged
-    JOINED to the base URL that connection stores — read by the SAME account
-    read connector-replay identity uses (``live_readings_for_declared_
-    components``), parsed by the route digest's own reader. Where no reading
-    answers (offline, an id-less reuse, a failed read) the judgment fails
-    closed (``fanout.judge_reused_request_target``)."""
-    targets = getattr(normalized, "recipe_reuse_targets", ()) or ()
+def stored_connection_xml_reader(boomi_client, readings=None):
+    """``read(key, component_id) -> xml or None`` for a connection apply REUSES (B15).
+
+    ``readings`` are the route's own account readings, keyed by spec key
+    (compile: the declared-id readings connector replay identity uses; apply:
+    the pre-write pass's ``_live_connector_xml``). A reading answers only when
+    it read the SAME component the plan resolved; any other key — resolved by
+    name, gated out of that pass, or read by a different predicate — is read
+    on demand by the resolved id, once. ``None`` means the account could not
+    answer (no client, a failed read): the judge then fails closed."""
+    from ..categories.integration_builder import canonical_component_id
+
+    cache: Dict[str, Optional[str]] = {}
+
+    def read(key, component_id):
+        wanted = canonical_component_id(component_id)
+        if not wanted:
+            return None
+        reading = (readings or {}).get(key)
+        if isinstance(reading, dict) and canonical_component_id(reading.get("component_id")) == wanted:
+            if reading.get("read_failed"):
+                return None
+            xml = reading.get("xml")
+            if isinstance(xml, str) and xml:
+                return xml
+        if wanted in cache:
+            return cache[wanted]
+        xml = None
+        if boomi_client is not None:
+            # Looked up at call time: the one platform read every route uses.
+            from ..categories.components import _shared
+
+            try:
+                fetched = _shared.component_get_xml(boomi_client, wanted)
+            except Exception:  # noqa: BLE001 - an unreadable component answers nothing
+                fetched = None
+            if isinstance(fetched, dict) and isinstance(fetched.get("xml"), str) and fetched["xml"]:
+                xml = fetched["xml"]
+        cache[wanted] = xml
+        return xml
+
+    return read
+
+
+def judge_recipe_rest_targets(targets, components, conflict_policy, existing_ids, read_stored_xml) -> None:
+    """THE judge of every recipe REST target against the connection apply
+    actually requests through (B15; B14 ARCH-r1-03).
+
+    Driven by the plan's reuse decision — apply's own predicate
+    (``_unwritten_connection_keys``) over the route's resolved ids — never by
+    the declaration: a target whose connection apply WRITES had its base URL
+    judged joined at preparation; a target whose connection apply REUSES (by
+    id, by name, or a create the plan binds to a same-name component) is
+    judged JOINED to the base URL that component stores, read through the
+    resolved id (``read_stored_xml``). Called at compile with the component
+    plan's ids and at apply with the execution plan's ids and fresh readings,
+    before the first write. Raises a value-free AUTHORING_COMPILE_BLOCKED: a
+    stored base carrying a query or fragment is pointed at the BINDING, a
+    path at the PATH, each with its own remediation (B15-4)."""
+    targets = tuple(targets or ())
     if not targets:
         return
+    from ..categories.integration_builder import _bound_existing_id
     from ..connector_replay.digests import connection_base_url
-    from ..recipes.builtins.fanout import judge_reused_request_target
+    from ..recipes.builtins.fanout import REUSED_TARGET_STORED_BASE, judge_reused_request_target
 
+    by_key = {component.key: component for component in components}
+    unwritten = _unwritten_connection_keys(components, conflict_policy, existing_ids)
     bad = []
-    for key, path, pointer in targets:
-        reading = (live_readings or {}).get(key) or {}
-        xml = reading.get("xml") if not reading.get("read_failed") else None
+    for key, path, path_pointer, binding_pointer in targets:
+        if key not in unwritten or key not in by_key:
+            continue
+        component_id = _bound_existing_id(by_key[key], existing_ids)
+        xml = read_stored_xml(key, component_id) if component_id else None
         stored = connection_base_url(xml) if isinstance(xml, str) else None
-        cause = judge_reused_request_target(stored, path)
-        if cause is not None:
-            bad.append((pointer, cause))
+        verdict = judge_reused_request_target(stored, path)
+        if verdict is None:
+            continue
+        cause, fault = verdict
+        if fault == REUSED_TARGET_STORED_BASE:
+            bad.append((
+                binding_pointer,
+                cause,
+                "The reused connection's stored base URL carries a query or fragment, so "
+                "the operation path would be appended inside it.",
+                "Select, or configure in the account, a connection whose base URL carries "
+                "no query and no fragment.",
+            ))
+        else:
+            bad.append((
+                path_pointer,
+                cause,
+                "The operation path, appended to the reused connection's stored base URL, "
+                "does not form a request target the recipe may emit.",
+                "Write the path as an absolute path ('/...') with no '=' before any '?', "
+                "and keep literal query values in query_parameters.",
+            ))
     if not bad:
         return
     raise AuthoringWorkflowError(
@@ -1178,19 +1249,13 @@ def _refuse_reused_request_targets(normalized, live_readings) -> None:
             _diag(
                 AUTHORING_COMPILE_BLOCKED,
                 "error",
-                message=(
-                    "The operation path, appended to the reused connection's stored "
-                    "base URL, does not form a request target the recipe may emit."
-                ),
+                message=message,
                 path=pointer,
                 subject_kind="recipe",
-                remediation=(
-                    "Write the path as an absolute path ('/...') with no '=' before any "
-                    "'?', and keep literal query values in query_parameters."
-                ),
+                remediation=remediation,
                 cause_codes=(cause,),
             )
-            for pointer, cause in bad
+            for pointer, cause, message, remediation in bad
         ),
     )
 
@@ -3296,7 +3361,13 @@ def plan_authoring_request_v1(
         normalized, request.intent.conflict_policy, planned_existing_ids(component_plan)
     )
     _refuse_create_bound_bases_apply_reuses(normalized, _unwritten_connections)
-    _refuse_reused_request_targets(normalized, _live_readings)
+    judge_recipe_rest_targets(
+        getattr(normalized, "recipe_rest_targets", ()),
+        normalized.integration_spec.components,
+        request.intent.conflict_policy,
+        planned_existing_ids(component_plan),
+        stored_connection_xml_reader(boomi_client, _live_readings),
+    )
     _reused_for_preview = frozenset(_reused_for_preview or ()) | _unwritten_connections
     topology_diagnostics = _validate_topology(request, normalized, profile)
     decisions, decision_diagnostics = _evaluate_decisions(request, normalized)
@@ -4049,6 +4120,11 @@ class CompiledBundle:
     #: component plan (``recheck_execution_bindings``) before any write.
     create_bound_bases: Tuple[Tuple[str, str], ...] = ()
     unwritten_connections: frozenset = frozenset()
+    #: B15: every recipe REST target ``(connection key, path, path pointer,
+    #: binding pointer)``. Apply judges them (``judge_recipe_rest_targets``)
+    #: against its EXECUTION plan's ids and the stored URLs it reads fresh,
+    #: before the first write. Never hashed.
+    rest_targets: Tuple[Tuple[str, str, str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse a bundle whose spec cannot build what the compile describes.
@@ -4326,6 +4402,7 @@ def preflight_typed_apply_v1(
             getattr(internals.normalized, "recipe_create_bound_bases", ()) or ()
         ),
         unwritten_connections=frozenset(internals.unwritten_connections),
+        rest_targets=tuple(getattr(internals.normalized, "recipe_rest_targets", ()) or ()),
     )
 
 
