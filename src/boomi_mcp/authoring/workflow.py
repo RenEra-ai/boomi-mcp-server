@@ -1148,9 +1148,9 @@ class BudgetedComponentReads:
     """Account reads of components by resolved id under ONE wall-clock budget (B16-3).
 
     The budget is the component GET deadline (``_component_get_deadline_seconds``),
-    spent across every read a route makes through this object, exactly as
+    spent across every read a route makes through this object, as
     ``_enrich_references`` spends it: each read is handed the REMAINING slice
-    as its own deadline, and once less than a second remains no new read
+    (fractional, B18-1) as its own deadline, and once none remains no new read
     starts. Several stalled reads therefore cannot sum past the platform
     request timeout. A read that fails, times out or is never started answers
     ``None`` (cached per id, so a component is asked at most once) and the
@@ -1177,14 +1177,20 @@ class BudgetedComponentReads:
         if wanted in self._cache:
             return self._cache[wanted]
         result = None
-        if self._budget >= 1:
+        if self._budget > 0:
             # Looked up at call time: the one platform read every route uses.
             from ..categories.components import _shared
 
             started = _time.monotonic()
             try:
+                # B18-1: the POSITIVE FRACTIONAL remainder is the read's own
+                # deadline. The GET deadline is a ``threading.Event.wait``
+                # timeout (``_shared._run_with_deadline``), which honours any
+                # positive float, so no floor above zero is needed; truncating
+                # to whole seconds starved every read after a fast first one
+                # under a 1 s budget.
                 fetched = _shared.component_get_xml(
-                    self._client, wanted, deadline_seconds=int(self._budget)
+                    self._client, wanted, deadline_seconds=self._budget
                 )
             except Exception:  # noqa: BLE001 - an unreadable component answers nothing
                 fetched = None
@@ -2464,6 +2470,65 @@ def derive_root_capabilities(
     ).capabilities_by_root
 
 
+def connector_identity_diagnostics(snapshot_error):
+    """``(diagnostics, mismatched keys)`` for a ``ConnectorIdentityError`` —
+    every failure it carries, each with its own remediation. ONE translation
+    for the plan's report and apply's combined pre-write refusal (B18-4), so
+    the two surfaces describe an identity failure identically."""
+    from ..errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH, submitted_xml_unsettled_summary
+
+    diagnostics: List[AuthoringDiagnosticV1] = []
+    mismatched: set = set()
+    for failure in snapshot_error.failures:
+        # Only a MISMATCH read a component of another kind: its stored URL
+        # is not this target's base. An UNAVAILABLE reading leaves the base
+        # UNKNOWN, which the URL judge's fail-closed rule still governs
+        # (QA-159-S1-r16-01) — reported beside the identity refusal.
+        if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH:
+            mismatched.add(failure.component_key)
+        diagnostics.append(
+            _diag(
+                failure.code,
+                "error",
+                message=str(failure),
+                subject_kind="component",
+                subject_id=failure.component_key,
+                # THE FAILURE IS THE AUTHORITY ON ITS OWN REMEDIATION, and
+                # this handler stopped deciding. It used to switch on the code
+                # with a hand-written two-branch conditional: the mismatch code
+                # got one sentence and EVERYTHING ELSE got the submitted-XML
+                # one. Live QA measured what that costs. The route-conflict
+                # refusal for a component read from the ACCOUNT is raised as
+                # the unavailable code, fell into the else branch, and told the
+                # caller their submitted XML could not be parsed — about a
+                # document they never submitted. A path mismatch was told to
+                # correct the family and the action, the two fields that were
+                # right. Both sentences already existed, computed correctly at
+                # the point that knows which field disagreed; a second opinion
+                # here could only be a worse copy of one. The branch survives
+                # ONLY as the fallback for a failure that carries no sentence
+                # of its own, so an unattributed refusal is still remediable.
+                remediation=failure.remediation or (
+                    "Declare the connector family and action the component "
+                    "actually resolves to, or correct the component so it "
+                    "resolves to what you declared."
+                    if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH
+                    else (
+                        "Submitted component XML is refused when {0}. Supply "
+                        "XML that settles what it installs, or omit it and "
+                        "declare the component's configuration instead."
+                    ).format(submitted_xml_unsettled_summary())
+                ),
+                # The offending field, machine-readably. `path` is this
+                # model's field locator and it was being served empty, so the
+                # only place the field was named was inside English prose —
+                # which a caller correcting the request cannot act on.
+                path=failure.field or "",
+            )
+        )
+    return tuple(diagnostics), frozenset(mismatched)
+
+
 def _validate_processes(
     normalized: _NormalizedIntent,
     declarations: Any = None,
@@ -2586,53 +2651,13 @@ def _validate_processes(
         snapshot = snapshot_error.partial or build_connector_resolution_snapshot(
             (), declared={}
         )
-        for failure in snapshot_error.failures:
-            # Only a MISMATCH read a component of another kind: its stored URL
-            # is not this target's base. An UNAVAILABLE reading leaves the base
-            # UNKNOWN, which the URL judge's fail-closed rule still governs
-            # (QA-159-S1-r16-01) — reported beside the identity refusal.
-            if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH:
-                _identity_refused.add(failure.component_key)
-            snapshot_diagnostics.append(
-                _diag(
-                    failure.code,
-                    "error",
-                    message=str(failure),
-                    subject_kind="component",
-                    subject_id=failure.component_key,
-                    # THE FAILURE IS THE AUTHORITY ON ITS OWN REMEDIATION, and
-                    # this handler stopped deciding. It used to switch on the code
-                    # with a hand-written two-branch conditional: the mismatch code
-                    # got one sentence and EVERYTHING ELSE got the submitted-XML
-                    # one. Live QA measured what that costs. The route-conflict
-                    # refusal for a component read from the ACCOUNT is raised as
-                    # the unavailable code, fell into the else branch, and told the
-                    # caller their submitted XML could not be parsed — about a
-                    # document they never submitted. A path mismatch was told to
-                    # correct the family and the action, the two fields that were
-                    # right. Both sentences already existed, computed correctly at
-                    # the point that knows which field disagreed; a second opinion
-                    # here could only be a worse copy of one. The branch survives
-                    # ONLY as the fallback for a failure that carries no sentence
-                    # of its own, so an unattributed refusal is still remediable.
-                    remediation=failure.remediation or (
-                        "Declare the connector family and action the component "
-                        "actually resolves to, or correct the component so it "
-                        "resolves to what you declared."
-                        if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH
-                        else (
-                            "Submitted component XML is refused when {0}. Supply "
-                            "XML that settles what it installs, or omit it and "
-                            "declare the component's configuration instead."
-                        ).format(submitted_xml_unsettled_summary())
-                    ),
-                    # The offending field, machine-readably. `path` is this
-                    # model's field locator and it was being served empty, so the
-                    # only place the field was named was inside English prose —
-                    # which a caller correcting the request cannot act on.
-                    path=failure.field or "",
-                )
-            )
+        _failure_diagnostics, _mismatched = connector_identity_diagnostics(snapshot_error)
+        snapshot_diagnostics.extend(_failure_diagnostics)
+        # Only a MISMATCH read a component of another kind: its stored URL is
+        # not this target's base. An UNAVAILABLE reading leaves the base
+        # UNKNOWN, which the URL judge's fail-closed rule still governs
+        # (QA-159-S1-r16-01) — reported beside the identity refusal.
+        _identity_refused.update(_mismatched)
     # THE DECLARATION IS AN ASSERTION HERE TOO. Building the snapshot and then
     # not comparing against it left the caller's `connector_metadata`
     # authoritative on every route but the raw one — which is the single thing

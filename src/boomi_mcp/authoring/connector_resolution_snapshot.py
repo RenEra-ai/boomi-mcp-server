@@ -44,6 +44,27 @@ from ..errors import (
 )
 
 
+def identity_reads_component(component) -> bool:
+    """Whether the connector resolution snapshot CONSUMES this component's
+    account reading (#159 S1 B18-2): connectors only. The ONE predicate for the
+    snapshot's own loop and for the collectors that read the account for it,
+    so a read the snapshot will discard (a profile, a map) is never made — and
+    can never spend the request's read budget."""
+    component_type = getattr(component, "type", None)
+    return isinstance(component_type, str) and "connector" in component_type
+
+
+#: B18-3: what to do when the account did not answer the read of a reused
+#: component — it was never asked about submitted XML, so it gets its own remedy.
+#: Value-free: no id, no URL.
+UNREADABLE_REUSE_REMEDIATION = (
+    "The account did not answer the read of this reused component (the read "
+    "failed, timed out, or the request's read budget was spent), so nothing "
+    "about it could be checked. Retry the request; if it persists, bind or "
+    "select a component the account can read."
+)
+
+
 class ConnectorIdentityError(Exception):
     """A connector component's identity cannot be stood behind.
 
@@ -754,8 +775,7 @@ def build_connector_resolution_snapshot(
     resolved = []
     failures: list = []
     for component in components:
-        component_type = getattr(component, "type", None)
-        if not isinstance(component_type, str) or "connector" not in component_type:
+        if not identity_reads_component(component):
             continue
         key = getattr(component, "key", None)
         if not isinstance(key, str) or not key:
@@ -978,6 +998,7 @@ def build_connector_resolution_snapshot(
                         "do could be checked."
                     ).format(key),
                     component_key=key,
+                    remediation=UNREADABLE_REUSE_REMEDIATION,
                 )
             )
             continue
@@ -1418,6 +1439,10 @@ def live_readings_for_declared_components(boomi_client, components, reads=None) 
         key = getattr(component, "key", None)
         component_id = getattr(component, "component_id", None)
         if not key or not component_id:
+            continue
+        if not identity_reads_component(component):
+            # B18-2: the snapshot reads connectors only; a profile's GET would
+            # only spend the request's read budget.
             continue
         if reads is not None:
             # #159 S1 B17-1: the request's ONE deadline budget

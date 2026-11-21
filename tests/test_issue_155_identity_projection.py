@@ -1950,6 +1950,27 @@ def test_the_apply_wide_resolution_refusal_is_classified():
     assert classifies, "its handler does not serve a classified envelope"
 
 
+def _with_identity_translation(tree, nodes):
+    """``nodes`` plus the body of ``connector_identity_diagnostics`` when any of
+    them calls it (#159 S1 B18-4): the plan handler's failure -> diagnostic
+    translation lives in that ONE function, shared with apply's combined
+    pre-write refusal, so a pin on the handler follows the call into it."""
+    import ast
+
+    nodes = list(nodes)
+    calls_it = any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "connector_identity_diagnostics"
+        for node in nodes for n in ast.walk(node)
+    )
+    if calls_it:
+        nodes.extend(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "connector_identity_diagnostics"
+        )
+    return nodes
+
+
 def test_the_plan_surface_reports_where_apply_refuses():
     """QA: `plan` began refusing where its own contract says it reports.
 
@@ -1975,7 +1996,7 @@ def test_the_plan_surface_reports_where_apply_refuses():
     assert handlers, "the plan surface lets the refusal escape as a raise"
     assert any(
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_diag"
-        for h in handlers for n in ast.walk(h)
+        for h in _with_identity_translation(tree, handlers) for n in ast.walk(h)
     ), "the plan surface catches the refusal but reports no diagnostic"
 
 
@@ -2641,7 +2662,7 @@ def test_the_planning_surface_still_reports_a_mismatch_rather_than_raising():
     assert handlers, "the planning surface lets a refusal escape as a raise"
     assert any(
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_diag"
-        for h in handlers for n in ast.walk(h)
+        for h in _with_identity_translation(tree, handlers) for n in ast.walk(h)
     ), "the planning surface catches the refusal but reports no diagnostic"
     # and the construction it guards declares what it expected
     assert any(
@@ -2904,7 +2925,7 @@ def test_the_remediation_matches_the_failure_that_produced_it():
             isinstance(c, ast.Name) and c.id == "CONNECTOR_REPLAY_IDENTITY_MISMATCH"
             for c in ast.walk(n.test)
         )
-        for n in ast.walk(validate)
+        for scope in _with_identity_translation(tree, [validate]) for n in ast.walk(scope)
     ), "the planning remediation does not branch on which failure occurred"
 
 

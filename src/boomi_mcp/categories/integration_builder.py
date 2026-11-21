@@ -10509,7 +10509,43 @@ def _apply_plan(
             account_id=_client_account_id(boomi_client),
         )
     except Exception as _resolution_exc:  # noqa: BLE001 — classified above
-        return _pre_write_refusal(_resolution_exc)
+        _identity_refusal = _pre_write_refusal(_resolution_exc)
+        # B18-4: an identity refusal does not hide the recipe targets' URL
+        # verdicts. Judged from the SAME pre-write readings, skipping only the
+        # targets whose connection identity MISMATCHED (their stored URL is not
+        # a REST base), and served beside the identity diagnostics — as the
+        # plan reports them. Still before any write.
+        from ..authoring.connector_resolution_snapshot import (
+            ConnectorIdentityError as _IdentityRefusal,
+        )
+
+        if (
+            isinstance(_resolution_exc, _IdentityRefusal)
+            and authoring_bundle is not None
+            and getattr(authoring_bundle, "rest_targets", ())
+        ):
+            from ..authoring.workflow import (
+                connector_identity_diagnostics,
+                judge_recipe_rest_targets,
+                stored_connection_xml_reader,
+            )
+
+            _identity_diagnostics, _mismatched = connector_identity_diagnostics(_resolution_exc)
+            _target_diagnostics = judge_recipe_rest_targets(
+                authoring_bundle.rest_targets,
+                spec.components,
+                conflict_policy,
+                existing_ids,
+                stored_connection_xml_reader(_pre_write_live_xml),
+                identity_refused=_mismatched,
+                report=True,
+            )
+            if _target_diagnostics:
+                _identity_refusal["authoring_diagnostics"] = [
+                    diagnostic.model_dump(mode="json")
+                    for diagnostic in tuple(_identity_diagnostics) + tuple(_target_diagnostics)
+                ]
+        return _identity_refusal
     # B15: EVERY recipe REST target judged again, AFTER the connector identity
     # resolution above (a family mismatch is that authority's refusal, read from
     # the same reading — B16-1), against the EXECUTION plan's ids and the stored

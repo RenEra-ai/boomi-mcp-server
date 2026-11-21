@@ -2693,15 +2693,19 @@ def test_b16_03_stored_url_reads_share_one_deadline_budget(monkeypatch):
     deadlines = []
 
     def stalled(_client, component_id, deadline_seconds=None, *a, **k):
+        # A read that stalls 1.2 s, cut off at its deadline like the real one.
         deadlines.append(deadline_seconds)
-        time.sleep(1.2)
+        time.sleep(min(1.2, deadline_seconds))
         raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 1.2)
 
     ids = ["0000000{0}-0000-4000-8000-000000000000".format(n) for n in range(3)]
     with mock.patch.object(_shared, "component_get_xml", stalled):
         reads = BudgetedComponentReads(object())
         assert [reads.fetch(cid) for cid in ids] == [None, None, None]
-    assert deadlines == [2], deadlines  # the budget (2 s) admits one stalled read
+    # The 2 s budget: the first read gets all of it and holds 1.2 s; the second
+    # gets the fractional remainder (B18-1) and spends it; the third never starts.
+    assert len(deadlines) == 2 and deadlines[0] == 2, deadlines
+    assert 0 < deadlines[1] <= 0.85, deadlines
     comps = [
         IntegrationComponentSpec(key="rest_{0}".format(n), type="connector-settings", name="R{0}".format(n),
                                  action="create", component_id=cid,
@@ -2737,7 +2741,7 @@ def _stalling(record, stall=1.2):
     def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
         record["calls"].append((component_id, deadline_seconds))
         started = time.monotonic()
-        time.sleep(stall)
+        time.sleep(min(stall, deadline_seconds) if deadline_seconds is not None else stall)
         record["held"] += time.monotonic() - started
         raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, stall)
 
@@ -2782,7 +2786,9 @@ def test_b17_01_compile_spends_one_read_budget_across_primary_and_target_reads(m
     assert envelope["_success"] is False
     assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" in served, served[:600]
     assert all(deadline is not None for _cid, deadline in record["calls"]), record["calls"]
-    assert len(record["calls"]) == 1, record["calls"]
+    # 2 s budget, 1.2 s stalls cut off at their deadline: the second read gets
+    # the fractional remainder (B18-1) and no third read starts.
+    assert len(record["calls"]) == 2, record["calls"]
     assert record["held"] <= 2.5, record["held"]
 
 
@@ -2846,7 +2852,9 @@ def test_b17_01_apply_spends_one_read_budget_across_its_connector_reads(monkeypa
     assert envelope["_success"] is False
     assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" in served, served[:600]
     assert all(deadline is not None for _cid, deadline in record["calls"]), record["calls"]
-    assert len(record["calls"]) == 1, record["calls"]
+    # 2 s budget, 1.2 s stalls cut off at their deadline: the second read gets
+    # the fractional remainder (B18-1) and no third read starts.
+    assert len(record["calls"]) == 2, record["calls"]
     assert record["held"] <= 2.5, record["held"]
 
 
@@ -3007,3 +3015,175 @@ def test_qa_r16_01_an_unreadable_stored_url_is_base_unknown_at_plan_and_compile(
         assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" in served
         assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served and _REUSE_PATH_POINTER in served
         assert "absolute path" in served
+
+
+# ---------------------------------------------------------------------------
+# B18 (Codex review of B17): witnesses, each failing at 08ac0bf.
+# ---------------------------------------------------------------------------
+
+_UNUSED_PROFILE_ID = "6f1d2c3b-0000-4000-8000-0000000000fe"
+
+
+def _healthy_three():
+    rest = _reused_rest_xml("http://h.example.invalid/api/")
+    db = (_CAP159 / "db-conn-7773fe1e.xml").read_text()
+    return {_DB_SOURCE_ID: db, _ORDERS_ID: rest, _REUSED_REST_ID: rest}
+
+
+def test_b18_01_a_one_second_budget_reads_every_healthy_reused_connector(monkeypatch):
+    """B18-1: with BOOMI_COMPONENT_GET_DEADLINE_SECONDS=1, the first healthy
+    read leaves a FRACTIONAL remainder. It is handed to the next read as its
+    timeout (the GET deadline honours fractions), so three healthy reused
+    connectors all read and the compile succeeds — as at cf2f7dd."""
+    from boomi_mcp.categories.components import _shared
+
+    monkeypatch.setenv(_shared._DEADLINE_ENV, "1")
+    envelope = _public(_three_declared_reuses(), "compile", _account_by_id(_healthy_three(), []))
+    assert envelope["_success"] is True, json.dumps(envelope)[:800]
+
+
+def test_b18_02_an_unused_profile_read_cannot_starve_the_connector_reads(monkeypatch):
+    """B18-2: the identity collector reads only what the connector snapshot
+    consumes. An unused JSON profile carrying a component id (listed FIRST),
+    whose GET would stall for the whole budget, is never read; the healthy
+    reused connection is, and the compile succeeds."""
+    import time
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+    from test_issue_157_governance import _conn, _op, _request as _gov_request, _unit
+
+    monkeypatch.setenv(_shared._DEADLINE_ENV, "2")
+    rest = _reused_rest_xml("http://h.example.invalid/api/")
+    asked = []
+
+    def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
+        asked.append((component_id, deadline_seconds))
+        if component_id == _UNUSED_PROFILE_ID:
+            time.sleep(deadline_seconds or 0)
+            raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 2.0)
+        assert component_id == _REUSED_REST_ID, component_id
+        return {"component_id": component_id, "version": 1, "xml": rest, "type": "connector-settings"}
+
+    profile = {"key": "unused_profile", "type": "profile.json", "action": "create",
+               "component_id": _UNUSED_PROFILE_ID,
+               "config": {"reference_only": True, "component_name": "Unused Profile"}}
+    conn = {"key": "conn", "type": "connector-settings", "name": "Reused REST", "action": "create",
+            "component_id": _REUSED_REST_ID, "config": {"reference_only": True, "connector_type": "rest"}}
+    request = _gov_request([_unit(name="P")], [profile, conn, _op()])
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "compile",
+            {"authoring_request": request.model_dump(mode="json", exclude_none=True)},
+        )
+    # The budgeted identity reads (the ones handed a deadline) never ask for the
+    # profile; the connection IS read within the budget (non-vacuity).
+    assert [d for c, d in asked if c == _UNUSED_PROFILE_ID and d is not None] == [], asked
+    assert [c for c, d in asked if d is not None] == [_REUSED_REST_ID], asked
+    assert envelope["_success"] is True, json.dumps(envelope)[:800]
+
+
+@pytest.mark.parametrize("binding", ["name", "config_id"])
+def test_b18_03_an_unreadable_resolved_target_gets_its_own_remedy(binding):
+    """B18-3: an UNAVAILABLE refusal for a reused component the account did not
+    answer is remedied by retrying or rebinding — never the submitted-XML
+    sentence (nothing was submitted). Value-free."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    def failing(*a, **k):
+        raise RuntimeError("platform unavailable")
+
+    request = _other_family_reuse(binding, "/v1/billing")
+    listing = [{"component_id": _DB_CONN_ID, "name": _REUSED_NAME, "type": "connector-settings",
+                "folder_name": "X"}]
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(x) for x in listing]), \
+            mock.patch.object(_shared, "component_get_xml", failing), \
+            mock.patch.object(integration_builder, "component_get_xml", failing):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "compile",
+            {"authoring_request": request.model_dump(mode="json", exclude_none=True)},
+        )
+    (diag,) = [d for d in envelope["authoring_diagnostics"] if d["code"] == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"]
+    assert "Submitted component XML" not in diag["remediation"]
+    assert "retry" in diag["remediation"].lower()
+    assert _DB_CONN_ID not in json.dumps(envelope)
+
+
+def test_b18_04_apply_reports_a_family_flip_and_a_stored_query_together():
+    """B18-4: every root reused; after the compile replay target 1's name flips
+    to the DATABASE capture and target 0's stored URL acquires a query. Apply's
+    pre-write refusal carries BOTH — the identity mismatch and target 0's
+    binding diagnostic — from the same readings, with zero writes."""
+    from unittest import mock
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.categories import integration_builder
+
+    db_xml = (_CAP159 / "db-conn-7773fe1e.xml").read_text()
+    answers = {
+        _REUSED_REST_ID: _reused_rest_xml("http://h.example.invalid/api/"),
+        _ORDERS_ID: _reused_rest_xml("http://o.example.invalid/api/"),
+        _DB_CONN_ID: db_xml,
+    }
+    listing = [(_REUSED_NAME, _REUSED_REST_ID), (_ROOT_NAME, _ROOT_ID, "process")]
+    raw, material = flagship_v2()
+    raw["targets"][0]["binding_mode"] = "reuse"
+    material["targets"][0]["connection"] = {"mode": "reuse", "component_id": _ORDERS_ID}
+    _bind_target_1(raw, material, "reuse")
+    material["targets"][1]["operation"]["path"] = "/v1/billing"
+    base = _rest_base({"reference_only": True, "connector_type": "rest"}, name=_REUSED_NAME)
+    request = recipe_request(raw, material, base_components=[base.model_dump(mode="json")])
+    client = mock.MagicMock()
+    with _account_by_id(answers, listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    real_preflight = workflow.preflight_typed_apply_v1
+    state = {"after_preflight": False}
+
+    def preflight(*a, **k):
+        bundle = real_preflight(*a, **k)
+        state["after_preflight"] = True
+        listing[0] = (_REUSED_NAME, _DB_CONN_ID)
+        answers[_ORDERS_ID] = _reused_rest_xml("http://o.example.invalid/api/?x=1")
+        return bundle
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    plans = []
+    real_build_plan = integration_builder._build_plan
+
+    def build_plan(*a, **k):
+        planned = real_build_plan(*a, **k)
+        plans.append(planned)
+        return planned
+
+    with _account_by_id(answers, listing), \
+            mock.patch.object(workflow, "preflight_typed_apply_v1", preflight), \
+            mock.patch.object(integration_builder, "_build_plan", build_plan), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    served = json.dumps(envelope)
+    assert state["after_preflight"], "the preflight was not reached: " + served[:600]
+    (root_step,) = [step for step in plans[-1]["steps"] if step["key"] == "main_process"]
+    assert root_step["planned_action"] == "reuse", root_step
+    assert writes == []
+    assert envelope["_success"] is False
+    assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in served, served[:800]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served, served[:800]
+    assert "/intent/invocations/0/component_material/targets/0/connection" in served
+    assert _RAW_BINDING_POINTER not in served  # no URL verdict for the mismatched target
+    assert "x=1" not in served
