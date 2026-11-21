@@ -5496,7 +5496,7 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
     return warnings
 
 
-from .components._shared import _PHASE_READS, phase_reads  # noqa: E402 — #159 S1 B20-4
+from .components._shared import _PHASE_READS, _PHASE_READS_FRESH, phase_reads  # noqa: E402 — #159 S1 B20-4
 
 
 def _discover_profile_index(
@@ -5513,7 +5513,7 @@ def _discover_profile_index(
     if _reads is not None:
         # B20-4: the phase's ONE budget, and a profile already read this phase
         # is not read again.
-        component = _reads.fetch(component_id)
+        component = _reads.fetch(component_id, refetch=_PHASE_READS_FRESH.get())
     else:
         try:
             component = component_get_xml(boomi_client, component_id)
@@ -10254,9 +10254,11 @@ def _apply_plan(
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
     # #159 S1 B21-2: the refresh is charged to the SAME phase budget as the
-    # execution plan's discovery (``_apply_reads``) — a profile that plan read
-    # moments ago in this phase is not read again.
-    with phase_reads(_apply_reads):
+    # execution plan's discovery (``_apply_reads``). B21 review: it is a
+    # FRESHNESS check, so it re-reads (``fresh=True``) rather than answering
+    # from the phase cache — a profile edited after ``_build_plan`` read it
+    # must be seen before any map is written.
+    with phase_reads(_apply_reads, fresh=True):
         literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
         selected_profile_indexes = _resolve_selected_profile_indexes(
             boomi_client,

@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15228, "minimum_collected": 15228, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15229, "minimum_collected": 15229, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15686,3 +15686,4 @@
 {"kind": "test", "id": "pytest-015685", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_03_a_malformed_stored_base_carrying_a_delimiter_is_refused[#frag]", "state": "active"}
 {"kind": "test", "id": "pytest-015686", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered[]", "state": "active"}
 {"kind": "test", "id": "pytest-015687", "node_id": "tests/test_recipe_fanout_v2.py::test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered[\\xff\\xfe<bns:Component/>]", "state": "active"}
+{"kind": "test", "id": "pytest-015688", "node_id": "tests/test_recipe_fanout_v2.py::test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache", "state": "active"}

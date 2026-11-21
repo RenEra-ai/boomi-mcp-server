@@ -1219,7 +1219,9 @@ class BudgetedComponentReads:
         self._budget = float(_shared._component_get_deadline_seconds())
         self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
-    def fetch(self, component_id) -> Optional[Dict[str, Any]]:
+    def fetch(self, component_id, *, refetch: bool = False) -> Optional[Dict[str, Any]]:
+        """``refetch=True`` skips the cache (a freshness check), still charged
+        to the budget; the fresh answer replaces the cached one."""
         import time as _time
 
         from ..categories.integration_builder import canonical_component_id
@@ -1227,7 +1229,7 @@ class BudgetedComponentReads:
         wanted = canonical_component_id(component_id)
         if not wanted or self._client is None:
             return None
-        if wanted in self._cache:
+        if wanted in self._cache and not refetch:
             return self._cache[wanted]
         result = None
         if self._budget > 0:

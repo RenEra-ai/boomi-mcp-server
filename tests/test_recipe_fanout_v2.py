@@ -3589,7 +3589,8 @@ def test_b21_01_a_name_that_rebinds_before_apply_moves_the_compile_hash(form):
 def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatch):
     """B21-2: apply's pre-write refresh of reused/literal profile indexes is
     charged to the SAME phase budget as the execution plan's discovery: every
-    profile read is handed a deadline, and none is read twice."""
+    profile read is handed a deadline, and the refresh's re-read (B21 review:
+    a freshness check re-reads) gets only what the plan's read left."""
     import time
     from unittest import mock
 
@@ -3619,7 +3620,41 @@ def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatc
     profile_reads = [c for c in calls if c[0] == _JSON_PROFILE_ID]
     assert profile_reads, "non-vacuity: the reused profile was read"
     assert all(deadline is not None for _cid, deadline in profile_reads), profile_reads
-    assert len(profile_reads) == 1, profile_reads
+    # One budget: the plan's read spent ~1.2 s of 2 s, so the refresh's re-read
+    # (if the budget let it start) was handed only the remainder.
+    assert len(profile_reads) <= 2, profile_reads
+    if len(profile_reads) == 2:
+        assert profile_reads[1][1] < 1.0, profile_reads
+
+
+def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache():
+    """B21 review: the pre-write refresh is a FRESHNESS check — a profile the
+    execution plan read moments ago is read AGAIN (not answered from the phase
+    cache), so an edit made after `_build_plan` is seen before any map is written."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    calls = []
+
+    def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
+        calls.append(component_id)
+        raise RuntimeError("unreadable")  # fast; the reading is None either way
+
+    spec = {"integration_name": "Raw", "components": [
+        {"key": "prof", "type": "profile.json", "name": "Existing Profile", "action": "create",
+         "component_id": _JSON_PROFILE_ID, "config": {"reference_only": True}},
+    ]}
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: {"_success": True, "component_id": "x"}):
+        integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
+        )
+    assert calls.count(_JSON_PROFILE_ID) >= 2, calls
 
 
 @pytest.mark.parametrize("delimiter", ["?mode=full", "#frag"])

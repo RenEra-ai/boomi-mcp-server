@@ -52,18 +52,33 @@ _PHASE_READS: "contextvars.ContextVar[Any]" = contextvars.ContextVar(
 )
 
 
-class phase_reads:
-    """``with phase_reads(reads):`` — the phase's shared read budget, scoped."""
+#: B21 review: inside a ``phase_reads(..., fresh=True)`` scope a profile read
+#: BYPASSES the phase cache (a freshness check must see the account now) while
+#: still spending the phase's one budget.
+_PHASE_READS_FRESH: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "boomi_phase_reads_fresh", default=False
+)
 
-    def __init__(self, reads):
+
+class phase_reads:
+    """``with phase_reads(reads):`` — the phase's shared read budget, scoped.
+
+    ``fresh=True``: reads in the scope re-fetch instead of answering from the
+    phase cache (apply's pre-write drift check), still charged to the budget."""
+
+    def __init__(self, reads, *, fresh: bool = False):
         self._reads = reads
+        self._fresh = fresh
         self._token = None
+        self._fresh_token = None
 
     def __enter__(self):
         self._token = _PHASE_READS.set(self._reads)
+        self._fresh_token = _PHASE_READS_FRESH.set(self._fresh)
         return self._reads
 
     def __exit__(self, *exc):
+        _PHASE_READS_FRESH.reset(self._fresh_token)
         _PHASE_READS.reset(self._token)
         return False
 
