@@ -3620,11 +3620,11 @@ def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatc
     profile_reads = [c for c in calls if c[0] == _JSON_PROFILE_ID]
     assert profile_reads, "non-vacuity: the reused profile was read"
     assert all(deadline is not None for _cid, deadline in profile_reads), profile_reads
-    # One budget: the plan's read spent ~1.2 s of 2 s, so the refresh's re-read
-    # (if the budget let it start) was handed only the remainder.
+    # One budget: the plan's read spent ~1.2 s of 2 s, so every later read
+    # (the refresh's re-read, if the budget let it start) was handed only the
+    # remainder — never a fresh full deadline.
     assert len(profile_reads) <= 2, profile_reads
-    if len(profile_reads) == 2:
-        assert profile_reads[1][1] < 1.0, profile_reads
+    assert all(deadline < 1.0 for _cid, deadline in profile_reads[1:]), profile_reads
 
 
 def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache():
