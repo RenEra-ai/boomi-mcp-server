@@ -225,6 +225,12 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: an action, so any rule selected by the request's declaration is skipped by
     #: mis-declaring one field.
     document_component_type: Optional[str] = None
+    #: #159 S1 B20-3: the document NAMES a connector subtype, and it is one no
+    #: family resolver recognizes (a legacy HTTP Client connection, say). Not the
+    #: same as an absent or unreadable subtype ("I could not tell"): the account
+    #: answered, with a family that cannot be the declared one. ``None`` when no
+    #: document was read.
+    family_unrecognized: Optional[bool] = None
     #: Whether the document named MORE THAN ONE operation type. ``None`` when no
     #: document was read. Carried rather than inferred from ``action is None``,
     #: which is true for two different reasons — a contradiction, and a document
@@ -741,6 +747,9 @@ def live_identity_from_component_xml(
         action_contradicted=contradicted,
         action_blank_present=blank_present,
         document_component_type=component_type,
+        family_unrecognized=(
+            isinstance(subtype, str) and bool(subtype.strip()) and family is None
+        ),
         listener_input_type=listener_input_type,
         listener_request_profile=listener_request_profile,
     )
@@ -1311,6 +1320,31 @@ def assert_declared_matches_resolved(
         # authority contract is explicit: a diagnostic may name the offending
         # field, never the value at it. The apply-boundary recheck already reports
         # drift this way, naming which field diverged and redacting what it held.
+        # AN UNRECOGNIZED FAMILY IN THE ACCOUNT IS NOT "I COULD NOT TELL" (#159 S1
+        # B20-3). The account WAS read and its component NAMES a connector
+        # subtype this module's resolver does not know (a legacy HTTP Client
+        # connection, say) — an absent or unreadable subtype is still "could
+        # not tell" and stays skipped. A declared family is an assertion; a component of a
+        # family nobody can name cannot be it — so it refuses as a mismatch
+        # rather than skipping the comparison, which let such a connection pass
+        # as the declared REST (or database) one.
+        if (
+            identity.source == "live"
+            and identity.family_unrecognized
+            and declared_family is not None
+            and str(declared_family).strip()
+        ):
+            mismatches.append(ConnectorIdentityError(
+                CONNECTOR_REPLAY_IDENTITY_MISMATCH,
+                (
+                    "component {0!r} is declared with family {1!r}, but the "
+                    "component stored in the account is of a connector family "
+                    "that is not recognized. The declaration is an assertion, "
+                    "not an override."
+                ).format(key, declared_family),
+                component_key=key,
+                field="family",
+            ))
         for label, mine, theirs, fold, show in (
             ("family", identity.family, declared_family, True, True),
             ("action", identity.action, declared_action, True, True),

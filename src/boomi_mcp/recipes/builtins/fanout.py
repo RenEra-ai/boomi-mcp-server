@@ -1833,6 +1833,54 @@ REUSED_TARGET_STORED_BASE = "stored_base"
 REUSED_TARGET_PATH = "path"
 
 
+#: B20-5: the rules for a path sent through a REUSED connection, as constants
+#: the judge enforces and the served sentence renders. A stored base carrying
+#: one of these is refused for reuse (the path would land inside it).
+_STORED_BASE_FORBIDDEN = "?#"
+#: With an UNKNOWN base the path must start with this ...
+_UNKNOWN_BASE_PATH_PREFIX = "/"
+#: ... and carry no such character before its query.
+_UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY = "="
+
+#: The ONE rendered statement of the reuse rules (B20-5), served in the
+#: fan-out material guarantee. The joined grammar alone does not imply them: a
+#: stored base ending in '?mode=full' joined with '/orders' satisfies it.
+REUSED_BASE_SENTENCE_V2 = (
+    "A path sent through a REUSED connection is judged against the base URL "
+    "that connection stores in the account: a stored base carrying {forbidden} "
+    "is refused for reuse (the path would be appended inside it); a stored "
+    "base that cannot be read, is blank, is an unresolved extension "
+    "placeholder, or is not an absolute http(s) URL is UNKNOWN, and then the "
+    "path must start with '{prefix}' and carry no '{before}' before any '?'."
+).format(
+    forbidden=" or ".join("'{0}'".format(char) for char in _STORED_BASE_FORBIDDEN),
+    prefix=_UNKNOWN_BASE_PATH_PREFIX,
+    before=_UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY,
+)
+
+
+def _stored_base_is_known(base: str) -> bool:
+    """Whether a stored url is a CONCRETE base (B20-1): not blank, not the
+    connector builder's unresolved-endpoint placeholder (its own definition,
+    ``is_unresolved_endpoint_value``), and an absolute http(s) URL with an
+    authority (the route digest's own bar). Anything else addresses nothing
+    knowable, so the path is judged as against an unknown base."""
+    from urllib.parse import urlsplit
+
+    from ...categories.components.builders.connector_builder import (
+        is_unresolved_endpoint_value,
+    )
+
+    candidate = base.strip()
+    if not candidate or is_unresolved_endpoint_value(candidate):
+        return False
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc)
+
+
 def judge_reused_request_target(
     stored_base_url: Optional[str], path: str
 ) -> Optional[Tuple[str, str]]:
@@ -1848,15 +1896,19 @@ def judge_reused_request_target(
     account, an unresolved, id-less or unreadable reuse, a blank stored url) the rule FAILS CLOSED
     on the path: it must start with '/' and carry no '=' before any '?' — the
     two shapes that could complete a pair a stored query left open."""
-    if stored_base_url is None or not stored_base_url.strip():
-        # B16-2: a blank or whitespace stored url is no base URL at all —
-        # unavailable, so the fail-closed rule judges the path.
+    if stored_base_url is None or not _stored_base_is_known(stored_base_url):
+        # B16-2 / B20-1: no concrete base (blank, the unresolved placeholder,
+        # not an absolute http(s) URL) — unknown, so the fail-closed rule
+        # judges the path.
         head = path.split("?", 1)[0]
-        if not path.startswith("/") or "=" in head:
+        if (
+            not path.startswith(_UNKNOWN_BASE_PATH_PREFIX)
+            or _UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY in head
+        ):
             return (_QUERY_NAME_CAUSE, REUSED_TARGET_PATH)
         return None
     base = stored_base_url.strip()
-    if "?" in base or "#" in base:
+    if any(char in base for char in _STORED_BASE_FORBIDDEN):
         return (_QUERY_NAME_CAUSE, REUSED_TARGET_STORED_BASE)
     for joined, path_start in _joined_targets(base, path):
         verdict = _judge_request_target(joined)

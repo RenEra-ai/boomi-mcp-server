@@ -8,6 +8,7 @@ query_components, manage_component, and analyze_component modules.
 from typing import Dict, Any, List, Optional
 import os
 import re
+import contextvars
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -39,6 +40,44 @@ _DEADLINE_ENV = "BOOMI_COMPONENT_GET_DEADLINE_SECONDS"
 _DEADLINE_DEFAULT = 90
 _DEADLINE_MIN = 1
 _DEADLINE_MAX = 240
+
+
+#: #159 S1 B20-4: the read budget of the request PHASE in progress
+#: (``workflow.BudgetedComponentReads``), when a typed route set one. Component
+#: planning and typed validation both discover reused profiles (``integration_builder._discover_profile_index``); through it they
+#: share one deadline budget and read each profile ONCE. ``None`` (the raw
+#: route, a standalone plan) keeps the per-read deadline.
+_PHASE_READS: "contextvars.ContextVar[Any]" = contextvars.ContextVar(
+    "boomi_phase_reads", default=None
+)
+
+
+class phase_reads:
+    """``with phase_reads(reads):`` — the phase's shared read budget, scoped."""
+
+    def __init__(self, reads):
+        self._reads = reads
+        self._token = None
+
+    def __enter__(self):
+        self._token = _PHASE_READS.set(self._reads)
+        return self._reads
+
+    def __exit__(self, *exc):
+        _PHASE_READS.reset(self._token)
+        return False
+
+
+class StoredComponentXmlUnparseable(ET.ParseError):
+    """A component GET SUCCEEDED, but the document the account returned does not
+    parse (#159 S1 B20-6). Distinct from a failed or timed-out read: the account
+    answered. Carries the returned text (``raw_xml``) so a caller classifying the
+    reading can hand it to its own parser; never logged or served."""
+
+    def __init__(self, component_id: str, raw_xml: str):
+        self.component_id = component_id
+        self.raw_xml = raw_xml
+        super().__init__(f"Component {component_id!r} returned a document that does not parse")
 
 
 class ComponentGetDeadlineExceeded(Exception):
@@ -231,7 +270,14 @@ def component_get_xml(
         raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
 
     raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
-    root = ET.fromstring(raw_xml)
+    try:
+        root = ET.fromstring(raw_xml)
+    except ET.ParseError as exc:
+        # The account ANSWERED, and what it answered does not parse: the stored
+        # component's fault, not an unanswered read (#159 S1 B20-6). Raised as
+        # its own ParseError subclass so existing ParseError handlers behave as
+        # before, carrying the bytes so a caller can classify them itself.
+        raise StoredComponentXmlUnparseable(component_id, raw_xml) from exc
 
     return {
         'component_id': root.attrib.get('componentId', component_id),

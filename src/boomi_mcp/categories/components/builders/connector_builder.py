@@ -39,6 +39,14 @@ from boomi_mcp.categories.components.builders._preservation_policy import (
 # extension-bound field into the fail-fast placeholder convention.
 SET_BY_EXTENSION = "SET_BY_EXTENSION"
 
+
+def is_unresolved_endpoint_value(value) -> bool:
+    """Whether an endpoint field's value is the UNRESOLVED placeholder — the
+    environment extension decides the endpoint, so the value addresses nothing
+    (#102 B2). The ONE definition this module's own checks use, and the one a
+    consumer of a STORED endpoint (#159 S1, the reuse judge) asks."""
+    return value == SET_BY_EXTENSION
+
 # The ONLY config fields (per connector family) for which SET_BY_EXTENSION is a
 # valid fail-fast placeholder: non-secret, extension-bound endpoint/principal
 # fields (Codex review — gate it to an explicit registry). Secret fields are
@@ -185,7 +193,7 @@ def _reject_misplaced_set_by_extension(
 
     def _walk(value: Any, path: str) -> Optional["BuilderValidationError"]:
         if isinstance(value, str):
-            if value == SET_BY_EXTENSION and path not in allowed:
+            if is_unresolved_endpoint_value(value) and path not in allowed:
                 return _make_error(path or "<root>")
             return None
         if isinstance(value, dict):
@@ -558,14 +566,14 @@ def normalized_identity_projection(config, live_projection=None):
     # Only a field the builder can actually extension-bind may claim a binding:
     # the placeholder is REFUSED on the others (`SET_BY_EXTENSION_FIELD_NOT_ALLOWED`),
     # so a marker there is malformed input, not an account-decided route.
-    extension_bound = any(value == SET_BY_EXTENSION for value in _declared_values) or (
+    extension_bound = any(is_unresolved_endpoint_value(value) for value in _declared_values) or (
         not _config_settles
-        and any(value == SET_BY_EXTENSION for value in _live_values)
+        and any(is_unresolved_endpoint_value(value) for value in _live_values)
     )
     # ... but it still may not be composed INTO a route. Fail closed under its own
     # cause rather than borrowing the extension one.
     _placeholder_refused = not extension_bound and any(
-        value == SET_BY_EXTENSION for value in _composed_values
+        is_unresolved_endpoint_value(value) for value in _composed_values
     )
     # A composed family supplies its own value below; everything else uses the
     # field it declared, or the account's reading when it declared none.
@@ -2496,7 +2504,7 @@ class RestClientConnectionBuilder:
         base_url_str = str(base_url).strip()
         # base_url is extension-bound, so the SET_BY_EXTENSION fail-fast
         # placeholder is exempt from the scheme check (#102 B2, Codex review).
-        if base_url_str != SET_BY_EXTENSION and not (
+        if not is_unresolved_endpoint_value(base_url_str) and not (
             base_url_str.startswith("http://") or base_url_str.startswith("https://")
         ):
             return BuilderValidationError(

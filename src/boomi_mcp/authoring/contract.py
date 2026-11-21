@@ -590,12 +590,15 @@ def _fanout_material_guarantee() -> str:
     from ..recipes.builtins.fanout import (
         LITERAL_QUERY_GUARANTEE_V2,
         QUERY_GRAMMAR_SENTENCE_V2,
+        REUSED_BASE_SENTENCE_V2,
     )
 
     return (
         LITERAL_QUERY_GUARANTEE_V2
         + " "
         + QUERY_GRAMMAR_SENTENCE_V2
+        + " "
+        + REUSED_BASE_SENTENCE_V2
         + " A base component a recipe input selects by key meets the SAME rules "
         "when apply would write it: a create-mode base must be one apply writes "
         "under every conflict policy and carry only keys the material can "

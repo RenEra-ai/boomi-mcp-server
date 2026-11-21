@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15207, "minimum_collected": 15207, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15217, "minimum_collected": 15217, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15665,3 +15665,13 @@
 {"kind": "test", "id": "pytest-015664", "node_id": "tests/test_recipe_fanout_v2.py::test_b18_03_an_unreadable_resolved_target_gets_its_own_remedy[config_id]", "state": "active"}
 {"kind": "test", "id": "pytest-015665", "node_id": "tests/test_recipe_fanout_v2.py::test_b18_04_apply_reports_a_family_flip_and_a_stored_query_together", "state": "active"}
 {"kind": "test", "id": "pytest-015666", "node_id": "tests/test_recipe_fanout_v2.py::test_b18r_an_unparseable_stored_component_gets_an_account_remedy", "state": "active"}
+{"kind": "test", "id": "pytest-015667", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_01_an_extension_placeholder_stored_url_is_base_unknown[provider_key=sample]", "state": "active"}
+{"kind": "test", "id": "pytest-015668", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_01_an_extension_placeholder_stored_url_is_base_unknown[v1/x]", "state": "active"}
+{"kind": "test", "id": "pytest-015669", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_01_control_a_placeholder_base_admits_an_absolute_path", "state": "active"}
+{"kind": "test", "id": "pytest-015670", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_02_apply_refuses_a_name_that_rebinds_after_the_compile_replay", "state": "active"}
+{"kind": "test", "id": "pytest-015671", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_02_sibling_a_reused_root_that_rebinds_after_the_compile_replay_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-015672", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_03_a_reused_connection_of_an_unrecognized_family_is_an_identity_mismatch[target]", "state": "active"}
+{"kind": "test", "id": "pytest-015673", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_03_a_reused_connection_of_an_unrecognized_family_is_an_identity_mismatch[source]", "state": "active"}
+{"kind": "test", "id": "pytest-015674", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_04_profile_reads_of_component_planning_and_validation_share_one_budget", "state": "active"}
+{"kind": "test", "id": "pytest-015675", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_05_the_served_grammar_states_the_reuse_rules_it_enforces", "state": "active"}
+{"kind": "test", "id": "pytest-015676", "node_id": "tests/test_recipe_fanout_v2.py::test_b20_06_malformed_stored_xml_through_the_getter_is_unparseable_not_unanswered", "state": "active"}

@@ -1142,6 +1142,59 @@ def recheck_execution_bindings(bundle, planned) -> None:
                 for key in drifted
             ),
         )
+    # B20-2: the SAME binding, not only the same create/reuse answer. A name the
+    # compile replay bound to one connection may bind a DIFFERENT existing one
+    # in the execution plan (the unwritten set unchanged), and apply would then
+    # emit an id the compile hash never covered. Value-free: the key, never ids.
+    rebound = sorted(
+        key
+        for key, bound in _component_bindings(
+            bundle.integration_spec, planned_existing_ids(planned)
+        ).items()
+        if bound != (bundle.resolved_component_ids or {}).get(key)
+    )
+    if rebound:
+        raise AuthoringWorkflowError(
+            AUTHORING_PLAN_STALE,
+            tuple(
+                _diag(
+                    AUTHORING_PLAN_STALE,
+                    "error",
+                    message=(
+                        "At apply, a component binds a different existing component "
+                        "than the one the compile resolved; nothing was written."
+                    ),
+                    subject_kind="component",
+                    subject_id=key,
+                    remediation="Re-plan and recompile against the account as it is now.",
+                )
+                for key in rebound
+            ),
+        )
+
+
+def _component_bindings(integration_spec, existing_ids) -> Dict[str, Optional[str]]:
+    """``{key: the existing component id it binds, canonical, or None}`` for EVERY
+    participant — each component by the planner binding apply acts on
+    (``_bound_existing_id`` over a route's resolved ids) and each canonical
+    process root by the same map (its declared id where the map is silent).
+    B20-2 and its sibling sweep: compile records it; apply's execution plan
+    must reproduce it exactly, so no name — connection, profile, operation,
+    map, cache or root — can rebind between the two."""
+    from ..categories.integration_builder import _bound_existing_id, canonical_component_id
+
+    bindings = {
+        component.key: canonical_component_id(_bound_existing_id(component, existing_ids))
+        for component in integration_spec.components
+    }
+    for unit in getattr(integration_spec, "processes", ()) or ():
+        envelope = unit.envelope
+        key = envelope.component_key
+        if existing_ids is not None and key in existing_ids:
+            bindings[key] = canonical_component_id(existing_ids[key])
+        else:
+            bindings[key] = canonical_component_id(getattr(envelope, "component_id", None))
+    return bindings
 
 
 class BudgetedComponentReads:
@@ -1192,6 +1245,11 @@ class BudgetedComponentReads:
                 fetched = _shared.component_get_xml(
                     self._client, wanted, deadline_seconds=self._budget
                 )
+            except _shared.StoredComponentXmlUnparseable as unparseable:
+                # B20-6: the account ANSWERED with a document that does not
+                # parse. Kept as the reading, so every consumer's own parser
+                # classifies it UNPARSEABLE — never "the account did not answer".
+                fetched = {"component_id": wanted, "xml": unparseable.raw_xml}
             except Exception:  # noqa: BLE001 - an unreadable component answers nothing
                 fetched = None
             finally:
@@ -3456,6 +3514,9 @@ class _PlanInternals:
     #: says apply will NOT write (reused) — the binding the served preview and
     #: endpoints advertised. Apply rechecks its EXECUTION plan against it.
     unwritten_connections: frozenset = frozenset()
+    #: B20-2: every participant's bound existing id (canonical, or None) by the
+    #: compile's component plan. Apply's execution plan must reproduce it.
+    resolved_component_ids: Mapping[str, Optional[str]] = field(default_factory=dict)
 
 
 def plan_authoring_request_v1(
@@ -3477,30 +3538,35 @@ def plan_authoring_request_v1(
     # (QA-184-s1-r10-01), and the component-plan lint below reads the same result.
     from ..categories.integration_builder import planned_existing_ids
 
-    component_plan = _legacy_plan_echo(normalized, request, boomi_client, raw=True)
+    # B20-4: ONE read budget for the whole plan phase — component planning's
+    # profile discovery, typed validation's, the identity and target reads.
+    from ..categories.components._shared import phase_reads
+
     _target_reads = BudgetedComponentReads(boomi_client)
-    (
-        validation,
-        validation_diagnostics,
-        symbols,
-        effect_capabilities,
-        resolution_snapshot,
-        _artifacts_for_preview,
-        _reused_for_preview,
-        _names_for_preview,
-        _live_readings,
-        _identity_refused,
-    ) = _validate_processes(
-        normalized,
-        request.effect_declarations,
-        request.intent.conflict_policy,
-        literal_indexes=_literal_profile_indexes(boomi_client, normalized),
-        boomi_client=boomi_client,
-        existing_ids=planned_existing_ids(component_plan),
-        # B16-1: ONE reading per plan-resolved recipe REST target, judged by
-        # connector identity AND the stored-URL judge; B16-3: one budget.
-        target_reads=_target_reads,
-    )
+    with phase_reads(_target_reads):
+        component_plan = _legacy_plan_echo(normalized, request, boomi_client, raw=True)
+        (
+            validation,
+            validation_diagnostics,
+            symbols,
+            effect_capabilities,
+            resolution_snapshot,
+            _artifacts_for_preview,
+            _reused_for_preview,
+            _names_for_preview,
+            _live_readings,
+            _identity_refused,
+        ) = _validate_processes(
+            normalized,
+            request.effect_declarations,
+            request.intent.conflict_policy,
+            literal_indexes=_literal_profile_indexes(boomi_client, normalized),
+            boomi_client=boomi_client,
+            existing_ids=planned_existing_ids(component_plan),
+            # B16-1: ONE reading per plan-resolved recipe REST target, judged by
+            # connector identity AND the stored-URL judge; B16-3: one budget.
+            target_reads=_target_reads,
+        )
     # B12-01: whether apply WRITES each connection is decided by the component
     # plan's RESOLVED ids (a create matched by name under ``reuse`` is reused),
     # never inferred from the declaration. A base a recipe bound in CREATE mode
@@ -3802,6 +3868,9 @@ def plan_authoring_request_v1(
         connector_resolution_snapshot=resolution_snapshot,
         component_plan_unjudged=boomi_client is not None and component_plan is None,
         unwritten_connections=frozenset(_unwritten_connections),
+        resolved_component_ids=_component_bindings(
+            normalized.integration_spec, planned_existing_ids(component_plan)
+        ),
     )
     return result, internals
 
@@ -4279,6 +4348,11 @@ class CompiledBundle:
     #: component plan (``recheck_execution_bindings``) before any write.
     create_bound_bases: Tuple[Tuple[str, str], ...] = ()
     unwritten_connections: frozenset = frozenset()
+    #: B20-2: every participant's bound existing id per the COMPILE's component
+    #: plan (``_component_bindings``); ``recheck_execution_bindings`` refuses an
+    #: execution plan that binds any of them differently. Not hashed here: it is
+    #: the compile replay's own reading, checked against the execution plan.
+    resolved_component_ids: Mapping[str, Optional[str]] = field(default_factory=dict)
     #: B15: every recipe REST target ``(connection key, path, path pointer,
     #: binding pointer)``. Apply judges them (``judge_recipe_rest_targets``)
     #: against its EXECUTION plan's ids and the stored URLs it reads fresh,
@@ -4561,6 +4635,7 @@ def preflight_typed_apply_v1(
             getattr(internals.normalized, "recipe_create_bound_bases", ()) or ()
         ),
         unwritten_connections=frozenset(internals.unwritten_connections),
+        resolved_component_ids=dict(internals.resolved_component_ids or {}),
         rest_targets=tuple(getattr(internals.normalized, "recipe_rest_targets", ()) or ()),
     )
 

@@ -5496,6 +5496,9 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
     return warnings
 
 
+from .components._shared import _PHASE_READS, phase_reads  # noqa: E402 — #159 S1 B20-4
+
+
 def _discover_profile_index(
     boomi_client: Boomi, component_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -5506,10 +5509,16 @@ def _discover_profile_index(
     (unsupported type / malformed). Never returns or logs raw XML — indexing is
     internal to build_integration here (issue #95 M7.5).
     """
-    try:
-        component = component_get_xml(boomi_client, component_id)
-    except Exception:
-        return None
+    _reads = _PHASE_READS.get()
+    if _reads is not None:
+        # B20-4: the phase's ONE budget, and a profile already read this phase
+        # is not read again.
+        component = _reads.fetch(component_id)
+    else:
+        try:
+            component = component_get_xml(boomi_client, component_id)
+        except Exception:
+            return None
     if not isinstance(component, dict):
         return None
     raw_xml = component.get("xml")
@@ -10038,7 +10047,14 @@ def _apply_plan(
         # exists to prevent.
         config["conflict_policy"] = authoring_bundle.request.intent.conflict_policy
 
-    planned = _build_plan(boomi_client, config)
+    # #159 S1 B17-1 / B20-4: ONE read budget for every account read of this
+    # phase — the execution plan's profile discovery, the primary connector
+    # reads and the recipe target reads below.
+    from ..authoring.workflow import BudgetedComponentReads as _BudgetedReads
+
+    _apply_reads = _BudgetedReads(boomi_client)
+    with phase_reads(_apply_reads):
+        planned = _build_plan(boomi_client, config)
     if not planned.get("_success"):
         return planned
     if authoring_bundle is not None:
@@ -10437,11 +10453,9 @@ def _apply_plan(
         _pkey for _pkey in process_units_by_key
         if _planned_actions.get(_pkey) != "reuse"
     ]
-    # #159 S1 B17-1: ONE read budget for every account read of this phase —
-    # the primary connector reads here and the recipe target reads below.
-    from ..authoring.workflow import BudgetedComponentReads as _BudgetedReads
-
-    _apply_reads = _BudgetedReads(boomi_client)
+    # #159 S1 B17-1: the phase's read budget (``_apply_reads``, opened before the
+    # execution plan) carries the primary connector reads here and the recipe
+    # target reads below.
     # B17-2: a recipe REST target's connection is read HERE even when every
     # root is reused (nothing else reads it then), so identity resolution and
     # the URL judge below see ONE reading, before any write.

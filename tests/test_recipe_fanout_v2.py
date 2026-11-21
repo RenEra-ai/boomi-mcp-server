@@ -2626,7 +2626,10 @@ def test_b16_01_apply_refuses_a_family_flip_by_identity_before_judging_any_url()
     def preflight(*a, **k):
         bundle = real_preflight(*a, **k)
         state["after_preflight"] = True
-        listing[:] = [(_REUSED_NAME, _DB_CONN_ID)]
+        # B20-2: a name rebinding to ANOTHER id is refused earlier as
+        # AUTHORING_PLAN_STALE (test_b20_02); here the bound id stays and only
+        # the execution read's answer for it disagrees with the declaration.
+        answers[_REUSED_REST_ID] = db_xml.replace(_DB_CONN_ID, _REUSED_REST_ID)
         return bundle
 
     payload = request.model_dump(mode="json", exclude_none=True)
@@ -2882,7 +2885,10 @@ def test_b17_02_a_family_flip_with_every_root_reused_is_refused_before_any_write
     def preflight(*a, **k):
         bundle = real_preflight(*a, **k)
         state["after_preflight"] = True
-        listing[0] = (_REUSED_NAME, _DB_CONN_ID)
+        # B20-2: a name rebinding to ANOTHER id is refused earlier as
+        # AUTHORING_PLAN_STALE (test_b20_02); here the bound id stays and only
+        # the execution read's answer for it disagrees with the declaration.
+        answers[_REUSED_REST_ID] = db_xml.replace(_DB_CONN_ID, _REUSED_REST_ID)
         return bundle
 
     payload = request.model_dump(mode="json", exclude_none=True)
@@ -3043,16 +3049,40 @@ def test_b18_01_a_one_second_budget_reads_every_healthy_reused_connector(monkeyp
 
 
 def test_b18_02_an_unused_profile_read_cannot_starve_the_connector_reads(monkeypatch):
-    """B18-2: the identity collector reads only what the connector snapshot
-    consumes. An unused JSON profile carrying a component id (listed FIRST),
-    whose GET would stall for the whole budget, is never read; the healthy
-    reused connection is, and the compile succeeds."""
+    """B18-2: the IDENTITY collector reads only what the connector snapshot
+    consumes — a declared-id JSON profile is never fetched by it. (B20-4 then
+    put profile DISCOVERY, which does consume every reused profile, on the same
+    phase budget; so end to end a slow profile read spends from that one budget
+    and is read ONCE, and a healthy connection still reads within it.)"""
     import time
     from unittest import mock
 
+    from boomi_mcp.authoring.connector_resolution_snapshot import live_readings_for_declared_components
     from boomi_mcp.categories import integration_builder
     from boomi_mcp.categories.components import _shared
-    from test_issue_157_governance import _conn, _op, _request as _gov_request, _unit
+    from test_issue_157_governance import _op, _request as _gov_request, _unit
+
+    profile = {"key": "unused_profile", "type": "profile.json", "action": "create",
+               "component_id": _UNUSED_PROFILE_ID,
+               "config": {"reference_only": True, "component_name": "Unused Profile"}}
+    conn = {"key": "conn", "type": "connector-settings", "name": "Reused REST", "action": "create",
+            "component_id": _REUSED_REST_ID, "config": {"reference_only": True, "connector_type": "rest"}}
+
+    class _Recorder:
+        def __init__(self):
+            self.asked = []
+
+        def fetch(self, component_id):
+            self.asked.append(component_id)
+            return None
+
+    recorder = _Recorder()
+    live_readings_for_declared_components(
+        object(),
+        [IntegrationComponentSpec.model_validate(profile), IntegrationComponentSpec.model_validate(conn)],
+        reads=recorder,
+    )
+    assert recorder.asked == [_REUSED_REST_ID], recorder.asked
 
     monkeypatch.setenv(_shared._DEADLINE_ENV, "2")
     rest = _reused_rest_xml("http://h.example.invalid/api/")
@@ -3061,16 +3091,11 @@ def test_b18_02_an_unused_profile_read_cannot_starve_the_connector_reads(monkeyp
     def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
         asked.append((component_id, deadline_seconds))
         if component_id == _UNUSED_PROFILE_ID:
-            time.sleep(deadline_seconds or 0)
-            raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 2.0)
+            time.sleep(min(0.5, deadline_seconds or 0.5))
+            raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 0.5)
         assert component_id == _REUSED_REST_ID, component_id
         return {"component_id": component_id, "version": 1, "xml": rest, "type": "connector-settings"}
 
-    profile = {"key": "unused_profile", "type": "profile.json", "action": "create",
-               "component_id": _UNUSED_PROFILE_ID,
-               "config": {"reference_only": True, "component_name": "Unused Profile"}}
-    conn = {"key": "conn", "type": "connector-settings", "name": "Reused REST", "action": "create",
-            "component_id": _REUSED_REST_ID, "config": {"reference_only": True, "connector_type": "rest"}}
     request = _gov_request([_unit(name="P")], [profile, conn, _op()])
     with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
             mock.patch.object(_shared, "component_get_xml", get_xml), \
@@ -3079,10 +3104,9 @@ def test_b18_02_an_unused_profile_read_cannot_starve_the_connector_reads(monkeyp
             mock.MagicMock(), "p", "compile",
             {"authoring_request": request.model_dump(mode="json", exclude_none=True)},
         )
-    # The budgeted identity reads (the ones handed a deadline) never ask for the
-    # profile; the connection IS read within the budget (non-vacuity).
-    assert [d for c, d in asked if c == _UNUSED_PROFILE_ID and d is not None] == [], asked
-    assert [c for c, d in asked if d is not None] == [_REUSED_REST_ID], asked
+    budgeted = [(c, d) for c, d in asked if d is not None]
+    assert [c for c, _d in budgeted].count(_UNUSED_PROFILE_ID) <= 1, asked  # read once per phase
+    assert _REUSED_REST_ID in [c for c, _d in budgeted], asked  # the connection reads within budget
     assert envelope["_success"] is True, json.dumps(envelope)[:800]
 
 
@@ -3148,7 +3172,10 @@ def test_b18_04_apply_reports_a_family_flip_and_a_stored_query_together():
     def preflight(*a, **k):
         bundle = real_preflight(*a, **k)
         state["after_preflight"] = True
-        listing[0] = (_REUSED_NAME, _DB_CONN_ID)
+        # B20-2: a name rebinding to ANOTHER id is refused earlier as
+        # AUTHORING_PLAN_STALE (test_b20_02); here the bound id stays and only
+        # the execution read's answer for it disagrees with the declaration.
+        answers[_REUSED_REST_ID] = db_xml.replace(_DB_CONN_ID, _REUSED_REST_ID)
         answers[_ORDERS_ID] = _reused_rest_xml("http://o.example.invalid/api/?x=1")
         return bundle
 
@@ -3210,3 +3237,268 @@ def test_b18r_an_unparseable_stored_component_gets_an_account_remedy():
     (diagnostic,) = diagnostics
     assert diagnostic.remediation == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
     assert "Submitted component XML" not in diagnostic.remediation
+
+
+# ---------------------------------------------------------------------------
+# B20 (architect final evaluation, r3): witnesses, each failing at 7d21498.
+# ---------------------------------------------------------------------------
+
+_B_REST_ID = "6f1d2c3b-0000-4000-8000-0000000000bb"
+_DB_PROFILE_ID = "6f1d2c3b-0000-4000-8000-0000000000d1"
+_JSON_PROFILE_ID = "6f1d2c3b-0000-4000-8000-0000000000d2"
+
+
+@pytest.mark.parametrize("path", ["provider_key=sample", "v1/x"])
+def test_b20_01_an_extension_placeholder_stored_url_is_base_unknown(path):
+    """B20-1 (ARCH-r2-01): a reused REST connection whose stored url is the
+    builder's unresolved-endpoint placeholder (``SET_BY_EXTENSION``) has NO
+    concrete base: the fail-closed path rule applies."""
+    from boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    envelope = _public(
+        _reuse_bound_request(path), "compile",
+        _account_by_id({_REUSED_REST_ID: _reused_rest_xml(SET_BY_EXTENSION)}, []),
+    )
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False, served[:600]
+    assert "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED" in served and _REUSE_PATH_POINTER in served
+    assert SET_BY_EXTENSION not in served
+
+
+def test_b20_01_control_a_placeholder_base_admits_an_absolute_path():
+    from boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    envelope = _public(
+        _reuse_bound_request("/v1/billing"), "compile",
+        _account_by_id({_REUSED_REST_ID: _reused_rest_xml(SET_BY_EXTENSION)}, []),
+    )
+    assert envelope["_success"] is True, json.dumps(envelope)[:600]
+
+
+def test_b20_02_apply_refuses_a_name_that_rebinds_after_the_compile_replay():
+    """B20-2: the compile replay binds the name to REST connection A; the
+    execution plan binds the SAME name to a different REST connection B (clean
+    URL, same family, the unwritten set unchanged). Apply refuses with
+    AUTHORING_PLAN_STALE before any write, value-free."""
+    from unittest import mock
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.categories import integration_builder
+
+    clean = _reused_rest_xml("http://h.example.invalid/api/")
+    answers = {_REUSED_REST_ID: clean, _B_REST_ID: clean.replace(_REUSED_REST_ID, _B_REST_ID)}
+    listing = [(_REUSED_NAME, _REUSED_REST_ID)]
+    request = _name_bound_reuse("base", "/v1/billing")
+    client = mock.MagicMock()
+    with _account_by_id(answers, listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    real_preflight = workflow.preflight_typed_apply_v1
+    state = {"after_preflight": False}
+
+    def preflight(*a, **k):
+        bundle = real_preflight(*a, **k)
+        state["after_preflight"] = True
+        listing[0] = (_REUSED_NAME, _B_REST_ID)
+        return bundle
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    with _account_by_id(answers, listing), \
+            mock.patch.object(workflow, "preflight_typed_apply_v1", preflight), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    served = json.dumps(envelope)
+    assert state["after_preflight"], "the preflight was not reached: " + served[:600]
+    assert writes == [], "apply wrote against a binding the compile never covered"
+    assert envelope["_success"] is False
+    assert "AUTHORING_PLAN_STALE" in served, served[:800]
+    assert _B_REST_ID not in served and _REUSED_REST_ID not in served
+
+
+def test_b20_02_sibling_a_reused_root_that_rebinds_after_the_compile_replay_is_refused():
+    """B20-2 sibling sweep: the binding recheck covers EVERY participant, not
+    only connections. The process root is reused by NAME; after the compile
+    replay the same name binds a different process. Refused AUTHORING_PLAN_STALE
+    before any write (the generated siblings would otherwise be created)."""
+    from unittest import mock
+
+    from boomi_mcp.authoring import workflow
+    from boomi_mcp.categories import integration_builder
+
+    other_root = "6f1d2c3b-0000-4000-8000-0000000000ab"
+    listing = [(_ROOT_NAME, _ROOT_ID, "process")]
+    raw, material = flagship_v2()
+    request = recipe_request(raw, material)
+    client = mock.MagicMock()
+    with _account_by_id({}, listing):
+        compiled, _ = compile_authoring_request_v1(request, boomi_client=client, profile="p")
+    real_preflight = workflow.preflight_typed_apply_v1
+    state = {"after_preflight": False}
+
+    def preflight(*a, **k):
+        bundle = real_preflight(*a, **k)
+        state["after_preflight"] = True
+        listing[0] = (_ROOT_NAME, other_root, "process")
+        return bundle
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["expected_capability_revision"] = compiled.revision_binding.capability_revision
+    payload["expected_compile_hash"] = compiled.revision_binding.compile_hash
+    writes = []
+    plans = []
+    real_build_plan = integration_builder._build_plan
+
+    def build_plan(*a, **k):
+        planned = real_build_plan(*a, **k)
+        plans.append(planned)
+        return planned
+
+    with _account_by_id({}, listing), \
+            mock.patch.object(workflow, "preflight_typed_apply_v1", preflight), \
+            mock.patch.object(integration_builder, "_build_plan", build_plan), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append("component") or {"_success": True, "component_id": "x"}), \
+            mock.patch.object(integration_builder, "create_component",
+                              side_effect=lambda *a, **k: writes.append("create") or {"_success": True, "component_id": "y"}), \
+            mock.patch.object(integration_builder, "update_component",
+                              side_effect=lambda *a, **k: writes.append("update") or {"_success": True}):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "apply", {"authoring_request": payload, "dry_run": False}
+        )
+    served = json.dumps(envelope)
+    assert state["after_preflight"], "the preflight was not reached: " + served[:600]
+    (root_step,) = [step for step in plans[-1]["steps"] if step["key"] == "main_process"]
+    assert root_step["planned_action"] == "reuse", root_step  # non-vacuity: the root is reused
+    assert writes == [], "apply wrote siblings of a root the compile never bound"
+    assert envelope["_success"] is False
+    assert "AUTHORING_PLAN_STALE" in served, served[:800]
+    assert other_root not in served and _ROOT_ID not in served
+
+
+@pytest.mark.parametrize("part", ["target", "source"])
+def test_b20_03_a_reused_connection_of_an_unrecognized_family_is_an_identity_mismatch(part):
+    """B20-3: the binding resolves to an account connection whose family the
+    connector resolver does not recognize (no HTTP Client connection exists in
+    the demo account — read-only search returned none — so the pinned,
+    proven-operable capture's subtype is set IN-TEST to the legacy HTTP Client
+    subtype ``http``). A declaration is an assertion: the unknown family is a
+    CONNECTOR_REPLAY_IDENTITY_MISMATCH, for a REST target and for the DB source."""
+    unknown = (_CAP159 / ("rest-conn-aa5c5042.xml" if part == "target" else "db-conn-7773fe1e.xml")).read_text()
+    original = 'subType="officialboomi-X3979C-rest-prod"' if part == "target" else 'subType="database"'
+    assert original in unknown
+    unknown = unknown.replace(original, 'subType="http"')
+    if part == "target":
+        request, answers = _reuse_bound_request("/orders"), {_REUSED_REST_ID: unknown}
+    else:
+        raw, material = flagship_v2()
+        raw["source"]["binding_mode"] = "reuse"
+        raw["source"].pop("auth_mode", None)
+        material["source"]["connection"] = {"mode": "reuse", "component_id": _DB_CONN_ID}
+        request, answers = recipe_request(raw, material), {_DB_CONN_ID: unknown}
+    envelope = _public(request, "compile", _account_by_id(answers, []))
+    served = json.dumps(envelope)
+    assert envelope["_success"] is False, served[:600]
+    assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in served, served[:800]
+
+
+def test_b20_04_profile_reads_of_component_planning_and_validation_share_one_budget(monkeypatch):
+    """B20-4: a repeated fan-out reuses BOTH generated profiles by name. The
+    component plan and typed validation both read them; under one phase budget
+    each read is handed the remainder, no profile is read twice, and the
+    compile answers within the budget."""
+    import time
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    monkeypatch.setenv(_shared._DEADLINE_ENV, "2")
+    record = {"calls": [], "held": 0.0}
+
+    def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
+        record["calls"].append((component_id, deadline_seconds))
+        started = time.monotonic()
+        time.sleep(min(1.2, deadline_seconds) if deadline_seconds is not None else 1.2)
+        record["held"] += time.monotonic() - started
+        raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 1.2)
+
+    listing = [{"component_id": _DB_PROFILE_ID, "name": "M8DEMO DB Read Profile", "type": "profile.db",
+                "folder_name": "X"},
+               {"component_id": _JSON_PROFILE_ID, "name": "M8DEMO Target Profile", "type": "profile.json",
+                "folder_name": "X"}]
+    raw, material = flagship_v2()
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: [dict(x) for x in listing]), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml):
+        envelope = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "compile",
+            {"authoring_request": recipe_request(raw, material).model_dump(mode="json", exclude_none=True)},
+        )
+    assert isinstance(envelope, dict) and "_success" in envelope
+    profile_calls = [c for c in record["calls"] if c[0] in (_DB_PROFILE_ID, _JSON_PROFILE_ID)]
+    assert profile_calls, "non-vacuity: the reused profiles were never read"
+    assert all(deadline is not None for _cid, deadline in profile_calls), profile_calls
+    assert record["held"] <= 2.5, (record["held"], record["calls"])
+
+
+def test_b20_05_the_served_grammar_states_the_reuse_rules_it_enforces():
+    """B20-5: the published grammar states what the reuse judge enforces — a
+    stored base carrying '?' or '#' is refused; with an unknown base the path
+    must start with '/' and carry no '=' before any '?' — rendered from the
+    judge's own constants."""
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+    from boomi_mcp.recipes.builtins.fanout import (
+        REUSED_BASE_SENTENCE_V2,
+        _STORED_BASE_FORBIDDEN,
+        _UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY,
+        _UNKNOWN_BASE_PATH_PREFIX,
+        judge_reused_request_target,
+    )
+
+    served = json.dumps(authoring_workflow_contract())
+    assert REUSED_BASE_SENTENCE_V2 in served
+    for char in _STORED_BASE_FORBIDDEN:
+        assert "'{0}'".format(char) in REUSED_BASE_SENTENCE_V2
+        assert judge_reused_request_target("http://h.example.invalid/v1" + char + "x", "/orders") is not None
+    assert "'{0}'".format(_UNKNOWN_BASE_PATH_PREFIX) in REUSED_BASE_SENTENCE_V2
+    assert "'{0}'".format(_UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY) in REUSED_BASE_SENTENCE_V2
+    assert judge_reused_request_target(None, "orders") is not None
+    assert judge_reused_request_target(None, "/a" + _UNKNOWN_BASE_FORBIDDEN_BEFORE_QUERY + "b") is not None
+    assert judge_reused_request_target(None, "/orders?filter=x") is None
+    # the stored-'?' case the joined grammar alone would admit
+    assert judge_reused_request_target("http://h.example.invalid/v1?mode=full", "/orders") is not None
+
+
+def test_b20_06_malformed_stored_xml_through_the_getter_is_unparseable_not_unanswered():
+    """B20-6: the account ANSWERS a reused connection's read with a document
+    that does not parse. Through the real shared getter (only the network call
+    beneath it is faked), that is UNPARSEABLE — the stored component's fault —
+    never "the account did not answer"."""
+    from unittest import mock
+
+    from boomi_mcp.authoring.connector_resolution_snapshot import (
+        UNPARSEABLE_STORED_COMPONENT_REMEDIATION,
+        UNREADABLE_REUSE_REMEDIATION,
+    )
+    from boomi_mcp.categories import integration_builder
+
+    client = mock.MagicMock()
+    client.component.get_component.return_value = b"<not-a-component"
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        envelope = integration_builder.build_integration_action(
+            client, "p", "compile",
+            {"authoring_request": _reuse_bound_request("/v1/billing").model_dump(mode="json", exclude_none=True)},
+        )
+    assert client.component.get_component.called, "non-vacuity: the getter's network call ran"
+    (diag,) = [d for d in envelope["authoring_diagnostics"] if d["code"] == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"]
+    assert diag["remediation"] == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
+    assert diag["remediation"] != UNREADABLE_REUSE_REMEDIATION
