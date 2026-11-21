@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15192, "minimum_collected": 15192, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15201, "minimum_collected": 15201, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15650,3 +15650,12 @@
 {"kind": "test", "id": "pytest-015649", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_02_a_blank_stored_url_is_unavailable_and_fails_closed[   ]", "state": "active"}
 {"kind": "test", "id": "pytest-015650", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_02_control_a_blank_stored_url_admits_an_absolute_path", "state": "active"}
 {"kind": "test", "id": "pytest-015651", "node_id": "tests/test_recipe_fanout_v2.py::test_b16_03_stored_url_reads_share_one_deadline_budget", "state": "active"}
+{"kind": "test", "id": "pytest-015652", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_01_compile_spends_one_read_budget_across_primary_and_target_reads", "state": "active"}
+{"kind": "test", "id": "pytest-015653", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_01_apply_spends_one_read_budget_across_its_connector_reads", "state": "active"}
+{"kind": "test", "id": "pytest-015654", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_02_a_family_flip_with_every_root_reused_is_refused_before_any_write", "state": "active"}
+{"kind": "test", "id": "pytest-015655", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_03_a_resolved_binding_whose_read_fails_is_identity_unavailable[name]", "state": "active"}
+{"kind": "test", "id": "pytest-015656", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_03_a_resolved_binding_whose_read_fails_is_identity_unavailable[config_id]", "state": "active"}
+{"kind": "test", "id": "pytest-015657", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_03_control_offline_an_unresolved_binding_keeps_the_fallback", "state": "active"}
+{"kind": "test", "id": "pytest-015658", "node_id": "tests/test_recipe_fanout_v2.py::test_b17_04_url_and_identity_refusals_of_different_targets_are_reported_together", "state": "active"}
+{"kind": "test", "id": "pytest-015659", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r16_01_an_unreadable_stored_url_is_base_unknown_at_plan_and_compile[v1/x]", "state": "active"}
+{"kind": "test", "id": "pytest-015660", "node_id": "tests/test_recipe_fanout_v2.py::test_qa_r16_01_an_unreadable_stored_url_is_base_unknown_at_plan_and_compile[provider_key=sample]", "state": "active"}

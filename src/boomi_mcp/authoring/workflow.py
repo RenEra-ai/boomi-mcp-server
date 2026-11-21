@@ -1160,6 +1160,9 @@ class BudgetedComponentReads:
         from ..categories.components import _shared
 
         self._client = boomi_client
+        #: Whether an account is held at all: without one nothing is read and
+        #: an unanswered binding is offline, not a failed read.
+        self.live = boomi_client is not None
         self._budget = float(_shared._component_get_deadline_seconds())
         self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
@@ -1193,33 +1196,32 @@ class BudgetedComponentReads:
         return result
 
 
-def stored_connection_xml_reader(boomi_client, readings=None, reads=None):
-    """``read(key, component_id) -> xml or None`` for a connection apply REUSES (B15).
+def stored_connection_xml_reader(readings=None):
+    """``read(key, component_id) -> xml or None`` for a connection apply REUSES (B15, B17).
 
-    ``readings`` are the route's own account readings, keyed by spec key
-    (compile: the readings connector identity validation was given; apply: the
-    pre-write pass's ``_live_connector_xml``). A reading answers only when it
-    read the SAME component the plan resolved; any other key is read on demand
-    by the resolved id through ``reads`` (:class:`BudgetedComponentReads`, one
-    shared deadline budget). ``None`` means the account could not answer (no
-    client, a failed, timed-out or unstarted read): the judge fails closed."""
+    ``readings`` are the route's own account readings, keyed by spec key — the
+    SAME readings connector identity validation was given (compile: the
+    declared-id readings plus each plan-resolved recipe target's,
+    ``_resolved_recipe_target_readings``; apply: the pre-write pass's
+    ``_live_connector_xml``). It answers ONLY from them, and only when a
+    reading read the component the plan resolved: the URL judge never reads a
+    connection identity did not see (the third instance of that class closed
+    structurally, B17). Anything else — no reading, a failed or unaffordable
+    read, a different component — answers ``None``: the base is UNKNOWN and
+    the judge fails closed."""
     from ..categories.integration_builder import canonical_component_id
-
-    reads = reads if reads is not None else BudgetedComponentReads(boomi_client)
 
     def read(key, component_id):
         wanted = canonical_component_id(component_id)
         if not wanted:
             return None
         reading = (readings or {}).get(key)
-        if isinstance(reading, dict) and canonical_component_id(reading.get("component_id")) == wanted:
-            if reading.get("read_failed"):
-                return None
-            xml = reading.get("xml")
-            if isinstance(xml, str) and xml:
-                return xml
-        fetched = reads.fetch(wanted)
-        return fetched["xml"] if fetched is not None else None
+        if not isinstance(reading, dict) or reading.get("read_failed"):
+            return None
+        if canonical_component_id(reading.get("component_id")) != wanted:
+            return None
+        xml = reading.get("xml")
+        return xml if isinstance(xml, str) and xml else None
 
     return read
 
@@ -1263,6 +1265,11 @@ def _resolved_recipe_target_readings(
             continue
         fetched = reads.fetch(resolved)
         if fetched is None:
+            if reads.live:
+                # B17-3: the binding RESOLVED against the account and the read
+                # did not answer — recorded, so identity refuses UNAVAILABLE
+                # exactly as apply does; never an unchecked component.
+                readings[key] = {"component_id": resolved, "read_failed": True}
             continue
         version = fetched.get("version")
         readings[key] = {
@@ -1275,8 +1282,9 @@ def _resolved_recipe_target_readings(
 
 
 def judge_recipe_rest_targets(
-    targets, components, conflict_policy, existing_ids, read_stored_xml, identity_refused=()
-) -> None:
+    targets, components, conflict_policy, existing_ids, read_stored_xml, identity_refused=(),
+    report=False,
+):
     """THE judge of every recipe REST target against the connection apply
     actually requests through (B15; B14 ARCH-r1-03).
 
@@ -1293,10 +1301,12 @@ def judge_recipe_rest_targets(
     path at the PATH, each with its own remediation (B15-4). A connection
     connector identity validation already refused (``identity_refused``: a
     family or binding mismatch read from the same reading) is that
-    authority's refusal, not a URL to judge (B16-1)."""
+    authority's refusal, not a URL to judge (B16-1). With ``report`` the
+    diagnostics are RETURNED for the plan's report-all result (B17-4) instead
+    of raised."""
     targets = tuple(targets or ())
     if not targets:
-        return
+        return ()
     from ..categories.integration_builder import _bound_existing_id
     from ..connector_replay.digests import connection_base_url
     from ..recipes.builtins.fanout import REUSED_TARGET_STORED_BASE, judge_reused_request_target
@@ -1332,23 +1342,21 @@ def judge_recipe_rest_targets(
                 "Write the path as an absolute path ('/...') with no '=' before any '?', "
                 "and keep literal query values in query_parameters.",
             ))
-    if not bad:
-        return
-    raise AuthoringWorkflowError(
-        AUTHORING_COMPILE_BLOCKED,
-        tuple(
-            _diag(
-                AUTHORING_COMPILE_BLOCKED,
-                "error",
-                message=message,
-                path=pointer,
-                subject_kind="recipe",
-                remediation=remediation,
-                cause_codes=(cause,),
-            )
-            for pointer, cause, message, remediation in bad
-        ),
+    diagnostics = tuple(
+        _diag(
+            AUTHORING_COMPILE_BLOCKED,
+            "error",
+            message=message,
+            path=pointer,
+            subject_kind="recipe",
+            remediation=remediation,
+            cause_codes=(cause,),
+        )
+        for pointer, cause, message, remediation in bad
     )
+    if report or not diagnostics:
+        return diagnostics
+    raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, diagnostics)
 
 
 def _refuse_create_bound_bases_apply_reuses(normalized, unwritten) -> None:
@@ -2522,7 +2530,7 @@ def _validate_processes(
         # create-only plan still reads nothing; a recipe target apply REUSES is
         # read once, and that one reading serves identity and the URL judge.
         _declared_live = live_readings_for_declared_components(
-            boomi_client, normalized.integration_spec.components
+            boomi_client, normalized.integration_spec.components, reads=target_reads
         )
         if target_reads is not None:
             _declared_live.update(_resolved_recipe_target_readings(
@@ -2560,7 +2568,7 @@ def _validate_processes(
             # at the binding apply acts on, NOT intersected with the explicit-id readings above.
             cache_profiles=live_cache_profiles_for_unwritten_caches(
                 boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
-                existing_ids=existing_ids,
+                existing_ids=existing_ids, reads=target_reads,
                 # The account is held but the component plan could not be built from it: a name
                 # binding is unjudged (ARCH-186-e1-02; the owner decision of 2026-09-14 keeps plan and
                 # compile degraded rather than refused, and typed apply refuses before any write).
@@ -2579,7 +2587,12 @@ def _validate_processes(
             (), declared={}
         )
         for failure in snapshot_error.failures:
-            _identity_refused.add(failure.component_key)
+            # Only a MISMATCH read a component of another kind: its stored URL
+            # is not this target's base. An UNAVAILABLE reading leaves the base
+            # UNKNOWN, which the URL judge's fail-closed rule still governs
+            # (QA-159-S1-r16-01) — reported beside the identity refusal.
+            if failure.code == CONNECTOR_REPLAY_IDENTITY_MISMATCH:
+                _identity_refused.add(failure.component_key)
             snapshot_diagnostics.append(
                 _diag(
                     failure.code,
@@ -3472,13 +3485,16 @@ def plan_authoring_request_v1(
         normalized, request.intent.conflict_policy, planned_existing_ids(component_plan)
     )
     _refuse_create_bound_bases_apply_reuses(normalized, _unwritten_connections)
-    judge_recipe_rest_targets(
+    # B17-4: collected with every other diagnostic, so an identity refusal of
+    # one target and a URL refusal of another reach the caller together.
+    _target_diagnostics = judge_recipe_rest_targets(
         getattr(normalized, "recipe_rest_targets", ()),
         normalized.integration_spec.components,
         request.intent.conflict_policy,
         planned_existing_ids(component_plan),
-        stored_connection_xml_reader(boomi_client, _live_readings, reads=_target_reads),
+        stored_connection_xml_reader(_live_readings),
         identity_refused=_identity_refused,
+        report=True,
     )
     _reused_for_preview = frozenset(_reused_for_preview or ()) | _unwritten_connections
     topology_diagnostics = _validate_topology(request, normalized, profile)
@@ -3486,6 +3502,7 @@ def plan_authoring_request_v1(
 
     all_diagnostics = (
         validation_diagnostics + topology_diagnostics + decision_diagnostics
+        + tuple(_target_diagnostics)
     )
     errors = sort_authoring_diagnostics(
         tuple(d for d in all_diagnostics if d.severity == "error")
@@ -3493,6 +3510,11 @@ def plan_authoring_request_v1(
     warnings = sort_authoring_diagnostics(
         tuple(d for d in all_diagnostics if d.severity != "error")
     )
+    if _target_diagnostics:
+        # A recipe request target refusal REFUSES the plan (as since B14,
+        # QA-159-S1-r16-01) — and carries every other error found so far
+        # (identity, topology, decisions), so nothing is hidden behind it (B17-4).
+        raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, errors)
 
     # THE VALIDATION PASS ALREADY ASKED. Resolving the selected artifacts a
     # second time here asked the account the same question twice per plan, for

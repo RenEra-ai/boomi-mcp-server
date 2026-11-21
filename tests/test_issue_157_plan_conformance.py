@@ -1632,7 +1632,7 @@ def test_the_connector_snapshot_is_told_the_reuse_set_not_the_live_readings():
         )
         with patch.object(crs, "build_connector_resolution_snapshot", spy), patch.object(
             crs, "live_readings_for_declared_components",
-            lambda client, components: {"conn": "<bns:Component/>"},
+            lambda client, components, **_: {"conn": "<bns:Component/>"},
         ):
             plan_authoring_request_v1(request, boomi_client=MagicMock(), profile=_PROFILE)
         return seen[-1]

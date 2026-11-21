@@ -1385,7 +1385,7 @@ def assert_declared_matches_resolved(
     return dict(declared)
 
 
-def live_readings_for_declared_components(boomi_client, components) -> Dict[str, Any]:
+def live_readings_for_declared_components(boomi_client, components, reads=None) -> Dict[str, Any]:
     """Live identity readings for components the author NAMES as already existing.
 
     #155 slice F. A contract symbol is minted by placing a registry record
@@ -1419,11 +1419,20 @@ def live_readings_for_declared_components(boomi_client, components) -> Dict[str,
         component_id = getattr(component, "component_id", None)
         if not key or not component_id:
             continue
-        try:
-            fetched = component_get_xml(boomi_client, str(component_id))
-        except Exception:  # noqa: BLE001 - an unreadable component observed nothing
-            readings[key] = {"read_failed": True}
-            continue
+        if reads is not None:
+            # #159 S1 B17-1: the request's ONE deadline budget
+            # (``workflow.BudgetedComponentReads``); a read it cannot afford is
+            # a read that did not answer.
+            fetched = reads.fetch(str(component_id))
+            if fetched is None:
+                readings[key] = {"read_failed": True}
+                continue
+        else:
+            try:
+                fetched = component_get_xml(boomi_client, str(component_id))
+            except Exception:  # noqa: BLE001 - an unreadable component observed nothing
+                readings[key] = {"read_failed": True}
+                continue
         if not isinstance(fetched, dict):
             readings[key] = {"read_failed": True}
             continue
@@ -1522,7 +1531,8 @@ def stored_document_cache_profile(
 
 
 def live_cache_profiles_for_unwritten_caches(
-    boomi_client, components, conflict_policy="reuse", existing_ids=None, binding_unjudged=False
+    boomi_client, components, conflict_policy="reuse", existing_ids=None, binding_unjudged=False,
+    reads=None,
 ) -> Optional[Tuple[StoredDocumentCacheProfileV1, ...]]:
     """The stored profile of every document cache the request names and apply does NOT write (#186).
 
@@ -1568,10 +1578,16 @@ def live_cache_profiles_for_unwritten_caches(
             readings.append(StoredDocumentCacheProfileV1(component_key=key, profile_state="unknown"))
             continue
         if component_id not in fetched_by_id:
-            try:
-                fetched = component_get_xml(boomi_client, component_id)
-                fetched_by_id[component_id] = fetched.get("xml") if isinstance(fetched, dict) else None
-            except Exception:  # noqa: BLE001 - an unreadable cache states an unknown profile
-                fetched_by_id[component_id] = None
+            if reads is not None:
+                # #159 S1 B17-1: the request's ONE read budget; an unaffordable
+                # read states an unknown profile, like a failed one.
+                fetched = reads.fetch(component_id)
+                fetched_by_id[component_id] = fetched["xml"] if fetched is not None else None
+            else:
+                try:
+                    fetched = component_get_xml(boomi_client, component_id)
+                    fetched_by_id[component_id] = fetched.get("xml") if isinstance(fetched, dict) else None
+                except Exception:  # noqa: BLE001 - an unreadable cache states an unknown profile
+                    fetched_by_id[component_id] = None
         readings.append(stored_document_cache_profile(key, fetched_by_id[component_id], component_id))
     return tuple(sorted(readings, key=lambda item: item.component_key))

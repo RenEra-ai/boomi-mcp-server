@@ -8725,7 +8725,7 @@ def _resolve_canonical_placement(boomi_client, envelope, folders=None):
     return matches[0].get("id") or None
 
 
-def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
+def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy, reads=None, keys=None):
     """Live XML for every connector component apply will REUSE.
 
     Only components the request will USE AS THEY ALREADY EXIST are read: they
@@ -8762,6 +8762,8 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
             continue
         if key not in reused:
             continue
+        if keys is not None and key not in keys:
+            continue
         component_id = (existing_ids or {}).get(key)
         # A FAILED READ IS RECORDED, not dropped. Omitting the key made a read
         # that failed indistinguishable from a component that is not a reuse at
@@ -8770,11 +8772,19 @@ def _live_connector_xml(*, boomi_client, spec, existing_ids, conflict_policy):
         # authority to consult. That is the difference between "nothing to
         # check" and "something to check that I could not".
         reading = {"xml": None, "component_id": component_id, "read_failed": True}
-        try:
-            fetched = component_get_xml(boomi_client, component_id)
-        except Exception:
-            live[key] = reading
-            continue
+        if reads is not None:
+            # #159 S1 B17-1: ONE deadline budget for the request's reads
+            # (``workflow.BudgetedComponentReads``); an unaffordable read failed.
+            fetched = reads.fetch(component_id)
+            if fetched is None:
+                live[key] = reading
+                continue
+        else:
+            try:
+                fetched = component_get_xml(boomi_client, component_id)
+            except Exception:
+                live[key] = reading
+                continue
         xml = fetched.get("xml") if isinstance(fetched, dict) else None
         if isinstance(xml, str) and xml:
             # KEEP WHAT THE FETCH ALREADY TOLD US. The id and version came back
@@ -10427,14 +10437,29 @@ def _apply_plan(
         _pkey for _pkey in process_units_by_key
         if _planned_actions.get(_pkey) != "reuse"
     ]
+    # #159 S1 B17-1: ONE read budget for every account read of this phase —
+    # the primary connector reads here and the recipe target reads below.
+    from ..authoring.workflow import BudgetedComponentReads as _BudgetedReads
+
+    _apply_reads = _BudgetedReads(boomi_client)
+    # B17-2: a recipe REST target's connection is read HERE even when every
+    # root is reused (nothing else reads it then), so identity resolution and
+    # the URL judge below see ONE reading, before any write.
+    _target_keys = frozenset(
+        target[0] for target in (getattr(authoring_bundle, "rest_targets", ()) or ())
+    )
     _pre_write_live_xml = (
         _live_connector_xml(
             boomi_client=boomi_client,
             spec=spec,
             existing_ids=existing_ids,
             conflict_policy=conflict_policy,
+            reads=_apply_reads,
+            # Every reused connector when a root compiles; otherwise only the
+            # recipe targets' connections, which identity and the URL judge read.
+            keys=None if _roots_to_compile else _target_keys,
         )
-        if _roots_to_compile
+        if (_roots_to_compile or _target_keys)
         else {}
     )
     _reused_component_keys = _keys_reused_at_apply(
@@ -10467,7 +10492,8 @@ def _apply_plan(
             # Gated with the connector reading: only a compiled root consumes it.
             cache_profiles=(
                 live_cache_profiles_for_unwritten_caches(
-                    boomi_client, spec.components, conflict_policy, existing_ids=existing_ids)
+                    boomi_client, spec.components, conflict_policy, existing_ids=existing_ids,
+                    reads=_apply_reads)
                 if _roots_to_compile else ()
             ),
             live_component_xml=_pre_write_live_xml,
@@ -10486,14 +10512,13 @@ def _apply_plan(
         return _pre_write_refusal(_resolution_exc)
     # B15: EVERY recipe REST target judged again, AFTER the connector identity
     # resolution above (a family mismatch is that authority's refusal, read from
-    # the same reading — B16-1), against the EXECUTION plan's
-    # ids and the stored URLs this pass reads (fresh; a key the pass did not
-    # read is read on demand by its resolved id) — the account can change
-    # between the compile replay and here. Before the first write; value-free.
+    # the same reading — B16-1), against the EXECUTION plan's ids and the stored
+    # URLs the pre-write pass read (B17: ONLY those — a connection identity never
+    # saw has an UNKNOWN base). The account can change between the compile
+    # replay and here. Before the first write; value-free.
     if authoring_bundle is not None and getattr(authoring_bundle, "rest_targets", ()):
         from ..authoring.workflow import (
             AuthoringWorkflowError as _TargetRefusal,
-            BudgetedComponentReads,
             judge_recipe_rest_targets,
             stored_connection_xml_reader,
         )
@@ -10504,10 +10529,7 @@ def _apply_plan(
                 spec.components,
                 conflict_policy,
                 existing_ids,
-                stored_connection_xml_reader(
-                    boomi_client, _pre_write_live_xml,
-                    reads=BudgetedComponentReads(boomi_client),
-                ),
+                stored_connection_xml_reader(_pre_write_live_xml),
             )
         except _TargetRefusal as exc:
             return _authoring_error_envelope(exc, "apply")

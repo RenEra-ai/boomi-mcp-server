@@ -1290,6 +1290,11 @@ def test_the_pre_write_read_is_skipped_when_no_root_will_be_compiled():
     The pre-write loop skips any root planned as a reuse, so an apply whose roots
     are all reused builds no canonical symbols and reads none of these bytes. The
     gate is derived from the loop's own skip condition so the two cannot drift.
+
+    #159 S1 B17-2: the gate also opens for a typed recipe's REST targets
+    (``_target_keys``) — with every root reused their connections are STILL
+    consumed, by the identity resolution and the stored-URL judge, so an apply
+    with neither a root to compile nor a target still reads nothing.
     """
     import ast
     from pathlib import Path
@@ -1309,8 +1314,10 @@ def test_the_pre_write_read_is_skipped_when_no_root_will_be_compiled():
             and sub.func.id == "_live_connector_xml"
             for sub in ast.walk(node)
         )
-        and isinstance(node.test, ast.Name)
-        and node.test.id == "_roots_to_compile"
+        and isinstance(node.test, ast.BoolOp)
+        and isinstance(node.test.op, ast.Or)
+        and [getattr(value, "id", None) for value in node.test.values]
+        == ["_roots_to_compile", "_target_keys"]
     ]
     assert len(guarded) == 1, "the account read is not gated on a root that will compile"
 
