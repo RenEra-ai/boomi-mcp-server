@@ -2125,3 +2125,30 @@ def test_the_single_request_check_judges_a_fetch_request_and_returns_its_recheck
     (diagnostic,) = caught.value.diagnostics
     assert diagnostic.path == "/component_material/source/connection/base_url"
     assert QUERY_NAME_CAUSE in diagnostic.cause_codes
+
+
+def test_the_prepared_result_is_the_shared_type_with_the_s1_alias():
+    """#159 S2: ``PreparedFanoutV2`` is the shared ``PreparedRecipeComponentsV1``
+    (an alias, same fields), and the fan-out preparer returns it."""
+    import dataclasses
+
+    from boomi_mcp.recipes import component_material
+    from boomi_mcp.recipes.builtins import fanout
+
+    assert fanout.PreparedFanoutV2 is component_material.PreparedRecipeComponentsV1
+    assert [field.name for field in dataclasses.fields(component_material.PreparedRecipeComponentsV1)] == [
+        "supporting_components",
+        "selected_base_keys",
+        "create_bound_base_keys",
+        "rest_request_targets",
+        "deferred_query_parameter_names",
+        "projection_facts",
+    ]
+    raw, material = flagship_v2()
+    prepared = prepare_db_rest_fanout_v2(
+        ComposeDbRestFanoutInputV2.model_validate(raw),
+        FanoutComponentMaterialV2.model_validate(material),
+        base_catalog={},
+    )
+    assert isinstance(prepared, component_material.PreparedRecipeComponentsV1)
+    assert repr(prepared).startswith("PreparedRecipeComponentsV1(supporting_keys=")

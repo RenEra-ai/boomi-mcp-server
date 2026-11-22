@@ -419,6 +419,10 @@ from ..component_material import (  # noqa: F401 — re-exports
     _connection_presence,
     check_rest_request,
 )
+from ..component_material import PreparedRecipeComponentsV1
+
+#: #159 S2: the prepared result is the shared type; the S1 name stays an alias.
+PreparedFanoutV2 = PreparedRecipeComponentsV1
 
 
 #: The composition-owned Document Cache key for staged handoffs. A port of
@@ -970,55 +974,6 @@ def _validate_fanout_topology_v2(inp: ComposeDbRestFanoutInputV2, *, phase: str)
 # ---------------------------------------------------------------------------
 # The preparer (trusted, server-side)
 # ---------------------------------------------------------------------------
-
-
-@_dataclass(frozen=True, repr=False)
-class PreparedFanoutV2:
-    """What the preparer hands the workflow. NEVER reaches a recipe executor.
-
-    ``supporting_components`` are the generated specs, in the legacy component
-    order. ``selected_base_keys`` name intent ``base_components`` entries the
-    generated specs reference (a base-key connection, a referenced script) —
-    the workflow adds those catalog entries to the run exactly once.
-    ``deferred_query_parameter_names`` maps ``(owning root, FIRST target's
-    operation key)`` to the watermark-sourced query parameter names the
-    preparer validated: they are recorded intent, kept OUT of the emitted
-    operation config, and handed to governance's watermark rule scoped to that
-    operation AND its root (ARCH-r1-04: keyed by the operation alone, another
-    root that also reaches the operation could borrow them).
-
-    The repr names counts and keys only; component configs carry material.
-    """
-
-    supporting_components: Tuple[IntegrationComponentSpec, ...]
-    selected_base_keys: Tuple[str, ...] = ()
-    #: B12-01: ``(base key, raw-input pointer)`` per selected base bound in
-    #: CREATE mode. Whether apply really writes it depends on the component
-    #: plan's account resolution (a create matched BY NAME is reused), which
-    #: only the workflow holds — it rechecks each one against that authority.
-    create_bound_base_keys: Tuple[Tuple[str, str], ...] = ()
-    #: B15: ``(connection key, path, path pointer, binding pointer)`` for EVERY
-    #: REST target, whatever its declared binding. Whether apply writes the
-    #: connection (its base URL was judged here, joined) or reuses one (its
-    #: STORED base URL governs) is the component plan's decision, which only
-    #: the workflow holds: it judges each target apply will not write against
-    #: the stored URL (:func:`judge_reused_request_target`), at compile and
-    #: again at apply before the first write.
-    rest_request_targets: Tuple[Tuple[str, str, str, str], ...] = ()
-    deferred_query_parameter_names: Tuple[Tuple[Tuple[str, str], Tuple[str, ...]], ...] = ()
-    #: #159 S1 (C8): the trusted facts the #157 projection reads for this
-    #: invocation's unit. Their presence is what admits the unit's recipe-route
-    #: rows. Keys and classifications only, EXCEPT the transform operations'
-    #: documentation hints — caller content from the material, served on the
-    #: transform row exactly where the legacy row served it (repr-redacted).
-    projection_facts: Optional[RecipeUnitProjectionFactsV1] = None
-
-    def __repr__(self) -> str:  # noqa: D105
-        return (
-            "PreparedFanoutV2("
-            f"supporting_keys={tuple(c.key for c in self.supporting_components)!r}, "
-            f"selected_base_keys={self.selected_base_keys!r})"
-        )
 
 
 def _check_selected_base_config(
