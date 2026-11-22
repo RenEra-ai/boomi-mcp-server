@@ -696,6 +696,13 @@ def _partial_arm(cases):
     sequence being exactly its DISCHARGED frozen payloads (independent of how
     far the projection has progressed)."""
     case = _clone(_rich(cases))
+    # #159 S2 discharged every row this case now reproduces; the arm restores
+    # the #157 state ON THE CLONE (the transform row alone discharged) so the
+    # partial path stays observable.
+    for row in case.flow_rows:
+        case.discharges["flows"][str(row["ordinal"])] = (
+            DISCHARGED if row["key"] == "transform" else PENDING
+        )
     output = copy.deepcopy(
         [r["payload"] for r in case.flow_rows if case.status(r["ordinal"]) == DISCHARGED]
     )
