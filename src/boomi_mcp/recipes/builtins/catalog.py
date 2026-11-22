@@ -492,7 +492,8 @@ _API_TO_DB_V1_GUIDANCE = dict(
             example_id="sync.api_to_database.v1.create",
             summary=(
                 "Create a REST source and write each response record into an existing "
-                "database connection."
+                "database connection; the named connection (Customers DB) must already "
+                "exist in the account."
             ),
             is_template=False,
             raw_input={
@@ -704,7 +705,8 @@ _LISTENER_DB_GUIDANCE = dict(
             example_id="listener_to_db.v1.api_service",
             summary=(
                 "Publish an order-intake listener as an API Service and insert each "
-                "request into an existing database connection."
+                "request into an existing database connection; the named connection "
+                "(Orders DB) must already exist in the account."
             ),
             is_template=False,
             raw_input={
