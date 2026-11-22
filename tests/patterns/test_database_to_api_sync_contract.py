@@ -2214,7 +2214,9 @@ def l1_registration():
             _emitter("connectoraction_source"),
             _emitter("connectoraction_target"),
             _emitter("map"),
+            _emitter("catcherrors"),
             _emitter("doccacheload"),
+            _emitter("notify"),
         ),
         conflict_policy=RecipeConflictPolicyV1(
             mode="error_unless_declared", merge_rules=("dedupe_identical_constraint",)
@@ -2306,14 +2308,15 @@ def test_l1_registration_resolves_in_a_test_registry():
     assert descriptor.entry_kind == "executable_recipe"
 
 
-@_pytest.mark.parametrize("case_id", L1_CASE_IDS)
-def test_l1_committed_canonical_fixture_is_its_derivation(case_id):
-    committed = json.loads((_l1_case_dir(case_id) / "input.canonical.json").read_text())
-    assert committed == l1_derived_request(case_id)
-    provenance = json.loads((_l1_case_dir(case_id) / "provenance.json").read_text())
-    legacy = (_l1_case_dir(case_id) / "input.legacy.json").read_bytes()
-    assert provenance["legacy_input_sha256"] == _hashlib.sha256(legacy).hexdigest()
-    assert provenance["recipe"] == {"recipe_id": "boomi.archetype.database_to_api_sync", "recipe_version": "1.0.0"}
+def test_l1_committed_canonical_fixtures_are_their_derivation():
+    for case_id in L1_CASE_IDS:
+        committed = json.loads((_l1_case_dir(case_id) / "input.canonical.json").read_text())
+        assert committed == l1_derived_request(case_id), case_id
+        provenance = json.loads((_l1_case_dir(case_id) / "provenance.json").read_text())
+        legacy = (_l1_case_dir(case_id) / "input.legacy.json").read_bytes()
+        assert provenance["legacy_input_sha256"] == _hashlib.sha256(legacy).hexdigest(), case_id
+        assert provenance["recipe"] == {
+            "recipe_id": "boomi.archetype.database_to_api_sync", "recipe_version": "1.0.0"}
 
 
 @_pytest.mark.parametrize("case_id", L1_CASE_IDS)
@@ -2357,64 +2360,60 @@ def _l1_legacy_spec(case_id: str) -> Dict[str, Any]:
     return result["integration_spec"]
 
 
-@_pytest.mark.parametrize("case_id", L1_CASE_IDS)
-def test_l1_supporting_components_equal_the_legacy_archetype(case_id):
-    """Component-set parity with the legacy route at HEAD: keys, types, names,
-    configs and dependencies, in order. The ONE re-spelling is the opaque
-    ``credential://`` scheme on a created DB connection's reference."""
-    from _fanout_v2_support import respell_oracle_credential_refs
-
-    legacy = [c for c in _l1_legacy_spec(case_id)["components"] if c["type"] != "process"]
-    expected = respell_oracle_credential_refs(legacy)
-    prepared = [c.model_dump(mode="json") for c in _l1_prepared(case_id).supporting_components]
-    assert prepared == expected
-
-
-@_pytest.mark.parametrize("case_id", L1_CASE_IDS)
-def test_l1_supporting_components_equal_the_baseline_component_list(case_id):
-    """The same parity against the BASELINE archetype's frozen component list
-    (the pre-#159 direct-unit fixture recorded it at ba1be9f; kept in git at
-    ad3d01c), so a legacy change at HEAD cannot move both sides at once."""
+def _l1_baseline_components(case_id: str) -> List[Dict[str, Any]]:
+    """The BASELINE archetype's component list for the case (process dropped),
+    as the pre-#159 direct-unit fixture recorded it at ba1be9f (kept in git at
+    ad3d01c; CI checks out full history)."""
     import subprocess
 
-    from _fanout_v2_support import respell_oracle_credential_refs
-
     path = f"tests/fixtures/governance/issue_157/cases/{L1_PRODUCER}/{case_id}/input.canonical.json"
-    frozen = json.loads(
+    return json.loads(
         subprocess.run(
             ["git", "show", f"ad3d01c:{path}"], cwd=_TESTS_DIR.parent, check=True,
             capture_output=True, text=True,
         ).stdout
     )["intent"]["components"]
-    # The ONE measured baseline difference: the baseline map carried each direct
-    # mapping's ``documentation_hint`` inside ``field_mappings``; the legacy
-    # route at HEAD no longer does (the test above pins that), and the hint is
-    # served from the transform row's facts instead. Stripped here, nothing else.
-    for component in frozen:
-        for mapping in (component.get("config") or {}).get("field_mappings") or ():
-            mapping.pop("documentation_hint", None)
-    prepared = [c.model_dump(mode="json") for c in _l1_prepared(case_id).supporting_components]
-    assert prepared == respell_oracle_credential_refs(frozen)
 
 
-@_pytest.mark.parametrize("case_id", L1_CASE_IDS)
-def test_l1_unit_envelope_matches_the_legacy_process(case_id):
-    """Name, folder, the legacy dependency edges (+ the DLQ cache the root now
-    references by key) and the extension declarations, derived from the ACTUAL
-    connection bindings, equal the legacy main process's."""
+def test_l1_assembly_matches_the_legacy_archetype_and_the_baseline():
+    """Per frozen case, against the legacy route at HEAD AND the baseline list
+    (so a legacy change at HEAD cannot move both sides at once):
+
+    * supporting components — keys, types, names, configs, dependencies, in
+      order. The ONE re-spelling is the opaque ``credential://`` scheme on a
+      created DB connection's reference. The ONE measured baseline difference:
+      the baseline map carried each direct mapping's ``documentation_hint`` in
+      ``field_mappings``; the route at HEAD does not (pinned here), and the hint
+      is served from the transform row's facts instead.
+    * the unit envelope — name, folder, the legacy dependency edges (+ the DLQ
+      cache the root now references by key) and the extension declarations,
+      derived from the ACTUAL bindings.
+    """
+    from _fanout_v2_support import respell_oracle_credential_refs
     from boomi_mcp.recipes.builtins import database_to_api_sync as preset
 
-    legacy = next(c for c in _l1_legacy_spec(case_id)["components"] if c["type"] == "process")
-    raw = l1_case(case_id).input_canonical["intent"]["invocations"][0]["raw_input"]
-    unit = preset.emit_database_to_api_sync(preset.DatabaseToApiSyncInputV1.model_validate(raw))[0].unit
-    envelope = unit.envelope
-    assert envelope.name == legacy["name"]
-    assert envelope.folder_name == legacy["config"].get("folder_name")
-    dlq = ("dlq_cache",) if _l1_dlq_cache_id(case_id) else ()
-    # The envelope model stores its edges canonically sorted.
-    assert sorted(envelope.depends_on) == sorted(tuple(legacy["depends_on"]) + dlq)
-    declared = envelope.process_extensions.model_dump(mode="json", exclude_none=True)["connections"]
-    assert declared == legacy["config"].get("process_extensions", {}).get("connections", [])
+    for case_id in L1_CASE_IDS:
+        spec = _l1_legacy_spec(case_id)
+        legacy = [c for c in spec["components"] if c["type"] != "process"]
+        prepared = [c.model_dump(mode="json") for c in _l1_prepared(case_id).supporting_components]
+        assert prepared == respell_oracle_credential_refs(legacy), case_id
+        baseline = _l1_baseline_components(case_id)
+        for component in baseline:
+            for mapping in (component.get("config") or {}).get("field_mappings") or ():
+                mapping.pop("documentation_hint", None)
+        assert prepared == respell_oracle_credential_refs(baseline), case_id
+
+        process = next(c for c in spec["components"] if c["type"] == "process")
+        raw = l1_case(case_id).input_canonical["intent"]["invocations"][0]["raw_input"]
+        unit = preset.emit_database_to_api_sync(preset.DatabaseToApiSyncInputV1.model_validate(raw))[0].unit
+        envelope = unit.envelope
+        assert envelope.name == process["name"], case_id
+        assert envelope.folder_name == process["config"].get("folder_name"), case_id
+        dlq = ("dlq_cache",) if _l1_dlq_cache_id(case_id) else ()
+        # The envelope model stores its edges canonically sorted.
+        assert sorted(envelope.depends_on) == sorted(tuple(process["depends_on"]) + dlq), case_id
+        declared = envelope.process_extensions.model_dump(mode="json", exclude_none=True)["connections"]
+        assert declared == process["config"].get("process_extensions", {}).get("connections", []), case_id
 
 
 # --- extension bindings per binding mode -------------------------------------
@@ -2444,23 +2443,18 @@ def _l1_declared(raw: Dict[str, Any]):
     ]
 
 
-@_pytest.mark.parametrize(
-    "source_mode,auth_mode,target_mode,expected",
-    [
-        ("create", "username_password", "create",
-         [("$ref:source_db_connection", "database", ("username", "password"))]),
+def test_l1_extension_bindings_follow_the_actual_binding():
+    db = ("$ref:source_db_connection", "database", ("username", "password"))
+    rest = ("$ref:target_rest_connection", "rest", ("username", "password"))
+    for source_mode, auth_mode, target_mode, expected in (
+        ("create", "username_password", "create", [db]),
         ("create", "windows_integrated", "create", []),
-        ("reuse", None, "create",
-         [("$ref:source_db_connection", "database", ("username", "password"))]),
-        ("create", "username_password", "reuse",
-         [("$ref:source_db_connection", "database", ("username", "password")),
-          ("$ref:target_rest_connection", "rest", ("username", "password"))]),
-    ],
-    ids=["db_create_up_rest_create", "db_create_windows", "db_reuse", "rest_reuse"],
-)
-def test_l1_extension_bindings_follow_the_actual_binding(source_mode, auth_mode, target_mode, expected):
-    raw = _l1_raw(source__binding_mode=source_mode, source__auth_mode=auth_mode, target__binding_mode=target_mode)
-    assert _l1_declared(raw) == expected
+        ("reuse", None, "create", [db]),
+        ("create", "username_password", "reuse", [db, rest]),
+        ("reuse", None, "reuse", [db, rest]),
+    ):
+        raw = _l1_raw(source__binding_mode=source_mode, source__auth_mode=auth_mode, target__binding_mode=target_mode)
+        assert _l1_declared(raw) == expected, (source_mode, auth_mode, target_mode)
 
 
 def test_l1_extension_switches_match_the_legacy_policy():

@@ -182,7 +182,6 @@ class DbToApiTargetV1(RecipeInputBase):
     binding_mode: _Literal["create", "reuse"]
     connection_key: Optional[RecipeComponentKey] = None
     method: _RestMethodV2 = "POST"  # type: ignore[valid-type]
-    expected_status_codes: Tuple[int, ...] = _DEFAULT_STATUS_CODES_V2
 
 
 class DbToApiWatermarkV1(RecipeInputBase):
@@ -490,7 +489,11 @@ def prepare_database_to_api_sync(
         material.target.operation,
         pointer="/component_material/target/operation",
         method=inp.target.method,
-        expected_status_codes=inp.target.expected_status_codes,
+        # Validated for shape only: the legacy route recorded expected status
+        # codes as intent and emitted them nowhere (no operation field, no
+        # frozen row), so this preset accepts none and the authority sees its
+        # default.
+        expected_status_codes=_DEFAULT_STATUS_CODES_V2,
     )
     operations = authorize_transform_operations(
         material.transform.operations,
@@ -910,9 +913,16 @@ def emit_database_to_api_sync(inp: DatabaseToApiSyncInputV1) -> Tuple[object, ..
                 ),
             )
         )
+    # A connector call lowers to the same source/target connector shapes the
+    # plain chain uses (the entry call is the source shape).
+    contributions.append(_capability("req.capability.source", "connectoraction_source"))
+    contributions.append(_capability("req.capability.target", "connectoraction_target"))
     contributions.append(_capability("req.capability.map", "map"))
     if keys.dlq_cache is not None:
+        contributions.append(_capability("req.capability.catch", "catcherrors"))
         contributions.append(_capability("req.capability.cache", "doccacheload"))
+        if inp.reliability.catch_notify is not None:
+            contributions.append(_capability("req.capability.notify", "notify"))
     return tuple(contributions)
 
 

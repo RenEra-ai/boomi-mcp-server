@@ -26,7 +26,7 @@
     ]
   },
   "provenance": {
-    "derivation": "raw_input/component_material = tests/patterns/test_database_to_api_sync_contract.py::l1_canonical_request over the frozen #157 case's legacy archetype parameters (create DB + create REST, DLQ off, no watermark); supporting_component_keys = the baseline archetype's emitted component list for this case in order (process entry dropped), as recorded in the case's pre-migration direct-unit input.canonical.json at git ad3d01c; references = that baseline main process's depends_on, sorted; scheduled = connector source entry (the root's first step is a DB source).",
+    "derivation": "raw_input/component_material = tests/patterns/test_database_to_api_sync_contract.py::l1_canonical_request over the frozen #157 case's legacy archetype parameters (create DB + create REST, DLQ off, no watermark); supporting_component_keys = the baseline archetype's emitted component list for this case in order (process entry dropped), as recorded in the case's pre-migration direct-unit input.canonical.json at git ad3d01c; references = that baseline main process's depends_on, sorted; scheduled = connector source entry (the root's first step is a DB source). One re-spelled value: the source host db.internal -> db.example.invalid (the seed convention's example-host rule); no served key or reference depends on it.",
     "source": "tests/fixtures/governance/issue_157/cases/database_to_api_sync/wm_off_dlq_off_create/input.legacy.json",
     "source_sha256": "3c20120e54e7bc8b2da18e0e75a6be57177f47b65cdff86a9d92f46542f51e40"
   },
@@ -53,7 +53,7 @@
           "credential_ref": "credential://secrets/db/svc_sync",
           "database": "AppDB",
           "driver": "microsoft_jdbc",
-          "host": "db.internal",
+          "host": "db.example.invalid",
           "mode": "create",
           "username": "svc_sync"
         },
