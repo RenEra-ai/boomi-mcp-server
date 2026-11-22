@@ -3586,11 +3586,34 @@ def test_b21_01_a_name_that_rebinds_before_apply_moves_the_compile_hash(form):
     assert _B_REST_ID not in served and _REUSED_REST_ID not in served
 
 
-def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatch):
-    """B21-2: apply's pre-write refresh of reused/literal profile indexes is
-    charged to the SAME phase budget as the execution plan's discovery: every
-    profile read is handed a deadline, and the refresh's re-read (B21 review:
-    a freshness check re-reads) gets only what the plan's read left."""
+def _b23_reused_profile_map_spec(target_key="prof_tgt"):
+    """A raw spec whose transform map references two REUSED stored profiles
+    (the #95 profile fixtures, read back by id) — so the pre-write refresh has
+    profiles a map actually consults."""
+    from pathlib import Path
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "profile_components" / "issue_95"
+    stored = {
+        "11111111-1111-1111-1111-111111111111": ("profile.json", (fixtures / "profile_json.xml").read_text()),
+        "22222222-2222-2222-2222-222222222222": ("profile.xml", (fixtures / "profile_xml.xml").read_text()),
+    }
+    spec = {"integration_name": "Raw", "components": [
+        {"key": "prof_src", "type": "profile.json", "name": "Stored JSON", "action": "create",
+         "component_id": "11111111-1111-1111-1111-111111111111", "config": {"reference_only": True}},
+        {"key": target_key, "type": "profile.xml", "name": "Stored XML", "action": "create",
+         "component_id": "22222222-2222-2222-2222-222222222222", "config": {"reference_only": True}},
+        {"key": "the_map", "type": "transform.map", "name": "Map", "action": "create",
+         "depends_on": ["prof_src", target_key],
+         "config": {"map_type": "direct", "source_profile_id": "$ref:prof_src",
+                    "source_profile_type": "profile.json",
+                    "target_profile_id": "$ref:" + target_key, "target_profile_type": "profile.xml",
+                    "field_mappings": [{"source_path": "Root/customer_code",
+                                        "target_path": "Order/customer_code"}]}},
+    ]}
+    return spec, stored
+
+
+def _b23_apply_counting_reads(monkeypatch, spec, stored, sleep_s):
     import time
     from unittest import mock
 
@@ -3602,29 +3625,46 @@ def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatc
 
     def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
         calls.append((component_id, deadline_seconds))
-        time.sleep(min(1.2, deadline_seconds) if deadline_seconds is not None else 1.2)
-        raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds or 0, 1.2)
+        time.sleep(sleep_s)
+        kind, xml = stored[component_id]
+        return {"component_id": component_id, "id": component_id, "type": kind, "xml": xml}
 
-    spec = {"integration_name": "Raw", "components": [
-        {"key": "prof", "type": "profile.json", "name": "Existing Profile", "action": "create",
-         "component_id": _JSON_PROFILE_ID, "config": {"reference_only": True}},
-    ]}
     with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
             mock.patch.object(_shared, "component_get_xml", get_xml), \
             mock.patch.object(integration_builder, "component_get_xml", get_xml), \
             mock.patch.object(integration_builder, "_execute_component",
                               side_effect=lambda *a, **k: {"_success": True, "component_id": "x"}):
-        integration_builder.build_integration_action(
+        result = integration_builder.build_integration_action(
             mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
         )
-    profile_reads = [c for c in calls if c[0] == _JSON_PROFILE_ID]
-    assert profile_reads, "non-vacuity: the reused profile was read"
-    assert all(deadline is not None for _cid, deadline in profile_reads), profile_reads
-    # One budget: the plan's read spent ~1.2 s of 2 s, so every later read
-    # (the refresh's re-read, if the budget let it start) was handed only the
-    # remainder — never a fresh full deadline.
-    assert len(profile_reads) <= 2, profile_reads
-    assert all(deadline < 1.0 for _cid, deadline in profile_reads[1:]), profile_reads
+    return calls, result
+
+
+def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatch):
+    """B21-2 / B23 review: apply's pre-write refresh of the profiles a map uses
+    is charged to the SAME phase budget as the execution plan's discovery: the
+    refresh RE-READS each map profile once, and each re-read is handed only what
+    the earlier reads of the phase left — never a fresh full deadline."""
+    spec, stored = _b23_reused_profile_map_spec()
+    calls, _ = _b23_apply_counting_reads(monkeypatch, spec, stored, sleep_s=0.2)
+    target = "22222222-2222-2222-2222-222222222222"
+    reads_of_target = [deadline for cid, deadline in calls if cid == target]
+    assert len(reads_of_target) == 2, calls  # the plan's read + the refresh's re-read
+    assert all(deadline is not None for _cid, deadline in calls), calls
+    assert reads_of_target[1] < reads_of_target[0], calls  # the remainder, not a new budget
+
+
+@pytest.mark.parametrize("target_key", ["prof_tgt", "prof_tgt "])
+def test_b23r_a_map_referenced_key_is_refreshed_exactly_as_the_validator_reads_it(
+    monkeypatch, target_key
+):
+    """B23 review: the refresh filter takes the `$ref` key VERBATIM, as
+    `resolve_map_profile_index` does — a key with surrounding whitespace is still
+    the referenced profile and is still re-read before any write."""
+    spec, stored = _b23_reused_profile_map_spec(target_key)
+    calls, _ = _b23_apply_counting_reads(monkeypatch, spec, stored, sleep_s=0.0)
+    target = "22222222-2222-2222-2222-222222222222"
+    assert [cid for cid, _d in calls].count(target) == 2, calls
 
 
 def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache():

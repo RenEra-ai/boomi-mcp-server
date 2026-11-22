@@ -10269,8 +10269,10 @@ def _apply_plan(
         # B22 review: only a reused profile a transform map REFERENCES is ever
         # consulted at apply, so only those are refreshed — an unrelated slow
         # profile must not spend the budget a map's own profile needs.
+        # Extracted EXACTLY as `resolve_map_profile_index` does (verbatim, no
+        # trim): a key the validator looks up must be the key refreshed.
         _map_refs = {
-            value[len("$ref:"):].strip()
+            value[len("$ref:"):]
             for comp in spec.components
             if getattr(comp, "type", None) == "transform.map"
             for side in ("source_profile_id", "target_profile_id")
