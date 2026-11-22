@@ -616,6 +616,7 @@ def test_flow_records_inert_transform_and_reliability_extras_as_noop():
 # Nothing in this section imports a legacy module at import time.
 
 import ast as _ast
+import re
 import copy as _copy
 import functools as _functools
 import inspect as _inspect
@@ -634,8 +635,9 @@ ZERO_CALLER_CUTOVER_COMPLETE = False
 #: ``legacy_adapters/authority.py:206`` (``_resolve_process_kind`` — the
 #: ``.get`` keys it reads), ``process_flow_builder.py:6140`` (``PROCESS_FLOW_BUILDERS``,
 #: its ``__all__`` lookups, and the public methods of each registered class),
-#: ``semantic_validation/legacy_bridge.py`` (its public functions) and the module
-#: files of all of the above. ``test_audited_adapter_authority_matches_the_live_registry``
+#: ``semantic_validation/legacy_bridge.py`` (its public functions), the public
+#: functions and classes of every other module in the adapter package, and the
+#: module files of all of the above. ``test_audited_adapter_authority_matches_the_live_registry``
 #: pins it to the live derivation in BOTH directions; it can only change by a
 #: reviewed edit here, never by drift.
 _AUDITED_ADAPTER_AUTHORITY: _typing.Dict[str, _typing.Any] = {
@@ -656,6 +658,18 @@ _AUDITED_ADAPTER_AUTHORITY: _typing.Dict[str, _typing.Any] = {
         "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline.adapt_sync_pipeline",
         "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline.adapt_sync_pipeline_config",
         "boomi_mcp.compiler.process_ir.legacy_adapters.wrapper_subprocess.adapt_wrapper_subprocess",
+    ),
+    "definition_callables": (
+        "boomi_mcp.compiler.process_ir.legacy_adapters.authority.AuthorityDecision",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.authority.evaluate_pipeline_authority",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.contracts.LegacyAdapterDiagnosticV1",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.contracts.LegacyAdapterError",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.contracts.LegacyAdapterResultV1",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.contracts.LegacySymbolRequirementV1",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.contracts.adapter_diagnostic",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.emission.LegacyEmissionV1",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.emission.emit_legacy_result",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.emission.emit_legacy_result_with_profile",
     ),
     "registry_callables": (
         "boomi_mcp.compiler.process_ir.legacy_adapters.registry.adapter_for",
@@ -712,6 +726,8 @@ _NON_FINDING_CLASSES = frozenset({
     "validator_selector_read",  # reads the kind selector (a refusal gate may keep doing so)
     "raw_schema_value",         # module-scope literal: served template / schema data
     "reexport_declaration",     # the name appears in an ``__all__`` declaration
+    "retired_implementation",   # module no live entry point or registration imports
+    "definition_dependency",    # imports a helper/constant from a definition module (#160 input)
 })
 
 _UNCLASSIFIED_DIALECT = "<unclassified-dialect>"
@@ -771,6 +787,22 @@ def _live_adapter_authority() -> _typing.Optional[_typing.Dict[str, _typing.Any]
         adapter_callables |= {"%s.%s" % (name, fn) for fn in _public_functions(module)}
     registry_callables = {"%s.%s" % (reg.__name__, fn) for fn in _public_functions(reg)}
     builder_classes = tuple(pfb.PROCESS_FLOW_BUILDERS.values())
+    package_dir = Path(reg.__file__).resolve().parent
+    # Everything else the adapter package defines publicly (the authority
+    # evaluator, the result contracts, the emission seam): a caller of any of it
+    # outside the package depends on the adapters.
+    import importlib
+
+    package = reg.__name__.rsplit(".", 1)[0]
+    definition_callables = set()
+    for module_path in sorted(package_dir.glob("*.py")):
+        module = importlib.import_module(
+            package if module_path.stem == "__init__" else "%s.%s" % (package, module_path.stem))
+        for name, obj in vars(module).items():
+            if not name.startswith("_") and getattr(obj, "__module__", None) == module.__name__ \
+                    and (_inspect.isfunction(obj) or _inspect.isclass(obj)):
+                definition_callables.add("%s.%s" % (module.__name__, name))
+    definition_callables -= adapter_callables | registry_callables
     tables = sorted(
         name for name in pfb.__all__
         if isinstance(getattr(pfb, name, None), dict) and getattr(pfb, name)
@@ -782,7 +814,6 @@ def _live_adapter_authority() -> _typing.Optional[_typing.Dict[str, _typing.Any]
         if not name.startswith("_")
         and isinstance(value, (classmethod, staticmethod, _types.FunctionType))
     })
-    package_dir = Path(reg.__file__).resolve().parent
     definition_modules = {_repo_rel(p) for p in package_dir.glob("*.py")}
     definition_modules |= {_repo_rel(sys.modules[c.__module__].__file__) for c in builder_classes}
     definition_modules.add(_repo_rel(bridge.__file__))
@@ -790,6 +821,7 @@ def _live_adapter_authority() -> _typing.Optional[_typing.Dict[str, _typing.Any]
         "migrated_dialects": {d: _qualname(fn) for d, fn in sorted(reg._MIGRATED.items())},
         "reserved_dialects": tuple(sorted(reg.RESERVED_DIALECTS)),
         "adapter_callables": tuple(sorted(adapter_callables | registry_callables)),
+        "definition_callables": tuple(sorted(definition_callables)),
         "registry_callables": tuple(sorted(registry_callables)),
         "builder_kinds": {k: _qualname(c) for k, c in sorted(pfb.PROCESS_FLOW_BUILDERS.items())},
         "builder_tables": tuple(tables),
@@ -827,6 +859,9 @@ class _AdapterAuthority:
             q.rsplit(".", 1)[1]: q.rsplit(".", 1)[0] for q in data["adapter_callables"]
         }
         self.registry_callables = {q.rsplit(".", 1)[1] for q in data["registry_callables"]}
+        self.definition_callables = {q.rsplit(".", 1)[1] for q in data["definition_callables"]}
+        self.callable_module.update(
+            (q.rsplit(".", 1)[1], q.rsplit(".", 1)[0]) for q in data["definition_callables"])
         self.builder_class_kind = {q.rsplit(".", 1)[1]: k for k, q in self.builder_kinds.items()}
 
     # -- resolutions --------------------------------------------------------
@@ -882,6 +917,8 @@ class _AdapterAuthority:
     def dialects_of_callable(self, name: str) -> _typing.Tuple[str, ...]:
         if name in self.registry_callables:
             return tuple(sorted(self.migrated))
+        if name in self.definition_callables:
+            return tuple(sorted(self.dialects))  # package-wide seams serve every dialect
         module = self.callable_module.get(name)
         return tuple(sorted(
             d for d, q in self.migrated.items() if q.rsplit(".", 1)[0] == module))
@@ -1178,7 +1215,8 @@ def _dispatch_findings(sources, patterns, candidates):
     archetype_paths = {p for _q, p in patterns.archetypes.values()}
     for path in sorted(sources):
         text = sources[path]
-        if not any(method in text for method in patterns.dispatch_methods):
+        if not path.startswith("src/") or not any(
+                method in text for method in patterns.dispatch_methods):
             continue
         visitor = _DispatchVisitor(patterns.dispatch_methods)
         visitor.visit(_ast.parse(text, filename=path))
@@ -1229,8 +1267,112 @@ def _mark_unreferenced_producers(records, sources, trees) -> None:
             record["form"] += " [no reference in the scanned tree: dead-definition candidate]"
 
 
+_IMPORT_STATEMENT = re.compile(
+    r"^[ \t]*(from[ \t]+[.\w]+[ \t]+import[ \t]+(?:\([^)]*\)|[^\n]+)|import[ \t]+[^\n]+)",
+    re.MULTILINE)
+
+
+def _imports(path, text, known, inventory):
+    """``(target module, imported name or None, line)`` for every import in ``path``.
+
+    At any depth (lazy imports included). Cheap on purpose: only import
+    statements are parsed. A docstring line that happens to read like one either
+    fails to parse (skipped) or adds an edge, so every approximation here can
+    only make MORE modules live (fail closed).
+    """
+    out = []
+    for match in _IMPORT_STATEMENT.finditer(text):
+        try:
+            statement = _ast.parse(match.group(1).strip()).body[0]
+        except (SyntaxError, IndexError):
+            continue
+        line = text.count("\n", 0, match.start(1)) + 1
+        if isinstance(statement, _ast.Import):
+            for alias in statement.names:
+                parts = alias.name.split(".")
+                for depth in range(1, len(parts) + 1):
+                    target = inventory._resolve_module_path(
+                        ".".join(parts[:depth]), 0, path, known)
+                    if target:
+                        out.append((target, None, line))
+        elif isinstance(statement, _ast.ImportFrom):
+            level = statement.level or 0
+            base = inventory._resolve_module_path(statement.module, level, path, known)
+            for alias in statement.names:
+                dotted = "%s.%s" % (statement.module, alias.name) if statement.module \
+                    else alias.name
+                target = inventory._resolve_module_path(dotted, level, path, known)
+                if target:
+                    out.append((target, None, line))
+                elif base:
+                    out.append((base, alias.name, line))
+            if base:
+                out.append((base, None, line))
+    return out
+
+
+def _import_edges(path, text, known, inventory) -> _typing.Set[str]:
+    return {target for target, _name, _line in _imports(path, text, known, inventory)}
+
+
+def _definition_dependencies(sources, known, authority, inventory):
+    """Non-definition modules importing a name from a definition module.
+
+    Not a finding by itself — a shared constant or connector-type helper does not
+    reach an adapter (an adapter name imported this way also yields its own
+    ``adapter_route`` row) — but it is exactly what #160's deletion must sever,
+    so the census records it.
+    """
+    out = []
+    for path in sorted(sources):
+        if not path.startswith("src/") or path in authority.definition_modules:
+            continue
+        for target, name, line in _imports(path, sources[path], known, inventory):
+            if target in authority.definition_modules and name is not None:
+                out.append(_finding("definition_dependency", path, "<import>",
+                                    "from %s import %s" % (target, name), line))
+    return out
+
+
+def _live_modules(sources, known, roots, inventory) -> _typing.Set[str]:
+    """Modules reachable by static import from the production roots.
+
+    Roots are the repo-root entry modules (``server.py`` registers the MCP
+    tools) and the modules defining every REGISTERED pattern (the pattern
+    registry imports and dispatches them dynamically). A module outside this
+    closure is a dead implementation behind a retired registration: the plan
+    keeps such files until #160 deletes them.
+    """
+    live: _typing.Set[str] = set()
+    frontier = [r for r in sorted(roots) if r in sources]
+    while frontier:
+        path = frontier.pop()
+        if path in live:
+            continue
+        live.add(path)
+        # Importing ``a/b/c.py`` executes the ``__init__`` of every package above it.
+        parts = path.split("/")[:-1]
+        for depth in range(1, len(parts) + 1):
+            package = "/".join(parts[:depth]) + "/__init__.py"
+            if package in sources and package not in live:
+                frontier.append(package)
+        frontier.extend(sorted(_import_edges(path, sources[path], known, inventory) - live))
+    return live
+
+
+def _retire_dead_records(records, live, authority) -> None:
+    for record in records:
+        if record["class"] in _FINDING_CLASSES and record["path"] not in live \
+                and record["path"] not in authority.definition_modules:
+            record["class"] = "retired_implementation"
+
+
 def _python_census(sources, authority, known_paths=None, patterns=None):
-    """``(records, context)`` for ``{repo-relative path: source}``."""
+    """``(records, context)`` for ``{repo-relative path: source}``.
+
+    Rows are produced for ``src/`` modules (the production tree); every other
+    module in ``sources`` is an entry point whose imports decide liveness.
+    """
     inventory = _inventory_module()
     vocab = _scanner_vocabulary(authority)
     # Builder METHOD names are deliberately not tokens: the scanner only counts
@@ -1241,6 +1383,8 @@ def _python_census(sources, authority, known_paths=None, patterns=None):
     known = frozenset(known_paths if known_paths is not None else sources)
     records, trees = [], {}
     for path in sorted(sources):
+        if not path.startswith("src/"):
+            continue
         text = sources[path]
         # Sound pre-filter: every scanner row keys on a vocabulary token spelled
         # literally in the source (an alias is bound by an import that names it).
@@ -1256,8 +1400,15 @@ def _python_census(sources, authority, known_paths=None, patterns=None):
         candidates = _candidate_archetypes(patterns, reach)
         dispatch, sites = _dispatch_findings(sources, patterns, candidates)
         records.extend(dispatch)
+    records.extend(_definition_dependencies(sources, known, authority, inventory))
+    roots = {p for p in sources if "/" not in p}
+    if patterns is not None:
+        roots |= {path for _qualname, path in patterns.archetypes.values()}
+    live = _live_modules(sources, known, roots, inventory)
+    _retire_dead_records(records, live, authority)
+    reach = {p: symbols for p, symbols in reach.items() if p in live}
     return records, _types.SimpleNamespace(candidates=candidates, dispatch_sites=sites,
-                                           reach=reach)
+                                           reach=reach, live=live)
 
 
 # ---------------------------------------------------------------------------
@@ -1287,16 +1438,20 @@ def _example_census(path, document, authority, patterns, context):
     composition = patterns.composition if patterns is not None else None
     composition_reaches = composition is not None and bool(context.reach.get(composition[1]))
 
-    def visit(node, ptr):
+    counter = [0]
+
+    def visit(node, ptr, in_spec=False):
+        counter[0] += 1
         if isinstance(node, list):
             for index, item in enumerate(node):
-                visit(item, _pointer(ptr, index))
+                visit(item, _pointer(ptr, index), in_spec)
             return
         if not isinstance(node, dict):
             return
         components = node.get("components")
-        if isinstance(components, list) and components and all(
-                isinstance(c, dict) and "type" in c for c in components):
+        is_spec = isinstance(components, list) and bool(components) and all(
+            isinstance(c, dict) and "type" in c for c in components)
+        if is_spec:
             for index, component in enumerate(components):
                 cptr = _pointer(_pointer(ptr, "components"), index)
                 if not authority.is_authoring_process(component):
@@ -1339,7 +1494,11 @@ def _example_census(path, document, authority, patterns, context):
         if isinstance(parts, list) and parts and all(
                 isinstance(p, dict) and isinstance(p.get("kind"), str) for p in parts):
             kinds = {p["kind"] for p in parts}
-            if composition is not None and kinds <= composition[0]:
+            if composition is not None and kinds <= composition[0] and in_spec:
+                # A spec body echoing the composition that produced it (its
+                # ``validation_rules``) describes a past request; it invokes nothing.
+                envelopes.append(("composition", ptr, "composition echo in spec metadata"))
+            elif composition is not None and kinds <= composition[0]:
                 envelopes.append(("composition", ptr, "composition request"))
                 if composition_reaches:
                     records.append(_finding("example_composition_invocation", path,
@@ -1349,10 +1508,10 @@ def _example_census(path, document, authority, patterns, context):
                 records.append(_finding("unclassified", path, _pointer(ptr, "parts"),
                                         "parts-shaped request with no composition authority", 0))
         for key, value in node.items():
-            visit(value, _pointer(ptr, key))
+            visit(value, _pointer(ptr, key), in_spec or is_spec)
 
     visit(document, "")
-    return records, envelopes
+    return records, envelopes, counter[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1365,15 +1524,18 @@ def _production_census():
     inventory = _inventory_module()
     authority = _adapter_authority()
     patterns = _pattern_authority()
-    sources = {p: s for p, s in inventory.python_sources().items() if p.startswith("src/")}
+    sources = {p: s for p, s in inventory.python_sources().items()
+               if p.startswith("src/") or "/" not in p}
     records, context = _python_census(sources, authority, patterns=patterns)
     documents = inventory.example_documents()
-    envelopes = {}
+    envelopes, visited = {}, {}
     for path, document in documents.items():
-        found, envelopes[path] = _example_census(path, document, authority, patterns, context)
+        found, envelopes[path], visited[path] = _example_census(
+            path, document, authority, patterns, context)
         records.extend(found)
     return _types.SimpleNamespace(records=records, context=context, documents=documents,
-                                  envelopes=envelopes, sources=sources, patterns=patterns)
+                                  envelopes=envelopes, visited=visited, sources=sources,
+                                  patterns=patterns)
 
 
 def _census_key(record):
@@ -1443,6 +1605,14 @@ _PRE_CUTOVER_CENSUS: _typing.FrozenSet[_typing.Tuple[str, str, str, str]] = froz
      'HttpListenerToRestArchetype.emit_spec',
      "dict-literal process_kind='sync_pipeline'"),
     # --- adapter_route
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_build_plan',
+     'evaluate_pipeline_authority(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_build_plan',
+     'import evaluate_pipeline_authority'),
     ('adapter_route',
      'src/boomi_mcp/authoring/process_entry.py',
      'legacy_config_entry',
@@ -1559,16 +1729,8 @@ _PRE_CUTOVER_CENSUS: _typing.FrozenSet[_typing.Tuple[str, str, str, str]] = froz
      '/compose_request/parts',
      'compose_archetypes'),
     ('example_composition_invocation',
-     'examples/m8/cache_handoff_staged_fanout.integration.json',
-     '/integration_spec/validation_rules/composition/parts',
-     'compose_archetypes'),
-    ('example_composition_invocation',
      'examples/m8/composed_db_to_api_fanout.integration.json',
      '/compose_request/parts',
-     'compose_archetypes'),
-    ('example_composition_invocation',
-     'examples/m8/composed_db_to_api_fanout.integration.json',
-     '/integration_spec/validation_rules/composition/parts',
      'compose_archetypes'),
     # --- example_process_config
     ('example_process_config',
@@ -1727,16 +1889,80 @@ def test_zero_caller_cutover_state_is_declared():
             "the worklist is empty: set ZERO_CALLER_CUTOVER_COMPLETE = True")
 
 
-def test_zero_caller_census_derives_its_routes_from_discovery():
-    """Candidate archetypes and dispatch routes come from the real registrations."""
+_DISPATCH_CONTROL_PACKAGE = "src/boomi_mcp/l8_control_patterns"
+
+#: An in-memory pattern package: one archetype whose ``emit_spec`` reaches an
+#: adapter config through a module-level helper, one that does not, a static
+#: dispatch into the first, and an action resolving archetypes from a registry.
+_DISPATCH_CONTROL_SOURCES = {
+    _DISPATCH_CONTROL_PACKAGE + "/__init__.py": "",
+    _DISPATCH_CONTROL_PACKAGE + "/legacy_one.py": '''
+def _main_process():
+    return {"process_kind": "sync_pipeline", "pipeline": {}}
+
+
+class LegacyOneArchetype:
+    @classmethod
+    def emit_spec(cls, parameters):
+        return _main_process()
+''',
+    _DISPATCH_CONTROL_PACKAGE + "/canonical_one.py": '''
+class CanonicalOneArchetype:
+    @classmethod
+    def emit_spec(cls, parameters):
+        return {"processes": []}
+''',
+    _DISPATCH_CONTROL_PACKAGE + "/compose.py": '''
+from .legacy_one import LegacyOneArchetype
+
+
+def compose(parameters):
+    return LegacyOneArchetype.emit_spec(parameters)
+''',
+    "src/boomi_mcp/l8_control_actions.py": '''
+from .l8_control_patterns.compose import compose
+
+
+def build_control_action(registry, name, parameters):
+    cls = registry.get(name)
+    return cls.emit_spec(parameters), compose(parameters)
+''',
+    "l8_control_entry.py": "from boomi_mcp import l8_control_actions\n",
+}
+
+
+def _dispatch_control_patterns():
+    package = _DISPATCH_CONTROL_PACKAGE
+    return _types.SimpleNamespace(
+        archetypes={
+            "legacy_one": ("LegacyOneArchetype", package + "/legacy_one.py"),
+            "canonical_one": ("CanonicalOneArchetype", package + "/canonical_one.py"),
+        },
+        dispatch_methods=("emit_spec",),
+        package_dir=package,
+        composition=None,
+    )
+
+
+def test_census_resolves_archetype_dispatch_from_the_registration_table():
+    """Candidate archetypes come from discovery intersected with adapter reach,
+    and both dispatch spellings resolve against that set — in memory, so the
+    control does not depend on which archetypes are registered at the time."""
+    records, context = _python_census(
+        _DISPATCH_CONTROL_SOURCES, _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY),
+        patterns=_dispatch_control_patterns())
+    assert context.candidates == {"legacy_one": "LegacyOneArchetype"}
+    dispatch = {(r["path"].rsplit("/", 1)[1], r["symbol"], r["form"], r["reaches"])
+                for r in records if r["class"] == "archetype_dispatch"}
+    assert dispatch == {
+        ("compose.py", "compose", "LegacyOneArchetype.emit_spec(...)", ("archetype:legacy_one",)),
+        ("l8_control_actions.py", "build_control_action",
+         "<registry-resolved>.emit_spec(...)", ("archetype:legacy_one",)),
+    }
+    assert [s[1] for s in context.dispatch_sites] == ["build_control_action"]
+    # The real tree: whatever is registered, candidates are discovered archetypes.
     census = _production_census()
-    patterns, context = census.patterns, census.context
-    assert patterns is not None and patterns.archetypes
-    assert set(context.candidates) <= set(patterns.archetypes)
-    # The registry-resolved dispatch is located in production code, so a tool
-    # call naming an archetype is classified against the live route.
-    assert context.dispatch_sites
-    # Recursive example discovery: every shipped JSON file was visited.
+    assert set(census.context.candidates) <= set(census.patterns.archetypes)
     assert census.documents and set(census.envelopes) == set(census.documents)
 
 
@@ -1777,7 +2003,9 @@ def injected_caller():
 def test_census_detects_an_injected_reachable_adapter_call(arm):
     authority = _adapter_authority() if arm == "live" else \
         _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
-    records, _ = _python_census({_INJECTED_CONTROL_PATH: _INJECTED_CONTROL_SOURCE}, authority)
+    entry = {"l8_control_entry.py": "import boomi_mcp._l8_injected_census_control\n"}
+    sources = dict(entry, **{_INJECTED_CONTROL_PATH: _INJECTED_CONTROL_SOURCE})
+    records, _ = _python_census(sources, authority)
     found = {(r["class"], r["symbol"], r["form"], r["line"]) for r in records
              if r["class"] in _FINDING_CLASSES}
     assert found == {
@@ -1795,6 +2023,12 @@ def test_census_detects_an_injected_reachable_adapter_call(arm):
     # The selector read in the dispatch is a validator, not a caller.
     assert ("validator_selector_read", "injected_dispatch") in {
         (r["class"], r["symbol"]) for r in records}
+    # Retirement is derived, not declared: the same module with nothing live
+    # importing it is a dead implementation, and every one of its findings is.
+    dead, _ = _python_census({_INJECTED_CONTROL_PATH: _INJECTED_CONTROL_SOURCE}, authority)
+    assert {(r["symbol"], r["form"], r["line"]) for r in dead
+            if r["class"] == "retired_implementation"} == {f[1:] for f in found}
+    assert not [r for r in dead if r["class"] in _FINDING_CLASSES]
 
 
 def _flow_sequence_example():
@@ -1812,7 +2046,7 @@ def test_census_detects_a_database_to_api_sync_flow_sequence_example(arm):
     authority = _adapter_authority() if arm == "live" else \
         _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
     path = "examples/l8_control/flow_sequence.integration.json"
-    records, envelopes = _example_census(
+    records, envelopes, _visited = _example_census(
         path, _flow_sequence_example(), authority, census.patterns, census.context)
     assert [(r["class"], r["path"], r["symbol"], r["form"]) for r in records] == [
         ("example_process_config", path, "/integration_spec/components/0/config",
@@ -1840,18 +2074,21 @@ def test_narrative_workflow_example_is_excluded_for_the_right_reason():
     # 2. Visited, and it holds no process-bearing envelope.
     assert census.envelopes[_NARRATIVE_EXAMPLE] == []
     assert not [r for r in census.records if r["path"] == _NARRATIVE_EXAMPLE]
-    # 3. It DOES talk about archetype authoring, so a lexical scan would flag it;
-    #    the structural visitor does not.
+    # 3. The visitor walked the WHOLE document, every container and scalar.
+    def _nodes(value):
+        if isinstance(value, dict):
+            return 1 + sum(_nodes(v) for v in value.values())
+        if isinstance(value, list):
+            return 1 + sum(_nodes(v) for v in value)
+        return 1
     document = census.documents[_NARRATIVE_EXAMPLE]
-    text = json.dumps(document)
-    tools = {s.split(".")[0][: -len("_action")] for _p, s, _l in census.context.dispatch_sites}
-    assert tools and all(tool in text for tool in tools)
+    assert census.visited[_NARRATIVE_EXAMPLE] == _nodes(document) > 1
     # 4. The same document with a real envelope injected IS a finding, at the
     #    injected pointer — the visitor walks this document's structure.
     injected = _copy.deepcopy(document)
     injected["workflow"]["fallback"]["integration_spec"] = \
         _flow_sequence_example()["integration_spec"]
-    records, envelopes = _example_census(
+    records, envelopes, _visited = _example_census(
         _NARRATIVE_EXAMPLE, injected, _adapter_authority(), census.patterns, census.context)
     assert [(r["class"], r["symbol"]) for r in records] == [
         ("example_process_config", "/workflow/fallback/integration_spec/components/0/config")]
