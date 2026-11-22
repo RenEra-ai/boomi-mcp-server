@@ -47,6 +47,7 @@ from _issue_157_flows_accounting import (  # noqa: E402
     BASELINE_SHA,
     CASES,
     CASES_DIR,
+    ROOT,
     _extract_baseline,
     derive_case_projection,
     load_cases,
@@ -84,6 +85,42 @@ def _legacy_components(extraction_src: Path, inputs: Mapping[str, Mapping[str, A
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr[-4000:])
     return json.loads(completed.stdout)
+
+
+#: ``case_id -> the baseline producer's emitted supporting components`` (the
+#: process entry dropped), computed once per interpreter.
+_BASELINE_COMPONENTS: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def baseline_supporting_components(case_ids: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
+    """The BASELINE producer's supporting components for each case's frozen input.
+
+    #159 S2 (L4): the projector tests build linear facts by hand over the
+    components the legacy producer emitted for the SAME frozen
+    ``input.legacy.json`` the rows were frozen from — a legacy-oracle capture,
+    causally independent of the projector under test. Executed from a pristine
+    ``git archive <BASELINE_SHA> src`` extraction, never the working tree, so
+    it survives #160 deleting the producers.
+    """
+    missing = [case_id for case_id in case_ids if case_id not in _BASELINE_COMPONENTS]
+    if missing:
+        cases = load_cases()
+        inputs = {}
+        for case_id in missing:
+            legacy = cases[case_id].input_legacy["input"]
+            inputs[case_id] = {"archetype": legacy["archetype"], "parameters": legacy["parameters"]}
+        with tempfile.TemporaryDirectory(prefix="issue157-l4-") as tmp:
+            extraction = Path(tmp) / "tree"
+            extraction.mkdir()
+            archive = subprocess.run(
+                ["git", "archive", BASELINE_SHA, "src"],
+                cwd=str(ROOT), capture_output=True, check=True,
+            ).stdout
+            subprocess.run(["tar", "-x", "-C", str(extraction)], input=archive, check=True)
+            emitted = _legacy_components(extraction / "src", inputs)
+        for case_id, components in emitted.items():
+            _BASELINE_COMPONENTS[case_id] = [c for c in components if c["type"] != "process"]
+    return {case_id: [dict(c) for c in _BASELINE_COMPONENTS[case_id]] for case_id in case_ids}
 
 
 def _role(components: Sequence[Mapping[str, Any]], *, type_: str, key_contains: str) -> Dict[str, Any]:

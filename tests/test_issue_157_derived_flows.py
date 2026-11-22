@@ -365,7 +365,14 @@ def test_the_operation_vocabulary_is_derived_from_the_discriminator_literals():
     assert set(union) == set(models._DERIVED_FLOW_MEMBERS)
     assert set(DERIVED_FLOW_OPERATIONS) == {
         "db_get", "rest_send", "transform", "reliability", "watermark", "branch",
+        # #159 S2: the linear presets' connector kinds and the stub's no-op
+        "rest_fetch", "db_write", "wss_listen", "noop",
     }
+    # every kind a frozen #157 row carries is servable — measured, not listed
+    frozen_kinds = {
+        row["kind"] for case in load_cases().values() for row in case.flow_rows
+    }
+    assert frozen_kinds <= set(DERIVED_FLOW_OPERATIONS), frozen_kinds - set(DERIVED_FLOW_OPERATIONS)
     schema = TypeAdapter(models.DerivedFlowRowV1).json_schema()
     assert schema["discriminator"]["propertyName"] == "operation"
     assert set(schema["discriminator"]["mapping"]) == set(DERIVED_FLOW_OPERATIONS)
@@ -453,3 +460,340 @@ def test_the_served_endpoints_and_summaries_are_outside_the_plan_hash():
     # and an empty summary map is OMITTED from the served object entirely
     empty = preview.model_copy(update={"composition_summaries": {}})
     assert "composition_summaries" not in empty.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# #159 S2 (L4): the linear projection facts, discharged by hand-built facts
+# ---------------------------------------------------------------------------
+#
+# Provenance. These tests prove the PROJECTOR, not the lanes' recipes: the facts
+# are built by hand. The components come from causally independent sources —
+# the committed canonical fixtures for DB->API and API->API (themselves the
+# baseline producer's emitted components, see `_issue_157_canonical_fixtures`)
+# and, for the cases without one, the baseline producer's emitted components
+# for the SAME frozen `input.legacy.json`, executed from a `git archive` of the
+# baseline (`baseline_supporting_components`). The roots are hand-authored over
+# those components following each legacy pipeline's stage order. The DLQ cases
+# add one reference-only document cache and a process-scope `try_catch` whose
+# catch path writes it — a TEST shape, not the DB->REST recipe's. The oracle is
+# the frozen ordered rows, compared by full normalized payload digest.
+
+_PROCESS = "main_process"
+
+
+def _linear_unit(root):
+    return ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key=_PROCESS, name="P", action="create", depends_on=()
+        ),
+        process_ir=parse_process_ir_v1(root),
+    )
+
+
+def _seq(*steps):
+    return {"version": "1", "body": {"kind": "sequence", "steps": list(steps)}}
+
+
+def _linear_project(components, root, facts, *, watermark_field=None, reused_keys=None):
+    from types import SimpleNamespace
+
+    from boomi_mcp.authoring.derived_flows import derive_recipe_projection
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.models.governance_intent import WatermarkDeclarationV1
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    specs = [IntegrationComponentSpec(**c) for c in components]
+    recorded = ()
+    if watermark_field is not None:
+        recorded = (
+            SimpleNamespace(
+                process_key=_PROCESS,
+                declaration=WatermarkDeclarationV1(
+                    source_profile_ref="$ref:source_db_read_profile",
+                    field=watermark_field,
+                    kind="timestamp",
+                ),
+            ),
+        )
+    return derive_recipe_projection(
+        [_linear_unit(root)],
+        specs,
+        connector_metadata=_connector_metadata_from_components(specs),
+        projection_facts={_PROCESS: facts} if facts is not None else {},
+        recorded_intents=recorded,
+        reused_keys=reused_keys,
+    )
+
+
+def _dumped(projection):
+    flows = [normalize_flow_row(r.model_dump(mode="json", exclude_unset=True)) for r in projection.flows]
+    endpoints = [r.model_dump(mode="json", exclude_unset=True) for r in projection.endpoints]
+    return flows, endpoints
+
+
+def _linear_facts(source, target, detail, *, status=None, reliability=None, source_conn=True):
+    from boomi_mcp.models.derived_flows import (
+        LinearConnectorFactV1,
+        LinearRouteProjectionFactsV1,
+        LinearTransformFactV1,
+    )
+
+    return LinearRouteProjectionFactsV1(
+        process_key=_PROCESS,
+        source=LinearConnectorFactV1(
+            connection_key=source[0] if source_conn else None, operation_key=source[1]
+        ),
+        transform=LinearTransformFactV1(detail=detail),
+        target=LinearConnectorFactV1(
+            connection_key=target[0], operation_key=target[1], expected_status_codes=status
+        ),
+        reliability=reliability,
+    )
+
+
+_DB_SOURCE = ("source_db_connection", "source_db_get_operation")
+_REST_SOURCE = ("source_rest_source_connection", "source_rest_source_operation")
+_WSS_SOURCE = (None, "source_wss_listener_operation")
+_REST_TARGET = ("target_rest_connection", "target_rest_operation")
+_DB_TARGET = ("target_db_connection", "target_db_write_operation")
+
+
+def _ref(key):
+    return "$ref:" + key
+
+
+def _linear_root(source_kind, source, label, target):
+    first = (
+        {"kind": "listener", "operation_ref": _ref(source[1])}
+        if source_kind == "listener"
+        else {"kind": "source", "connection_ref": _ref(source[0]), "operation_ref": _ref(source[1])}
+    )
+    return _seq(
+        first,
+        {"kind": "map_ref", "map_ref": "$ref:transform_transform_map", "label": label},
+        {"kind": "target", "connection_ref": _ref(target[0]), "operation_ref": _ref(target[1])},
+        {"kind": "stop"},
+    )
+
+
+def _dlq_root(root):
+    """The same route inside a process-scope try_catch whose catch writes the DLQ."""
+    steps = root["body"]["steps"]
+
+    def call(step):
+        return {"kind": "connector_call", "operation_ref": step["operation_ref"]}
+
+    return _seq(
+        {
+            "kind": "try_catch",
+            "scope": "process",
+            "try_body": {"steps": [call(steps[0]), steps[1], call(steps[2])], "terminal": {"kind": "stop"}},
+            "catch_body": {"steps": [], "terminal": {"kind": "cache_put", "cache_ref": "$ref:dlq_cache"}},
+        }
+    )
+
+
+_DLQ_CACHE = {
+    "key": "dlq_cache", "type": "document_cache", "action": "create", "name": "DLQ",
+    "config": {"reference_only": True, "component_id": "<<dlq document cache component id>>"},
+}
+
+
+def _hand_built_linear_case(cases, case_id):
+    """``(components, root, facts, watermark_field)`` for one frozen linear case."""
+    from boomi_mcp.authoring.derived_flows import infer_direct_linear_facts
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.models.derived_flows import (
+        LinearReliabilityFactV1,
+        StubRouteProjectionFactsV1,
+    )
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+    from _issue_157_canonical_fixtures import baseline_supporting_components
+
+    case = cases[case_id]
+    producer = case.producer
+    if producer in ("database_to_api_sync", "api_to_api_sync"):
+        components = copy.deepcopy(case.input_canonical["intent"]["components"])
+        root = copy.deepcopy(case.input_canonical["intent"]["units"][0]["process_ir"])
+    elif producer == "stub_minimal":
+        return [], _seq({"kind": "passthrough"}, {"kind": "stop"}), StubRouteProjectionFactsV1(process_key=_PROCESS), None
+    else:
+        components = baseline_supporting_components([case_id])[case_id]
+        label = _transform_row(case)["payload"]["name"]
+        target = _DB_TARGET if "database" in producer or producer.endswith("_db") else _REST_TARGET
+        if producer.startswith("http_listener"):
+            root = _linear_root("listener", _WSS_SOURCE, label, target)
+            for component in components:
+                if component["type"] == "webservice":
+                    # the baseline ASC routes to the legacy process key; the
+                    # hand-authored unit is that same key
+                    assert component["config"]["routes"][0]["process"] == _ref(_PROCESS)
+        else:
+            root = _linear_root("source", _REST_SOURCE, label, target)
+        source = _WSS_SOURCE if producer.startswith("http_listener") else _REST_SOURCE
+        facts = _linear_facts(source, target, "schema_summary", source_conn=source[0] is not None)
+        return components, root, facts, None
+    if producer == "api_to_api_sync":
+        specs = [IntegrationComponentSpec(**c) for c in components]
+        facts = infer_direct_linear_facts(
+            _linear_unit(root), specs, _connector_metadata_from_components(specs)
+        )
+        return components, root, facts, None
+    dlq = "_dlq_on_" in case_id
+    if dlq:
+        components.append(dict(_DLQ_CACHE))
+        root = _dlq_root(root)
+    facts = _linear_facts(
+        _DB_SOURCE, _REST_TARGET, "generated_artifacts",
+        reliability=LinearReliabilityFactV1(dlq_component_key="dlq_cache" if dlq else None),
+    )
+    return components, root, facts, ("source_a" if case_id.split("/")[1].startswith("wm_on") else None)
+
+
+_LINEAR_PRODUCERS = (
+    "database_to_api_sync", "api_to_api_sync", "api_to_database_sync",
+    "http_listener_to_db", "http_listener_to_rest", "stub_minimal",
+)
+
+
+def test_hand_built_linear_facts_reproduce_every_frozen_linear_case(cases):
+    """Every non-composition frozen case — all fifteen, every new flow kind —
+    reproduces its COMPLETE ordered flow and endpoint sequences, by full
+    normalized payload, from hand-built facts over independent components."""
+    linear = sorted(case_id for case_id, case in cases.items() if case.producer in _LINEAR_PRODUCERS)
+    assert len(linear) == len(cases) - sum(1 for c in cases.values() if c.producer == "composition")
+    failures = []
+    kinds = set()
+    for case_id in linear:
+        case = cases[case_id]
+        components, root, facts, watermark = _hand_built_linear_case(cases, case_id)
+        flows, endpoints = _dumped(_linear_project(components, root, facts, watermark_field=watermark))
+        if [acct_digest(r) for r in flows] != [r["payload_sha256"] for r in case.flow_rows]:
+            failures.append((case_id, "flows", [r.get("key") for r in flows]))
+        if [acct_digest(r) for r in endpoints] != [r["payload_sha256"] for r in case.endpoint_rows]:
+            failures.append((case_id, "endpoints", endpoints))
+        kinds |= {r["operation"] for r in flows}
+    assert failures == []
+    # non-vacuity: every new kind, the watermark and the reliability rows were exercised
+    assert {"rest_fetch", "db_write", "wss_listen", "noop", "watermark", "reliability"} <= kinds
+
+
+def acct_digest(row):
+    import _issue_157_flows_accounting as acct
+
+    return acct._digest(row)
+
+
+def test_the_schema_summary_form_omits_the_generation_keys_and_reads_the_write_profile(cases):
+    """null versus absent: the summary form SETS no generation key, and its DB
+    write summary is the builder's index over the write profile component."""
+    case_id = "api_to_database_sync/create"
+    components, root, facts, _wm = _hand_built_linear_case(cases, case_id)
+    projection = _linear_project(components, root, facts)
+    transform = projection.flows[1].model_dump(mode="json", exclude_unset=True)
+    for absent in ("direct_field_mappings", "source_profile_generation",
+                   "target_profile_generation", "target_payload_profile"):
+        assert absent not in transform, absent
+    assert transform["target"] is None and "target" in transform
+    # the summary TRACKS the component: add a column, the summary moves
+    for component in components:
+        if component["key"] == "target_db_write_profile":
+            component["config"]["fields"].append({"name": "zz", "data_type": "number", "mandatory": True})
+    moved = _linear_project(components, root, facts).flows[1].target_write_profile
+    assert moved.field_count == transform["target_write_profile"]["field_count"] + 1
+    assert moved.target_paths[-1].path == "Fields/zz" and moved.target_paths[-1].required is True
+
+
+def test_linear_facts_that_do_not_resolve_never_invent_a_row(cases):
+    """A wrong operation key, a missing component or an unreferenced DLQ pointer
+    projects the transform row only — no connector rows, no endpoints."""
+    from boomi_mcp.models.derived_flows import LinearReliabilityFactV1
+
+    case_id = "database_to_api_sync/wm_off_dlq_on_create"
+    components, root, facts, _wm = _hand_built_linear_case(cases, case_id)
+    assert [r.key for r in _linear_project(components, root, facts).flows][0] == "extract"
+    wrong_op = facts.model_copy(update={"target": facts.target.model_copy(update={"operation_key": "nope"})})
+    dangling = facts.model_copy(update={"reliability": LinearReliabilityFactV1(dlq_component_key="no_such")})
+    unreferenced_root = cases[case_id].input_canonical["intent"]["units"][0]["process_ir"]
+    for components_in, root_in, facts_in in (
+        (components, root, wrong_op),
+        (components, root, dangling),
+        (components, unreferenced_root, facts),  # the pointer resolves, the ROOT never writes it
+        ([c for c in components if c["key"] != "target_rest_connection"], root, facts),
+    ):
+        projected = _linear_project(components_in, root_in, facts_in)
+        assert [r.key for r in projected.flows] == ["transform"]
+        assert projected.endpoints == () and projected.composition_summaries == {}
+
+
+def test_the_dlq_target_follows_its_pointer_never_a_try_catch(cases):
+    """A retry-only try_catch reports the canonical default reliability row
+    (target null); only a resolved, root-referenced DLQ pointer serves ``dlq``."""
+    from boomi_mcp.models.derived_flows import LinearReliabilityFactV1
+
+    case_id = "database_to_api_sync/wm_off_dlq_on_create"
+    components, root, facts, _wm = _hand_built_linear_case(cases, case_id)
+    with_dlq = _linear_project(components, root, facts).flows
+    retry_only = _linear_project(
+        components, root, facts.model_copy(update={"reliability": LinearReliabilityFactV1()})
+    ).flows
+    assert [r.key for r in with_dlq] == [r.key for r in retry_only]
+    assert with_dlq[3].target == "dlq" and retry_only[3].target is None
+    no_row = _linear_project(components, root, facts.model_copy(update={"reliability": None})).flows
+    assert [r.key for r in no_row] == ["extract", "transform", "send"]
+
+
+def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
+    """The API->API inference is shape-exact: a DB source (the DB->API direct
+    fixtures at the S1 tip) or a second map infers nothing."""
+    from boomi_mcp.authoring.derived_flows import infer_direct_linear_facts
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    def infer(case_id, mutate=None):
+        intent = copy.deepcopy(cases[case_id].input_canonical["intent"])
+        if mutate:
+            mutate(intent)
+        root = intent["units"][0]["process_ir"]
+        specs = [IntegrationComponentSpec(**c) for c in intent["components"]]
+        return infer_direct_linear_facts(_linear_unit(root), specs, _connector_metadata_from_components(specs))
+
+    facts = infer("api_to_api_sync/create")
+    assert facts.source.operation_key == "source_rest_source_operation"
+    assert facts.target.expected_status_codes == (200, 201, 202)
+    assert facts.source.expected_status_codes is None and facts.reliability is None
+    for case_id in sorted(c for c in cases if c.startswith("database_to_api_sync/")):
+        assert infer(case_id) is None, case_id
+
+    def database_target(intent):
+        # the SAME root over a target connection of another family
+        for component in intent["components"]:
+            if component["key"] == "target_rest_connection":
+                component["config"] = {"connector_type": "database", "reference_only": True,
+                                       "component_name": "Existing DB"}
+
+    assert infer("api_to_api_sync/create", database_target) is None
+    from boomi_mcp.authoring.derived_flows import rest_success_status_default
+    from boomi_mcp.recipes.builtins.fanout import _DEFAULT_STATUS_CODES_V2
+
+    assert rest_success_status_default() == _DEFAULT_STATUS_CODES_V2
+
+
+def test_the_stub_route_needs_a_stop_only_root_and_its_endpoints_bind_nothing():
+    from pydantic import ValidationError
+
+    from boomi_mcp.models.derived_flows import DerivedEndpointRowV1, StubRouteProjectionFactsV1
+
+    facts = StubRouteProjectionFactsV1(process_key=_PROCESS)
+    stub = _linear_project([], _seq({"kind": "passthrough"}, {"kind": "stop"}), facts)
+    assert [r.operation for r in stub.flows] == ["noop"]
+    assert [e.model_dump(mode="json") for e in stub.endpoints] == [
+        {"key": "stub_source", "type": "stub", "direction": "source", "label": "Stub source"},
+        {"key": "stub_target", "type": "stub", "direction": "target", "label": "Stub target"},
+    ]
+    with pytest.raises(ValidationError):
+        DerivedEndpointRowV1(key="x", type="rest", direction="source")  # no binding mode
+    with pytest.raises(ValidationError):
+        DerivedEndpointRowV1(key="x", type="stub", direction="source", binding_mode="create")
+    with pytest.raises(ValidationError):
+        DerivedEndpointRowV1(key="x", type="rest", direction="source", binding_mode="create", label="l")

@@ -682,6 +682,11 @@ RECIPE_FLOW_ROW_SPELLINGS: Mapping[str, str] = {
     "reliability": "Retry / DLQ",
     "watermark": "Advance watermark",
     "fanout": "Fan out to REST targets",
+    # #159 S2: the linear presets' rows
+    "fetch": "Fetch from REST source",
+    "listen": "Listen for inbound HTTP payloads",
+    "write": "Write to database target",
+    "stub_noop_flow": "Stub no-op flow",
 }
 
 #: Connector family -> the endpoint token a route serves for it, per direction.
@@ -690,13 +695,40 @@ RECIPE_FLOW_ROW_SPELLINGS: Mapping[str, str] = {
 ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY: Mapping[Tuple[str, str], str] = {
     ("source", "database"): "db_source",
     ("target", "rest"): "rest_target",
+    # #159 S2
+    ("source", "rest"): "rest_source",
+    ("source", "wss"): "wss_listener",
+    ("target", "database"): "database_target",
 }
 
 #: Connector family -> the connector-row ``operation`` for its direction.
 CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY: Mapping[Tuple[str, str], str] = {
     ("source", "database"): "db_get",
     ("target", "rest"): "rest_send",
+    # #159 S2
+    ("source", "rest"): "rest_fetch",
+    ("source", "wss"): "wss_listen",
+    ("target", "database"): "db_write",
 }
+
+#: Connector family -> the connector ROW KEY for its direction (#159 S2). The
+#: source side IS the token the transform row names its feeding step by
+#: (``SOURCE_TOKEN_BY_FAMILY``), so it is derived from that table, not retyped.
+CONNECTOR_ROW_KEY_BY_DIRECTION_AND_FAMILY: Mapping[Tuple[str, str], str] = {
+    **{("source", family): token for family, token in SOURCE_TOKEN_BY_FAMILY.items()},
+    ("target", "rest"): "send",
+    ("target", "database"): "write",
+}
+
+#: The stub route's two placeholder endpoints: ``(key, label)`` per direction.
+STUB_ENDPOINTS: Mapping[str, Tuple[str, str]] = {
+    "source": ("stub_source", "Stub source"),
+    "target": ("stub_target", "Stub target"),
+}
+
+#: A database write operation's ``operation_mode`` -> the served ``operation``
+#: spelling on its endpoint row (the legacy DB-write producers' spelling).
+DB_WRITE_OPERATION_SPELLINGS: Mapping[str, str] = {"send": "Send"}
 
 #: The DLQ token the reliability row serves when the root wires a catch path.
 _DLQ_TOKEN = "dlq"
@@ -744,6 +776,7 @@ def _endpoint_row(
     method: Optional[str] = None,
     reused: bool = False,
     existing_ids: Optional[Mapping[str, Any]] = None,
+    extra: Optional[Mapping[str, Any]] = None,
 ):
     """One endpoint row, read off the connection component (never the input).
 
@@ -788,6 +821,9 @@ def _endpoint_row(
         row["auth_mode"] = config.get("auth_mode")
     else:
         row["auth_mode"] = _served_rest_auth(config)
+    # #159 S2: keys read off OTHER components of the same step (the write
+    # profile's statement type, the operation's mode, a declared status set).
+    row.update(dict(extra or {}))
     return DerivedEndpointRowV1(**row)
 
 
@@ -836,8 +872,11 @@ def recipe_leg_ordinals(unit: Any, facts: Any) -> Tuple[Tuple[str, int], ...]:
     staging leg itself realizes no input part and is not listed. In ordinal
     order; empty when the root has no terminal Branch.
     """
+    from ..models.derived_flows import RecipeUnitProjectionFactsV1
+
     branch = _branch_of(unit)
-    if branch is None:
+    if branch is None or not isinstance(facts, RecipeUnitProjectionFactsV1):
+        # #159 S2: a linear or stub route has no fan-out leg identity.
         return ()
     positions, _staging, _cache_key = _leg_positions(branch, facts)
     return tuple(
@@ -1032,6 +1071,414 @@ def _route_projection(
     return rows, endpoints, DerivedCompositionSummaryV1(**summary)
 
 
+# ---------------------------------------------------------------------------
+# the linear-route projection (#159 S2)
+# ---------------------------------------------------------------------------
+
+
+def _operation_family(operation: Optional[IntegrationComponentSpec]) -> Optional[str]:
+    """An operation-only step's family, through the resolver the builders route on."""
+    if operation is None:
+        return None
+    family = str((operation.config or {}).get("connector_type") or "") or None
+    if not family:
+        return None
+    from ..categories.components.builders.connector_builder import connector_family_of
+
+    return connector_family_of(family) or family.strip().lower()
+
+
+def _connector_node_index(nodes: Sequence[Any], operation_key: str) -> Optional[int]:
+    """Document-order position of the ONE connector node binding ``operation_key``."""
+    wanted = REF_PREFIX + operation_key
+    found = [
+        index
+        for index, node in enumerate(nodes)
+        if getattr(node, "kind", None) in _CONNECTOR_KINDS
+        and getattr(node, "operation_ref", None) == wanted
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def _root_references(nodes: Sequence[Any], key: str) -> bool:
+    """Whether any node of the root references component ``key`` by any field."""
+    wanted = REF_PREFIX + key
+    for node in nodes:
+        for name in type(node).model_fields:
+            if getattr(node, name, None) == wanted:
+                return True
+    return False
+
+
+def write_profile_summary(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """The served DB write-profile summary, read off the write profile's config.
+
+    The index is ``DatabaseWriteProfileBuilder.build_field_index`` — the SAME
+    index the map builder binds a DB-write target against — so the summary
+    cannot describe a leaf the map cannot address.
+    """
+    from ..categories.components.builders.profile_builder import (
+        DatabaseWriteProfileBuilder,
+    )
+
+    index = DatabaseWriteProfileBuilder.build_field_index(dict(config))
+    return {
+        "kind": "database.write",
+        "statement_type": config.get("statement_type"),
+        "field_count": sum(1 for path in index if path.startswith("Fields/")),
+        "condition_count": sum(1 for path in index if path.startswith("Conditions/")),
+        "target_paths": [
+            {
+                "path": path,
+                "data_type": entry.get("data_type"),
+                "required": bool(entry.get("required")),
+            }
+            for path, entry in sorted(index.items())
+        ],
+    }
+
+
+def _is_write_profile(component: Optional[IntegrationComponentSpec]) -> bool:
+    return (
+        component is not None
+        and component.type == "profile.db"
+        and (component.config or {}).get("profile_type") == "database.write"
+    )
+
+
+#: The transform-row keys the ``schema_summary`` form serves (beside exactly
+#: one of the two target summaries). The generation keys are ABSENT there.
+_SCHEMA_SUMMARY_ROW_KEYS: Tuple[str, ...] = (
+    "key", "name", "source", "target", "operation", "executable",
+    "source_schema", "operations",
+)
+
+
+def _schema_summary_row(row: Any, map_component, by_key, reused) -> Optional[Any]:
+    """The ``schema_summary`` transform row, built from the rich row and the
+    map's target profile component. None when the target cannot be summarized."""
+    if map_component is None or map_component.key in reused:
+        return None
+    payload = row.model_dump(mode="json", exclude_unset=True)
+    out = {key: payload[key] for key in _SCHEMA_SUMMARY_ROW_KEYS if key in payload}
+    target_key = _ref_key((map_component.config or {}).get("target_profile_id")) or ""
+    target = by_key.get(target_key)
+    if _is_write_profile(target) and target_key not in reused:
+        out["target_write_profile"] = write_profile_summary(target.config or {})
+    elif payload.get("target_payload_profile") is not None:
+        out["target_payload_profile"] = payload["target_payload_profile"]
+    else:
+        return None
+    return DerivedTransformFlowV1.model_validate(out)
+
+
+def _listener_endpoint_extra(
+    operation: IntegrationComponentSpec,
+    components: Sequence[IntegrationComponentSpec],
+    process_key: str,
+) -> Optional[Dict[str, Any]]:
+    """A WSS listener's served method and path, from the listener operation and
+    — when one routes to this process — its API Service component.
+
+    Bare WSS: ``wss_http_method`` and ``compute_wss_endpoint`` (the formulas the
+    deploy-time ``listener_verify`` probe uses). Behind an API Service:
+    ``effective_api_service_route`` over that component's route and the linked
+    operation, served with ``publish_mode: api_service``.
+    """
+    from ..categories.components.builders._api_service_paths import (
+        effective_api_service_route,
+        wss_http_method,
+    )
+    from ..patterns.primitives.wss_listen import compute_wss_endpoint
+
+    op_config = dict(operation.config or {})
+    wanted = REF_PREFIX + process_key
+    services = []
+    for component in components:
+        if component.type != "webservice":
+            continue
+        config = component.config or {}
+        for route in mapping_entries(config.get("routes")):
+            if isinstance(route, Mapping) and route.get("process") == wanted:
+                services.append((config, route))
+    if len(services) > 1:
+        return None
+    if services:
+        config, route = services[0]
+        resolved = effective_api_service_route(
+            config.get("base_url_path"), dict(route), op_config
+        )
+        if not resolved.get("method"):
+            return None
+        return {
+            "method": resolved["method"],
+            "endpoint_path": resolved["path"],
+            "publish_mode": "api_service",
+        }
+    object_name = str(op_config.get("object_name") or "").strip()
+    operation_type = str(op_config.get("operation_type") or "").strip()
+    if not object_name or not operation_type:
+        return None
+    return {
+        "method": wss_http_method(op_config.get("input_type")),
+        "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+    }
+
+
+def _linear_endpoint(
+    direction: str,
+    token: str,
+    family: str,
+    connection: Optional[IntegrationComponentSpec],
+    operation: IntegrationComponentSpec,
+    fact: Any,
+    by_key: Mapping[str, IntegrationComponentSpec],
+    components: Sequence[IntegrationComponentSpec],
+    process_key: str,
+    reused_keys,
+    existing_ids,
+):
+    """One linear endpoint row, or None when a served key cannot be derived."""
+    from ..models.derived_flows import DerivedEndpointRowV1
+
+    op_config = operation.config or {}
+    if family == "wss":
+        extra = _listener_endpoint_extra(operation, components, process_key)
+        if extra is None:
+            return None
+        reuse = bool(op_config.get("reference_only")) or operation.key in reused_keys
+        return DerivedEndpointRowV1(
+            key=token,
+            type="wss",
+            direction=direction,
+            binding_mode="reuse" if reuse else "create",
+            executable=False,
+            **extra,
+        )
+    if connection is None:
+        return None
+    extra: Dict[str, Any] = {}
+    method = None
+    if family == "rest":
+        method = op_config.get("method")
+        if fact.expected_status_codes is not None:
+            extra["expected_status_codes"] = tuple(fact.expected_status_codes)
+    elif family == "database" and direction == "target":
+        profile = by_key.get(_ref_key(op_config.get("write_profile_id")) or "")
+        spelling = DB_WRITE_OPERATION_SPELLINGS.get(str(op_config.get("operation_mode") or ""))
+        if not _is_write_profile(profile) or spelling is None:
+            return None
+        extra["operation"] = spelling
+        extra["statement_type"] = (profile.config or {}).get("statement_type")
+    return _endpoint_row(
+        token,
+        direction,
+        connection,
+        family,
+        method=method,
+        reused=connection.key in reused_keys,
+        existing_ids=existing_ids,
+        extra=extra,
+    )
+
+
+def _linear_route_projection(
+    unit, by_key, components, metadata, facts, transform_rows, watermarked,
+    reused_keys=frozenset(), existing_ids=None,
+):
+    """``(rows, endpoints)`` for one linear-facts unit, or None.
+
+    None — the unit is then projected transform rows only — whenever a fact
+    does not resolve against the root and components: one ``map_ref``, the
+    source connector node before it and the target connector node after it,
+    both binding the operations the facts name, each family in the closed
+    tables, and every endpoint key derivable.
+    """
+    from ..models.derived_flows import (
+        DerivedConnectorFlowV1,
+        DerivedReliabilityFlowV1,
+        DerivedWatermarkFlowV1,
+    )
+
+    if len(transform_rows) != 1:
+        return None
+    nodes = _walk_nodes(unit.process_ir)
+    map_positions = [i for i, node in enumerate(nodes) if getattr(node, "kind", None) == "map_ref"]
+    source_at = _connector_node_index(nodes, facts.source.operation_key)
+    target_at = _connector_node_index(nodes, facts.target.operation_key)
+    if len(map_positions) != 1 or source_at is None or target_at is None:
+        return None
+    if not source_at < map_positions[0] < target_at:
+        return None
+    sides = []
+    for direction, fact in (("source", facts.source), ("target", facts.target)):
+        operation = by_key.get(fact.operation_key)
+        connection = by_key.get(fact.connection_key) if fact.connection_key else None
+        if operation is None or (fact.connection_key and connection is None):
+            return None
+        family = _family_of(connection, metadata) if connection is not None else _operation_family(operation)
+        token = ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY.get((direction, family or ""))
+        row_key = CONNECTOR_ROW_KEY_BY_DIRECTION_AND_FAMILY.get((direction, family or ""))
+        if token is None or row_key is None:
+            return None
+        endpoint = _linear_endpoint(
+            direction, token, family, connection, operation, fact, by_key, components,
+            unit.envelope.component_key, reused_keys, existing_ids,
+        )
+        if endpoint is None:
+            return None
+        sides.append((direction, family, token, row_key, endpoint))
+    (_sd, source_family, source_token, source_key, source_endpoint) = sides[0]
+    (_td, target_family, target_token, target_key, target_endpoint) = sides[1]
+
+    reused = frozenset(reused_keys)
+    hints = facts.transform
+    (transform,) = [_with_hints(row, hints) for row in transform_rows]
+    if hints.row_name:
+        transform = transform.model_copy(update={"name": hints.row_name})
+    if hints.detail == "schema_summary":
+        map_node = nodes[map_positions[0]]
+        map_key = _ref_key(getattr(map_node, "map_ref", None)) or ""
+        transform = _schema_summary_row(transform, by_key.get(map_key), by_key, reused)
+        if transform is None:
+            return None
+
+    rows: List[Any] = [
+        DerivedConnectorFlowV1(
+            key=source_key,
+            name=RECIPE_FLOW_ROW_SPELLINGS[source_key],
+            source=source_token,
+            target=None,
+            operation=CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("source", source_family)],
+            executable=False,
+        ),
+        transform,
+        DerivedConnectorFlowV1(
+            key=target_key,
+            name=RECIPE_FLOW_ROW_SPELLINGS[target_key],
+            source=transform.key,
+            target=target_token,
+            operation=CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY[("target", target_family)],
+            executable=False,
+        ),
+    ]
+    if facts.reliability is not None:
+        dlq_key = facts.reliability.dlq_component_key
+        if dlq_key is not None and (dlq_key not in by_key or not _root_references(nodes, dlq_key)):
+            return None
+        rows.append(
+            DerivedReliabilityFlowV1(
+                key="reliability",
+                name=RECIPE_FLOW_ROW_SPELLINGS["reliability"],
+                source=target_key,
+                target=_DLQ_TOKEN if dlq_key is not None else None,
+                operation="reliability",
+                executable=False,
+            )
+        )
+    if watermarked:
+        rows.append(
+            DerivedWatermarkFlowV1(
+                key="watermark",
+                name=RECIPE_FLOW_ROW_SPELLINGS["watermark"],
+                source=target_key,
+                target=None,
+                operation="watermark",
+                executable=False,
+            )
+        )
+    return rows, [source_endpoint, target_endpoint]
+
+
+def _stub_route_projection(unit, transform_rows):
+    """``(rows, endpoints)`` for a stub-facts unit whose root IS Stop-only
+    (``stop``, optionally after the ``passthrough`` entry), or None."""
+    from ..models.derived_flows import DerivedEndpointRowV1, DerivedNoopFlowV1
+
+    kinds = [getattr(step, "kind", None) for step in _root_steps(unit)]
+    if kinds[:1] == ["passthrough"]:
+        # The grammar's no-connector entry: a Stop-only root is authored as
+        # ``passthrough -> stop`` (a bare ``stop`` does not parse).
+        kinds = kinds[1:]
+    if transform_rows or kinds != ["stop"]:
+        return None
+    source_key, source_label = STUB_ENDPOINTS["source"]
+    target_key, target_label = STUB_ENDPOINTS["target"]
+    rows = [
+        DerivedNoopFlowV1(
+            key="stub_noop_flow",
+            name=RECIPE_FLOW_ROW_SPELLINGS["stub_noop_flow"],
+            source=source_key,
+            target=target_key,
+            operation="noop",
+            executable=False,
+        )
+    ]
+    endpoints = [
+        DerivedEndpointRowV1(key=source_key, type="stub", direction="source", label=source_label),
+        DerivedEndpointRowV1(key=target_key, type="stub", direction="target", label=target_label),
+    ]
+    return rows, endpoints
+
+
+def rest_success_status_default() -> Tuple[int, ...]:
+    """The existing REST success-status default (the neutral send-request model's
+    own default — the authority fan-out 2.0.0 reads too)."""
+    from ..patterns.archetype_parameters import RestSendRequest
+
+    return tuple(RestSendRequest.model_fields["expected_status_codes"].default_factory())
+
+
+def infer_direct_linear_facts(
+    unit: Any,
+    components: Sequence[IntegrationComponentSpec],
+    connector_metadata: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
+):
+    """Linear facts for a DIRECT root that is exactly REST ``source -> map_ref ->
+    REST target`` (optionally ``-> stop``), or None (#159 S2).
+
+    The retired API→API producer has no preparer, so its two frozen cases are
+    replayed as direct canonical units and their facts are read off the root
+    itself: the two connector nodes name the components, the target serves the
+    existing REST success-status default both frozen cases carry, and the
+    transform keeps the rich form. Every other root shape — a DB source, a
+    Branch, a second map — infers nothing and projects exactly as before.
+    """
+    from ..models.derived_flows import (
+        LinearConnectorFactV1,
+        LinearRouteProjectionFactsV1,
+        LinearTransformFactV1,
+    )
+
+    steps = _root_steps(unit)
+    kinds = [getattr(step, "kind", None) for step in steps]
+    if kinds and kinds[-1] == "stop":
+        kinds, steps = kinds[:-1], steps[:-1]
+    if kinds != ["source", "map_ref", "target"]:
+        return None
+    by_key = {component.key: component for component in components}
+    metadata = dict(connector_metadata or {})
+    facts = {}
+    for role, step in (("source", steps[0]), ("target", steps[2])):
+        connection_key = _ref_key(getattr(step, "connection_ref", None))
+        operation_key = _ref_key(getattr(step, "operation_ref", None))
+        if not connection_key or not operation_key:
+            return None
+        if _family_of(by_key.get(connection_key), metadata) != "rest":
+            return None
+        facts[role] = LinearConnectorFactV1(
+            connection_key=connection_key,
+            operation_key=operation_key,
+            expected_status_codes=rest_success_status_default() if role == "target" else None,
+        )
+    return LinearRouteProjectionFactsV1(
+        process_key=unit.envelope.component_key,
+        source=facts["source"],
+        transform=LinearTransformFactV1(detail="generated_artifacts"),
+        target=facts["target"],
+    )
+
+
 def derive_recipe_projection(
     units: Sequence[Any],
     components: Sequence[IntegrationComponentSpec],
@@ -1078,14 +1525,9 @@ def derive_recipe_projection(
             )
         )
         facts = facts_by_key.get(key)
-        route = (
-            _route_projection(
-                unit, by_key, metadata, facts, transform_rows, key in watermarked,
-                frozenset(reused_keys or ()),
-                existing_ids,
-            )
-            if facts is not None
-            else None
+        route = _project_unit_route(
+            unit, by_key, components, metadata, facts, transform_rows, key in watermarked,
+            frozenset(reused_keys or ()), existing_ids,
         )
         projected.append((key, transform_rows, route))
 
@@ -1118,8 +1560,38 @@ def derive_recipe_projection(
             rows, unit_endpoints = _qualified_route(key, rows, unit_endpoints)
         flows.extend(rows)
         endpoints.extend(unit_endpoints)
-        summaries[key] = summary
+        if summary is not None:
+            summaries[key] = summary
     return RecipeProjection(flows, endpoints, summaries)
+
+
+def _project_unit_route(
+    unit, by_key, components, metadata, facts, transform_rows, watermarked,
+    reused_keys, existing_ids,
+):
+    """``(rows, endpoints, summary-or-None)`` for one unit, dispatched on its
+    facts' TYPE; None when it has none (or they do not resolve)."""
+    from ..models.derived_flows import (
+        LinearRouteProjectionFactsV1,
+        RecipeUnitProjectionFactsV1,
+        StubRouteProjectionFactsV1,
+    )
+
+    if isinstance(facts, RecipeUnitProjectionFactsV1):
+        return _route_projection(
+            unit, by_key, metadata, facts, transform_rows, watermarked,
+            reused_keys, existing_ids,
+        )
+    if isinstance(facts, LinearRouteProjectionFactsV1):
+        linear = _linear_route_projection(
+            unit, by_key, components, metadata, facts, transform_rows, watermarked,
+            reused_keys, existing_ids,
+        )
+        return None if linear is None else (linear[0], linear[1], None)
+    if isinstance(facts, StubRouteProjectionFactsV1):
+        stub = _stub_route_projection(unit, transform_rows)
+        return None if stub is None else (stub[0], stub[1], None)
+    return None
 
 
 def qualified_route_key(process_key: str, key: str) -> str:
@@ -1158,18 +1630,24 @@ def _qualified_route(process_key: str, rows: Sequence[Any], endpoints: Sequence[
 
 __all__ = [
     "CONNECTOR_OPERATION_BY_DIRECTION_AND_FAMILY",
+    "CONNECTOR_ROW_KEY_BY_DIRECTION_AND_FAMILY",
+    "DB_WRITE_OPERATION_SPELLINGS",
     "ENDPOINT_TOKEN_BY_DIRECTION_AND_FAMILY",
     "FUTURE_BUILDER_ISSUE_BY_ROUTE",
     "NORMALIZATION_RULES",
     "RECIPE_FLOW_ROW_SPELLINGS",
     "RecipeProjection",
     "SOURCE_TOKEN_BY_FAMILY",
+    "STUB_ENDPOINTS",
     "derive_recipe_projection",
     "derive_transform_flows",
     "flow_row_digest",
+    "infer_direct_linear_facts",
     "normalize_flow_row",
     "normalize_operation_summary",
     "qualified_route_key",
     "recipe_leg_ordinals",
+    "rest_success_status_default",
     "typed_row_from_legacy",
+    "write_profile_summary",
 ]
