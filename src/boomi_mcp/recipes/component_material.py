@@ -362,7 +362,7 @@ def _published_query_names() -> str:
 #: The architect's served guarantee (D12, "Served contract text"), with the
 #: published names rendered from :data:`LITERAL_QUERY_NAMES_V2`.
 LITERAL_QUERY_GUARANTEE_V2 = (
-    "Fan-out 2.0.0 requires opaque `credential://` references in credential "
+    "Component material requires opaque `credential://` references in credential "
     "fields, rejects URL userinfo and JDBC property injection in checked "
     "fields, and limits literal REST queries to the published names ({names}) "
     "and the REST builder\u2019s value rules. Usernames, SQL, map constants, URL "

@@ -1705,7 +1705,9 @@ def test_the_served_text_states_the_query_name_rule():
     names = ", ".join(fanout.LITERAL_QUERY_NAMES_V2)
     guarantee = fanout.LITERAL_QUERY_GUARANTEE_V2
     assert "the published names (" + names + ")" in guarantee
-    assert guarantee.startswith("Fan-out 2.0.0 requires opaque `credential://` references")
+    # #159 S2: shared served text, preset-neutral (the cause CODE keeps its name).
+    assert guarantee.startswith("Component material requires opaque `credential://` references")
+    assert "fan-out" not in guarantee.lower()
     for field in (
         fanout.FanoutQueryParameterV2.model_fields["literal_value"],
         fanout.FanoutRestOperationMaterialV2.model_fields["path"],
