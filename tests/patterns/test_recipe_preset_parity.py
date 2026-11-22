@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import Field
 
 from boomi_mcp.categories.integration_authoring import (
     build_from_archetype_action,
@@ -51,6 +53,7 @@ from boomi_mcp.patterns.archetypes.api_to_database_sync import (
 )
 from boomi_mcp.patterns.recipe_bridge import run_fanout_recipe, run_sync_preset_recipe
 from boomi_mcp.recipes import placeholder_component_id
+from boomi_mcp.recipes.contracts import RecipeInputBase
 from boomi_mcp.recipes.builtins.catalog import (
     RECIPE_API_TO_API_SYNC,
     RECIPE_API_TO_DATABASE_SYNC,
@@ -857,13 +860,12 @@ def matrix_pairing(registrations, seed_dir):
     directions: a registration with no seed and a seed naming no registration
     are each a ``MatrixSeedError``, as is a file whose content names another key.
     """
-    enumerated = sorted(
-        {
-            (reg.recipe_id, reg.recipe_version)
-            for reg in registrations
-            if reg.entry_kind == _MATRIX_ENTRY_KIND
-        }
-    )
+    executables = {
+        (reg.recipe_id, reg.recipe_version): reg
+        for reg in registrations
+        if reg.entry_kind == _MATRIX_ENTRY_KIND
+    }
+    enumerated = sorted(executables)
     wanted = {matrix_seed_name(*key): key for key in enumerated}
     on_disk = {path.name: path for path in Path(seed_dir).glob("*.json")}
     missing = sorted(set(wanted) - set(on_disk))
@@ -877,6 +879,20 @@ def matrix_pairing(registrations, seed_dir):
         seed = json.loads(on_disk[name].read_text())
         if (seed.get("recipe_id"), seed.get("recipe_version")) != key:
             raise MatrixSeedError(f"seed {name} names another registration")
+        if seed.get("seed_format") != "1":
+            raise MatrixSeedError(f"seed {name} is not seed_format 1")
+        provenance = seed.get("provenance") or {}
+        if not all(
+            isinstance(provenance.get(field), str) and provenance[field]
+            for field in ("source", "source_sha256", "derivation")
+        ):
+            raise MatrixSeedError(f"seed {name} does not record its provenance")
+        has_material = "component_material" in (seed.get("request") or {})
+        if has_material != (executables[key].component_material_model is not None):
+            raise MatrixSeedError(
+                f"seed {name} must carry component_material exactly when its "
+                "registration declares a material model"
+            )
     return tuple((key, on_disk[matrix_seed_name(*key)]) for key in enumerated)
 
 
@@ -1129,3 +1145,149 @@ def test_every_published_pin_resolves():
             )
             assert target.entry_kind == _MATRIX_ENTRY_KIND
     assert {key for key, _ in _MATRIX_ROWS} <= published
+
+
+class _MatrixStubInputV1(RecipeInputBase):
+    """The zero-supporting-component witness's input."""
+
+    version: Literal["1"]
+    process_key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    process_name: str = Field(min_length=1)
+
+
+def _matrix_stub_executor(inp):
+    """One process unit, passthrough entry then Stop; no supporting component.
+
+    A bare ``[stop]`` sequence is not a legal ProcessIRV1 root at this tip (a
+    connector-flow sequence must start with its source), so the witness uses the
+    smallest legal component-free root.
+    """
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitV1,
+        ProcessComponentEnvelopeV1,
+    )
+    from boomi_mcp.models.process_ir import ProcessIRV1
+    from boomi_mcp.models.recipe_contributions import (
+        ConstraintRequirementV1,
+        ProcessUnitContributionV1,
+        RequireProcessV1,
+    )
+
+    root = ProcessIRV1.model_validate(
+        {"version": "1", "body": {"kind": "sequence", "steps": [{"kind": "passthrough"}, {"kind": "stop"}]}}
+    )
+    envelope = ProcessComponentEnvelopeV1(
+        component_key=inp.process_key, name=inp.process_name, action="create"
+    )
+    return (
+        ProcessUnitContributionV1(
+            contribution_kind="process_unit",
+            version="1",
+            contribution_id="unit.process",
+            unit=ProcessAuthoringUnitV1(envelope=envelope, process_ir=root),
+        ),
+        ConstraintRequirementV1(
+            contribution_kind="constraint_requirement",
+            version="1",
+            requirement_id="req.process",
+            requirement=RequireProcessV1(kind="process", process_key=inp.process_key),
+        ),
+    )
+
+
+def test_a_zero_supporting_component_registration_completes_a_matrix_row(
+    tmp_path, monkeypatch
+):
+    """The matrix MECHANISM on a component-free recipe, before the real stub lands.
+
+    A test registration carrying descriptor guidance (an example) is installed
+    at the engine's registry seam, paired with a temp seed through the same
+    ``matrix_pairing`` and run through the same ``_run_matrix_row``: empty
+    supporting components, an empty id registry, an empty reference set, zero
+    writes. The seed's expected values describe this witness recipe only.
+    """
+    from boomi_mcp.recipes import engine
+    from boomi_mcp.recipes.contracts import (
+        RecipeConflictPolicyV1,
+        RecipeExampleV1,
+        RecipeRegistrationV1,
+    )
+    from boomi_mcp.recipes.registry import build_test_registry
+
+    raw = {"version": "1", "process_key": "stub_process", "process_name": "Matrix Stub"}
+    stub = RecipeRegistrationV1(
+        recipe_id="boomi.archetype.matrix_stub_witness",
+        recipe_version="1.0.0",
+        entry_kind="executable_recipe",
+        is_default=True,
+        input_model=_MatrixStubInputV1,
+        executor=_matrix_stub_executor,
+        output_types=("constraint_requirement", "process_unit"),
+        conflict_policy=RecipeConflictPolicyV1(),
+        limitations=("Emits a passthrough root that only stops.",),
+        examples=(
+            RecipeExampleV1(
+                example_id="stub.basic",
+                summary="A passthrough process that only stops.",
+                is_template=False,
+                raw_input=raw,
+            ),
+        ),
+    )
+    registry = build_test_registry((stub,))
+    monkeypatch.setattr(engine, "production_registry", lambda: registry)
+
+    seed = {
+        "seed_format": "1",
+        "recipe_id": stub.recipe_id,
+        "recipe_version": stub.recipe_version,
+        "provenance": {
+            "source": "this test",
+            "source_sha256": "-",
+            "derivation": "a mechanism witness; no production recipe",
+        },
+        "request": {
+            "integration_name": "Matrix stub witness",
+            "invocation_id": "matrix",
+            "raw_input": raw,
+        },
+        "expected": {
+            "process_keys": ["stub_process"],
+            # The execution-profile rule: a passthrough entry derives "passthrough".
+            "execution_profiles": {"stub_process": "passthrough"},
+            "supporting_component_keys": [],
+            "references": {"stub_process": []},
+        },
+    }
+    (tmp_path / matrix_seed_name(stub.recipe_id, stub.recipe_version)).write_text(
+        json.dumps(seed)
+    )
+    ((_key, path),) = matrix_pairing((stub,), tmp_path)
+    materialized = _run_matrix_row(_load_seed(path))
+    assert list(materialized) == ["stub_process"]
+
+
+def test_matrix_pairing_refuses_a_seed_without_provenance_or_with_stray_material(tmp_path):
+    import shutil
+
+    from boomi_mcp.recipes.builtins.catalog import PRODUCTION_REGISTRATIONS
+
+    for _key, path in _MATRIX_ROWS:
+        shutil.copy(path, tmp_path / path.name)
+    (_key, first), *_ = _MATRIX_ROWS
+    seed = _load_seed(first)
+    target = tmp_path / first.name
+
+    unsourced = dict(seed, provenance={"source": "x"})
+    target.write_text(json.dumps(unsourced))
+    with pytest.raises(MatrixSeedError, match="provenance"):
+        matrix_pairing(PRODUCTION_REGISTRATIONS, tmp_path)
+
+    flipped = json.loads(json.dumps(seed))
+    if "component_material" in flipped["request"]:
+        del flipped["request"]["component_material"]
+    else:
+        flipped["request"]["component_material"] = {}
+    target.write_text(json.dumps(flipped))
+    with pytest.raises(MatrixSeedError, match="component_material"):
+        matrix_pairing(PRODUCTION_REGISTRATIONS, tmp_path)
