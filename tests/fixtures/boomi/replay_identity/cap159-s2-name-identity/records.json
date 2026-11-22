@@ -1,0 +1,24 @@
+[
+  {
+    "scenario": "cap159-s2-name-identity",
+    "capture": "db-conn-7773fe1e",
+    "capture_scenario": "cap159-s1-reuse-identity",
+    "component_id": "7773fe1e-9242-4155-9a1b-c6a610b1ef3b",
+    "version_marker": "1",
+    "component_name": "Sandbox MSSQL Expert (jtds)",
+    "metadata_type": "connector-settings",
+    "folder_name": "Demo-Account-Folder",
+    "sha256_archived_bytes": "d3923401e0be1ecc4f39f71e5f21a09d20878c8a37b88c94d89a04c0a3780a3b",
+    "byte_length": 1452,
+    "binds_placeholder_ids": [],
+    "binds_placeholder_names": [
+      "<<existing DB connection>>"
+    ],
+    "binding_rule": "#159 S2 (integrator, S2-D6a; same move as ARCH-r1-12): the two frozen #157 http_listener_to_db cases reuse their DB connection BY NAME, a PLACEHOLDER name. The offline replay answers the account's component-metadata query for that name with ONE current, undeleted connector-settings row whose id is this capture's, and the account read for that id with the capture's bytes (the SAME archived file the cap159-s1-reuse-identity record pins, read from that scenario's directory; no bytes are copied). The case inputs are not changed.",
+    "operable_evidence": [
+      "agents/reports/2026-11-20-issue-159-s1-r1.md scenario 2 (s2k): process 0efc6f8b-8fdd-4e2b-abf7-b97cad3e3741 references both 7773fe1e and aa5c5042; execution-3003474e-db89-4d90-9ae4-1074c8e479c2-2026.11.20 COMPLETE, each REST leg successCount 2 / errorCount 0",
+      "agents/reports/2026-11-20-issue-159-s1-r1.md scenario 3 (Q5): execution-9195acc2-82eb-4ed6-b503-a082843e1d52-2026.11.20 and execution-bfc79e24-38d8-4f90-96a1-c99bd7bc5c93-2026.11.20 COMPLETE over the shared reference-only DB 7773fe1e"
+    ],
+    "utc_precision": "date only: the capture time-of-day was not recorded"
+  }
+]

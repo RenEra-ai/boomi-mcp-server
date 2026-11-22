@@ -650,8 +650,13 @@ _PLAN_CACHE: Dict[Tuple[str, str], Any] = {}
 REPLAY_IDENTITY_DIR = ROOT / "tests" / "fixtures" / "boomi" / "replay_identity"
 
 
-def replay_identity_captures() -> Dict[str, Dict[str, Any]]:
-    """``{placeholder id: get-component answer}``, verified byte for byte."""
+def _replay_identity_records() -> List[Tuple[Dict[str, Any], bytes]]:
+    """Every replay-identity record with its capture's bytes, verified.
+
+    A record's capture lives in its own scenario directory unless it names
+    another one (``capture_scenario``): a NAME binding (#159 S2) answers with
+    a capture another scenario already pins, never a copy of its bytes.
+    """
     sums = {}
     for line in (REPLAY_IDENTITY_DIR / "SHA256SUMS").read_text().splitlines():
         if line.strip():
@@ -667,19 +672,70 @@ def replay_identity_captures() -> Dict[str, Dict[str, Any]]:
     for relative, digest in sums.items():
         if hashlib.sha256((REPLAY_IDENTITY_DIR / relative).read_bytes()).hexdigest() != digest:
             raise RuntimeError("replay identity captures: bytes differ from SHA256SUMS")
-    answers: Dict[str, Dict[str, Any]] = {}
+    out: List[Tuple[Dict[str, Any], bytes]] = []
     for records_path in sorted(REPLAY_IDENTITY_DIR.glob("*/records.json")):
         for record in json.loads(records_path.read_text()):
-            data = (records_path.parent / (record["capture"] + ".xml")).read_bytes()
+            directory = REPLAY_IDENTITY_DIR / record.get("capture_scenario", records_path.parent.name)
+            data = (directory / (record["capture"] + ".xml")).read_bytes()
             if hashlib.sha256(data).hexdigest() != record["sha256_archived_bytes"]:
                 raise RuntimeError("replay identity captures: a record's digest is stale")
-            for placeholder in record["binds_placeholder_ids"]:
-                answers[placeholder] = {
-                    "component_id": placeholder,
-                    "version": record["version_marker"],
-                    "xml": data.decode("utf-8"),
-                }
+            out.append((record, data))
+    return out
+
+
+def replay_identity_captures() -> Dict[str, Dict[str, Any]]:
+    """``{component id: get-component answer}``, verified byte for byte.
+
+    A placeholder ID is answered under itself; a placeholder NAME's record is
+    answered under the capture's own component id, the id the name query
+    (:func:`replay_identity_names`) resolves it to.
+    """
+    answers: Dict[str, Dict[str, Any]] = {}
+    for record, data in _replay_identity_records():
+        ids = list(record.get("binds_placeholder_ids") or ())
+        if record.get("binds_placeholder_names"):
+            ids.append(record["component_id"])
+        for component_id in ids:
+            answers[component_id] = {
+                "component_id": component_id,
+                "version": record["version_marker"],
+                "xml": data.decode("utf-8"),
+            }
     return answers
+
+
+def replay_identity_names() -> Dict[str, Dict[str, Any]]:
+    """``{placeholder name: component-metadata row}`` (#159 S2): the account's
+    answer to a reuse-BY-NAME query, one current undeleted row per bound name."""
+    rows: Dict[str, Dict[str, Any]] = {}
+    for record, _data in _replay_identity_records():
+        for name in record.get("binds_placeholder_names") or ():
+            rows[name] = {
+                "component_id": record["component_id"],
+                "id": record["component_id"],
+                "name": name,
+                "folder_name": record.get("folder_name", ""),
+                "type": record["metadata_type"],
+                "version": record["version_marker"],
+                "current_version": True,
+                "deleted": False,
+            }
+    return rows
+
+
+def replay_paginate_metadata(rows: Optional[Mapping[str, Dict[str, Any]]] = None):
+    """A stand-in for ``integration_builder.paginate_metadata`` answering ONLY
+    bound names, filtered by the query's component TYPE like the account."""
+    bound = dict(replay_identity_names() if rows is None else rows)
+
+    def paginate_metadata(_client, query_config, *_args, **_kwargs):
+        try:
+            wanted = set(query_config.query_filter.expression.argument or ())
+        except AttributeError:
+            wanted = set()
+        return [dict(row) for row in bound.values() if row["type"] in wanted]
+
+    return paginate_metadata
 
 
 def replay_component_get_xml(answers: Optional[Mapping[str, Dict[str, Any]]] = None):
@@ -696,6 +752,7 @@ def replay_component_get_xml(answers: Optional[Mapping[str, Dict[str, Any]]] = N
 
 
 _GET_XML = "boomi_mcp.categories.components._shared.component_get_xml"
+_PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
 
 def case_plan_result(case: Case):

@@ -516,6 +516,98 @@ def test_the_replay_identity_stand_in_is_not_vacuous():
     assert not wrong_family.validation_report.is_valid
 
 
+def _name_bound_reuse_cases(cases):
+    """The cases whose canonical request reuses a connection BY NAME only (a
+    ``reuse`` connection in component material with a name and no id) — read
+    from the fixtures, never listed by hand."""
+
+    def connections(node):
+        if isinstance(node, dict):
+            if node.get("mode") == "reuse" and "connection" not in node:
+                yield node
+            for value in node.values():
+                yield from connections(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from connections(value)
+
+    found = {}
+    for case_id, case in cases.items():
+        intent = (case.input_canonical or {}).get("intent") or {}
+        for invocation in intent.get("invocations") or ():
+            for connection in connections(invocation.get("component_material") or {}):
+                if connection.get("component_name") and not connection.get("component_id"):
+                    found.setdefault(case_id, set()).add(connection["component_name"])
+    return found
+
+
+def test_a_name_bound_reuse_plans_with_its_capture_and_serves_the_resolved_id(cases):
+    """#159 S2 (S2-D6a), measured: the name-bound reuse cases (the two DB
+    listeners and both API->DB cases) plan AND compile once the replay answers
+    the account's name query with the pinned capture
+    (``cap159-s2-name-identity``) — and then the reused endpoint serves the
+    plan-resolved ``component_id`` beside the name (the projector's reviewed
+    B12 rule), which the frozen legacy row does not carry. Unbound, the rows
+    reproduce exactly and the one unresolved step is that reuse. Which plan
+    the row oracle reads is an integrator decision; this pins both halves."""
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1, plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    named = _name_bound_reuse_cases(cases)
+    rows = acct.replay_identity_names()
+    assert set(named) == {
+        "api_to_database_sync/create", "api_to_database_sync/source_reuse",
+        "http_listener_to_db/advanced_runtime", "http_listener_to_db/plain",
+    }
+    for case_id, names in sorted(named.items()):
+        case = cases[case_id]
+        assert names <= set(rows), case_id
+        request = AuthoringRequestV1.model_validate(case.input_canonical)
+        with patch(_PAGINATE, acct.replay_paginate_metadata()), \
+                patch(acct._GET_XML, acct.replay_component_get_xml()):
+            bound, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile="issue-157-replay")
+            compiled, _ = compile_authoring_request_v1(request, boomi_client=MagicMock(), profile="issue-157-replay")
+        assert bound.validation_report.is_valid and not bound.errors, case_id
+        assert compiled.validation_report.is_valid, case_id
+        served = [r.model_dump(mode="json", exclude_unset=True) for r in bound.integration_spec_preview.endpoints]
+        assert len(served) == len(case.endpoint_rows), case_id
+        for got, frozen in zip(served, case.endpoint_rows):
+            expected = dict(frozen["payload"])
+            if expected.get("binding_mode") == "reuse" and expected.get("component_name") in names:
+                expected["component_id"] = rows[expected["component_name"]]["component_id"]
+            assert got == expected, (case_id, frozen["key"])
+        # Unbound (the replay's established boundary): exact rows, one blocked step.
+        with patch(_PAGINATE, lambda *a, **k: []):
+            unbound = acct.case_plan_result(case)
+            assert [acct._digest(r) for r in derive_case_endpoints(case)] == [
+                r["payload_sha256"] for r in case.endpoint_rows
+            ], case_id
+        assert {(d.path, tuple(d.cause_codes)) for d in unbound.errors} == {
+            ("/components/target_db_connection", ("error_missing_target",))
+        }, case_id
+    # Non-vacuity of the stand-in: a name nobody bound is still unanswered.
+    from boomi_mcp.categories.integration_builder import (
+        ComponentMetadataQueryConfig,
+        ComponentMetadataQueryConfigQueryFilter,
+        ComponentMetadataSimpleExpression,
+        ComponentMetadataSimpleExpressionOperator,
+        ComponentMetadataSimpleExpressionProperty,
+    )
+
+    def query(component_type):
+        return ComponentMetadataQueryConfig(query_filter=ComponentMetadataQueryConfigQueryFilter(
+            expression=ComponentMetadataSimpleExpression(
+                operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
+                property=ComponentMetadataSimpleExpressionProperty.TYPE,
+                argument=[component_type],
+            )))
+
+    answer = acct.replay_paginate_metadata()
+    assert [r["name"] for r in answer(None, query("connector-settings"))] == ["<<existing DB connection>>"]
+    assert answer(None, query("connector-action")) == []
+    assert acct.replay_paginate_metadata({})(None, query("connector-settings")) == []
+
+
 def test_the_import_blocker_refuses_a_known_forbidden_import(batch):
     """Non-vacuity: in that same child a deliberate legacy import IS refused, and
     the simulated deregistration really removed what it claims to."""
