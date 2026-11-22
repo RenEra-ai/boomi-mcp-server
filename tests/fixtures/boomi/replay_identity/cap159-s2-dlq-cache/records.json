@@ -1,0 +1,23 @@
+[
+  {
+    "scenario": "cap159-s2-dlq-cache",
+    "capture": "dlq-cache-unprofiled",
+    "component_id": "4f436363-d5d5-4e93-8ac0-cce6f3245449",
+    "version_marker": "1",
+    "component_name": "New Document Cache",
+    "sha256_archived_bytes": "955ed46aed3a386332d02201c2baabda122fd4b56c12e27af076abf1f7c24111",
+    "byte_length": 1223,
+    "derived_from": {
+      "path": "tests/fixtures/live_xml/m11/documentcache_profile_key_component.xml",
+      "sha256": "9a4bab3ed6516874ea785caff8e1d1b4168287b9c556e07b846da9b90417f394",
+      "kind": "live platform ComponentGet capture of a Document Cache (profiled, profile.json)"
+    },
+    "byte_transform": "the one DocumentCache element's attributes profile=\"a8471eb5-adc7-4311-95c8-f27c2ea31808\" profileType=\"profile.json\" rewritten to profile=\"\" profileType=\"profile.none\"; every other byte is the capture's own (the transform the architect retry probe probe_b_cache_states.py applied; reproduced by tests/patterns/test_database_to_api_sync_contract.py::l1_unprofiled_cache_xml)",
+    "binds_placeholder_ids": [
+      "<<dlq document cache component id>>"
+    ],
+    "binding_rule": "#159 S2 (architect retry decision): the frozen #157 DB-to-API DLQ cases name their dead-letter Document Cache by a PLACEHOLDER id; the offline replay answers the account read for that placeholder with an UNPROFILED cache, the only kind the connector-scoped double guard (DB-profile and JSON-profile documents) can route into. The case inputs are not changed.",
+    "operable_evidence": [],
+    "open_evidence": "No live capture of an unprofiled Document Cache exists in the repository; live QA should capture one (profileType=\"profile.none\") and replace this transform."
+  }
+]

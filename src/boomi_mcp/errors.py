@@ -53,6 +53,14 @@ COMPOSITION_COMPONENT_KEY_COLLISION = "COMPOSITION_COMPONENT_KEY_COLLISION"
 # value-free with this cause (never echoing the submitted name or value).
 FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED = "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED"
 
+# --- DB -> REST sync preset (#159 S2, architect retry decision) ---------------
+# ``boomi.archetype.database_to_api_sync`` 1.0.0 parses
+# ``reliability.retry.max_attempts`` in 1..6 and refuses 2..6 with this cause
+# before anything is assembled: a retried REST send needs an attested
+# operation grant (a POST operation record) the public path does not have yet
+# (tracked as issue #199). 1 is the only supported value; nothing is reduced.
+DB_TO_API_RETRY_UNAVAILABLE = "DB_TO_API_RETRY_UNAVAILABLE"
+
 # --- Safe existing-component edit workflow (M9.7 / issue #97) -----------------
 COMPONENT_EDIT_RAW_XML_UNSUPPORTED = "COMPONENT_EDIT_RAW_XML_UNSUPPORTED"
 COMPONENT_EDIT_CONFIRMATION_REQUIRED = "COMPONENT_EDIT_CONFIRMATION_REQUIRED"

@@ -1,0 +1,118 @@
+{
+  "expected": {
+    "execution_profiles": {
+      "main_process": "scheduled"
+    },
+    "process_keys": [
+      "main_process"
+    ],
+    "references": {
+      "main_process": [
+        "source_db_connection",
+        "source_db_get_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+        "transform_transform_map"
+      ]
+    },
+    "supporting_component_keys": [
+      "source_db_connection",
+      "source_db_read_profile",
+      "source_db_get_operation",
+      "transform_target_profile",
+      "transform_transform_map",
+      "target_rest_connection",
+      "target_rest_operation"
+    ]
+  },
+  "provenance": {
+    "derivation": "raw_input/component_material = tests/patterns/test_database_to_api_sync_contract.py::l1_canonical_request over the frozen #157 case's legacy archetype parameters (create DB + create REST, DLQ off, no watermark); supporting_component_keys = the baseline archetype's emitted component list for this case in order (process entry dropped), as recorded in the case's pre-migration direct-unit input.canonical.json at git ad3d01c; references = that baseline main process's depends_on, sorted; scheduled = connector source entry (the root's first step is a DB source). One re-spelled value: the source host db.internal -> db.example.invalid (the seed convention's example-host rule); no served key or reference depends on it.",
+    "source": "tests/fixtures/governance/issue_157/cases/database_to_api_sync/wm_off_dlq_off_create/input.legacy.json",
+    "source_sha256": "3c20120e54e7bc8b2da18e0e75a6be57177f47b65cdff86a9d92f46542f51e40"
+  },
+  "recipe_id": "boomi.archetype.database_to_api_sync",
+  "recipe_version": "1.0.0",
+  "request": {
+    "component_material": {
+      "payload_profile": {
+        "format": "json",
+        "root": {
+          "children": [
+            {
+              "data_type": "character",
+              "kind": "simple",
+              "name": "target_a"
+            }
+          ],
+          "kind": "object",
+          "name": "Root"
+        }
+      },
+      "source": {
+        "connection": {
+          "credential_ref": "credential://secrets/db/svc_sync",
+          "database": "AppDB",
+          "driver": "microsoft_jdbc",
+          "host": "db.example.invalid",
+          "mode": "create",
+          "username": "svc_sync"
+        },
+        "read": {
+          "result_fields": [
+            {
+              "data_type": "character",
+              "name": "source_field_a"
+            }
+          ],
+          "sql": "<<user-authored DB read statement>>"
+        }
+      },
+      "target": {
+        "connection": {
+          "base_url": "https://api.example.com",
+          "mode": "create"
+        },
+        "operation": {
+          "path": "/v1/items",
+          "query_parameters": []
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "source_field_a",
+            "target_path": "Root/target_a"
+          }
+        ]
+      },
+      "version": "1"
+    },
+    "integration_name": "Matrix DB to API sync 1.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "naming": {
+        "component_prefix": "DEMO"
+      },
+      "process_key": "main_process",
+      "reliability": {
+        "retry": {
+          "max_attempts": 1
+        }
+      },
+      "source": {
+        "auth_mode": "username_password",
+        "binding_mode": "create"
+      },
+      "target": {
+        "binding_mode": "create",
+        "method": "POST"
+      },
+      "transform": {
+        "map_label": "Map source to JSON payload"
+      },
+      "version": "1"
+    }
+  },
+  "seed_format": "1"
+}

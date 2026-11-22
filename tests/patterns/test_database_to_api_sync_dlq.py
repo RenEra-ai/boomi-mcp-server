@@ -483,3 +483,283 @@ def test_archetype_notify_shape_sequence():
     assert len(loads) == 2
     for load in loads:
         assert list(load.find("dragpoints")) == []
+
+
+# ===========================================================================
+# #159 S2 lane L1 — reliability of the typed preset
+# ``boomi.archetype.database_to_api_sync`` 1.0.0: connector-scoped Try/Catch,
+# the dead-letter cache, catch Notify, and the architect retry decision.
+# ===========================================================================
+
+import test_database_to_api_sync_contract as _l1  # noqa: E402  (sibling test module)
+import pytest as _pytest  # noqa: E402
+
+
+def _l1_inputs(case_id="wm_off_dlq_on_create"):
+    intent = copy.deepcopy(_l1.l1_case(case_id).input_canonical["intent"])
+    invocation = intent["invocations"][0]
+    return intent, invocation["raw_input"], invocation["component_material"]
+
+
+def _l1_root(raw):
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    unit = preset.emit_database_to_api_sync(preset.DatabaseToApiSyncInputV1.model_validate(raw))[0].unit
+    return unit.process_ir.model_dump(mode="json", exclude_none=True)
+
+
+def test_l1_root_shapes_follow_the_dead_letter_cache():
+    """Without a DLQ: the plain linear chain (the legacy route emits no
+    Try/Catch). With one: golden-000086's connector-scoped double guard, retry
+    count ZERO in both, no idempotency block, each catch an optional Notify
+    then Add to Cache into the DLQ cache."""
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_off_create")
+    assert [s["kind"] for s in _l1_root(raw)["body"]["steps"]] == ["source", "map_ref", "target", "stop"]
+
+    for case_id in ("wm_off_dlq_on_create", "wm_on_dlq_on_reuse"):
+        _intent, raw, _material = _l1_inputs(case_id)
+        steps = _l1_root(raw)["body"]["steps"]
+        assert [s["kind"] for s in steps] == ["try_catch", "map_ref", "try_catch"], case_id
+        read_guard, _map, send_guard = steps
+        notify = raw["reliability"].get("catch_notify")
+        for guard in (read_guard, send_guard):
+            assert guard["scope"] == "connector" and guard["retry"]["count"] == 0
+            expected_steps = (
+                [{"kind": "notify", "level": notify["level"], "message_template": notify["message_template"]}]
+                if notify else []
+            )
+            assert [
+                {k: v for k, v in step.items() if k in ("kind", "level", "message_template")}
+                for step in guard["catch_body"]["steps"]
+            ] == expected_steps, case_id
+            assert guard["catch_body"]["terminal"] == {
+                "kind": "cache_put", "cache_ref": "$ref:dlq_cache", "label": "Route caught errors to DLQ cache"}
+            (call,) = guard["try_body"]["steps"]
+            assert call["kind"] == "connector_call" and "idempotency" not in call
+        assert read_guard["try_body"]["terminal"] == {"kind": "continue"}
+        assert send_guard["try_body"]["terminal"] == {"kind": "stop"}
+        assert read_guard["try_body"]["steps"][0]["operation_ref"] == "$ref:source_db_get_operation"
+        assert send_guard["try_body"]["steps"][0]["operation_ref"] == "$ref:target_rest_operation"
+
+
+def test_l1_catch_notify_refusals():
+    """Value-free input refusals: no caught-error token, an unsupported level,
+    an extra channel key, and a Notify without a dead-letter cache."""
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    for case_id, catch_notify in (
+        ("wm_off_dlq_on_create", {"level": "ERROR", "message_template": "static text, no token"}),
+        ("wm_off_dlq_on_create", {"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]}),
+        ("wm_off_dlq_on_create", {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"],
+                                  "email_to": "ops@example.invalid"}),
+        ("wm_off_dlq_off_create", dict(_CATCH_NOTIFY)),
+    ):
+        _intent, raw, _material = _l1_inputs(case_id)
+        raw["reliability"]["catch_notify"] = catch_notify
+        with _pytest.raises(ValidationError) as caught:
+            preset.DatabaseToApiSyncInputV1.model_validate(raw)
+        assert "ops@example.invalid" not in str(caught.value.errors(include_input=False))
+
+
+# --- retry evidence (architect decision) ------------------------------------
+
+
+def test_l1_retry_above_one_is_refused_not_reduced():
+    """The frozen ``wm_on_dlq_on_reuse`` legacy input asks for 5 attempts. The
+    preset refuses 2..6 — in the preparer's FIRST step and in the executor —
+    with ``DB_TO_API_RETRY_UNAVAILABLE``, before anything is assembled."""
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+    from boomi_mcp.recipes.errors import RecipeError
+
+    for attempts in (2, 5, 6):
+        _intent, raw, material = _l1_inputs("wm_on_dlq_on_reuse")
+        raw["reliability"]["retry"]["max_attempts"] = attempts
+        inp = preset.DatabaseToApiSyncInputV1.model_validate(raw)
+        for call in (
+            # An EMPTY base catalog: a step past the retry rule would refuse the DLQ base.
+            lambda: preset.prepare_database_to_api_sync(
+                inp, preset.DatabaseToApiSyncMaterialV1.model_validate(material), base_catalog={}),
+            lambda: preset.emit_database_to_api_sync(inp),
+        ):
+            with _pytest.raises(RecipeError) as caught:
+                call()
+            (diagnostic,) = caught.value.diagnostics
+            assert diagnostic.code == "RECIPE_CONSTRAINT_FAILED"
+            assert diagnostic.cause_codes == ("DB_TO_API_RETRY_UNAVAILABLE",)
+            assert diagnostic.path == "/raw_input/reliability/retry/max_attempts"
+
+
+def test_l1_retry_five_is_refused_through_the_public_planner():
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError
+
+    request = copy.deepcopy(_l1.l1_case("wm_on_dlq_on_reuse").input_canonical)
+    request["intent"]["invocations"][0]["raw_input"]["reliability"]["retry"]["max_attempts"] = 5
+    with _pytest.raises(AuthoringWorkflowError) as caught:
+        _l1.l1_plan(request, client=None)
+    assert "DB_TO_API_RETRY_UNAVAILABLE" in str(caught.value.diagnostics)
+
+
+def test_l1_retry_input_is_strict_and_carries_no_idempotency_field():
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    for retry in ({"max_attempts": 0}, {"max_attempts": 7}, {"max_attempts": "1"}, {"max_attempts": True},
+                  {"max_attempts": 1.0},
+                  {"max_attempts": 1, "idempotency": {"kind": "key_reference", "contract_ref": "$ref:x"}}):
+        _intent, raw, _material = _l1_inputs("wm_off_dlq_on_create")
+        raw["reliability"]["retry"] = retry
+        with _pytest.raises(ValidationError):
+            preset.DatabaseToApiSyncInputV1.model_validate(raw)
+
+
+# --- the dead-letter cache ------------------------------------------------------
+
+
+def test_l1_dlq_cache_must_be_an_existing_reference_only_document_cache():
+    intent, raw, material = _l1_inputs("wm_off_dlq_on_create")
+    (cache,) = intent["base_components"]
+    missing = _l1._l1_refusal(raw, material, ())
+    assert missing == (("COMPOSITION_CONTRACT_MISMATCH",), "/raw_input/reliability/dlq/cache_key")
+    wrong_type = copy.deepcopy(cache)
+    wrong_type["type"] = "connector-settings"
+    assert _l1._l1_refusal(raw, material, (wrong_type,)) == missing
+    written = copy.deepcopy(cache)
+    written["config"].pop("reference_only")
+    assert _l1._l1_refusal(raw, material, (written,)) == missing
+    prepared = _l1._l1_prepare(raw, material, (cache,))
+    assert "dlq_cache" in prepared.selected_base_keys
+    assert prepared.projection_facts.reliability.dlq_component_key == "dlq_cache"
+
+
+def _l1_dlq_plan_causes(xml):
+    request = _l1.l1_case("wm_off_dlq_on_create").input_canonical
+    cache_id = request["intent"]["base_components"][0]["config"]["component_id"]
+    result, _internals = _l1.l1_plan(request, answers=_l1.l1_cache_answers(cache_id, xml))
+    return [(d.cause_codes, d.path) for d in result.errors]
+
+
+def test_l1_dlq_cache_stored_profile_decides_the_plan():
+    """The workflow reads the cache's STORED XML; the compiler's profile rule
+    admits an unprofiled cache and refuses one that is profiled (it cannot
+    admit both the DB and the JSON documents the two catch legs route) or that
+    cannot be read."""
+    assert _l1_dlq_plan_causes(_l1.l1_unprofiled_cache_xml()) == []
+    for xml in (_l1.l1_profiled_cache_xml(), None):
+        causes = _l1_dlq_plan_causes(xml)
+        assert causes and all(c == ("PROCESS_IR_SEMANTIC_PROFILE_MISMATCH",) for c, _p in causes), causes
+        assert {p.rsplit("/", 1)[-1] for _c, p in causes} == {"cache_ref"}
+
+
+# --- process XML parity with the legacy route ---------------------------------
+
+
+def _l1_canonical_process_xml(dlq=None, catch_notify=None, name="Archetype DLQ Golden"):
+    """The preset's materialized process for ``arch_params`` (the archetype
+    goldens' own input), through the public plan -> compile -> late binding ->
+    canonical materialization, with the goldens' frozen ids."""
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+
+    legacy = {"parameters": _params(copy.deepcopy(dlq) if dlq else None, None, catch_notify)}
+    if dlq:
+        legacy["parameters"]["reliability"]["dlq"]["target"]["document_cache_id"] = _corpus.ARCH_CACHE_ID
+    request = _l1.l1_canonical_request("arch_golden", legacy, "Map source to JSON payload")
+    raw = request["intent"]["invocations"][0]["raw_input"]
+    raw["naming"].update({"process_name": name, "folder_name": "Golden/Fixtures"})
+    result, internals = _l1.l1_plan(request, client=None)
+    assert not result.errors, [(d.cause_codes, d.path) for d in result.errors]
+    unit = internals.normalized.integration_spec.processes[0]
+    plan = build_materialization_plan(
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
+        symbols=internals.symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+    ids = {
+        "source_db_connection": _corpus.ARCH_DB_CONN_ID,
+        "source_db_get_operation": _corpus.ARCH_DB_OP_ID,
+        "transform_transform_map": _corpus.ARCH_MAP_ID,
+        "target_rest_connection": _corpus.ARCH_REST_CONN_ID,
+        "target_rest_operation": _corpus.ARCH_REST_OP_ID,
+        "dlq_cache": _corpus.ARCH_CACHE_ID,
+    }
+    return materialize_canonical_process_xml(plan=plan, id_registry=ids, symbols=internals.symbols)
+
+
+def test_l1_process_xml_equals_the_archetype_goldens_and_the_legacy_builder():
+    """The frozen archetype goldens (DLQ: ``try_catch_dlq_document_cache_archetype.xml``;
+    notify DLQ: golden-000088 ``issue184_cache_notify_archetype_terminal.xml``,
+    frozen independently of both builders) and, without a DLQ, the legacy
+    builder's own rendering of the same input."""
+    assert _l1_canonical_process_xml(dlq=_WIRED_DC) == _GOLDEN.read_text()
+    assert _l1_canonical_process_xml(
+        dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
+    ) == _NOTIFY_GOLDEN.read_text()
+    assert _l1_canonical_process_xml(name="Archetype DLQ Golden") == _build_archetype_process_xml(_emit())
+
+
+_L1_XML_IDS = {
+    "source_db_connection": _corpus.ARCH_DB_CONN_ID,
+    "source_db_get_operation": _corpus.ARCH_DB_OP_ID,
+    "transform_transform_map": _corpus.ARCH_MAP_ID,
+    "target_rest_connection": _corpus.ARCH_REST_CONN_ID,
+    "target_rest_operation": _corpus.ARCH_REST_OP_ID,
+    "dlq_cache": _corpus.ARCH_CACHE_ID,
+}
+
+
+def test_l1_each_frozen_case_materializes_the_legacy_builder_process():
+    """Per frozen case: the preset's canonical process XML equals the legacy
+    builder's rendering of the legacy archetype's process for the SAME case,
+    under the same late-bound ids. The one exact difference is the measured
+    retry restriction: ``wm_on_dlq_on_reuse``'s legacy send guard retries 4
+    times; the preset refuses that input, so its fixture carries one attempt."""
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+    from boomi_mcp.categories.components.builders import ProcessFlowBuilder
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import (
+        _materializer_revision,
+        _resolve_dependency_tokens,
+    )
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+
+    for case_id in _l1.L1_CASE_IDS:
+        process = next(c for c in _l1._l1_legacy_spec(case_id)["components"] if c["type"] == "process")
+        config = copy.deepcopy(process["config"])
+        dlq = config.get("reliability", {}).get("dlq", {})
+        if dlq.get("document_cache_id"):
+            dlq["document_cache_id"] = _L1_XML_IDS["dlq_cache"]
+        legacy = ProcessFlowBuilder.build(
+            _resolve_dependency_tokens(config, _L1_XML_IDS),
+            name=process["name"], folder_name=config.get("folder_name"),
+        )
+        if case_id == "wm_on_dlq_on_reuse":
+            assert legacy.count('retryCount="4"') == 1 and legacy.count("(retry 4)") == 1
+            legacy = legacy.replace('retryCount="4"', 'retryCount="0"').replace("(retry 4)", "(no retry)")
+        result, internals = _l1.l1_plan(_l1.l1_case(case_id).input_canonical, client=None)
+        assert not result.errors, (case_id, [(d.cause_codes, d.path) for d in result.errors])
+        unit = internals.normalized.integration_spec.processes[0]
+        plan = build_materialization_plan(
+            envelope=unit.envelope, process_ir=unit.process_ir, symbols=internals.symbols,
+            conflict_policy="reuse",
+            compiler_revision=get_authoring_revisions()["compiler_revision"],
+            emitter_revision=emitter_revision(), materializer_revision=_materializer_revision(),
+        )
+        emitted = materialize_canonical_process_xml(
+            plan=plan, id_registry=dict(_L1_XML_IDS), symbols=internals.symbols
+        )
+        assert emitted == legacy, case_id
