@@ -5513,7 +5513,13 @@ def _discover_profile_index(
     if _reads is not None:
         # B20-4: the phase's ONE budget, and a profile already read this phase
         # is not read again.
-        component = _reads.fetch(component_id, refetch=_PHASE_READS_FRESH.get())
+        # A fresh scope re-reads each id ONCE (the first fresh answer then serves
+        # the rest of the scope); outside one, the phase cache answers.
+        _refreshed = _PHASE_READS_FRESH.get()
+        _refetch = _refreshed is not None and component_id not in _refreshed
+        component = _reads.fetch(component_id, refetch=_refetch)
+        if _refreshed is not None:
+            _refreshed.add(component_id)
     else:
         try:
             component = component_get_xml(boomi_client, component_id)
@@ -10260,12 +10266,27 @@ def _apply_plan(
     # must be seen before any map is written.
     with phase_reads(_apply_reads, fresh=True):
         literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
+        # B22 review: only a reused profile a transform map REFERENCES is ever
+        # consulted at apply, so only those are refreshed — an unrelated slow
+        # profile must not spend the budget a map's own profile needs.
+        _map_refs = {
+            value[len("$ref:"):].strip()
+            for comp in spec.components
+            if getattr(comp, "type", None) == "transform.map"
+            for side in ("source_profile_id", "target_profile_id")
+            for value in [(comp.config or {}).get(side)]
+            if isinstance(value, str) and value.startswith("$ref:")
+        }
         selected_profile_indexes = _resolve_selected_profile_indexes(
             boomi_client,
             spec,
-            reused_keys=_keys_reused_at_apply(
-                spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
-            ),
+            reused_keys=[
+                key
+                for key in _keys_reused_at_apply(
+                    spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+                )
+                if key in _map_refs
+            ],
             conflict_policy=conflict_policy,
         )
 

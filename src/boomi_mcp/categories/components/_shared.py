@@ -55,8 +55,10 @@ _PHASE_READS: "contextvars.ContextVar[Any]" = contextvars.ContextVar(
 #: B21 review: inside a ``phase_reads(..., fresh=True)`` scope a profile read
 #: BYPASSES the phase cache (a freshness check must see the account now) while
 #: still spending the phase's one budget.
-_PHASE_READS_FRESH: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
-    "boomi_phase_reads_fresh", default=False
+#: The value is the SET of ids already re-read in this fresh scope (``None``
+#: outside one): each id is re-read at most ONCE per scope (B22 review).
+_PHASE_READS_FRESH: "contextvars.ContextVar[Any]" = contextvars.ContextVar(
+    "boomi_phase_reads_fresh", default=None
 )
 
 
@@ -74,7 +76,7 @@ class phase_reads:
 
     def __enter__(self):
         self._token = _PHASE_READS.set(self._reads)
-        self._fresh_token = _PHASE_READS_FRESH.set(self._fresh)
+        self._fresh_token = _PHASE_READS_FRESH.set(set() if self._fresh else None)
         return self._reads
 
     def __exit__(self, *exc):

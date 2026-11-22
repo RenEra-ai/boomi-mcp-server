@@ -3628,9 +3628,36 @@ def test_b21_02_the_pre_write_profile_refresh_spends_the_phase_budget(monkeypatc
 
 
 def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache():
-    """B21 review: the pre-write refresh is a FRESHNESS check — a profile the
-    execution plan read moments ago is read AGAIN (not answered from the phase
-    cache), so an edit made after `_build_plan` is seen before any map is written."""
+    """B21 review + B22 review: inside the pre-write refresh scope a profile is
+    RE-READ (not answered from the phase cache) — and each id only ONCE per
+    scope, so a map naming one profile twice does not spend the budget twice."""
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components._shared import phase_reads
+
+    asked = []
+
+    class _Reads:
+        def fetch(self, component_id, *, refetch=False):
+            asked.append((component_id, refetch))
+            return None
+
+    reads = _Reads()
+    with phase_reads(reads):
+        integration_builder._discover_profile_index(None, _JSON_PROFILE_ID)
+    with phase_reads(reads, fresh=True):
+        integration_builder._discover_profile_index(None, _JSON_PROFILE_ID)
+        integration_builder._discover_profile_index(None, _JSON_PROFILE_ID)
+    assert asked == [
+        (_JSON_PROFILE_ID, False),  # the plan's read: the cache may answer
+        (_JSON_PROFILE_ID, True),   # the refresh: re-read
+        (_JSON_PROFILE_ID, False),  # the same id again in the scope: not re-read
+    ], asked
+
+
+def test_b22r_an_unreferenced_reused_profile_is_not_refreshed_before_writes():
+    """B22 review: only a reused profile a transform map references is consulted
+    at apply, so only those are refreshed — an unrelated profile's read must not
+    spend the budget a map's own profile needs."""
     from unittest import mock
 
     from boomi_mcp.categories import integration_builder
@@ -3640,7 +3667,7 @@ def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache
 
     def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
         calls.append(component_id)
-        raise RuntimeError("unreadable")  # fast; the reading is None either way
+        raise RuntimeError("unreadable")
 
     spec = {"integration_name": "Raw", "components": [
         {"key": "prof", "type": "profile.json", "name": "Existing Profile", "action": "create",
@@ -3654,7 +3681,7 @@ def test_b21r_the_pre_write_refresh_re_reads_instead_of_answering_from_the_cache
         integration_builder.build_integration_action(
             mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
         )
-    assert calls.count(_JSON_PROFILE_ID) >= 2, calls
+    assert calls.count(_JSON_PROFILE_ID) == 1, calls  # the plan's read only
 
 
 @pytest.mark.parametrize("delimiter", ["?mode=full", "#frag"])
