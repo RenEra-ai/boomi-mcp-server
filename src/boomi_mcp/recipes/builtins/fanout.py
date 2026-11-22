@@ -419,7 +419,9 @@ from ..component_material import (  # noqa: F401 — re-exports
     authorize_db_connection,
     check_connection_binding,
     check_credential_boundary,
-    db_connection_params,
+    emit_db_read_components,
+    emit_rest_send_components,
+    emit_transform_components,
     check_rest_request,
     material_field_classes,
     register_material_root,
@@ -1502,70 +1504,18 @@ def _emit_db_components_v2(
     keys: _FanoutKeysV2,
     context: PrimitiveBuildContext,
 ) -> _List[IntegrationComponentSpec]:
-    """Port of ``_build_db_extract_params`` + ``_rt().DbExtractPrimitive``.
+    """Port of ``_build_db_extract_params`` + ``_rt().DbExtractPrimitive``,
+    through the shared DB-read assembly (:func:`emit_db_read_components`).
 
     Connection values and result fields are the AUTHORITY-validated ones."""
-    read = authorized.read
-    # A base-key binding: the connection exists already; only its key is read.
-    # The placeholder selector never reaches a spec (see below).
-    connection_params = db_connection_params(authorized.db, base_connection_key=keys.db_connection)
-
-    read_profile: _Dict[str, _Any] = {
-        "query": read.sql,
-        "output_fields": [
-            {"name": field.name, "data_type": field.data_type, "mandatory": field.required}
-            for field in authorized.result_fields
-        ],
-    }
-    if read.parameters:
-        read_profile["parameters"] = [
-            {"name": parameter.name, "mappable": parameter.direction == "in"}
-            for parameter in read.parameters
-        ]
-    operation: _Dict[str, _Any] = {}
-    if read.batch_size is not None:
-        operation["batch_count"] = read.batch_size
-    if read.max_rows is not None:
-        operation["max_rows"] = read.max_rows
-
-    source_prefix = _namespaced_v2(inp, _rt().SOURCE_PREFIX)
-    params = _builder_check(
-        "/component_material/source",
-        lambda: _rt().DbExtractParameters.model_validate(
-            {
-                "key_prefix": source_prefix,
-                "connection": connection_params,
-                "read_profile": read_profile,
-                "operation": operation,
-                "component_names": {},
-            }
-        ),
+    return emit_db_read_components(
+        authorized.db,
+        authorized.read,
+        context=context,
+        key_prefix=_namespaced_v2(inp, _rt().SOURCE_PREFIX),
+        pointer="/component_material/source",
+        base_connection_key=inp.source.connection_key,
     )
-    if inp.source.connection_key is None:
-        return _builder_check(
-            "/component_material/source",
-            lambda: _rt().DbExtractPrimitive.emit_components(context, params),
-        )
-    folder = context.folder_path
-    return [
-        _builder_check(
-            "/component_material/source/read",
-            lambda: _rt().DbExtractPrimitive._emit_read_profile(
-                context, params, keys.db_read_profile, folder
-            ),
-        ),
-        _builder_check(
-            "/component_material/source/read",
-            lambda: _rt().DbExtractPrimitive._emit_get_operation(
-                context,
-                params,
-                keys.db_get_operation,
-                keys.db_connection,
-                keys.db_read_profile,
-                folder,
-            ),
-        ),
-    ]
 
 
 def _emit_transform_components_v2(
@@ -1575,67 +1525,24 @@ def _emit_transform_components_v2(
     keys: _FanoutKeysV2,
     context: PrimitiveBuildContext,
 ) -> _List[IntegrationComponentSpec]:
-    """Port of ``_build_field_map_params`` + ``_rt().FieldMapPrimitive``.
-
-    Map scripts take the primitive's script-component REFERENCE path: the
-    script is a base component, referenced by ``$ref``, never inlined.
-    """
-    direct: _List[_Dict[str, _Any]] = []
-    functions: _List[_Dict[str, _Any]] = []
-    scripts: _List[_Dict[str, _Any]] = []
-    for operation in authorized.operations:
-        if isinstance(operation, FanoutDirectOperationV2):
-            direct.append(
-                {"source_field": operation.source_field, "target_path": operation.target_path}
-            )
-        elif isinstance(operation, FanoutFunctionOperationV2):
-            entry: _Dict[str, _Any] = {
-                "function_type": operation.function_type,
-                "inputs": list(operation.inputs),
-                "target_path": operation.target_path,
-            }
-            if operation.parameters:
-                entry["parameters"] = {
-                    parameter.name: parameter.value for parameter in operation.parameters
-                }
-            functions.append(entry)
-        else:
-            scripts.append(
-                {
-                    "inputs": [
-                        {"source_path": name, "input_name": name} for name in operation.inputs
-                    ],
-                    "outputs": [
-                        {"output_name": path.rsplit("/", 1)[-1], "target_path": path}
-                        for path in operation.outputs
-                    ],
-                    "script_component_ref": f"$ref:{operation.script_component_key}",
-                }
-            )
-    params = _builder_check(
-        "/component_material/transform",
-        lambda: _rt().FieldMapParameters.model_validate(
-            {
-                "key_prefix": _namespaced_v2(inp, _rt().TRANSFORM_PREFIX),
-                "source": {
-                    "source_profile_id": f"$ref:{keys.db_read_profile}",
-                    "source_profile_type": "profile.db",
-                    "source_field_index": {
-                        field.name: {"data_type": field.data_type, "mappable": True}
-                        for field in authorized.result_fields
-                    },
-                },
-                "target_payload_profile": material.payload_profile.model_dump(),
-                "direct": direct,
-                "map_function": functions,
-                "map_script": scripts,
-                "component_names": {},
-            }
-        ),
-    )
-    return _builder_check(
-        "/component_material/transform",
-        lambda: _rt().FieldMapPrimitive.emit_components(context, params),
+    """Port of ``_build_field_map_params`` + ``_rt().FieldMapPrimitive``,
+    through the shared transform assembly (:func:`emit_transform_components`):
+    the DB read profile is the source, the ONE shared payload profile the
+    generated target."""
+    return emit_transform_components(
+        authorized.operations,
+        context=context,
+        key_prefix=_namespaced_v2(inp, _rt().TRANSFORM_PREFIX),
+        pointer="/component_material/transform",
+        source={
+            "source_profile_id": f"$ref:{keys.db_read_profile}",
+            "source_profile_type": "profile.db",
+            "source_field_index": {
+                field.name: {"data_type": field.data_type, "mappable": True}
+                for field in authorized.result_fields
+            },
+        },
+        target_payload_profile=material.payload_profile.model_dump(),
     )
 
 
@@ -1648,69 +1555,29 @@ def _emit_target_components_v2(
     context: PrimitiveBuildContext,
     material_index: int,
 ) -> _List[IntegrationComponentSpec]:
-    """Port of ``_fanout_target_params`` + ``_rt().RestSendWithRetryPrimitive``.
+    """Port of ``_fanout_target_params`` + ``_rt().RestSendWithRetryPrimitive``,
+    through the shared REST-send assembly (:func:`emit_rest_send_components`).
 
     The base URL, reuse selector, path and query parameters are the
     AUTHORITY-validated values (``validated``), exactly as the legacy route
-    emits ``settings.base_url`` / ``send.path`` / ``qp.name`` (CDX-r1-05)."""
-    prefix, connection_key, operation_key = target_keys
-    base = f"/component_material/targets/{material_index}"
+    emits ``settings.base_url`` / ``send.path`` / ``qp.name`` (CDX-r1-05).
+    Every leg sends the ONE shared payload profile the transform produces."""
+    prefix, _connection_key, _operation_key = target_keys
     label = _derived_label_v2(target)
     connection, request = validated
-    if isinstance(connection, RestCreateSettings):
-        connection_params: _Dict[str, _Any] = {
-            "mode": "create",
-            "base_url": connection.base_url,
-            "auth": _rt().REST_CREATE_AUTH_MAP["none"],
-        }
-    elif connection is not None:
-        connection_params = {"mode": "reuse"}
-        if connection.component_id:
-            connection_params["component_id"] = connection.component_id
-        if connection.component_name:
-            connection_params["component_name"] = connection.component_name
-    else:
-        connection_params = {"mode": "reuse", "component_id": connection_key}
-    operation: _Dict[str, _Any] = {
-        "method": target.method,
-        "path": request.path,
-        # Every leg sends the ONE shared payload profile the transform produces.
-        "request_profile_id": f"$ref:{keys.target_profile}",
-        "request_profile_type": "json",
-    }
-    literal = {
-        parameter.name: parameter.literal_value
-        for parameter in request.query_parameters
-        if parameter.value_source == "literal" and parameter.literal_value is not None
-    }
-    if literal:
-        operation["query_parameters"] = literal
-    params = _builder_check(
-        base,
-        lambda: _rt().RestSendWithRetryParameters.model_validate(
-            {
-                "key_prefix": prefix,
-                "connection": connection_params,
-                "operation": operation,
-                "component_names": {
-                    "connection": f"{context.component_prefix} {label} REST Connection",
-                    "operation": f"{context.component_prefix} {label} REST Send",
-                },
-            }
-        ),
+    return emit_rest_send_components(
+        connection,
+        request,
+        context=context,
+        key_prefix=prefix,
+        pointer=f"/component_material/targets/{material_index}",
+        request_profile_key=keys.target_profile,
+        component_names={
+            "connection": f"{context.component_prefix} {label} REST Connection",
+            "operation": f"{context.component_prefix} {label} REST Send",
+        },
+        base_connection_key=target.connection_key,
     )
-    if target.connection_key is None:
-        return _builder_check(
-            base, lambda: _rt().RestSendWithRetryPrimitive.emit_components(context, params)
-        )
-    return [
-        _builder_check(
-            base + "/operation",
-            lambda: _rt().RestSendWithRetryPrimitive._emit_operation(
-                context, params, operation_key, connection_key, context.folder_path
-            ),
-        )
-    ]
 
 
 def _emit_handoff_cache_v2(

@@ -1634,6 +1634,243 @@ def emit_db_write_components(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Component assembly a preset may reuse (#159 S2, lifted from fan-out 2.0.0)
+# ---------------------------------------------------------------------------
+#
+# Each takes AUTHORITY-validated values (never raw material), a key prefix the
+# primitive derives its role keys from, and the pointer a builder refusal names.
+# No topology, ordinal, handoff, branch or watermark logic lives here.
+
+
+def emit_db_read_components(
+    connection: _Any,
+    read: _Any,
+    *,
+    context: _Any,
+    key_prefix: str,
+    pointer: str,
+    base_connection_key: Optional[str] = None,
+    component_names: Optional[_Mapping[str, str]] = None,
+) -> _List[IntegrationComponentSpec]:
+    """The DB-read group through the ``db_extract`` primitive: connection, read
+    profile and Get operation — or, for a base-key binding
+    (``base_connection_key``), the read profile and Get operation only, bound
+    to that key. ``connection`` is :func:`authorize_db_connection`'s result;
+    ``read`` the validated ``DbReadOperation``. Builder refusals point at
+    ``pointer`` (the group) or ``pointer + "/read"`` (base-bound)."""
+    rt = _rt()
+    connection_params = db_connection_params(
+        connection, base_connection_key=base_connection_key or ""
+    )
+    read_profile: _Dict[str, _Any] = {
+        "query": read.sql,
+        "output_fields": [
+            {"name": field.name, "data_type": field.data_type, "mandatory": field.required}
+            for field in read.result_schema.fields
+        ],
+    }
+    if read.parameters:
+        read_profile["parameters"] = [
+            {"name": parameter.name, "mappable": parameter.direction == "in"}
+            for parameter in read.parameters
+        ]
+    operation: _Dict[str, _Any] = {}
+    if read.batch_size is not None:
+        operation["batch_count"] = read.batch_size
+    if read.max_rows is not None:
+        operation["max_rows"] = read.max_rows
+    params = _builder_check(
+        pointer,
+        lambda: rt.DbExtractParameters.model_validate(
+            {
+                "key_prefix": key_prefix,
+                "connection": connection_params,
+                "read_profile": read_profile,
+                "operation": operation,
+                "component_names": dict(component_names or {}),
+            }
+        ),
+    )
+    if base_connection_key is None:
+        return _builder_check(pointer, lambda: rt.DbExtractPrimitive.emit_components(context, params))
+    read_profile_key = rt.primitive_component_key(key_prefix, rt.ROLE_DB_READ_PROFILE)
+    get_operation_key = rt.primitive_component_key(key_prefix, rt.ROLE_DB_GET_OPERATION)
+    folder = context.folder_path
+    return [
+        _builder_check(
+            pointer + "/read",
+            lambda: rt.DbExtractPrimitive._emit_read_profile(
+                context, params, read_profile_key, folder
+            ),
+        ),
+        _builder_check(
+            pointer + "/read",
+            lambda: rt.DbExtractPrimitive._emit_get_operation(
+                context,
+                params,
+                get_operation_key,
+                base_connection_key,
+                read_profile_key,
+                folder,
+            ),
+        ),
+    ]
+
+
+def emit_transform_components(
+    operations: Tuple[_Any, ...],
+    *,
+    context: _Any,
+    key_prefix: str,
+    pointer: str,
+    source: _Mapping[str, _Any],
+    target_payload_profile: Optional[_Mapping[str, _Any]] = None,
+    target_binding: Optional[_Mapping[str, _Any]] = None,
+    component_names: Optional[_Mapping[str, str]] = None,
+) -> _List[IntegrationComponentSpec]:
+    """The transform group through the ``field_map`` primitive, from the
+    shared mapping leaves AFTER their legacy authorities normalized them
+    (direct / map_function / map_script reference). ``source`` is the
+    primitive's ``SourceBinding``; give exactly one of
+    ``target_payload_profile`` (generate a JSON target profile) or
+    ``target_binding`` (bind an existing profile, e.g. a DB write profile).
+    Map scripts take the primitive's script-component REFERENCE path: the
+    script is a base component, referenced by ``$ref``, never inlined."""
+    rt = _rt()
+    direct: _List[_Dict[str, _Any]] = []
+    functions: _List[_Dict[str, _Any]] = []
+    scripts: _List[_Dict[str, _Any]] = []
+    for operation in operations:
+        if isinstance(operation, FanoutDirectOperationV2):
+            direct.append(
+                {"source_field": operation.source_field, "target_path": operation.target_path}
+            )
+        elif isinstance(operation, FanoutFunctionOperationV2):
+            entry: _Dict[str, _Any] = {
+                "function_type": operation.function_type,
+                "inputs": list(operation.inputs),
+                "target_path": operation.target_path,
+            }
+            if operation.parameters:
+                entry["parameters"] = {
+                    parameter.name: parameter.value for parameter in operation.parameters
+                }
+            functions.append(entry)
+        else:
+            scripts.append(
+                {
+                    "inputs": [
+                        {"source_path": name, "input_name": name} for name in operation.inputs
+                    ],
+                    "outputs": [
+                        {"output_name": path.rsplit("/", 1)[-1], "target_path": path}
+                        for path in operation.outputs
+                    ],
+                    "script_component_ref": f"$ref:{operation.script_component_key}",
+                }
+            )
+    values: _Dict[str, _Any] = {"key_prefix": key_prefix, "source": dict(source)}
+    if target_payload_profile is not None:
+        values["target_payload_profile"] = target_payload_profile
+    if target_binding is not None:
+        values["target_binding"] = dict(target_binding)
+    values.update(
+        {
+            "direct": direct,
+            "map_function": functions,
+            "map_script": scripts,
+            "component_names": dict(component_names or {}),
+        }
+    )
+    params = _builder_check(pointer, lambda: rt.FieldMapParameters.model_validate(values))
+    return _builder_check(pointer, lambda: rt.FieldMapPrimitive.emit_components(context, params))
+
+
+def rest_connection_params(connection: _Any, *, base_connection_key: str) -> _Dict[str, _Any]:
+    """The REST primitive ``connection`` parameters for an AUTHORIZED REST
+    connection: validated ``RestCreateSettings`` (always unauthenticated), a
+    validated ``RestConnectionBinding`` reuse, or — base-key binding
+    (``None``) — a placeholder reuse naming ``base_connection_key``."""
+    from ..patterns.archetype_parameters import RestCreateSettings
+
+    if isinstance(connection, RestCreateSettings):
+        return {
+            "mode": "create",
+            "base_url": connection.base_url,
+            "auth": _rt().REST_CREATE_AUTH_MAP["none"],
+        }
+    if connection is not None:
+        params: _Dict[str, _Any] = {"mode": "reuse"}
+        if connection.component_id:
+            params["component_id"] = connection.component_id
+        if connection.component_name:
+            params["component_name"] = connection.component_name
+        return params
+    return {"mode": "reuse", "component_id": base_connection_key}
+
+
+def emit_rest_send_components(
+    connection: _Any,
+    request: RestSendRequest,
+    *,
+    context: _Any,
+    key_prefix: str,
+    pointer: str,
+    request_profile_key: str,
+    component_names: Optional[_Mapping[str, str]] = None,
+    base_connection_key: Optional[str] = None,
+) -> _List[IntegrationComponentSpec]:
+    """The REST SEND group through the ``rest_send`` primitive: connection and
+    operation — or, for a base-key binding, the operation only, bound to
+    ``base_connection_key``. ``request`` is the validated ``RestSendRequest``;
+    only its LITERAL query parameters are emitted (a watermark-sourced one is
+    recorded intent, never config). The operation sends the JSON profile
+    ``request_profile_key``. Builder refusals point at ``pointer`` (the group)
+    or ``pointer + "/operation"`` (base-bound)."""
+    rt = _rt()
+    connection_params = rest_connection_params(
+        connection, base_connection_key=base_connection_key or ""
+    )
+    operation: _Dict[str, _Any] = {
+        "method": request.method,
+        "path": request.path,
+        "request_profile_id": f"$ref:{request_profile_key}",
+        "request_profile_type": "json",
+    }
+    literal = {
+        parameter.name: parameter.literal_value
+        for parameter in request.query_parameters
+        if parameter.value_source == "literal" and parameter.literal_value is not None
+    }
+    if literal:
+        operation["query_parameters"] = literal
+    params = _builder_check(
+        pointer,
+        lambda: rt.RestSendWithRetryParameters.model_validate(
+            {
+                "key_prefix": key_prefix,
+                "connection": connection_params,
+                "operation": operation,
+                "component_names": dict(component_names or {}),
+            }
+        ),
+    )
+    if base_connection_key is None:
+        return _builder_check(
+            pointer, lambda: rt.RestSendWithRetryPrimitive.emit_components(context, params)
+        )
+    operation_key = rt.primitive_component_key(key_prefix, rt.ROLE_REST_OPERATION)
+    return [
+        _builder_check(
+            pointer + "/operation",
+            lambda: rt.RestSendWithRetryPrimitive._emit_operation(
+                context, params, operation_key, base_connection_key, context.folder_path
+            ),
+        )
+    ]
+
+
 def check_rest_request(
     *,
     connection_key: str,
