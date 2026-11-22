@@ -584,3 +584,1275 @@ def test_flow_records_inert_transform_and_reliability_extras_as_noop():
     # Consumed fields are never recorded as no-ops.
     assert "/transform/mode" not in paths
     assert "/reliability/retry_count" not in paths
+
+
+# ===========================================================================
+# #159 S3 — derived zero-caller census
+# ===========================================================================
+#
+# #159 ends in a STATE: no production code path and no shipped example reaches a
+# legacy process-kind adapter, so #160 removes the adapters, the builder dispatch
+# and the ``flow_sequence`` sub-dialect as a pure deletion. This section is the
+# gate for that state, built BEFORE the migration so it can be watched shrinking.
+#
+# * What is an adapter is DERIVED, never typed out here: the dialect registry
+#   (``legacy_adapters/registry.py``), the alias/authority resolution
+#   (``authority._resolve_process_kind`` / ``_is_authoring_process``), the dialect
+#   split the production bridge uses (``legacy_bridge._adapter_for_config``), the
+#   builder dispatch table (``PROCESS_FLOW_BUILDERS``), pattern discovery
+#   (``PatternRegistry.from_package``) and the composition part model.
+# * The scan is the #149 AST scanner (``tests/_m12_12_legacy_inventory.py``) run
+#   with an ADAPTER vocabulary — leaf pass only, never the served-artifact
+#   collection and never the full fixed-point closure, which is what keeps this
+#   cheap. Leaf call sites are sufficient and fail-closed: a retained route counts
+#   whether or not anything calls it.
+# * ``_PRE_CUTOVER_CENSUS`` pins today's findings; the census must EQUAL it. The
+#   integrator deletes entries as callers migrate. At cutover the list is empty
+#   and ``ZERO_CALLER_CUTOVER_COMPLETE`` flips to ``True`` (one line).
+# * When #160 deletes the registry modules, the census keeps working from
+#   ``_AUDITED_ADAPTER_AUTHORITY`` — the same facts, captured from the
+#   pre-removal registry and pinned against it in both directions while it lives.
+#
+# Nothing in this section imports a legacy module at import time.
+
+import ast as _ast
+import copy as _copy
+import functools as _functools
+import inspect as _inspect
+import types as _types
+import typing as _typing
+
+#: Flip to ``True`` in the same commit that empties ``_PRE_CUTOVER_CENSUS``.
+ZERO_CALLER_CUTOVER_COMPLETE = False
+
+#: The audited adapter authority, retained as TEST DATA so the census survives
+#: #160's physical deletion of the modules it was derived from.
+#:
+#: Provenance: captured at ed17ddee6e55bc65869c4e3009a5df864f2d6579 (#159 S1 tip,
+#: branch codex/issue-159-s1) by ``_live_adapter_authority()`` below, reading
+#: ``legacy_adapters/registry.py`` (``_MIGRATED``, ``RESERVED_DIALECTS``),
+#: ``legacy_adapters/authority.py:206`` (``_resolve_process_kind`` — the
+#: ``.get`` keys it reads), ``process_flow_builder.py:6140`` (``PROCESS_FLOW_BUILDERS``,
+#: its ``__all__`` lookups, and the public methods of each registered class),
+#: ``semantic_validation/legacy_bridge.py`` (its public functions) and the module
+#: files of all of the above. ``test_audited_adapter_authority_matches_the_live_registry``
+#: pins it to the live derivation in BOTH directions; it can only change by a
+#: reviewed edit here, never by drift.
+_AUDITED_ADAPTER_AUTHORITY: _typing.Dict[str, _typing.Any] = {
+    "migrated_dialects": {
+        "database_to_api_sync/flow_sequence":
+            "boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence.adapt_flow_sequence",
+        "sync_pipeline":
+            "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline.adapt_sync_pipeline_config",
+        "wrapper_subprocess":
+            "boomi_mcp.compiler.process_ir.legacy_adapters.wrapper_subprocess.adapt_wrapper_subprocess",
+    },
+    "reserved_dialects": ("database_to_api_sync",),
+    "adapter_callables": (
+        "boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence.adapt_flow_sequence",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.adapter_for",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.is_migrated",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.migrated_dialects",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline.adapt_sync_pipeline",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline.adapt_sync_pipeline_config",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.wrapper_subprocess.adapt_wrapper_subprocess",
+    ),
+    "registry_callables": (
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.adapter_for",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.is_migrated",
+        "boomi_mcp.compiler.process_ir.legacy_adapters.registry.migrated_dialects",
+    ),
+    "builder_kinds": {
+        "database_to_api_sync":
+            "boomi_mcp.categories.components.builders.process_flow_builder.ProcessFlowBuilder",
+        "sync_pipeline":
+            "boomi_mcp.categories.components.builders.process_flow_builder.SyncPipelineBuilder",
+        "wrapper_subprocess":
+            "boomi_mcp.categories.components.builders.process_flow_builder.WrapperSubprocessBuilder",
+    },
+    "builder_tables": ("PROCESS_FLOW_BUILDERS",),
+    "builder_lookups": ("get_process_flow_builder",),
+    "builder_methods": (
+        "build",
+        "lower_config",
+        "redact_forbidden_secret_fields_in_place",
+        "scan_forbidden_secret_fields",
+        "validate_config",
+    ),
+    "semantic_bridge_callables": ("blocking_codes", "validate_legacy_process_config"),
+    "kind_selectors": ("process_kind", "process_type"),
+    "definition_modules": (
+        "src/boomi_mcp/categories/components/builders/process_flow_builder.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/__init__.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/contracts.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/flow_sequence.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/registry.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/sync_pipeline.py",
+        "src/boomi_mcp/compiler/process_ir/legacy_adapters/wrapper_subprocess.py",
+        "src/boomi_mcp/compiler/process_ir/semantic_validation/legacy_bridge.py",
+    ),
+}
+
+#: Census classes that are FINDINGS — every one must be gone at cutover.
+_FINDING_CLASSES = frozenset({
+    "adapter_route",            # production code calling / importing / dispatching an adapter
+    "adapter_producer",         # production code constructing an adapter process config
+    "archetype_dispatch",       # a call into an archetype that authors through an adapter
+    "unclassified",             # fail-closed residue: reaches the vocabulary, cannot be classified
+    "example_process_config",   # a shipped example authoring a process through an adapter config
+    "example_archetype_invocation",
+    "example_composition_invocation",
+})
+
+#: Classified NON-findings, recorded so the census is total and reviewable.
+_NON_FINDING_CLASSES = frozenset({
+    "legacy_definition",        # inside the adapter/builder/bridge modules themselves
+    "validator_selector_read",  # reads the kind selector (a refusal gate may keep doing so)
+    "raw_schema_value",         # module-scope literal: served template / schema data
+    "reexport_declaration",     # the name appears in an ``__all__`` declaration
+})
+
+_UNCLASSIFIED_DIALECT = "<unclassified-dialect>"
+
+
+def _repo_rel(path) -> str:
+    return Path(path).resolve().relative_to(_ROOT).as_posix()
+
+
+def _qualname(obj) -> str:
+    return "%s.%s" % (obj.__module__, obj.__qualname__)
+
+
+def _public_functions(module) -> _typing.Set[str]:
+    return {
+        name for name, obj in vars(module).items()
+        if _inspect.isfunction(obj) and obj.__module__ == module.__name__
+        and not name.startswith("_")
+    }
+
+
+def _selector_keys(function) -> _typing.Tuple[str, ...]:
+    """The literal keys an authority function reads with ``.get(...)``."""
+    tree = _ast.parse(_inspect.cleandoc("\n" + _inspect.getsource(function)))
+    keys = {
+        node.args[0].value
+        for node in _ast.walk(tree)
+        if isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
+        and node.func.attr == "get" and node.args
+        and isinstance(node.args[0], _ast.Constant) and isinstance(node.args[0].value, str)
+    }
+    return tuple(sorted(keys))
+
+
+def _live_legacy_modules():
+    """The legacy authority modules, or ``None`` once #160 has deleted them."""
+    try:
+        from boomi_mcp.categories.components.builders import process_flow_builder as pfb
+        from boomi_mcp.compiler.process_ir.legacy_adapters import authority as auth
+        from boomi_mcp.compiler.process_ir.legacy_adapters import registry as reg
+        from boomi_mcp.compiler.process_ir.semantic_validation import legacy_bridge as bridge
+    except ImportError:
+        return None
+    return _types.SimpleNamespace(pfb=pfb, auth=auth, reg=reg, bridge=bridge)
+
+
+def _live_adapter_authority() -> _typing.Optional[_typing.Dict[str, _typing.Any]]:
+    """Derive the adapter authority from the live registry, dispatch and bridge."""
+    mods = _live_legacy_modules()
+    if mods is None:
+        return None
+    pfb, auth, reg, bridge = mods.pfb, mods.auth, mods.reg, mods.bridge
+    adapter_modules = sorted({fn.__module__ for fn in reg._MIGRATED.values()})
+    adapter_callables = set()
+    for name in adapter_modules:
+        module = sys.modules[name]
+        adapter_callables |= {"%s.%s" % (name, fn) for fn in _public_functions(module)}
+    registry_callables = {"%s.%s" % (reg.__name__, fn) for fn in _public_functions(reg)}
+    builder_classes = tuple(pfb.PROCESS_FLOW_BUILDERS.values())
+    tables = sorted(
+        name for name in pfb.__all__
+        if isinstance(getattr(pfb, name, None), dict) and getattr(pfb, name)
+        and all(value in builder_classes for value in getattr(pfb, name).values())
+    )
+    lookups = sorted(n for n in pfb.__all__ if _inspect.isfunction(getattr(pfb, n, None)))
+    methods = sorted({
+        name for cls in builder_classes for name, value in vars(cls).items()
+        if not name.startswith("_")
+        and isinstance(value, (classmethod, staticmethod, _types.FunctionType))
+    })
+    package_dir = Path(reg.__file__).resolve().parent
+    definition_modules = {_repo_rel(p) for p in package_dir.glob("*.py")}
+    definition_modules |= {_repo_rel(sys.modules[c.__module__].__file__) for c in builder_classes}
+    definition_modules.add(_repo_rel(bridge.__file__))
+    return {
+        "migrated_dialects": {d: _qualname(fn) for d, fn in sorted(reg._MIGRATED.items())},
+        "reserved_dialects": tuple(sorted(reg.RESERVED_DIALECTS)),
+        "adapter_callables": tuple(sorted(adapter_callables | registry_callables)),
+        "registry_callables": tuple(sorted(registry_callables)),
+        "builder_kinds": {k: _qualname(c) for k, c in sorted(pfb.PROCESS_FLOW_BUILDERS.items())},
+        "builder_tables": tuple(tables),
+        "builder_lookups": tuple(lookups),
+        "builder_methods": tuple(methods),
+        "semantic_bridge_callables": tuple(sorted(_public_functions(bridge))),
+        "kind_selectors": _selector_keys(auth._resolve_process_kind),
+        "definition_modules": tuple(sorted(definition_modules)),
+    }
+
+
+class _AdapterAuthority:
+    """The adapter facts plus the three resolutions the census needs.
+
+    ``live`` delegates every resolution to the production function that owns it.
+    The snapshot arm models the same three rules from ``_AUDITED_ADAPTER_AUTHORITY``
+    and is pinned to the live arm by ``test_snapshot_resolutions_match_the_live_authority``.
+    """
+
+    def __init__(self, data: _typing.Dict[str, _typing.Any], live=None) -> None:
+        self.data = data
+        self.live = live
+        self.selectors = tuple(data["kind_selectors"])
+        self.builder_kinds = dict(data["builder_kinds"])
+        self.migrated = dict(data["migrated_dialects"])
+        self.reserved = frozenset(data["reserved_dialects"])
+        self.dialects = frozenset(self.migrated) | self.reserved
+        self.definition_modules = frozenset(data["definition_modules"])
+        # A qualified dialect is ``<kind>/<config key>``: the key whose non-empty
+        # list moves a config of that kind onto the sub-dialect's adapter.
+        self.split = {
+            dialect.split("/", 1)[1]: dialect for dialect in self.migrated if "/" in dialect
+        }
+        self.callable_module = {
+            q.rsplit(".", 1)[1]: q.rsplit(".", 1)[0] for q in data["adapter_callables"]
+        }
+        self.registry_callables = {q.rsplit(".", 1)[1] for q in data["registry_callables"]}
+        self.builder_class_kind = {q.rsplit(".", 1)[1]: k for k, q in self.builder_kinds.items()}
+
+    # -- resolutions --------------------------------------------------------
+    def resolve_kind(self, config: _typing.Any) -> str:
+        if self.live is not None:
+            return self.live.auth._resolve_process_kind(config)
+        for key in self.selectors:
+            value = config.get(key) if isinstance(config, dict) else None
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    def is_authoring_process(self, component: _typing.Dict[str, _typing.Any]) -> bool:
+        view = _types.SimpleNamespace(
+            type=component.get("type"), config=component.get("config"),
+            action=component.get("action"),
+        )
+        if self.live is not None:
+            return self.live.auth._is_authoring_process(view)
+        if not isinstance(view.type, str) or view.type.strip().lower() != "process":
+            return False
+        reference_only = isinstance(view.config, dict) and bool(view.config.get("reference_only"))
+        return not (view.action == "create" and reference_only)
+
+    def dialect(self, config: _typing.Any) -> _typing.Optional[str]:
+        """The adapter dialect a process config dispatches to, or ``None``.
+
+        ``None`` means the production dispatch would not route it to any adapter.
+        An adapter kind that no dialect accounts for is ``_UNCLASSIFIED_DIALECT``
+        — still a finding (fail closed).
+        """
+        kind = self.resolve_kind(config)
+        if not kind or kind.lower() not in self.builder_kinds:
+            return None
+        if self.live is not None:
+            adapter, _policy = self.live.bridge._adapter_for_config(kind, config)
+            if adapter is not None:
+                hits = [d for d, fn in self.live.reg._MIGRATED.items() if fn is adapter]
+                return hits[0] if len(hits) == 1 else _UNCLASSIFIED_DIALECT
+        else:
+            if kind in self.migrated:
+                return kind
+            for key, dialect in self.split.items():
+                value = config.get(key)
+                if isinstance(value, list) and value:
+                    return dialect
+        return kind if kind in self.reserved else _UNCLASSIFIED_DIALECT
+
+    # -- reach annotation ---------------------------------------------------
+    def dialects_of_kind(self, kind: str) -> _typing.Tuple[str, ...]:
+        return tuple(sorted(d for d in self.dialects if d.split("/", 1)[0] == kind))
+
+    def dialects_of_callable(self, name: str) -> _typing.Tuple[str, ...]:
+        if name in self.registry_callables:
+            return tuple(sorted(self.migrated))
+        module = self.callable_module.get(name)
+        return tuple(sorted(
+            d for d, q in self.migrated.items() if q.rsplit(".", 1)[0] == module))
+
+
+@_functools.lru_cache(maxsize=None)
+def _adapter_authority() -> _AdapterAuthority:
+    live = _live_adapter_authority()
+    if live is None:
+        return _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
+    return _AdapterAuthority(live, live=_live_legacy_modules())
+
+
+def _inventory_module():
+    import _m12_12_legacy_inventory as inventory  # tests/ is on sys.path under pytest
+
+    return inventory
+
+
+def _scanner_vocabulary(authority: _AdapterAuthority) -> _typing.Dict[str, _typing.Tuple[str, ...]]:
+    """The #149 scanner's families, re-pointed at the adapter authority.
+
+    The scanner reports a call to a ``legacy_emitters`` name by its bare name, so
+    that family carries the adapter callables; the XML-write, raw-invoker and
+    legacy ``_emit_*`` families are out of this census's scope and stay empty.
+    """
+    data = authority.data
+    builder_classes = tuple(sorted(authority.builder_class_kind))
+    return {
+        "registry_names": tuple(sorted(set(data["builder_tables"]) | set(data["builder_lookups"]))),
+        "builder_classes": builder_classes,
+        "builder_methods": tuple(data["builder_methods"]),
+        "legacy_emitters": tuple(sorted(authority.callable_module)),
+        "legacy_semantic_validation": tuple(data["semantic_bridge_callables"]),
+        "component_xml_write_sinks": (),
+        "raw_api_invokers": (),
+        "producer_selectors": authority.selectors,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Python census
+# ---------------------------------------------------------------------------
+
+_ROUTE_ROWS = frozenset({
+    "registry_lookup", "renderer_call", "legacy_emitter", "legacy_semantic_validation",
+})
+
+
+def _finding(cls, path, symbol, form, line, reaches=()):
+    return {"class": cls, "path": path, "symbol": symbol, "form": form,
+            "line": line, "reaches": tuple(reaches)}
+
+
+def _all_declaration_lines(tree) -> _typing.Set[int]:
+    lines: _typing.Set[int] = set()
+    for node in tree.body:
+        targets = node.targets if isinstance(node, _ast.Assign) else (
+            [node.target] if isinstance(node, (_ast.AugAssign, _ast.AnnAssign)) else [])
+        if any(isinstance(t, _ast.Name) and t.id == "__all__" for t in targets):
+            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
+
+
+def _route_reaches(row, authority: _AdapterAuthority) -> _typing.Tuple[str, ...]:
+    census, form = row["census"], row["form"]
+    if census == "legacy_emitter":
+        name = form.replace("import ", "").split("(")[0].split(" ")[0]
+        return authority.dialects_of_callable(name)
+    if census == "renderer_call":
+        owner = form.split(".", 1)[0]
+        kind = authority.builder_class_kind.get(owner)
+        if kind is not None:
+            return authority.dialects_of_kind(kind)
+        return tuple(sorted(authority.dialects))
+    if census == "legacy_semantic_validation":
+        return tuple(sorted(authority.migrated))
+    return tuple(sorted(authority.dialects))  # registry lookup: any registered kind
+
+
+def _producer_value(form: str) -> _typing.Optional[str]:
+    if "=" not in form:
+        return None
+    value = form.split("=", 1)[1]
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return None
+
+
+def _classify_rows(rows, path, tree, authority):
+    """Every scanner row lands in exactly one census class."""
+    out = []
+    in_all = _all_declaration_lines(tree)
+    vocabulary = set(_scanner_vocabulary(authority)["registry_names"]) \
+        | set(authority.builder_class_kind) | set(authority.callable_module)
+    adapter_symbols: _typing.Set[str] = set()
+    pending_specs = []
+    definition = path in authority.definition_modules
+    for row in sorted(rows, key=lambda r: (r["census"], r["symbol"], r["form"])):
+        census, symbol, form, line = row["census"], row["symbol"], row["form"], row["evidence_line"]
+        if census in ("http_client_call", "component_xml_write", "raw_api_invoker"):
+            continue  # scanner families outside this census (their vocabulary is empty)
+        if definition:
+            out.append(_finding("legacy_definition", path, symbol, form, line))
+            continue
+        if census in _ROUTE_ROWS:
+            adapter_symbols.add(symbol)
+            out.append(_finding("adapter_route", path, symbol, form, line,
+                                _route_reaches(row, authority)))
+        elif census == "process_kind_consumer":
+            out.append(_finding("validator_selector_read", path, symbol, form, line))
+        elif census == "process_kind_producer":
+            if symbol == "<module>":
+                out.append(_finding("raw_schema_value", path, symbol, form, line))
+            elif form.startswith("IntegrationComponentSpec("):
+                pending_specs.append(row)
+            else:
+                value = _producer_value(form)
+                if value is not None and value.strip().lower() in authority.builder_kinds:
+                    adapter_symbols.add(symbol)
+                    out.append(_finding("adapter_producer", path, symbol, form, line,
+                                        authority.dialects_of_kind(value.strip().lower())))
+                else:
+                    out.append(_finding("unclassified", path, symbol,
+                                        form + " [process kind is not a statically resolvable adapter kind]",
+                                        line))
+        elif census == "unclassified_dynamic":
+            out.append(_finding("unclassified", path, symbol, form, line))
+        elif census == "unclassified_reference":
+            if "selector" in form:
+                out.append(_finding("validator_selector_read", path, symbol, form, line))
+            elif "Component-endpoint" in form:
+                continue  # #149's endpoint residue: not this census's vocabulary
+            elif "symbolic literal" in form and line in in_all:
+                out.append(_finding("reexport_declaration", path, symbol, form, line))
+            elif "symbolic literal" in form:
+                # A bare string naming an adapter or builder (``required_builders =
+                # ["ProcessFlowBuilder"]``) is served metadata. Turning one into a
+                # call needs ``getattr``, which the scanner reports on its own as
+                # ``unclassified_dynamic``.
+                out.append(_finding("raw_schema_value", path, symbol, form, line))
+            elif any(form.startswith(name + " ") or form.startswith(repr(name) + " ")
+                     for name in vocabulary):
+                out.append(_finding("unclassified", path, symbol, form, line))
+            else:  # pragma: no cover - the scanner's residue forms are closed
+                out.append(_finding("unclassified", path, symbol, form, line))
+        else:  # pragma: no cover - an unknown scanner row kind fails closed
+            out.append(_finding("unclassified", path, symbol, form, line))
+    for row in pending_specs:
+        # A process component built in a scope that also builds or routes an
+        # adapter config is that config's carrier; on its own it is unexplained.
+        if row["symbol"] in adapter_symbols:
+            out.append(_finding("adapter_producer", path, row["symbol"], row["form"],
+                                row["evidence_line"]))
+        else:
+            out.append(_finding("unclassified", path, row["symbol"],
+                                row["form"] + " [no adapter config in the same scope]",
+                                row["evidence_line"]))
+    return out
+
+
+def _scan_leaf(path, tree, vocab, known, inventory):
+    scanner = inventory._Scanner(path, vocab, local_defs=inventory._module_level_functions(tree),
+                                 known_paths=known)
+    scanner.visit(tree)
+    residue = inventory._ResidueScanner(path, vocab, scanner._consumed, aliases=scanner._aliases)
+    residue.visit(tree)
+    return list(scanner.rows.values()) + list(residue.rows.values())
+
+
+def _pattern_authority():
+    """Discovered archetypes and the composition route, or ``None`` if gone."""
+    try:
+        from boomi_mcp import patterns as patterns_pkg
+        from boomi_mcp.patterns import PatternKind, PatternRegistry
+        from boomi_mcp.patterns.base import ArchetypePattern
+    except ImportError:  # pragma: no cover - the pattern layer outlives #160
+        return None
+    registry = PatternRegistry.from_package(patterns_pkg)
+    archetypes = {}
+    for cls in registry.list_patterns(kind=PatternKind.ARCHETYPE):
+        archetypes[cls.metadata.name] = (
+            cls.__qualname__, _repo_rel(sys.modules[cls.__module__].__file__))
+    composition = None
+    try:
+        from boomi_mcp.patterns.composition import CompositionPart
+    except ImportError:
+        CompositionPart = None
+    if CompositionPart is not None:
+        kinds = _typing.get_args(CompositionPart.model_fields["kind"].annotation)
+        composition = (frozenset(kinds), _repo_rel(sys.modules[CompositionPart.__module__].__file__))
+    return _types.SimpleNamespace(
+        archetypes=archetypes,
+        dispatch_methods=tuple(sorted(ArchetypePattern.__abstractmethods__)),
+        package_dir=_repo_rel(Path(patterns_pkg.__file__).parent),
+        composition=composition,
+    )
+
+
+def _bearing_pairs(findings, trees, inventory):
+    pairs = set()
+    for f in findings:
+        if f["class"] in ("adapter_route", "adapter_producer", "unclassified", "legacy_definition") \
+                and "." not in f["symbol"] and f["symbol"] != "<module>" \
+                and f["path"] in trees \
+                and f["symbol"] in inventory._module_level_functions(trees[f["path"]]):
+            pairs.add((f["path"], f["symbol"]))
+    return pairs
+
+
+def _pattern_reach(findings, sources, trees_cache, known, patterns, inventory, vocab):
+    """``{path: {symbol}}`` of pattern-package scopes that reach an adapter.
+
+    A one-package fixed point of the #149 transitive pass: it is how
+    ``http_listener_to_rest`` is seen to author through the adapter config that
+    ``http_listener_to_db._build_listener_main_process`` constructs.
+    """
+    prefix = patterns.package_dir + "/"
+    for p, text in sources.items():
+        if p.startswith(prefix) and p not in trees_cache:
+            trees_cache[p] = _ast.parse(text, filename=p)
+    trees = {p: t for p, t in trees_cache.items() if p.startswith(prefix)}
+    all_trees = trees_cache
+    reexports = inventory.reexport_index(all_trees)
+    reach: _typing.Dict[str, _typing.Set[str]] = {}
+    for f in findings:
+        if f["class"] in _FINDING_CLASSES:
+            reach.setdefault(f["path"], set()).add(f["symbol"])
+    bearing = _bearing_pairs(findings, all_trees, inventory)
+    seen: _typing.Set[_typing.Tuple[str, str]] = set()
+    while bearing - seen:
+        seen |= bearing
+        for path, tree in sorted(trees.items()):
+            scanner = inventory._Scanner(
+                path, vocab, transitive_targets=frozenset(bearing),
+                local_defs=inventory._module_level_functions(tree), known_paths=known,
+                reexports=reexports)
+            scanner.visit(tree)
+            for row in scanner.rows.values():
+                if row["census"] != "legacy_transitive_call":
+                    continue
+                reach.setdefault(path, set()).add(row["symbol"])
+                if "." not in row["symbol"] and row["symbol"] != "<module>" \
+                        and row["symbol"] in inventory._module_level_functions(tree):
+                    bearing = bearing | {(path, row["symbol"])}
+    return reach
+
+
+def _candidate_archetypes(patterns, reach) -> _typing.Dict[str, str]:
+    """Discovered archetypes that author a process through an adapter."""
+    out = {}
+    for name, (qualname, path) in sorted(patterns.archetypes.items()):
+        symbols = reach.get(path, set())
+        if any(s == qualname or s.startswith(qualname + ".") for s in symbols):
+            out[name] = qualname
+    return out
+
+
+class _DispatchVisitor(_ast.NodeVisitor):
+    """Calls of the archetype dispatch method (``emit_spec``), with their scope."""
+
+    def __init__(self, methods) -> None:
+        self.methods = set(methods)
+        self.stack: _typing.List[str] = []
+        self.calls: _typing.List[_typing.Tuple[str, _typing.Optional[str], str, int]] = []
+
+    def _scoped(self, node) -> None:
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _scoped
+
+    def visit_Call(self, node) -> None:  # noqa: N802
+        func = node.func
+        if isinstance(func, _ast.Attribute) and func.attr in self.methods:
+            receiver = func.value
+            last = receiver.attr if isinstance(receiver, _ast.Attribute) else (
+                receiver.id if isinstance(receiver, _ast.Name) else None)
+            self.calls.append((".".join(self.stack) or "<module>", last, func.attr, node.lineno))
+        self.generic_visit(node)
+
+
+def _dispatch_findings(sources, patterns, candidates):
+    """Archetype dispatch: static calls into a candidate, and registry dispatch.
+
+    The receiver of a registry-resolved dispatch (``cls.emit_spec(...)`` after
+    ``PatternRegistry.get``) is not statically known, so it is resolved from the
+    REAL registration table: it reaches every discovered archetype that authors
+    through an adapter.
+    """
+    findings, sites = [], []
+    by_class = {qual.split(".")[-1]: name for name, (qual, _p) in patterns.archetypes.items()}
+    archetype_paths = {p for _q, p in patterns.archetypes.values()}
+    for path in sorted(sources):
+        text = sources[path]
+        if not any(method in text for method in patterns.dispatch_methods):
+            continue
+        visitor = _DispatchVisitor(patterns.dispatch_methods)
+        visitor.visit(_ast.parse(text, filename=path))
+        for symbol, receiver, method, line in visitor.calls:
+            if receiver in by_class:
+                name = by_class[receiver]
+                if name in candidates:
+                    findings.append(_finding(
+                        "archetype_dispatch", path, symbol, "%s.%s(...)" % (receiver, method),
+                        line, ("archetype:%s" % name,)))
+            elif receiver in ("cls", "self") and path in archetype_paths:
+                continue  # an archetype's own body calling itself
+            else:
+                sites.append((path, symbol, line))
+                if candidates:
+                    findings.append(_finding(
+                        "archetype_dispatch", path, symbol,
+                        "<registry-resolved>.%s(...)" % method, line,
+                        tuple("archetype:%s" % n for n in sorted(candidates))))
+    return findings, sites
+
+
+def _mark_unreferenced_producers(records, sources, trees) -> None:
+    """Relabel a producer function nothing in the scanned tree refers to.
+
+    It stays a finding either way; the label tells the integrator it is a
+    dead-definition candidate (delete or isolate) rather than a live caller to
+    migrate. A ROUTE is never relabelled: a retained route counts uncalled.
+    """
+    names = {r["symbol"] for r in records
+             if r["class"] == "adapter_producer" and "." not in r["symbol"]}
+    referenced: _typing.Set[str] = set()
+    for path, text in sources.items():
+        wanted = {n for n in names - referenced if n in text}
+        if not wanted:
+            continue
+        tree = trees.get(path) or _ast.parse(text, filename=path)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Name) and node.id in wanted:
+                referenced.add(node.id)
+            elif isinstance(node, _ast.Attribute) and node.attr in wanted:
+                referenced.add(node.attr)
+            elif isinstance(node, _ast.alias) and node.name in wanted:
+                referenced.add(node.name)
+    for record in records:
+        if record["class"] == "adapter_producer" and record["symbol"] in names - referenced:
+            record["class"] = "unclassified"
+            record["form"] += " [no reference in the scanned tree: dead-definition candidate]"
+
+
+def _python_census(sources, authority, known_paths=None, patterns=None):
+    """``(records, context)`` for ``{repo-relative path: source}``."""
+    inventory = _inventory_module()
+    vocab = _scanner_vocabulary(authority)
+    # Builder METHOD names are deliberately not tokens: the scanner only counts
+    # ``build`` / ``validate_config`` on a receiver bound to a builder class or
+    # to the dispatch table, and those names are tokens themselves.
+    tokens = set().union(*(v for k, v in vocab.items() if k != "builder_methods")) \
+        | {"IntegrationComponentSpec"}
+    known = frozenset(known_paths if known_paths is not None else sources)
+    records, trees = [], {}
+    for path in sorted(sources):
+        text = sources[path]
+        # Sound pre-filter: every scanner row keys on a vocabulary token spelled
+        # literally in the source (an alias is bound by an import that names it).
+        if not any(token in text for token in tokens):
+            continue
+        tree = trees[path] = _ast.parse(text, filename=path)
+        records.extend(_classify_rows(_scan_leaf(path, tree, vocab, known, inventory),
+                                      path, tree, authority))
+    _mark_unreferenced_producers(records, sources, trees)
+    candidates, sites, reach = {}, [], {}
+    if patterns is not None:
+        reach = _pattern_reach(records, sources, trees, known, patterns, inventory, vocab)
+        candidates = _candidate_archetypes(patterns, reach)
+        dispatch, sites = _dispatch_findings(sources, patterns, candidates)
+        records.extend(dispatch)
+    return records, _types.SimpleNamespace(candidates=candidates, dispatch_sites=sites,
+                                           reach=reach)
+
+
+# ---------------------------------------------------------------------------
+# Shipped-example census
+# ---------------------------------------------------------------------------
+
+
+def _pointer(base: str, token) -> str:
+    return "%s/%s" % (base, str(token).replace("~", "~0").replace("/", "~1"))
+
+
+def _example_census(path, document, authority, patterns, context):
+    """``(records, envelopes)`` for one JSON document, visited structurally.
+
+    Three process-bearing envelope shapes, recognised by structure wherever they
+    nest: a component list (an ``IntegrationSpecV1`` body), an archetype tool
+    call (``{"tool", "arguments"}`` naming a tool whose action dispatches
+    archetypes) and a composition request (``parts`` of composition part kinds).
+    """
+    records, envelopes = [], []
+    archetype_names = set(patterns.archetypes) if patterns is not None else set()
+    dispatch_tools = {
+        symbol.split(".")[0][: -len("_action")]
+        for _p, symbol, _l in context.dispatch_sites
+        if symbol.split(".")[0].endswith("_action")
+    }
+    composition = patterns.composition if patterns is not None else None
+    composition_reaches = composition is not None and bool(context.reach.get(composition[1]))
+
+    def visit(node, ptr):
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, _pointer(ptr, index))
+            return
+        if not isinstance(node, dict):
+            return
+        components = node.get("components")
+        if isinstance(components, list) and components and all(
+                isinstance(c, dict) and "type" in c for c in components):
+            for index, component in enumerate(components):
+                cptr = _pointer(_pointer(ptr, "components"), index)
+                if not authority.is_authoring_process(component):
+                    envelopes.append(("component", cptr, "not an authored process"))
+                    continue
+                config = component.get("config")
+                dialect = authority.dialect(config) if isinstance(config, dict) else None
+                if dialect is None:
+                    selector = isinstance(config, dict) and any(
+                        k in config for k in authority.selectors)
+                    if selector:
+                        records.append(_finding("unclassified", path, _pointer(cptr, "config"),
+                                                "process kind is not an adapter kind", 0))
+                    envelopes.append(("component", cptr, "process with no adapter kind"))
+                    continue
+                envelopes.append(("component", cptr, "adapter process config"))
+                records.append(_finding("example_process_config", path,
+                                        _pointer(cptr, "config"), dialect, 0, (dialect,)))
+        tool, arguments = node.get("tool"), node.get("arguments")
+        if isinstance(tool, str) and isinstance(arguments, dict):
+            name = arguments.get("name")
+            aptr = _pointer(_pointer(ptr, "arguments"), "name")
+            if tool in dispatch_tools:
+                if name in context.candidates:
+                    envelopes.append(("tool_call", ptr, "archetype authoring through an adapter"))
+                    records.append(_finding("example_archetype_invocation", path, aptr,
+                                            "%s:%s" % (tool, name), 0, ("archetype:%s" % name,)))
+                elif name in archetype_names:
+                    envelopes.append(("tool_call", ptr, "canonical archetype"))
+                else:
+                    envelopes.append(("tool_call", ptr, "unknown archetype"))
+                    records.append(_finding("unclassified", path, aptr,
+                                            "%s:%s [archetype not discovered]" % (tool, name), 0))
+            elif isinstance(name, str) and name in archetype_names:
+                envelopes.append(("tool_call", ptr, "archetype name through an unknown tool"))
+                records.append(_finding("unclassified", path, aptr,
+                                        "%s:%s [names an archetype; tool is not a dispatch route]"
+                                        % (tool, name), 0))
+        parts = node.get("parts")
+        if isinstance(parts, list) and parts and all(
+                isinstance(p, dict) and isinstance(p.get("kind"), str) for p in parts):
+            kinds = {p["kind"] for p in parts}
+            if composition is not None and kinds <= composition[0]:
+                envelopes.append(("composition", ptr, "composition request"))
+                if composition_reaches:
+                    records.append(_finding("example_composition_invocation", path,
+                                            _pointer(ptr, "parts"), "compose_archetypes", 0,
+                                            ("composition:%s" % composition[1],)))
+            elif composition is None:
+                records.append(_finding("unclassified", path, _pointer(ptr, "parts"),
+                                        "parts-shaped request with no composition authority", 0))
+        for key, value in node.items():
+            visit(value, _pointer(ptr, key))
+
+    visit(document, "")
+    return records, envelopes
+
+
+# ---------------------------------------------------------------------------
+# The census over the real tree
+# ---------------------------------------------------------------------------
+
+
+@_functools.lru_cache(maxsize=None)
+def _production_census():
+    inventory = _inventory_module()
+    authority = _adapter_authority()
+    patterns = _pattern_authority()
+    sources = {p: s for p, s in inventory.python_sources().items() if p.startswith("src/")}
+    records, context = _python_census(sources, authority, patterns=patterns)
+    documents = inventory.example_documents()
+    envelopes = {}
+    for path, document in documents.items():
+        found, envelopes[path] = _example_census(path, document, authority, patterns, context)
+        records.extend(found)
+    return _types.SimpleNamespace(records=records, context=context, documents=documents,
+                                  envelopes=envelopes, sources=sources, patterns=patterns)
+
+
+def _census_key(record):
+    return (record["class"], record["path"], record["symbol"], record["form"])
+
+
+def _finding_keys(records):
+    return {_census_key(r) for r in records if r["class"] in _FINDING_CLASSES}
+
+
+# ---------------------------------------------------------------------------
+# The pinned pre-cutover census — the migration worklist
+# ---------------------------------------------------------------------------
+# Measured at ed17dde. Key: (class, path, symbol-or-JSON-pointer, form). Line
+# numbers are deliberately NOT part of the key (other lanes edit these files);
+# a failure message prints them. DELETE an entry when its caller is migrated;
+# never add one without a recorded decision. At cutover this is empty and
+# ``ZERO_CALLER_CUTOVER_COMPLETE`` is ``True``.
+_PRE_CUTOVER_CENSUS: _typing.FrozenSet[_typing.Tuple[str, str, str, str]] = frozenset({
+    # --- adapter_producer
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
+     'ApiToApiSyncArchetype.emit_spec',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
+     '_build_main_process',
+     "IntegrationComponentSpec(type='process')"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
+     '_build_main_process',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
+     'ApiToDatabaseSyncArchetype.emit_spec',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
+     '_build_main_process',
+     "IntegrationComponentSpec(type='process')"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
+     '_build_main_process',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
+     '_build_main_process',
+     "IntegrationComponentSpec(type='process')"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
+     '_build_sync_pipeline_adapter_config',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
+     'HttpListenerToDbArchetype.emit_spec',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
+     '_build_listener_main_process',
+     "IntegrationComponentSpec(type='process')"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
+     '_build_listener_main_process',
+     "dict-literal process_kind='sync_pipeline'"),
+    ('adapter_producer',
+     'src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py',
+     'HttpListenerToRestArchetype.emit_spec',
+     "dict-literal process_kind='sync_pipeline'"),
+    # --- adapter_route
+    ('adapter_route',
+     'src/boomi_mcp/authoring/process_entry.py',
+     'legacy_config_entry',
+     'PROCESS_FLOW_BUILDERS (read)'),
+    ('adapter_route',
+     'src/boomi_mcp/authoring/process_entry.py',
+     'legacy_config_entry',
+     'PROCESS_FLOW_BUILDERS.get(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_build_plan',
+     'ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_execute_component',
+     '<registry-bound>.build(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_execute_component',
+     'PROCESS_FLOW_BUILDERS (read)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_execute_component',
+     'get_process_flow_builder(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     '<registry-bound>.validate_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'PROCESS_FLOW_BUILDERS (read)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'ProcessFlowBuilder.scan_forbidden_secret_fields(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'SyncPipelineBuilder.lower_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'get_process_flow_builder(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_ir_semantic_error',
+     'validate_legacy_process_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_resolve_preservation_policy',
+     'get_process_flow_builder(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_scan_top_level_pipeline_secrets',
+     'ProcessFlowBuilder.scan_forbidden_secret_fields(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     'build_structured_update_xml',
+     '<registry-bound>.build(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     'build_structured_update_xml',
+     'PROCESS_FLOW_BUILDERS (read)'),
+    ('adapter_route',
+     'src/boomi_mcp/categories/integration_builder.py',
+     'build_structured_update_xml',
+     'get_process_flow_builder(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
+     '_build_main_process',
+     'SyncPipelineBuilder.lower_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/composition.py',
+     'compose_archetypes',
+     'ProcessFlowBuilder.validate_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/recipe_bridge.py',
+     'run_fanout_recipe',
+     'adapt_flow_sequence(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/recipe_bridge.py',
+     'run_fanout_recipe',
+     'import adapt_flow_sequence'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/recipe_bridge.py',
+     'run_sync_preset_recipe',
+     'adapt_sync_pipeline_config(...)'),
+    ('adapter_route',
+     'src/boomi_mcp/patterns/recipe_bridge.py',
+     'run_sync_preset_recipe',
+     'import adapt_sync_pipeline_config'),
+    # --- archetype_dispatch
+    ('archetype_dispatch',
+     'src/boomi_mcp/categories/integration_authoring.py',
+     'build_from_archetype_action',
+     '<registry-resolved>.emit_spec(...)'),
+    ('archetype_dispatch',
+     'src/boomi_mcp/patterns/composition.py',
+     'compose_archetypes',
+     'DatabaseToApiSyncArchetype.emit_spec(...)'),
+    # --- example_archetype_invocation
+    ('example_archetype_invocation',
+     'examples/authoring/database_to_api_sync_minimal_example.json',
+     '/tool_call/arguments/name',
+     'build_from_archetype:database_to_api_sync'),
+    ('example_archetype_invocation',
+     'examples/authoring/database_to_api_sync_reuse_connections_example.json',
+     '/tool_call/arguments/name',
+     'build_from_archetype:database_to_api_sync'),
+    # --- example_composition_invocation
+    ('example_composition_invocation',
+     'examples/m8/cache_handoff_staged_fanout.integration.json',
+     '/compose_request/parts',
+     'compose_archetypes'),
+    ('example_composition_invocation',
+     'examples/m8/cache_handoff_staged_fanout.integration.json',
+     '/integration_spec/validation_rules/composition/parts',
+     'compose_archetypes'),
+    ('example_composition_invocation',
+     'examples/m8/composed_db_to_api_fanout.integration.json',
+     '/compose_request/parts',
+     'compose_archetypes'),
+    ('example_composition_invocation',
+     'examples/m8/composed_db_to_api_fanout.integration.json',
+     '/integration_spec/validation_rules/composition/parts',
+     'compose_archetypes'),
+    # --- example_process_config
+    ('example_process_config',
+     'examples/m11/cache_property_authoring_basic.integration.json',
+     '/integration_spec/components/0/config',
+     'database_to_api_sync/flow_sequence'),
+    ('example_process_config',
+     'examples/m11/cache_property_authoring_join.integration.json',
+     '/integration_spec/components/2/config',
+     'database_to_api_sync/flow_sequence'),
+    ('example_process_config',
+     'examples/m8/cache_handoff_staged_fanout.integration.json',
+     '/integration_spec/components/10/config',
+     'database_to_api_sync/flow_sequence'),
+    ('example_process_config',
+     'examples/m8/composed_db_to_api_fanout.integration.json',
+     '/integration_spec/components/9/config',
+     'database_to_api_sync/flow_sequence'),
+    # --- unclassified
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'ProcessFlowBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'SyncPipelineBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_component_preflight',
+     'WrapperSubprocessBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_process_models_error_handling',
+     'ProcessFlowBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_synthesize_wrapper_subprocess_edges',
+     'WrapperSubprocessBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/categories/integration_builder.py',
+     '_synthesize_wrapper_subprocess_extensions',
+     'WrapperSubprocessBuilder (unclassified reference)'),
+    ('unclassified',
+     'src/boomi_mcp/models/_process_ir_compat.py',
+     'ir_to_legacy_flow_sequence',
+     "dict-literal process_kind='database_to_api_sync' [no reference in the scanned tree: dead-definition candidate]"),
+    ('unclassified',
+     'src/boomi_mcp/models/_process_ir_compat.py',
+     'ir_to_legacy_flow_sequence',
+     "dict-literal process_kind='wrapper_subprocess' [no reference in the scanned tree: dead-definition candidate]"),
+})
+
+
+def _describe(records, keys) -> str:
+    lines = []
+    for record in sorted(records, key=lambda r: (_census_key(r), r["line"])):
+        if _census_key(record) in keys:
+            where = record["path"] + (":%d" % record["line"] if record["line"] else "")
+            lines.append("  %s  %s  %s  %s  reaches=%s" % (
+                record["class"], where, record["symbol"], record["form"],
+                ",".join(record["reaches"]) or "-"))
+    return "\n".join(lines)
+
+
+def test_audited_adapter_authority_matches_the_live_registry():
+    """The retained authority equals the live derivation, in both directions."""
+    live = _live_adapter_authority()
+    if live is None:
+        # #160 deleted the modules: the snapshot is now the only authority. Make
+        # sure that is what happened rather than an unrelated import failure.
+        with pytest.raises(ImportError):
+            from boomi_mcp.compiler.process_ir.legacy_adapters import registry  # noqa: F401
+        return
+    assert live == _AUDITED_ADAPTER_AUTHORITY, (
+        "the adapter authority moved; re-audit _AUDITED_ADAPTER_AUTHORITY against "
+        "the live registry (and record why):\n  live=%r" % (live,))
+    # Non-vacuity and internal agreement: every dialect is hosted by a builder
+    # kind, and every builder kind hosts at least one dialect.
+    dialects = set(live["migrated_dialects"]) | set(live["reserved_dialects"])
+    assert dialects and live["builder_kinds"] and live["kind_selectors"]
+    assert {d.split("/", 1)[0] for d in dialects} == set(live["builder_kinds"])
+    assert set(live["definition_modules"]) <= set(_production_census().sources)
+
+
+def _authority_probes(authority):
+    """Configs varying every axis the dialect resolution reads."""
+    probes = [None, {}, {"unrelated": 1}]
+    for kind in sorted(authority.builder_kinds):
+        for selector in authority.selectors:
+            for spelling in (kind, " %s " % kind, kind.upper()):
+                base = {selector: spelling}
+                probes.append(base)
+                for key in sorted(authority.split):
+                    for value in ([{"kind": "map_ref"}], [], {"kind": "map_ref"}):
+                        probes.append(dict(base, **{key: value}))
+    probes.append({authority.selectors[0]: "not_an_adapter_kind"})
+    return probes
+
+
+def test_snapshot_resolutions_match_the_live_authority():
+    """The snapshot arm's three rules are the live functions' rules.
+
+    Pinned on probes built from the authority's own axes, so the census gives
+    the same answer the day #160 removes the functions it delegates to.
+    """
+    live = _adapter_authority()
+    if live.live is None:
+        return  # post-#160: nothing left to compare against; the snapshot rules stand
+    snapshot = _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
+    probes = _authority_probes(live)
+    assert [live.dialect(p) if isinstance(p, dict) else None for p in probes] == \
+        [snapshot.dialect(p) if isinstance(p, dict) else None for p in probes]
+    assert [live.resolve_kind(p) for p in probes if isinstance(p, dict)] == \
+        [snapshot.resolve_kind(p) for p in probes if isinstance(p, dict)]
+    # Non-vacuity: the probes reach every dialect, the no-adapter answer and the
+    # fail-closed answer.
+    outcomes = {live.dialect(p) for p in probes if isinstance(p, dict)}
+    assert live.dialects | {None, _UNCLASSIFIED_DIALECT} <= outcomes
+    components = [
+        {"type": t, "action": a, "config": c}
+        for t in ("process", "Process", "connector-action", None)
+        for a in ("create", "update", None)
+        for c in ({"reference_only": True}, {"reference_only": False}, {}, None)
+    ]
+    assert [live.is_authoring_process(c) for c in components] == \
+        [snapshot.is_authoring_process(c) for c in components]
+    assert {live.is_authoring_process(c) for c in components} == {True, False}
+
+
+def test_zero_caller_census_matches_the_pinned_pre_cutover_worklist():
+    """The derived census EQUALS the pinned worklist — both directions."""
+    census = _production_census()
+    known = _FINDING_CLASSES | _NON_FINDING_CLASSES
+    assert {r["class"] for r in census.records} <= known
+    measured = _finding_keys(census.records)
+    added = measured - _PRE_CUTOVER_CENSUS
+    removed = _PRE_CUTOVER_CENSUS - measured
+    assert not added, (
+        "NEW process-kind adapter caller(s). Author the process as a ProcessIR "
+        "unit instead; do not add the entry here without a recorded decision:\n"
+        + _describe(census.records, added))
+    assert not removed, (
+        "pinned caller(s) no longer present — delete these entries from "
+        "_PRE_CUTOVER_CENSUS (that is the migration's bookkeeping):\n  "
+        + "\n  ".join(map(repr, sorted(removed))))
+
+
+def test_zero_caller_cutover_state_is_declared():
+    """At cutover the worklist is empty AND the flag says so — never only one."""
+    if ZERO_CALLER_CUTOVER_COMPLETE:
+        assert not _PRE_CUTOVER_CENSUS
+        assert not _finding_keys(_production_census().records)
+    else:
+        assert _PRE_CUTOVER_CENSUS, (
+            "the worklist is empty: set ZERO_CALLER_CUTOVER_COMPLETE = True")
+
+
+def test_zero_caller_census_derives_its_routes_from_discovery():
+    """Candidate archetypes and dispatch routes come from the real registrations."""
+    census = _production_census()
+    patterns, context = census.patterns, census.context
+    assert patterns is not None and patterns.archetypes
+    assert set(context.candidates) <= set(patterns.archetypes)
+    # The registry-resolved dispatch is located in production code, so a tool
+    # call naming an archetype is classified against the live route.
+    assert context.dispatch_sites
+    # Recursive example discovery: every shipped JSON file was visited.
+    assert census.documents and set(census.envelopes) == set(census.documents)
+
+
+_INJECTED_CONTROL_PATH = "src/boomi_mcp/_l8_injected_census_control.py"
+
+#: A reachable internal caller, written the ways the census claims to see:
+#: an aliased registry lookup, builder dispatch through an aliased lookup, a
+#: dynamic builder attribute, and a constructed adapter config. In memory, so it
+#: keeps working after #160 deletes the modules it names.
+_INJECTED_CONTROL_SOURCE = '''
+from boomi_mcp.compiler.process_ir.legacy_adapters import registry as _r
+from boomi_mcp.categories.components.builders import get_process_flow_builder as _pick
+from boomi_mcp.categories.components.builders.process_flow_builder import SyncPipelineBuilder
+
+
+def injected_route(config):
+    return _r.adapter_for("sync_pipeline")(config)
+
+
+def injected_dispatch(config):
+    return _pick(config["process_kind"]).build(config, name="x")
+
+
+def injected_dynamic(config, verb):
+    return getattr(SyncPipelineBuilder, verb)(config)
+
+
+def injected_constructor():
+    return {"process_kind": "database_to_api_sync", "flow_sequence": [{"kind": "map_ref"}]}
+
+
+def injected_caller():
+    return injected_dispatch(injected_constructor())
+'''
+
+
+@pytest.mark.parametrize("arm", ["live", "snapshot"])
+def test_census_detects_an_injected_reachable_adapter_call(arm):
+    authority = _adapter_authority() if arm == "live" else \
+        _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
+    records, _ = _python_census({_INJECTED_CONTROL_PATH: _INJECTED_CONTROL_SOURCE}, authority)
+    found = {(r["class"], r["symbol"], r["form"], r["line"]) for r in records
+             if r["class"] in _FINDING_CLASSES}
+    assert found == {
+        ("adapter_route", "injected_route", "adapter_for(...)", 8),
+        ("adapter_route", "injected_dispatch", "get_process_flow_builder(...)", 12),
+        ("adapter_route", "injected_dispatch", "<registry-bound>.build(...)", 12),
+        ("unclassified", "injected_dynamic", "getattr(<builder>, <dynamic>)", 16),
+        ("unclassified", "injected_dynamic", "SyncPipelineBuilder (unclassified reference)", 16),
+        ("adapter_producer", "injected_constructor",
+         "dict-literal process_kind='database_to_api_sync'", 20),
+    }
+    assert all(r["path"] == _INJECTED_CONTROL_PATH for r in records)
+    route = next(r for r in records if r["symbol"] == "injected_route")
+    assert "sync_pipeline" in route["reaches"]
+    # The selector read in the dispatch is a validator, not a caller.
+    assert ("validator_selector_read", "injected_dispatch") in {
+        (r["class"], r["symbol"]) for r in records}
+
+
+def _flow_sequence_example():
+    """A shipped-example envelope authoring ``database_to_api_sync`` with a
+    ``flow_sequence`` — the module's own frozen ``_flow_cfg`` adapter input."""
+    return {"integration_spec": {"components": [
+        {"key": "main_process", "type": "process", "action": "create",
+         "config": _flow_cfg()},
+    ]}}
+
+
+@pytest.mark.parametrize("arm", ["live", "snapshot"])
+def test_census_detects_a_database_to_api_sync_flow_sequence_example(arm):
+    census = _production_census()
+    authority = _adapter_authority() if arm == "live" else \
+        _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
+    path = "examples/l8_control/flow_sequence.integration.json"
+    records, envelopes = _example_census(
+        path, _flow_sequence_example(), authority, census.patterns, census.context)
+    assert [(r["class"], r["path"], r["symbol"], r["form"]) for r in records] == [
+        ("example_process_config", path, "/integration_spec/components/0/config",
+         "database_to_api_sync/flow_sequence"),
+    ]
+    # The alias spelling reaches the same adapter; a reference-only process does not author.
+    aliased = _flow_sequence_example()
+    config = aliased["integration_spec"]["components"][0]["config"]
+    config["process_type"] = config.pop("process_kind")
+    assert [r["form"] for r in _example_census(
+        path, aliased, authority, census.patterns, census.context)[0]] == [
+        "database_to_api_sync/flow_sequence"]
+    referenced = _flow_sequence_example()
+    referenced["integration_spec"]["components"][0]["config"]["reference_only"] = True
+    assert _example_census(path, referenced, authority, census.patterns, census.context)[0] == []
+
+
+_NARRATIVE_EXAMPLE = "examples/authoring/authoring_workflow_sequence_example.json"
+
+
+def test_narrative_workflow_example_is_excluded_for_the_right_reason():
+    census = _production_census()
+    # 1. Discovered — the exclusion is not a skipped file.
+    assert _NARRATIVE_EXAMPLE in census.documents
+    # 2. Visited, and it holds no process-bearing envelope.
+    assert census.envelopes[_NARRATIVE_EXAMPLE] == []
+    assert not [r for r in census.records if r["path"] == _NARRATIVE_EXAMPLE]
+    # 3. It DOES talk about archetype authoring, so a lexical scan would flag it;
+    #    the structural visitor does not.
+    document = census.documents[_NARRATIVE_EXAMPLE]
+    text = json.dumps(document)
+    tools = {s.split(".")[0][: -len("_action")] for _p, s, _l in census.context.dispatch_sites}
+    assert tools and all(tool in text for tool in tools)
+    # 4. The same document with a real envelope injected IS a finding, at the
+    #    injected pointer — the visitor walks this document's structure.
+    injected = _copy.deepcopy(document)
+    injected["workflow"]["fallback"]["integration_spec"] = \
+        _flow_sequence_example()["integration_spec"]
+    records, envelopes = _example_census(
+        _NARRATIVE_EXAMPLE, injected, _adapter_authority(), census.patterns, census.context)
+    assert [(r["class"], r["symbol"]) for r in records] == [
+        ("example_process_config", "/workflow/fallback/integration_spec/components/0/config")]
+    assert envelopes
