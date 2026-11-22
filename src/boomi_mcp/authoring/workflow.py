@@ -68,7 +68,7 @@ from .governance import (
     scan_runtime_secrets,
 )
 from .derived_flows import derive_recipe_projection
-from ..recipes.errors import declared_loc_segments
+from ..recipes.errors import cause_remediation, declared_loc_segments
 from .process_materialization import (
     canonical_plan_material,
     envelope_relocatability_offenders,
@@ -608,9 +608,15 @@ def _recipe_blocked(exc, invocation_index: Mapping[str, int]) -> "AuthoringWorkf
                 path=path,
                 subject_kind="recipe",
                 subject_id=getattr(diagnostic, "target", "") or "",
+                # #159 S2: a cause with its own static remediation (e.g. the
+                # refused DB->API retry, issue #199) keeps it on this channel;
+                # every other refusal serves the fixed text.
                 remediation=(
-                    "Fix the recipe input or invocation and re-plan. See "
-                    "cause_codes for the recipe layer's own diagnosis."
+                    cause_remediation(tuple(getattr(diagnostic, "cause_codes", ()) or ()))
+                    or (
+                        "Fix the recipe input or invocation and re-plan. See "
+                        "cause_codes for the recipe layer's own diagnosis."
+                    )
                 ),
                 cause_codes=tuple(getattr(diagnostic, "cause_codes", ()) or ())
                 + ((getattr(diagnostic, "code", "") or "",)),

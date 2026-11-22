@@ -613,6 +613,40 @@ def test_l1_retry_five_is_refused_through_the_public_planner():
     assert "DB_TO_API_RETRY_UNAVAILABLE" in str(caught.value.diagnostics)
 
 
+def test_l1_retry_remediation_reaches_the_mcp_result():
+    """#159 S2: through the MCP-level dispatch (build_integration_action plan),
+    a DB->API 1.0.0 invocation asking for 5 attempts serves the cause's own
+    #199 remediation; a refusal of another cause keeps the channel's fixed text."""
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories import integration_builder
+
+    def served(mutate):
+        request = copy.deepcopy(_l1.l1_case("wm_off_dlq_off_create").input_canonical)
+        mutate(request["intent"]["invocations"][0])
+        with patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+            envelope = integration_builder.build_integration_action(
+                MagicMock(), "issue-157-replay", "plan", {"authoring_request": request}
+            )
+        assert envelope["_success"] is False and envelope["mutation_performed"] is False
+        (diagnostic,) = envelope["authoring_diagnostics"]
+        return diagnostic
+
+    def five_attempts(invocation):
+        invocation["raw_input"]["reliability"]["retry"]["max_attempts"] = 5
+
+    def key_collision(invocation):
+        invocation["raw_input"]["process_key"] = "source_db_connection"
+
+    retry = served(five_attempts)
+    assert retry["cause_codes"] == ["DB_TO_API_RETRY_UNAVAILABLE", "RECIPE_CONSTRAINT_FAILED"]
+    assert retry["path"] == "/intent/invocations/0/raw_input/reliability/retry/max_attempts"
+    assert "issue #199" in retry["remediation"] and "max_attempts to 1" in retry["remediation"]
+    other = served(key_collision)
+    assert "DB_TO_API_RETRY_UNAVAILABLE" not in other["cause_codes"]
+    assert other["remediation"].startswith("Fix the recipe input or invocation and re-plan.")
+
+
 def test_l1_retry_input_is_strict_and_carries_no_idempotency_field():
     from pydantic import ValidationError
 

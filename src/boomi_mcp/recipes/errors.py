@@ -196,6 +196,15 @@ class RecipeDiagnosticV1(BaseModel):
     remediation: str = Field(..., min_length=1)
 
 
+def cause_remediation(cause_codes: Sequence[str]) -> Optional[str]:
+    """The static per-cause remediation when ``cause_codes`` is exactly ONE
+    cause that has one, else None (#159 S2). One rule for every surface that
+    serves a recipe refusal, so the recipe layer and the authoring channel
+    cannot disagree on when it applies."""
+    causes = tuple(sorted(set(cause_codes)))
+    return _CAUSE_REMEDIATIONS.get(causes[0]) if len(causes) == 1 else None
+
+
 def recipe_diagnostic(
     code: str,
     *,
@@ -217,7 +226,7 @@ def recipe_diagnostic(
     cause has a per-cause remediation serves that one instead of the code's.
     """
     causes = tuple(sorted(set(cause_codes)))
-    remediation = _CAUSE_REMEDIATIONS.get(causes[0]) if len(causes) == 1 else None
+    remediation = cause_remediation(causes)
     if remediation is None:
         remediation = _REMEDIATIONS.get(code, "Consult specs/TYPED_RECIPE_CONTRIBUTIONS_V1.md.")
     return RecipeDiagnosticV1(
