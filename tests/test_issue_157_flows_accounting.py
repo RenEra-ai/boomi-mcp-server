@@ -429,16 +429,30 @@ def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived
     assert set(replayed) == set(acct.canonical_case_ids())
     assert {case_id.split("/")[0] for case_id in replayed} >= {"composition", *_RICH_PRODUCERS}
     assert batch["attempts"] == []
+    # #159 S2 (integrator decision, item 5 (b)): TWO boundaries, never mixed.
+    # ROWS — the frozen, account-less boundary the rows were recorded on:
+    # every discharge below reads the child's rows from it. EXECUTABILITY — the
+    # same plus the account's name queries answered by the pinned name records:
+    # plan validity, plan errors, the component plan and compile read from it.
+    name_bound = set(_name_bound_reuse_cases(cases))
+    assert name_bound and name_bound <= set(replayed)
     for case_id, child in replayed.items():
         case = cases[case_id]
+        # ROWS boundary
         report = discharge_case(case, child["flows"], retirements, served=child["served"])
         assert report.ok, (case_id, report.problems)
         endpoints = discharge_endpoints(case, child["endpoints"], retirements)
         assert endpoints.ok, (case_id, endpoints.problems)
         assert child["flows"] == derived[case_id], case_id
-        # the REAL component plan, compared with the unblocked tree's own
-        with patch(_PAGINATE, lambda *a, **k: []):
-            parent = acct.case_plan_result(case)
+        # ROWS boundary: a name-bound reuse is the ONE unresolved step there
+        # (as on the legacy route); every other case blocks nothing.
+        assert child["rows_plan_blocked"] == (
+            [["/components/target_db_connection", ["error_missing_target"]]]
+            if case_id in name_bound else []
+        ), case_id
+        # EXECUTABILITY boundary: the REAL component plan, compared with the
+        # unblocked tree's own on the same boundary
+        parent = acct.case_executability_plan(case)
         assert child["plan_valid"] is bool(parent.validation_report.is_valid), case_id
         assert child["plan_errors"] == sorted({d.code for d in parent.errors}), case_id
         assert child["component_dependencies"] == len(parent.component_dependencies), case_id
@@ -446,8 +460,8 @@ def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived
         # (the zero-component stub binds none — its frozen endpoints are stubs)
         if any(row["payload"].get("type") != "stub" for row in case.endpoint_rows):
             assert child["component_dependencies"] > 0, case_id
-        # ARCH-r1-12: EVERY case — a reused connection included — must plan and
-        # compile for real. A reused connection's account read is answered by
+        # EXECUTABILITY boundary. ARCH-r1-12: EVERY case — a reused connection
+        # included — must plan and compile for real. A reused connection's account read is answered by
         # a SHA-pinned platform capture of a proven-operable connection of the
         # same family (``acct.replay_identity_captures``), in parent and child.
         assert child["plan_valid"] and child["plan_errors"] == [], (case_id, child["plan_errors"])
@@ -552,8 +566,9 @@ def test_a_name_bound_reuse_plans_with_its_capture_and_serves_the_resolved_id(ca
     (``cap159-s2-name-identity``) — and then the reused endpoint serves the
     plan-resolved ``component_id`` beside the name (the projector's reviewed
     B12 rule), which the frozen legacy row does not carry. Unbound, the rows
-    reproduce exactly and the one unresolved step is that reuse. Which plan
-    the row oracle reads is an integrator decision; this pins both halves."""
+    reproduce exactly and the one unresolved step is that reuse. Integrator
+    decision (item 5 (b)): the rows are read on the unbound boundary and
+    executability on the bound one; this pins both halves."""
     from boomi_mcp.authoring.workflow import compile_authoring_request_v1, plan_authoring_request_v1
     from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 

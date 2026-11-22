@@ -197,7 +197,7 @@ RETIRED_PREFIX = "retired:"
 #: Set it True once all 21 cases replay: then every case must be completed and
 #: NO row may be pending — the pending-state witness in
 #: ``test_issue_157_flows_accounting.py`` becomes the no-pending assertion.
-FINAL_REPLAY = False
+FINAL_REPLAY = True
 
 
 # ---------------------------------------------------------------------------
@@ -777,6 +777,38 @@ def case_plan_result(case: Case):
     return _PLAN_CACHE[cache_key]
 
 
+_EXECUTABILITY_CACHE: Dict[Tuple[str, str], Any] = {}
+
+
+def case_executability_plan(case: Case):
+    """The public plan on the EXECUTABILITY boundary (#159 S2, item 5 (b)).
+
+    The ROWS boundary (:func:`case_plan_result`) is the frozen, account-less
+    one the rows were recorded on: a reuse BY NAME is unanswered there, so its
+    plan blocks that one step, exactly as the legacy route's own plan did. The
+    executability boundary adds the account's answer to the name query (the
+    pinned ``binds_placeholder_names`` records), so the same request is planned
+    as it would bind against the account. Rows come from the first, plan and
+    compile validity from the second; the two never mix.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    if case.input_canonical is None:
+        return None
+    cache_key = (case.case_id, _digest(case.input_canonical))
+    if cache_key not in _EXECUTABILITY_CACHE:
+        request = AuthoringRequestV1.model_validate(case.input_canonical)
+        with patch(_GET_XML, replay_component_get_xml()), patch(_PAGINATE, replay_paginate_metadata()):
+            result, _internals = plan_authoring_request_v1(
+                request, boomi_client=MagicMock(), profile="issue-157-replay"
+            )
+        _EXECUTABILITY_CACHE[cache_key] = result
+    return _EXECUTABILITY_CACHE[cache_key]
+
+
 def _require_canonical_input(case: Case) -> None:
     """A case that OWES canonical rows must carry the canonical request.
 
@@ -1277,15 +1309,22 @@ with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda 
         patch(acct._GET_XML, acct.replay_component_get_xml()):
     for case_id in sys.argv[7:]:
         case = cases[case_id]
+        # ROWS boundary: the frozen, account-less one the rows were recorded on
+        # (metadata query -> [], reads by id -> the pinned captures).
         result = acct.case_plan_result(case)
         request = AuthoringRequestV1.model_validate(case.input_canonical)
-        try:
-            compiled, _internals = compile_authoring_request_v1(
-                request, boomi_client=MagicMock(), profile="issue-157-replay"
-            )
-            compile_valid, compile_error = bool(compiled.validation_report.is_valid), None
-        except AuthoringWorkflowError as exc:
-            compiled, compile_valid, compile_error = None, False, exc.code
+        # EXECUTABILITY boundary (#159 S2, integrator decision on item 5): the
+        # same, plus the account's NAME queries answered by the pinned name
+        # records, so a reuse-by-name binds as it would against the account.
+        executable = acct.case_executability_plan(case)
+        with patch(acct._PAGINATE, acct.replay_paginate_metadata()):
+            try:
+                compiled, _internals = compile_authoring_request_v1(
+                    request, boomi_client=MagicMock(), profile="issue-157-replay"
+                )
+                compile_valid, compile_error = bool(compiled.validation_report.is_valid), None
+            except AuthoringWorkflowError as exc:
+                compiled, compile_valid, compile_error = None, False, exc.code
         if case_id == APPLY_CASE and compiled is not None:
             # The full typed workflow, apply included, with ONLY the network
             # boundary faked (the #153 harness shape): every component write
@@ -1326,9 +1365,14 @@ with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda 
             "compile_error": compile_error,
             # The REAL component plan must succeed, not only the row comparison:
             # an unexecutable plan step is a served error on this route.
-            "plan_valid": bool(result.validation_report.is_valid),
-            "plan_errors": sorted({d.code for d in result.errors}),
-            "component_dependencies": len(result.component_dependencies),
+            # EXECUTABILITY boundary (name queries answered):
+            "plan_valid": bool(executable.validation_report.is_valid),
+            "plan_errors": sorted({d.code for d in executable.errors}),
+            "component_dependencies": len(executable.component_dependencies),
+            # ROWS boundary (account-less): what blocks there, and the rows.
+            "rows_plan_blocked": sorted(
+                [d.path, list(d.cause_codes)] for d in result.errors
+            ),
             "flows": acct.derive_case_projection(case),
             "served": acct.derive_served_projection(case),
             "endpoints": acct.derive_case_endpoints(case),

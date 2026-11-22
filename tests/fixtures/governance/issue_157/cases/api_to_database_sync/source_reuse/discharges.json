@@ -2,7 +2,7 @@
   "case_id": "api_to_database_sync/source_reuse",
   "endpoints": {
     "0": "discharged",
-    "1": "pending:#159"
+    "1": "discharged"
   },
   "flows": {
     "0": "discharged",
