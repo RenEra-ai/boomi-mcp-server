@@ -1,12 +1,12 @@
 {
   "case_id": "http_listener_to_rest/plain",
   "endpoints": {
-    "0": "pending:#159",
-    "1": "pending:#159"
+    "0": "discharged",
+    "1": "discharged"
   },
   "flows": {
-    "0": "pending:#159",
-    "1": "pending:#159",
-    "2": "pending:#159"
+    "0": "discharged",
+    "1": "discharged",
+    "2": "discharged"
   }
 }

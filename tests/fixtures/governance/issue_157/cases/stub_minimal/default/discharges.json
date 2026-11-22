@@ -1,10 +1,10 @@
 {
   "case_id": "stub_minimal/default",
   "endpoints": {
-    "0": "pending:#159",
-    "1": "pending:#159"
+    "0": "discharged",
+    "1": "discharged"
   },
   "flows": {
-    "0": "pending:#159"
+    "0": "discharged"
   }
 }
