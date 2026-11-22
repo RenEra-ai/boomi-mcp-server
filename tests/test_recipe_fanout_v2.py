@@ -3837,10 +3837,9 @@ def test_b25r_the_dispatcher_and_the_refresh_share_one_map_predicate():
 
 
 def test_b26r_a_whitespace_only_map_xml_is_refused_before_any_write(monkeypatch):
-    """B26 review: whitespace-only `config.xml` is NOT raw XML for any route
-    (`submits_raw_component_xml` and the drift check agree), so a map carrying it
-    and no structured fields is refused before the first write — never after
-    earlier components were created."""
+    """B26 review: whitespace-only `config.xml` selects the RAW route (the shared
+    truthiness predicate, QA-154-r4-02), but it is refused (MAP_RAW_XML_BLANK)
+    before the first write — never after earlier components were created."""
     from unittest import mock
 
     from boomi_mcp.categories import integration_builder
@@ -3875,7 +3874,7 @@ def test_b26r_a_whitespace_only_map_xml_is_refused_before_any_write(monkeypatch)
             mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
         )
     assert result.get("_success") is False, result
-    assert result.get("error_code") == "MAP_RAW_XML_BLANK", result
+    assert "MAP_RAW_XML_BLANK" in json.dumps(result, default=str), result  # plan reports it (B27 review)
     assert writes == [], result
 
 
@@ -3892,3 +3891,26 @@ def test_b26r_whitespace_only_xml_is_not_raw_for_the_shared_predicate():
     assert not submits_raw_component_xml({"xml": ""})
     assert not submits_raw_component_xml({})
     assert not map_consults_profile_indexes("transform.map", {"xml": "   "})
+
+
+
+@pytest.mark.parametrize("mode", ["plan", "dry_run"])
+def test_b27r_blank_map_xml_is_reported_by_the_plan_and_the_dry_run(mode):
+    """B27 review: the blank-XML refusal needs no account data, so the PLAN
+    reports the step as an error and a dry run does not show it as runnable."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    spec = {"integration_name": "Raw", "components": [
+        {"key": "ws_map", "type": "transform.map", "name": "Whitespace map", "action": "create",
+         "config": {"xml": "   "}},
+    ]}
+    config = {"integration_spec": spec}
+    action = "plan"
+    if mode == "dry_run":
+        action, config = "apply", {"integration_spec": spec, "dry_run": True}
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        result = integration_builder.build_integration_action(mock.MagicMock(), "p", action, config)
+    rendered = json.dumps(result, default=str)
+    assert "MAP_RAW_XML_BLANK" in rendered, rendered[:1500]

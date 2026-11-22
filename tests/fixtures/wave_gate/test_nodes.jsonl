@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15237, "minimum_collected": 15237, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15239, "minimum_collected": 15239, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15695,3 +15695,5 @@
 {"kind": "test", "id": "pytest-015694", "node_id": "tests/test_recipe_fanout_v2.py::test_b25r_the_dispatcher_and_the_refresh_share_one_map_predicate", "state": "active"}
 {"kind": "test", "id": "pytest-015695", "node_id": "tests/test_recipe_fanout_v2.py::test_b26r_a_whitespace_only_map_xml_is_refused_before_any_write", "state": "active"}
 {"kind": "test", "id": "pytest-015696", "node_id": "tests/test_recipe_fanout_v2.py::test_b26r_whitespace_only_xml_is_not_raw_for_the_shared_predicate", "state": "active"}
+{"kind": "test", "id": "pytest-015697", "node_id": "tests/test_recipe_fanout_v2.py::test_b27r_blank_map_xml_is_reported_by_the_plan_and_the_dry_run[plan]", "state": "active"}
+{"kind": "test", "id": "pytest-015698", "node_id": "tests/test_recipe_fanout_v2.py::test_b27r_blank_map_xml_is_reported_by_the_plan_and_the_dry_run[dry_run]", "state": "active"}

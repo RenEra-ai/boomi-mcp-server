@@ -7772,6 +7772,30 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             #     (e.g. JSON profile leaf with data_type='blob') plans clean
             #     and crashes apply after earlier steps have already mutated
             #     state. Codex r1 P2 finding #1.
+            # B27 review: a whitespace-only map `config.xml` selects the RAW
+            # route (truthiness, QA-154-r4-02) and would be posted verbatim and
+            # refused by the platform. It needs no account data, so the PLAN
+            # reports it (and dry-run and apply refuse the unresolvable step
+            # before any write) — a reused map is never written, so it is exempt.
+            _map_xml = raw_config.get("xml")
+            if (
+                gen_profile_err is None
+                and is_direct_map
+                and planned_action in ("create", "create_clone", "update")
+                and isinstance(_map_xml, str)
+                and _map_xml
+                and not _map_xml.strip()
+            ):
+                gen_profile_err = BuilderValidationError(
+                    f"Map '{comp.key}' supplies config.xml that is only whitespace; "
+                    "it would be submitted as the component and refused by the platform.",
+                    error_code="MAP_RAW_XML_BLANK",
+                    field="xml",
+                    hint=(
+                        "Supply the map's component XML, or omit config.xml and declare "
+                        "map_type and field_mappings."
+                    ),
+                )
             will_invoke_gen_profile_builder = (
                 gen_profile_err is None
                 and not xml_payload
