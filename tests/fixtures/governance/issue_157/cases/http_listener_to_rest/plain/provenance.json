@@ -1,0 +1,24 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_id": "http_listener_to_rest/plain",
+  "derived_by": "hand re-spelling of input.legacy.json into one pinned recipe invocation (field_map below)",
+  "executed_at_replay": false,
+  "field_map": [
+    "naming.component_prefix -> raw_input.naming.component_prefix (naming.integration_name -> intent.integration_name is replaced by the replay name; no row serves it)",
+    "listener.object_name / operation_type / payload_profile -> component_material.listener.object_name / operation_type / request_profile (input_type and response_content_type keep their legacy defaults by omission)",
+    "transform.operations[*] direct {source_path, target_path} -> the shared direct leaf {source_field, target_path}, same values",
+    "inbound_validation.enabled true -> raw_input.listener.inbound_validation true",
+    "target.binding {mode create, settings {base_url, auth_mode none}} -> raw_input.target.binding_mode 'create' + component_material.target.connection {mode create, base_url} (a created REST connection is always unauthenticated)",
+    "target.send_request.method -> raw_input.target.method",
+    "target.send_request.path '/v1/<<target resource>>' -> component_material.target.operation.path '/v1/target-resource' (SANITIZED: the shared request-target grammar refuses '<', '>' and the space; no frozen flow or endpoint row carries the path, and the legacy-route parity test runs the legacy archetype on the same sanitized path)",
+    "target.payload_profile -> component_material.target.payload_profile"
+  ],
+  "legacy_input_sha256": "343a1f679c15048fe0b0fed9ad4b277a3eb5e7b921a38fa2b0367bb1aa4e976f",
+  "method": "the legacy archetype parameters re-spelled into one pinned boomi.archetype.http_listener_to_rest 1.0.0 invocation (raw_input + component_material); no prebuilt components; every value is the legacy input's except where field_map says otherwise",
+  "oracle_checks": [
+    "tests/patterns/test_http_listener_archetypes_e2e.py::TestTypedListenerPresets::test_the_canonical_input_replays_every_frozen_row (frozen flows + endpoints by full payload)",
+    "tests/patterns/test_http_listener_archetypes_e2e.py::TestTypedListenerPresets::test_the_supporting_components_equal_the_legacy_routes (legacy archetype at HEAD; equal to the baseline producer's components at ba1be9f3 for this input, measured)",
+    "tests/patterns/test_http_listener_archetypes_e2e.py::TestTypedListenerPresets::test_the_process_xml_equals_the_legacy_arm"
+  ]
+}

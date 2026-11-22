@@ -1,0 +1,114 @@
+{
+  "seed_format": "1",
+  "recipe_id": "boomi.archetype.http_listener_to_db",
+  "recipe_version": "1.0.0",
+  "provenance": {
+    "source": "tests/fixtures/governance/issue_157/cases/http_listener_to_db/advanced_runtime/input.legacy.json",
+    "source_sha256": "13a5b420a11313d22c8f10c44a7bbc66c974f1c2e08017d9b1af5750b449b603",
+    "derivation": "raw_input/component_material re-spell the frozen legacy parameters of http_listener_to_db/advanced_runtime (naming.component_prefix; listener object_name/operation_type/payload_profile -> material.listener.request_profile; asc_wrapper.enabled -> raw_input.listener.publish_mode 'api_service' with all-default api_service material; target connection/write_profile -> the shared DB-write block; transform source_path -> source_field). expected.supporting_component_keys = the baseline producer's components for this input at ba1be9f3 in emission order with main_process excluded; expected.references = that baseline main_process's depends_on, sorted; execution profile 'listener' = the canonical rule for a listener entry step."
+  },
+  "request": {
+    "integration_name": "Matrix listener to DB 1.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "version": "1",
+      "process_key": "main_process",
+      "naming": {
+        "component_prefix": "OrderIntake"
+      },
+      "listener": {
+        "publish_mode": "api_service"
+      },
+      "target": {
+        "binding_mode": "reuse"
+      }
+    },
+    "component_material": {
+      "version": "1",
+      "listener": {
+        "object_name": "orderIntake",
+        "operation_type": "EXECUTE",
+        "request_profile": {
+          "format": "json",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "id",
+                "kind": "simple",
+                "data_type": "character"
+              },
+              {
+                "name": "amount",
+                "kind": "simple",
+                "data_type": "number"
+              }
+            ]
+          }
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "Root/id",
+            "target_path": "Fields/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_field": "Root/amount",
+            "target_path": "Fields/amount"
+          }
+        ]
+      },
+      "target": {
+        "connection": {
+          "mode": "reuse",
+          "component_name": "<<existing DB connection>>"
+        },
+        "write_profile": {
+          "statement_type": "dynamicinsert",
+          "table_name": "<<target table>>",
+          "fields": [
+            {
+              "name": "id",
+              "data_type": "character",
+              "mandatory": true
+            },
+            {
+              "name": "amount",
+              "data_type": "number"
+            }
+          ]
+        }
+      },
+      "api_service": {}
+    }
+  },
+  "expected": {
+    "process_keys": [
+      "main_process"
+    ],
+    "execution_profiles": {
+      "main_process": "listener"
+    },
+    "supporting_component_keys": [
+      "listener_request_profile",
+      "source_wss_listener_operation",
+      "target_db_connection",
+      "target_db_write_profile",
+      "target_db_write_operation",
+      "transform_transform_map",
+      "api_service"
+    ],
+    "references": {
+      "main_process": [
+        "source_wss_listener_operation",
+        "target_db_connection",
+        "target_db_write_operation",
+        "transform_transform_map"
+      ]
+    }
+  }
+}
