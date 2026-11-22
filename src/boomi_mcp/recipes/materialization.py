@@ -319,18 +319,69 @@ def _stored_cache_profile_facts(component, snapshot, facts):
         return facts._replace(cache_profile=None, unknown=False), None
     if reading is None or reading.profile_state != "known":
         return facts._replace(cache_profile=None, unknown=True), None
+    symbol = _stored_profile_symbol(reading.profile_component_id, reading.profile_component_type)
+    return facts._replace(cache_profile=symbol.ref, unknown=False), symbol
+
+
+def _stored_profile_symbol(profile_component_id, profile_component_type):
+    """The internal symbol standing for ONE stored profile component (#186, #159 S3).
+
+    Its ref is a digest of the profile's id and type, so every stored link to one profile — a
+    cache's, a map's, an operation's — is one symbol, and its identity
+    (``contracts.component_identity``: the bound id) equals a plan profile bound to that id.
+    """
+    from ..compiler.process_ir.contracts import ComponentSymbolV1
+
     digest = hashlib.sha256("{0}|{1}".format(
-        reading.profile_component_id, reading.profile_component_type).encode("utf-8")).hexdigest()
-    symbol = ComponentSymbolV1(
+        profile_component_id, profile_component_type).encode("utf-8")).hexdigest()
+    return ComponentSymbolV1(
         ref=STORED_PROFILE_REF_PREFIX + digest,
-        component_id=reading.profile_component_id,
-        component_type=reading.profile_component_type,
+        component_id=profile_component_id,
+        component_type=profile_component_type,
         connector_type=None,
         action_type=None,
         connection_ref=None,
-        bound_component_id=reading.profile_component_id,
+        bound_component_id=profile_component_id,
     )
-    return facts._replace(cache_profile=symbol.ref, unknown=False), symbol
+
+
+#: #159 S3: the component types whose stored profile links ``stored_profile_bindings`` reads.
+_STORED_BINDING_TYPES = frozenset({"transform.map", "connector-action"})
+
+
+def _stored_binding_profile_facts(component, snapshot, facts):
+    """``(facts, internal profile symbols)`` for a map or REST operation apply does NOT write (#159 S3).
+
+    The request's configuration of such a component is discarded, so it states nothing
+    (`_profile_facts`); what it accepts and produces is what the account stores, read by a route
+    that holds the account (`StoredProfileBindingV1`). Per side: KNOWN — an internal symbol whose
+    identity is the stored profile component and its type, so a plan profile bound to the same
+    component is the same profile and any other is not; ABSENT — no profile; UNKNOWN — no profile,
+    and the symbol's profiles are unknown (``profiles_unknown``), which every profile consumer
+    treats as matching nothing. A route that read nothing, or a component it did not record (a
+    connector action of another family), keeps the facts it had: none.
+    """
+    if str(component.type or "").strip() not in _STORED_BINDING_TYPES:
+        return facts, ()
+    if not bool(getattr(snapshot, "profile_bindings_read", False)):
+        return facts, ()
+    reading = snapshot.lookup_profile_binding(component.key)
+    if reading is None:
+        return facts, ()
+    if reading.binding_unjudged:
+        return facts._replace(input_profile=None, output_profile=None, unknown=True), ()
+    stored = []
+    refs = []
+    unknown = False
+    for side in (reading.input, reading.output):
+        if side.state == "known":
+            symbol = _stored_profile_symbol(side.profile_component_id, side.profile_component_type)
+            stored.append(symbol)
+            refs.append(symbol.ref)
+            continue
+        refs.append(None)
+        unknown = unknown or side.state == "unknown"
+    return facts._replace(input_profile=refs[0], output_profile=refs[1], unknown=unknown), tuple(stored)
 
 
 def build_symbol_table(
@@ -493,6 +544,18 @@ def build_symbol_table(
             facts, stored_symbol = _stored_cache_profile_facts(component, connector_resolution_snapshot, facts)
             if stored_symbol is not None and stored_symbol.ref not in {item.ref for item in stored_profiles}:
                 stored_profiles.append(stored_symbol)
+        stored_binding = (
+            connector_resolution_snapshot.lookup_profile_binding(component.key)
+            if getattr(connector_resolution_snapshot, "profile_bindings_read", False) else None
+        )
+        if not written or getattr(stored_binding, "binding_unjudged", False):
+            # #159 S3: a map or REST operation apply does not write declares what the ACCOUNT
+            # stores; one whose name binding is unjudged, unknown profiles.
+            facts, stored_symbols = _stored_binding_profile_facts(
+                component, connector_resolution_snapshot, facts)
+            for stored_symbol in stored_symbols:
+                if stored_symbol.ref not in {item.ref for item in stored_profiles}:
+                    stored_profiles.append(stored_symbol)
         symbols.append(
             ComponentSymbolV1(
                 ref=ref,

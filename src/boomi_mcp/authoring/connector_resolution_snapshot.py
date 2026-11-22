@@ -248,6 +248,13 @@ class ResolvedConnectorComponentIdentityV1(_SnapshotModel):
     #: operation that will actually serve it. ``None`` when nothing settled it.
     listener_input_type: Optional[str] = None
     listener_request_profile: Optional[str] = None
+    #: #159 S3. The ``requestProfile`` / ``responseProfile`` a REST operation's ONE
+    #: ``GenericOperationConfig`` stores — the element this reader takes the family and verb
+    #: from. ``""`` when that element names none (an unprofiled operation); ``None`` when the
+    #: bytes settle no single REST operation configuration. Raw stored ids, never verified
+    #: here: ``stored_profile_bindings`` reads each linked profile's own envelope.
+    rest_request_profile: Optional[str] = None
+    rest_response_profile: Optional[str] = None
     #: Whether the DOCUMENT this came from parsed. ``None`` when no document was
     #: read at all (a config projection). Tracked rather than inferred: the first
     #: version derived it from "did we find a family or an action", which labels a
@@ -308,6 +315,47 @@ class StoredDocumentCacheProfileV1(_SnapshotModel):
     binding_unjudged: bool = False
 
 
+class StoredProfileSideV1(_SnapshotModel):
+    """One profile link a stored map or REST operation declares (#159 S3).
+
+    Tri-state like the cache reading, and never inferred from a missing answer:
+
+    - ``known``: the stored attribute names a component id, and that id's own ComponentGet
+      envelope states the same id and a real profile type
+      (``connector_resolution.PROFILE_COMPONENT_TYPES``);
+    - ``absent``: the stored component names no profile on this side (no attribute, or a
+      blank one) — an unprofiled operation, the shape of the cap155 captures;
+    - ``unknown``: anything else — the profile read failed, was unaffordable, did not parse,
+      named another id or a component of another type, or the stored id is malformed.
+    """
+
+    state: Literal["known", "absent", "unknown"]
+    profile_component_id: Optional[str] = None
+    profile_component_type: Optional[str] = None
+
+
+class StoredProfileBindingV1(_SnapshotModel):
+    """The profiles a map or REST operation the request does NOT write stores in the account (#159 S3).
+
+    Read from the account's stored component, at the id apply binds, because apply discards the
+    request's own configuration of such a component (``apply_writes_component_config``), so that
+    configuration describes nothing. ``input`` is a map's ``fromProfile`` or an operation's
+    ``requestProfile``; ``output`` a map's ``toProfile`` or an operation's ``responseProfile`` —
+    an operation's read from the same ``GenericOperationConfig`` that settles its family and verb
+    (``live_identity_from_component_xml``). Both sides ``unknown`` when the component itself could
+    not be read, did not parse, is of another type, or its binding is unjudged.
+    """
+
+    component_key: str
+    component_type: Literal["transform.map", "connector-action"]
+    component_id: Optional[str] = None
+    input: StoredProfileSideV1
+    output: StoredProfileSideV1
+    #: As on the cache reading: the route consulted the account and its binding of the request's
+    #: names failed, so apply may yet reuse this component by name — its profiles are unknown.
+    binding_unjudged: bool = False
+
+
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     """Every connector identity the request settles, keyed by component.
 
@@ -327,6 +375,12 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     #: instead (an unwritten cache's stored profile is judged at apply, before any write); True on a
     #: route that read, where a cache with no reading has an unknown profile.
     cache_profiles_read: bool = False
+    #: #159 S3: the stored profiles of every map and REST operation the request does not write,
+    #: read by a route that holds the account (`stored_profile_bindings`).
+    profile_bindings: Tuple[StoredProfileBindingV1, ...] = ()
+    #: #159 S3: whether the route READ them. False on a route with no account: such a component
+    #: then states no profile (the behaviour before this reading existed).
+    profile_bindings_read: bool = False
 
     def for_root(
         self, root_key: str, component_keys: Sequence[str]
@@ -351,6 +405,10 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
                 reading for reading in self.cache_profiles if reading.component_key in wanted
             ),
             cache_profiles_read=self.cache_profiles_read,
+            profile_bindings=tuple(
+                reading for reading in self.profile_bindings if reading.component_key in wanted
+            ),
+            profile_bindings_read=self.profile_bindings_read,
         )
 
     def lookup(self, component_key: str) -> Optional[ResolvedConnectorComponentIdentityV1]:
@@ -362,6 +420,13 @@ class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):
     def lookup_cache(self, component_key: str) -> Optional[StoredDocumentCacheProfileV1]:
         """The stored profile reading of a cache the request does not write, if one was taken (#186)."""
         for reading in self.cache_profiles:
+            if reading.component_key == component_key:
+                return reading
+        return None
+
+    def lookup_profile_binding(self, component_key: str) -> Optional[StoredProfileBindingV1]:
+        """The stored profile reading of a map or REST operation the request does not write (#159 S3)."""
+        for reading in self.profile_bindings:
             if reading.component_key == component_key:
                 return reading
         return None
@@ -544,6 +609,9 @@ def live_identity_from_component_xml(
                         # element, read with the element they belong to.
                         "inputType": attributes.get("inputType"),
                         "requestProfile": attributes.get("requestProfile"),
+                        # #159 S3: a REST operation's response profile, read with
+                        # the element that settles its verb.
+                        "responseProfile": attributes.get("responseProfile"),
                         # THE PATHS THIS CANDIDATE OWNS. Collected per candidate
                         # so they are filtered by family alongside it: a shared
                         # list let a decoy sibling's path field make a genuinely
@@ -676,6 +744,17 @@ def live_identity_from_component_xml(
     listener_input_type = _listener_fact("inputType")
     listener_request_profile = _listener_fact("requestProfile")
 
+    def _rest_profile_fact(field):
+        """#159 S3: one REST profile link, only when exactly one REST operation element
+        survives; ``""`` when that element names none."""
+        if family != "rest" or len(actions) != 1:
+            return None
+        value = actions[0].get(field)
+        return value.strip() if isinstance(value, str) else ""
+
+    rest_request_profile = _rest_profile_fact("requestProfile")
+    rest_response_profile = _rest_profile_fact("responseProfile")
+
     actions = [_verb_of(config) for config in actions]
 
     # EVERY verb the document carries, not the first one. A document with two
@@ -752,6 +831,8 @@ def live_identity_from_component_xml(
         ),
         listener_input_type=listener_input_type,
         listener_request_profile=listener_request_profile,
+        rest_request_profile=rest_request_profile,
+        rest_response_profile=rest_response_profile,
     )
 
 
@@ -764,12 +845,15 @@ def build_connector_resolution_snapshot(
     account_id: Optional[str] = None,
     declared: Optional[Mapping[str, Tuple[Optional[str], Optional[str]]]] = None,
     cache_profiles: Optional[Sequence[StoredDocumentCacheProfileV1]] = None,
+    profile_bindings: Optional[Sequence[StoredProfileBindingV1]] = None,
 ) -> TrustedConnectorResolutionSnapshotV1:
     """Resolve every connector component in ``components`` from its own config.
 
     ``cache_profiles`` (#186) are the stored profiles of the document caches the request does
     not write, read by the route that holds the account; they are carried, not resolved here.
     ``None`` says the route read none (it holds no account), which is not an empty reading.
+    ``profile_bindings`` (#159 S3) are carried the same way, for the maps and REST operations
+    the request does not write (``stored_profile_bindings``).
 
     Non-connector components are skipped rather than recorded as unresolved:
     the snapshot answers "what did this connector resolve to", and a process or
@@ -1064,6 +1148,8 @@ def build_connector_resolution_snapshot(
         account_scope=account_id,
         cache_profiles=tuple(sorted(cache_profiles or (), key=lambda item: item.component_key)),
         cache_profiles_read=cache_profiles is not None,
+        profile_bindings=tuple(sorted(profile_bindings or (), key=lambda item: item.component_key)),
+        profile_bindings_read=profile_bindings is not None,
     )
 
     # THE COMPARISON IS PART OF CONSTRUCTION, not a call a route can omit. It was

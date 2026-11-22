@@ -580,13 +580,18 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
     return None
 
 
-def _verified_dependencies(boomi_client: Boomi, request) -> Dict[str, Any]:
+def _verified_dependencies(boomi_client: Boomi, request, reads=None) -> Dict[str, Any]:
     """Read EVERY supporting id from the account and check its live type.
 
     A clean compile does not verify a dependency: the compile reads connectors only,
     and an unreadable one contributes nothing there. This route writes a process
     whose emitted ids are these, so each one is read here, a failed read refuses,
     and the reading (id, type, version, XML digest) is what the token binds.
+
+    ``reads`` (#159 S3): the call's ONE ``workflow.BudgetedComponentReads``, shared with
+    the compile, so a dependency is the very reading the compile judged (its identity
+    and its stored profile links) and is read once. A read the budget could not make,
+    or that failed, refuses like any other failed read.
     """
     from ..integration_builder import declared_bindings_for_components
 
@@ -594,21 +599,23 @@ def _verified_dependencies(boomi_client: Boomi, request) -> Dict[str, Any]:
     bindings = declared_bindings_for_components(
         tuple(intent.components or ()), intent.conflict_policy
     )
+    if reads is None:
+        from ...authoring.workflow import BudgetedComponentReads
+
+        reads = BudgetedComponentReads(boomi_client)
     readings: Dict[str, Dict[str, Any]] = {}
     for index, comp in enumerate(intent.components or ()):
         bound = bindings[comp.key]
         pointer = f"authoring_request.intent.components.{index}"
-        try:
-            fetched = component_get_xml(boomi_client, bound)
-        except ComponentGetDeadlineExceeded as exc:
-            return component_get_deadline_envelope(exc)
-        except Exception as exc:
+        fetched = reads.fetch(bound)
+        if not isinstance(fetched, dict) or fetched.get("unparseable"):
             return _canonical_refusal(
                 PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
                 f"Supporting component {comp.key!r} ({bound!r}) could not be read from "
-                f"the account: {_extract_api_error_msg(exc)}",
+                "the account (the read failed, timed out, did not parse, or the request's "
+                "read budget was spent).",
                 pointer,
-                "Bind an id that exists in this account.",
+                "Bind an id that exists in this account, then retry.",
             )
         live_type = (fetched.get("type") or "").strip()
         if live_type != str(comp.type).strip():
@@ -636,8 +643,14 @@ def _compute_canonical_xml(
     *,
     phase: str,
     layout_mode: str = DEFAULT_LAYOUT_MODE,
+    reads=None,
 ) -> Dict[str, Any]:
     """Compile, verify, materialize and merge ONE canonical process update — no push.
+
+    ``reads`` (#159 S3): the prepare or apply call's ONE ``workflow.BudgetedComponentReads``.
+    The compile (component plan, connector identities, stored profile links) and the
+    dependency verification read through it, so each id is read once and the verified
+    dependency is the very bytes the compile judged.
 
     The same chain ``build_integration``'s canonical update runs: the request is
     compiled by ``compile_authoring_request_v1``; the COMPILED materialization plan is
@@ -659,6 +672,10 @@ def _compute_canonical_xml(
         materialize_canonical_process_xml,
     )
 
+    if reads is None:
+        from ...authoring.workflow import BudgetedComponentReads
+
+        reads = BudgetedComponentReads(boomi_client)
     request, refusal = _parse_canonical_request(raw_request, phase)
     if refusal is not None:
         return refusal
@@ -673,6 +690,7 @@ def _compute_canonical_xml(
             boomi_client=boomi_client,
             profile=profile,
             account_id=_client_account_id(boomi_client),
+            reads=reads,
         )
     except AuthoringWorkflowError as exc:
         return _authoring_error_envelope(exc, phase)
@@ -687,7 +705,7 @@ def _compute_canonical_xml(
             "Retry once the account's component metadata can be read.",
         )
 
-    verified = _verified_dependencies(boomi_client, request)
+    verified = _verified_dependencies(boomi_client, request, reads=reads)
     if not verified.get("_success"):
         return verified
     readings = verified["readings"]
@@ -833,9 +851,13 @@ def prepare_component_edit_action(
         if refusal is not None:
             refusal.setdefault("boomi_mutation", False)
             return refusal
+        from ...authoring.workflow import BudgetedComponentReads
+
         merged = _compute_canonical_xml(
             boomi_client, profile, component_id, current, patch[_CANONICAL_PATCH_KEY],
             phase="prepare", layout_mode=effective_layout,
+            # #159 S3: ONE read budget for this prepare call.
+            reads=BudgetedComponentReads(boomi_client),
         )
         if merged.get("_success"):
             canonical_binding = {
@@ -1053,9 +1075,14 @@ def apply_component_edit_action(
             return refusal
         # RECOMPUTED, never trusted from the token: the compile, the dependency
         # reads, the materialization and the merge all run again here.
+        from ...authoring.workflow import BudgetedComponentReads
+
+        # #159 S3: ONE read budget for this apply call — the compile, the dependency
+        # verification and the final target check below all spend it.
+        canonical_reads = BudgetedComponentReads(boomi_client)
         merged = _compute_canonical_xml(
             boomi_client, profile, component_id, current, patch[_CANONICAL_PATCH_KEY],
-            phase="apply", layout_mode=effective_layout,
+            phase="apply", layout_mode=effective_layout, reads=canonical_reads,
         )
     else:
         merged = _compute_merged_xml(
@@ -1125,19 +1152,20 @@ def apply_component_edit_action(
         # #159 S3: the compile and the dependency reads ran AFTER the drift check
         # above, so the target is read once more, immediately before the single
         # write: a change landing during those reads refuses here, written-nothing.
-        try:
-            recheck = component_get_xml(boomi_client, component_id)
-        except ComponentGetDeadlineExceeded as exc:
-            return component_get_deadline_envelope(exc)
-        except Exception as exc:
+        # Through the call's budget, and FRESH (``refetch``): an answer from the
+        # budget's cache would make this check vacuous.
+        recheck = canonical_reads.fetch(component_id, refetch=True)
+        if not isinstance(recheck, dict) or recheck.get("unparseable"):
             return {
                 "_success": False,
-                "error": f"Failed to re-read component {component_id!r} before the write: "
-                         f"{_extract_api_error_msg(exc)}",
-                "exception_type": type(exc).__name__,
+                "error": f"Failed to re-read component {component_id!r} before the write "
+                         "(the read failed, timed out, did not parse, or the request's read "
+                         "budget was spent); nothing was written.",
+                "field": "component_id",
+                "hint": "Retry apply_component_edit with the same token.",
                 "boomi_mutation": False,
             }
-        if recheck["version"] != base_version or _sha256(recheck["xml"]) != base_xml_sha256:
+        if recheck.get("version") != base_version or _sha256(recheck.get("xml") or "") != base_xml_sha256:
             return {
                 "_success": False,
                 "error_code": COMPONENT_EDIT_DRIFT_DETECTED,
@@ -1147,7 +1175,7 @@ def apply_component_edit_action(
                 ),
                 "component_id": component_id,
                 "expected_version": base_version,
-                "current_version": recheck["version"],
+                "current_version": recheck.get("version"),
                 "field": "component_id",
                 "hint": "Re-run prepare_component_edit to preview against the current version.",
                 "boomi_mutation": False,
