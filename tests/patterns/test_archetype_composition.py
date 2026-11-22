@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
@@ -51,6 +52,83 @@ _EXAMPLE_PATH = (
     / "m8"
     / "composed_db_to_api_fanout.integration.json"
 )
+
+
+_TESTS_DIR = str(Path(__file__).resolve().parent.parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
+
+import _example_unit_support as _units  # noqa: E402
+from _fanout_v2_support import respell_oracle_credential_refs  # noqa: E402
+
+_COMPONENT_FIELDS = ("key", "type", "action", "name", "config", "depends_on", "component_id")
+
+
+def _example_payload(path: Path) -> Dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["example_not_template"] is True
+    assert payload["is_template"] is False
+    assert payload["template_status"] == "example_only_not_reusable_template"
+    return payload
+
+
+def _recipe_normalized_spec(payload: Dict[str, Any]):
+    """The CANONICAL route's spec for the example's ``recipe_request``.
+
+    A typed recipe intent compiled through the public workflow; the normalized spec
+    carries the supporting components and the direct process unit the fan-out
+    recipe contributes (no legacy process component, no ``process_kind``).
+    """
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    request = AuthoringRequestV1.model_validate(
+        {
+            "intent": {
+                "intent_kind": "recipe",
+                "integration_name": payload["integration_spec"]["name"],
+                "invocations": [payload["recipe_request"]],
+            }
+        }
+    )
+    result, internals = compile_authoring_request_v1(request, profile="p")
+    assert result.validation_report.is_valid
+    return internals.normalized.integration_spec
+
+
+def _assert_example_matches_recipe(payload: Dict[str, Any]) -> None:
+    from boomi_mcp.models.process_ir import canonical_process_ir_json, parse_process_ir_v1
+
+    shipped = payload["integration_spec"]
+    assert not [c for c in shipped["components"] if c["type"] == "process"]
+    composed = _recipe_normalized_spec(payload)
+
+    # The ONE re-spelling fan-out 2.0.0 applies (a legacy credential_ref under the
+    # opaque `credential://` scheme) goes on the EXPECTED side; every other byte of
+    # every supporting component is compared as shipped.
+    expected = [
+        {field: component[field] for field in _COMPONENT_FIELDS}
+        for component in respell_oracle_credential_refs(shipped["components"])
+    ]
+    actual = []
+    for component in composed.components:
+        data = component.model_dump(mode="json")
+        actual.append({field: data[field] for field in _COMPONENT_FIELDS})
+    assert actual == expected
+
+    assert len(composed.processes) == len(shipped["processes"]) == 1
+    unit, authored = composed.processes[0], shipped["processes"][0]
+    envelope = authored["envelope"]
+    assert unit.envelope.component_key == envelope["component_key"]
+    assert unit.envelope.name == envelope["name"]
+    assert unit.envelope.action == envelope["action"]
+    assert set(unit.envelope.depends_on) == set(envelope["depends_on"])
+    assert unit.envelope.process_extensions.model_dump(
+        mode="json", exclude_none=True
+    ) == envelope["process_extensions"]
+    assert canonical_process_ir_json(unit.process_ir) == canonical_process_ir_json(
+        parse_process_ir_v1(authored["process_ir"])
+    )
 
 
 def _payload_profile(*leaf_names: str) -> Dict[str, Any]:
@@ -407,16 +485,26 @@ def test_composed_spec_plans_clean_and_emits_branch_xml():
 
 
 def test_golden_example_round_trips():
-    payload = json.loads(_EXAMPLE_PATH.read_text(encoding="utf-8"))
-    assert payload["example_not_template"] is True
-    assert payload["is_template"] is False
-    assert payload["template_status"] == "example_only_not_reusable_template"
-    request = payload["compose_request"]
-    result = compose_archetypes_action(
-        parts=request["parts"], options=request["options"]
-    )
-    assert result["_success"] is True
-    assert result["integration_spec"] == payload["integration_spec"]
+    payload = _example_payload(_EXAMPLE_PATH)
+    # The example's typed recipe request reproduces its components and its direct
+    # process unit (the legacy compose route no longer authors its process).
+    _assert_example_matches_recipe(payload)
+
+
+def test_golden_example_process_matches_the_frozen_legacy_bytes():
+    spec = _units.example_spec(_EXAMPLE_PATH)
+    xml = _units.render_process_xml(spec, _units.uuid5_registry(spec))
+    frozen = (
+        _units.LEGACY_ORACLE_DIR / "composed_db_to_api_fanout.process.legacy.xml"
+    ).read_text(encoding="utf-8")
+    assert xml == frozen
+    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
+    assert shapes.count("branch") == 1
+    # DB Get source + one REST send per leg.
+    assert shapes.count("connectoraction") == 3
+    # Each Branch leg terminates in its own Stop.
+    assert shapes.count("stop") == 2
+    assert shapes.count("map") == 1
 
 
 def test_golden_example_plans_clean():
@@ -753,16 +841,20 @@ _CACHE_EXAMPLE_PATH = (
 
 
 def test_cache_handoff_golden_example_round_trips():
-    payload = json.loads(_CACHE_EXAMPLE_PATH.read_text(encoding="utf-8"))
-    assert payload["example_not_template"] is True
-    assert payload["is_template"] is False
-    assert payload["template_status"] == "example_only_not_reusable_template"
-    request = payload["compose_request"]
-    result = compose_archetypes_action(
-        parts=request["parts"], options=request["options"]
-    )
-    assert result["_success"] is True
-    assert result["integration_spec"] == payload["integration_spec"]
+    payload = _example_payload(_CACHE_EXAMPLE_PATH)
+    _assert_example_matches_recipe(payload)
+
+
+def test_cache_handoff_golden_example_process_matches_the_frozen_legacy_bytes():
+    spec = _units.example_spec(_CACHE_EXAMPLE_PATH)
+    xml = _units.render_process_xml(spec, _units.uuid5_registry(spec))
+    frozen = (
+        _units.LEGACY_ORACLE_DIR / "cache_handoff_staged_fanout.process.legacy.xml"
+    ).read_text(encoding="utf-8")
+    assert xml == frozen
+    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
+    assert shapes.count("doccacheload") == 1
+    assert shapes.count("doccacheretrieve") == 2
 
 
 def test_cache_handoff_golden_example_plans_clean():

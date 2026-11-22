@@ -4,138 +4,121 @@
   "template_status": "example_only_not_reusable_template",
   "purpose": "M8 (#14): composed archetype fan-out \u2014 compose_archetypes(parts) turns one db_source part, one shared transform part, and two rest_target parts into ONE coherent IntegrationSpecV1 whose main process lowers the shared map + Branch fan-out onto the verified flow_sequence surface (#117/#112).",
   "do_not_reuse": "Concrete values below are demo-grade placeholders (example.invalid endpoints, <<...>> sentinels) so the spec plans clean in tests; author real bindings from actual requirements.",
-  "compose_request": {
-    "parts": [
-      {
-        "key": "db",
-        "kind": "db_source",
-        "parameters": {
-          "binding": {
-            "mode": "create",
-            "settings": {
-              "driver": "microsoft_jdbc",
-              "auth_mode": "username_password",
-              "host": "db.example.invalid",
-              "database": "AppDB",
-              "username": "<<db user>>",
-              "credential_ref": "<<opaque credential reference>>"
-            }
-          },
-          "read_operation": {
-            "sql": "<<user-authored DB read statement>>",
-            "result_schema": {
-              "fields": [
-                {
-                  "name": "source_a",
-                  "data_type": "character"
-                },
-                {
-                  "name": "source_b",
-                  "data_type": "character"
-                }
-              ]
-            }
-          }
-        }
+  "recipe_request": {
+    "recipe_id": "boomi.compose.db_rest_fanout",
+    "recipe_version": "2.0.0",
+    "invocation_id": "fanout",
+    "raw_input": {
+      "version": "2",
+      "process_key": "main_process",
+      "naming": {
+        "component_prefix": "M8DEMO"
       },
-      {
-        "key": "shape",
-        "kind": "transform",
-        "parameters": {
-          "operations": [
+      "source": {
+        "part_key": "db",
+        "binding_mode": "create",
+        "auth_mode": "username_password"
+      },
+      "transform": {
+        "part_key": "shape"
+      },
+      "targets": [
+        {
+          "part_key": "orders",
+          "label": "Orders",
+          "binding_mode": "create",
+          "method": "POST"
+        },
+        {
+          "part_key": "billing",
+          "label": "Billing",
+          "binding_mode": "create",
+          "method": "POST"
+        }
+      ]
+    },
+    "component_material": {
+      "version": "2",
+      "source": {
+        "connection": {
+          "mode": "create",
+          "driver": "microsoft_jdbc",
+          "host": "db.example.invalid",
+          "database": "AppDB",
+          "username": "<<db user>>",
+          "credential_ref": "credential://<<opaque credential reference>>"
+        },
+        "read": {
+          "sql": "<<user-authored DB read statement>>",
+          "result_fields": [
             {
-              "operation_type": "direct",
-              "source_field": "source_a",
-              "target_path": "Root/target_a"
+              "name": "source_a",
+              "data_type": "character"
             },
             {
-              "operation_type": "direct",
-              "source_field": "source_b",
-              "target_path": "Root/target_b"
+              "name": "source_b",
+              "data_type": "character"
             }
           ]
         }
       },
-      {
-        "key": "orders",
-        "kind": "rest_target",
-        "label": "Orders",
-        "parameters": {
-          "binding": {
-            "mode": "create",
-            "settings": {
-              "base_url": "https://orders.example.invalid",
-              "auth_mode": "none"
-            }
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a"
           },
-          "send_request": {
-            "method": "POST",
-            "path": "/v1/orders"
-          },
-          "payload_profile": {
-            "format": "json",
-            "root": {
-              "name": "Root",
-              "kind": "object",
-              "children": [
-                {
-                  "name": "target_a",
-                  "kind": "simple",
-                  "data_type": "character"
-                },
-                {
-                  "name": "target_b",
-                  "kind": "simple",
-                  "data_type": "character"
-                }
-              ]
-            }
+          {
+            "operation_type": "direct",
+            "source_field": "source_b",
+            "target_path": "Root/target_b"
           }
+        ]
+      },
+      "payload_profile": {
+        "format": "json",
+        "root": {
+          "name": "Root",
+          "kind": "object",
+          "children": [
+            {
+              "name": "target_a",
+              "kind": "simple",
+              "data_type": "character"
+            },
+            {
+              "name": "target_b",
+              "kind": "simple",
+              "data_type": "character"
+            }
+          ]
         }
       },
-      {
-        "key": "billing",
-        "kind": "rest_target",
-        "label": "Billing",
-        "parameters": {
-          "binding": {
+      "targets": [
+        {
+          "part_key": "orders",
+          "connection": {
             "mode": "create",
-            "settings": {
-              "base_url": "https://billing.example.invalid",
-              "auth_mode": "none"
-            }
+            "base_url": "https://orders.example.invalid"
           },
-          "send_request": {
-            "method": "POST",
-            "path": "/v1/billing"
+          "operation": {
+            "path": "/v1/orders",
+            "query_parameters": []
+          }
+        },
+        {
+          "part_key": "billing",
+          "connection": {
+            "mode": "create",
+            "base_url": "https://billing.example.invalid"
           },
-          "payload_profile": {
-            "format": "json",
-            "root": {
-              "name": "Root",
-              "kind": "object",
-              "children": [
-                {
-                  "name": "target_a",
-                  "kind": "simple",
-                  "data_type": "character"
-                },
-                {
-                  "name": "target_b",
-                  "kind": "simple",
-                  "data_type": "character"
-                }
-              ]
-            }
+          "operation": {
+            "path": "/v1/billing",
+            "query_parameters": []
           }
         }
-      }
-    ],
-    "options": {
-      "naming": {
-        "integration_name": "M8 Composed DB to API Fanout Demo",
-        "component_prefix": "M8DEMO"
-      }
+      ]
     }
   },
   "integration_spec": {
@@ -341,89 +324,6 @@
         "depends_on": [
           "target_billing_rest_connection",
           "transform_target_profile"
-        ]
-      },
-      {
-        "key": "main_process",
-        "type": "process",
-        "action": "create",
-        "name": "M8DEMO DB to API Sync",
-        "component_id": null,
-        "config": {
-          "process_kind": "database_to_api_sync",
-          "source": {
-            "connector_type": "database",
-            "action_type": "Get",
-            "connection_id": "$ref:source_db_connection",
-            "operation_id": "$ref:source_db_get_operation"
-          },
-          "transform": {
-            "mode": "passthrough"
-          },
-          "target": {
-            "connector_type": "rest",
-            "action_type": "POST",
-            "connection_id": "$ref:target_rest_connection",
-            "operation_id": "$ref:target_rest_operation"
-          },
-          "process_extensions": {
-            "connections": [
-              {
-                "connection_id": "$ref:source_db_connection",
-                "connector_type": "database",
-                "fields": [
-                  {
-                    "id": "username",
-                    "label": "User",
-                    "xpath": "DatabaseConnectionSettings/@username"
-                  },
-                  {
-                    "id": "password",
-                    "label": "Password",
-                    "xpath": "DatabaseConnectionSettings/@password"
-                  }
-                ]
-              }
-            ]
-          },
-          "flow_sequence": [
-            {
-              "kind": "map_ref",
-              "map_ref": "$ref:transform_transform_map",
-              "label": "Shared transform"
-            },
-            {
-              "kind": "branch",
-              "label": "Fan out",
-              "legs": [
-                {
-                  "target": {
-                    "connector_type": "rest",
-                    "action_type": "POST",
-                    "connection_id": "$ref:target_rest_connection",
-                    "operation_id": "$ref:target_rest_operation"
-                  }
-                },
-                {
-                  "target": {
-                    "connector_type": "rest",
-                    "connection_id": "$ref:target_billing_rest_connection",
-                    "operation_id": "$ref:target_billing_rest_operation",
-                    "action_type": "POST"
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        "depends_on": [
-          "source_db_connection",
-          "source_db_get_operation",
-          "transform_transform_map",
-          "target_rest_connection",
-          "target_rest_operation",
-          "target_billing_rest_connection",
-          "target_billing_rest_operation"
         ]
       }
     ],
@@ -799,6 +699,83 @@
     },
     "pipeline": null,
     "profile_indexes_by_component_id": null,
-    "processes": []
+    "processes": [
+      {
+        "envelope": {
+          "component_key": "main_process",
+          "name": "M8DEMO DB to API Sync",
+          "action": "create",
+          "depends_on": [
+            "source_db_connection",
+            "source_db_get_operation",
+            "transform_transform_map",
+            "target_rest_connection",
+            "target_rest_operation",
+            "target_billing_rest_connection",
+            "target_billing_rest_operation"
+          ],
+          "process_extensions": {
+            "connections": [
+              {
+                "connection_id": "$ref:source_db_connection",
+                "connector_type": "database",
+                "fields": [
+                  {
+                    "id": "username",
+                    "label": "User",
+                    "xpath": "DatabaseConnectionSettings/@username"
+                  },
+                  {
+                    "id": "password",
+                    "label": "Password",
+                    "xpath": "DatabaseConnectionSettings/@password"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "process_ir": {
+          "version": "1",
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "kind": "source",
+                "connection_ref": "$ref:source_db_connection",
+                "operation_ref": "$ref:source_db_get_operation"
+              },
+              {
+                "kind": "map_ref",
+                "map_ref": "$ref:transform_transform_map",
+                "label": "Shared transform"
+              },
+              {
+                "kind": "branch",
+                "legs": [
+                  {
+                    "steps": [],
+                    "terminal": {
+                      "kind": "target",
+                      "connection_ref": "$ref:target_rest_connection",
+                      "operation_ref": "$ref:target_rest_operation"
+                    }
+                  },
+                  {
+                    "steps": [],
+                    "terminal": {
+                      "kind": "target",
+                      "connection_ref": "$ref:target_billing_rest_connection",
+                      "operation_ref": "$ref:target_billing_rest_operation"
+                    }
+                  }
+                ],
+                "label": "Fan out"
+              }
+            ]
+          }
+        }
+      }
+    ]
   }
 }
