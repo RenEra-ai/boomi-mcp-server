@@ -483,3 +483,259 @@ def test_archetype_notify_shape_sequence():
     assert len(loads) == 2
     for load in loads:
         assert list(load.find("dragpoints")) == []
+
+
+# ===========================================================================
+# #159 S2 lane L1 — reliability of the typed preset
+# ``boomi.archetype.database_to_api_sync`` 1.0.0: connector-scoped Try/Catch,
+# the dead-letter cache, catch Notify, and the architect retry decision.
+# ===========================================================================
+
+import test_database_to_api_sync_contract as _l1  # noqa: E402  (sibling test module)
+import pytest as _pytest  # noqa: E402
+
+
+def _l1_inputs(case_id="wm_off_dlq_on_create"):
+    intent = copy.deepcopy(_l1.l1_case(case_id).input_canonical["intent"])
+    invocation = intent["invocations"][0]
+    return intent, invocation["raw_input"], invocation["component_material"]
+
+
+def _l1_root(raw):
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    unit = preset.emit_database_to_api_sync(preset.DatabaseToApiSyncInputV1.model_validate(raw))[0].unit
+    return unit.process_ir.model_dump(mode="json", exclude_none=True)
+
+
+def test_l1_dlq_off_root_is_the_plain_linear_chain():
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_off_create")
+    assert [s["kind"] for s in _l1_root(raw)["body"]["steps"]] == ["source", "map_ref", "target", "stop"]
+
+
+def test_l1_dlq_on_root_is_the_connector_scoped_double_guard_with_retry_zero():
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_on_create")
+    steps = _l1_root(raw)["body"]["steps"]
+    assert [s["kind"] for s in steps] == ["try_catch", "map_ref", "try_catch"]
+    read_guard, _map, send_guard = steps
+    for guard in (read_guard, send_guard):
+        assert guard["scope"] == "connector"
+        assert guard["retry"]["count"] == 0
+        assert guard["catch_body"]["steps"] == []
+        assert guard["catch_body"]["terminal"] == {
+            "kind": "cache_put", "cache_ref": "$ref:dlq_cache", "label": "Route caught errors to DLQ cache"}
+        (call,) = guard["try_body"]["steps"]
+        assert call["kind"] == "connector_call" and "idempotency" not in call
+    assert read_guard["try_body"]["terminal"] == {"kind": "continue"}
+    assert send_guard["try_body"]["terminal"] == {"kind": "stop"}
+    assert read_guard["try_body"]["steps"][0]["operation_ref"] == "$ref:source_db_get_operation"
+    assert send_guard["try_body"]["steps"][0]["operation_ref"] == "$ref:target_rest_operation"
+
+
+def test_l1_catch_notify_heads_both_catch_legs():
+    _intent, raw, _material = _l1_inputs("wm_on_dlq_on_reuse")
+    steps = _l1_root(raw)["body"]["steps"]
+    expected = raw["reliability"]["catch_notify"]
+    for guard in (steps[0], steps[2]):
+        (notify,) = guard["catch_body"]["steps"]
+        assert (notify["kind"], notify["level"], notify["message_template"]) == (
+            "notify", expected["level"], expected["message_template"])
+
+
+@_pytest.mark.parametrize(
+    "catch_notify",
+    [
+        {"level": "ERROR", "message_template": "static text, no token"},
+        {"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]},
+        {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"], "email_to": "ops@example.invalid"},
+    ],
+    ids=["no_caught_error_token", "unsupported_level", "extra_channel"],
+)
+def test_l1_catch_notify_refusals(catch_notify):
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_on_create")
+    raw["reliability"]["catch_notify"] = catch_notify
+    with _pytest.raises(ValidationError) as caught:
+        preset.DatabaseToApiSyncInputV1.model_validate(raw)
+    assert "ops@example.invalid" not in str(caught.value.errors(include_input=False))
+
+
+def test_l1_catch_notify_without_a_dlq_is_refused():
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_off_create")
+    raw["reliability"]["catch_notify"] = dict(_CATCH_NOTIFY)
+    with _pytest.raises(ValidationError):
+        preset.DatabaseToApiSyncInputV1.model_validate(raw)
+
+
+# --- retry evidence (architect decision) ------------------------------------
+
+
+@_pytest.mark.parametrize("attempts", [2, 5, 6])
+def test_l1_retry_above_one_is_refused_not_reduced(attempts):
+    """The frozen ``wm_on_dlq_on_reuse`` legacy input asks for 5 attempts. The
+    preset refuses it — in the preparer's FIRST step and in the executor —
+    with ``DB_TO_API_RETRY_UNAVAILABLE``, before anything is assembled."""
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+    from boomi_mcp.recipes.errors import RecipeError
+
+    intent, raw, material = _l1_inputs("wm_on_dlq_on_reuse")
+    raw["reliability"]["retry"]["max_attempts"] = attempts
+    inp = preset.DatabaseToApiSyncInputV1.model_validate(raw)
+    for call in (
+        # An EMPTY base catalog: a step past the retry rule would refuse the DLQ base.
+        lambda: preset.prepare_database_to_api_sync(
+            inp, preset.DatabaseToApiSyncMaterialV1.model_validate(material), base_catalog={}),
+        lambda: preset.emit_database_to_api_sync(inp),
+    ):
+        with _pytest.raises(RecipeError) as caught:
+            call()
+        (diagnostic,) = caught.value.diagnostics
+        assert diagnostic.code == "RECIPE_CONSTRAINT_FAILED"
+        assert diagnostic.cause_codes == ("DB_TO_API_RETRY_UNAVAILABLE",)
+        assert diagnostic.path == "/raw_input/reliability/retry/max_attempts"
+
+
+def test_l1_retry_five_is_refused_through_the_public_planner():
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError
+
+    request = copy.deepcopy(_l1.l1_case("wm_on_dlq_on_reuse").input_canonical)
+    request["intent"]["invocations"][0]["raw_input"]["reliability"]["retry"]["max_attempts"] = 5
+    with _pytest.raises(AuthoringWorkflowError) as caught:
+        _l1.l1_plan(request, client=None)
+    assert "DB_TO_API_RETRY_UNAVAILABLE" in str(caught.value.diagnostics)
+
+
+@_pytest.mark.parametrize("attempts", [0, 7, "1", True, 1.0])
+def test_l1_retry_outside_the_strict_range_is_an_input_error(attempts):
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_off_create")
+    raw["reliability"]["retry"]["max_attempts"] = attempts
+    with _pytest.raises(ValidationError):
+        preset.DatabaseToApiSyncInputV1.model_validate(raw)
+
+
+def test_l1_no_caller_authored_idempotency_field_exists():
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    _intent, raw, _material = _l1_inputs("wm_off_dlq_on_create")
+    raw["reliability"]["retry"]["idempotency"] = {"kind": "key_reference", "contract_ref": "$ref:x"}
+    with _pytest.raises(ValidationError):
+        preset.DatabaseToApiSyncInputV1.model_validate(raw)
+
+
+# --- the dead-letter cache ------------------------------------------------------
+
+
+def test_l1_dlq_cache_must_be_an_existing_reference_only_document_cache():
+    intent, raw, material = _l1_inputs("wm_off_dlq_on_create")
+    (cache,) = intent["base_components"]
+    missing = _l1._l1_refusal(raw, material, ())
+    assert missing == (("COMPOSITION_CONTRACT_MISMATCH",), "/raw_input/reliability/dlq/cache_key")
+    wrong_type = copy.deepcopy(cache)
+    wrong_type["type"] = "connector-settings"
+    assert _l1._l1_refusal(raw, material, (wrong_type,)) == missing
+    written = copy.deepcopy(cache)
+    written["config"].pop("reference_only")
+    assert _l1._l1_refusal(raw, material, (written,)) == missing
+    prepared = _l1._l1_prepare(raw, material, (cache,))
+    assert "dlq_cache" in prepared.selected_base_keys
+    assert prepared.projection_facts.reliability.dlq_component_key == "dlq_cache"
+
+
+def _l1_dlq_plan_causes(xml):
+    request = _l1.l1_case("wm_off_dlq_on_create").input_canonical
+    cache_id = request["intent"]["base_components"][0]["config"]["component_id"]
+    result, _internals = _l1.l1_plan(request, answers=_l1.l1_cache_answers(cache_id, xml))
+    return [(d.cause_codes, d.path) for d in result.errors]
+
+
+def test_l1_unprofiled_dlq_cache_plans_clean():
+    assert _l1_dlq_plan_causes(_l1.l1_unprofiled_cache_xml()) == []
+
+
+@_pytest.mark.parametrize("state", ["profiled", "unreadable"])
+def test_l1_profiled_or_unreadable_dlq_cache_is_refused(state):
+    """The workflow reads the cache's STORED XML and the compiler's profile rule
+    refuses a cache that is profiled (it cannot admit both the DB and the JSON
+    documents the two catch legs route) or that cannot be read."""
+    xml = _l1.l1_profiled_cache_xml() if state == "profiled" else None
+    causes = _l1_dlq_plan_causes(xml)
+    assert causes and all(c == ("PROCESS_IR_SEMANTIC_PROFILE_MISMATCH",) for c, _p in causes), causes
+    assert {p.rsplit("/", 1)[-1] for _c, p in causes} == {"cache_ref"}
+
+
+# --- process XML parity with the legacy route ---------------------------------
+
+
+def _l1_canonical_process_xml(dlq=None, catch_notify=None, name="Archetype DLQ Golden"):
+    """The preset's materialized process for ``arch_params`` (the archetype
+    goldens' own input), through the public plan -> compile -> late binding ->
+    canonical materialization, with the goldens' frozen ids."""
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+
+    legacy = {"parameters": _params(copy.deepcopy(dlq) if dlq else None, None, catch_notify)}
+    if dlq:
+        legacy["parameters"]["reliability"]["dlq"]["target"]["document_cache_id"] = _corpus.ARCH_CACHE_ID
+    request = _l1.l1_canonical_request("arch_golden", legacy, "Map source to JSON payload")
+    raw = request["intent"]["invocations"][0]["raw_input"]
+    raw["naming"].update({"process_name": name, "folder_name": "Golden/Fixtures"})
+    result, internals = _l1.l1_plan(request, client=None)
+    assert not result.errors, [(d.cause_codes, d.path) for d in result.errors]
+    unit = internals.normalized.integration_spec.processes[0]
+    plan = build_materialization_plan(
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
+        symbols=internals.symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+    ids = {
+        "source_db_connection": _corpus.ARCH_DB_CONN_ID,
+        "source_db_get_operation": _corpus.ARCH_DB_OP_ID,
+        "transform_transform_map": _corpus.ARCH_MAP_ID,
+        "target_rest_connection": _corpus.ARCH_REST_CONN_ID,
+        "target_rest_operation": _corpus.ARCH_REST_OP_ID,
+        "dlq_cache": _corpus.ARCH_CACHE_ID,
+    }
+    return materialize_canonical_process_xml(plan=plan, id_registry=ids, symbols=internals.symbols)
+
+
+def test_l1_dlq_process_xml_equals_the_frozen_archetype_golden():
+    """golden-000059-style DLQ (no notify): ``try_catch_dlq_document_cache_archetype.xml``."""
+    emitted = _l1_canonical_process_xml(dlq=_WIRED_DC)
+    assert emitted == _GOLDEN.read_text()
+
+
+def test_l1_notify_dlq_process_xml_equals_the_frozen_archetype_golden():
+    """golden-000088 (``issue184_cache_notify_archetype_terminal.xml``), frozen
+    independently of both builders."""
+    emitted = _l1_canonical_process_xml(
+        dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
+    )
+    assert emitted == _NOTIFY_GOLDEN.read_text()
+
+
+def test_l1_dlq_off_process_xml_equals_the_legacy_builder():
+    emitted = _l1_canonical_process_xml(name="Archetype DLQ Golden")
+    legacy = _build_archetype_process_xml(_emit())
+    assert emitted == legacy
