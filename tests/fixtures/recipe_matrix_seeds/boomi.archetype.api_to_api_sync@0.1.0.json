@@ -1,0 +1,320 @@
+{
+  "expected": {
+    "execution_profiles": {
+      "main_process": "scheduled"
+    },
+    "process_keys": [
+      "main_process"
+    ],
+    "references": {
+      "main_process": [
+        "source_rest_source_connection",
+        "source_rest_source_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+        "transform_transform_map"
+      ]
+    },
+    "supporting_component_keys": [
+      "source_response_profile",
+      "source_rest_source_connection",
+      "source_rest_source_operation",
+      "transform_target_profile",
+      "transform_transform_map",
+      "target_rest_connection",
+      "target_rest_operation"
+    ]
+  },
+  "provenance": {
+    "derivation": "the L1 parity spec frozen at 060dabad64e028d83d192e5820d8f37df64d54d3 (before #145 code existed). base_components = its components verbatim; raw_input = the five pipeline stage references (fetch/map/send-or-write) and one materializer slot per component, mode by the documented reference_only/action rule. expected: process key, supporting keys (spec order, process dropped) and process depends_on from the same spec; scheduled = connector source entry.",
+    "source": "tests/fixtures/recipe_parity/api_to_api_sync_0.json",
+    "source_sha256": "d41df8409b3115f8db6fd89fb2bb852db2d5691b63f0fefebfbd6f204226985d"
+  },
+  "recipe_id": "boomi.archetype.api_to_api_sync",
+  "recipe_version": "0.1.0",
+  "request": {
+    "base_components": [
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Source Profile",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "source_a",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "source_response_profile",
+        "name": "DEMO Source Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "auth": "NONE",
+          "base_url": "https://source.example.com",
+          "component_name": "DEMO REST Source Connection",
+          "connector_type": "rest"
+        },
+        "depends_on": [],
+        "key": "source_rest_source_connection",
+        "name": "DEMO REST Source Connection",
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO REST Fetch",
+          "connection_ref_key": "source_rest_source_connection",
+          "connector_type": "rest",
+          "method": "GET",
+          "operation_mode": "execute",
+          "path": "/v1/<<source resource>>",
+          "response_profile_id": "$ref:source_response_profile",
+          "response_profile_type": "json"
+        },
+        "depends_on": [
+          "source_rest_source_connection",
+          "source_response_profile"
+        ],
+        "key": "source_rest_source_operation",
+        "name": "DEMO REST Fetch",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Target Profile",
+          "profile_type": "json.generated",
+          "root": {
+            "children": [
+              {
+                "children": null,
+                "data_type": "character",
+                "description": null,
+                "kind": "simple",
+                "name": "target_a",
+                "required": false
+              }
+            ],
+            "data_type": null,
+            "description": null,
+            "kind": "object",
+            "name": "Root",
+            "required": false
+          }
+        },
+        "depends_on": [],
+        "key": "transform_target_profile",
+        "name": "DEMO Target Profile",
+        "type": "profile.json"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO Field Map",
+          "field_mappings": [
+            {
+              "source_path": "Root/source_a",
+              "target_path": "Root/target_a"
+            }
+          ],
+          "map_type": "direct",
+          "source_profile_id": "$ref:source_response_profile",
+          "source_profile_type": "profile.json",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json"
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_response_profile"
+        ],
+        "key": "transform_transform_map",
+        "name": "DEMO Field Map",
+        "type": "transform.map"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "auth": "NONE",
+          "base_url": "https://target.example.com",
+          "component_name": "DEMO REST Connection",
+          "connector_type": "rest"
+        },
+        "depends_on": [],
+        "key": "target_rest_connection",
+        "name": "DEMO REST Connection",
+        "type": "connector-settings"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "component_name": "DEMO REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "connector_type": "rest",
+          "method": "POST",
+          "operation_mode": "execute",
+          "path": "/v1/<<target resource>>",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ],
+        "key": "target_rest_operation",
+        "name": "DEMO REST Send",
+        "type": "connector-action"
+      },
+      {
+        "action": "create",
+        "component_id": null,
+        "config": {
+          "pipeline": {
+            "dependencies": [
+              {
+                "from_stage": "fetch",
+                "to_stage": "map"
+              },
+              {
+                "from_stage": "map",
+                "to_stage": "send"
+              }
+            ],
+            "stages": [
+              {
+                "config": {
+                  "connection_id": "$ref:source_rest_source_connection",
+                  "operation_id": "$ref:source_rest_source_operation",
+                  "primitive": "rest_fetch"
+                },
+                "key": "fetch",
+                "kind": "fetch"
+              },
+              {
+                "config": {
+                  "map_ref": "$ref:transform_transform_map",
+                  "primitive": "map"
+                },
+                "key": "map",
+                "kind": "map"
+              },
+              {
+                "config": {
+                  "action_type": "POST",
+                  "connection_id": "$ref:target_rest_connection",
+                  "operation_id": "$ref:target_rest_operation",
+                  "primitive": "rest_send"
+                },
+                "key": "send",
+                "kind": "send"
+              }
+            ]
+          },
+          "process_kind": "sync_pipeline"
+        },
+        "depends_on": [
+          "source_rest_source_connection",
+          "source_rest_source_operation",
+          "transform_transform_map",
+          "target_rest_connection",
+          "target_rest_operation"
+        ],
+        "key": "main_process",
+        "name": "DEMO API to API Sync",
+        "type": "process"
+      }
+    ],
+    "integration_name": "Matrix demo-api-to-api-sync",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "component_slots": [
+        {
+          "component_key": "source_response_profile",
+          "component_type": "profile.json",
+          "contribution_id": "c.0",
+          "materialization_mode": "create",
+          "materializer_slot": "source_response_profile"
+        },
+        {
+          "component_key": "source_rest_source_connection",
+          "component_type": "connector-settings",
+          "contribution_id": "c.1",
+          "materialization_mode": "create",
+          "materializer_slot": "source_rest_source_connection"
+        },
+        {
+          "component_key": "source_rest_source_operation",
+          "component_type": "connector-action",
+          "contribution_id": "c.2",
+          "materialization_mode": "create",
+          "materializer_slot": "source_rest_source_operation"
+        },
+        {
+          "component_key": "transform_target_profile",
+          "component_type": "profile.json",
+          "contribution_id": "c.3",
+          "materialization_mode": "create",
+          "materializer_slot": "transform_target_profile"
+        },
+        {
+          "component_key": "transform_transform_map",
+          "component_type": "transform.map",
+          "contribution_id": "c.4",
+          "materialization_mode": "create",
+          "materializer_slot": "transform_transform_map"
+        },
+        {
+          "component_key": "target_rest_connection",
+          "component_type": "connector-settings",
+          "contribution_id": "c.5",
+          "materialization_mode": "create",
+          "materializer_slot": "target_rest_connection"
+        },
+        {
+          "component_key": "target_rest_operation",
+          "component_type": "connector-action",
+          "contribution_id": "c.6",
+          "materialization_mode": "create",
+          "materializer_slot": "target_rest_operation"
+        },
+        {
+          "component_key": "main_process",
+          "component_type": "process",
+          "contribution_id": "c.7",
+          "materialization_mode": "create",
+          "materializer_slot": "main_process"
+        }
+      ],
+      "map_ref": "$ref:transform_transform_map",
+      "process_key": "main_process",
+      "source_connection_ref": "$ref:source_rest_source_connection",
+      "source_operation_ref": "$ref:source_rest_source_operation",
+      "target_connection_ref": "$ref:target_rest_connection",
+      "target_operation_ref": "$ref:target_rest_operation",
+      "version": "1"
+    }
+  },
+  "seed_format": "1"
+}

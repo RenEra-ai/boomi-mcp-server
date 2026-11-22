@@ -1,0 +1,156 @@
+{
+  "expected": {
+    "execution_profiles": {
+      "main_process": "scheduled"
+    },
+    "process_keys": [
+      "main_process"
+    ],
+    "references": {
+      "main_process": [
+        "source_db_connection",
+        "source_db_get_operation",
+        "target_billing_rest_connection",
+        "target_billing_rest_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+        "transform_transform_map"
+      ]
+    },
+    "supporting_component_keys": [
+      "source_db_connection",
+      "source_db_read_profile",
+      "source_db_get_operation",
+      "transform_target_profile",
+      "transform_transform_map",
+      "target_rest_connection",
+      "target_rest_operation",
+      "target_billing_rest_connection",
+      "target_billing_rest_operation"
+    ]
+  },
+  "provenance": {
+    "derivation": "raw_input and component_material are tests/_fanout_v2_support.py::flagship_v2() over the oracle's frozen compose_request (legacy request values re-spelled into the v2 split). expected: process key, supporting component keys (oracle order, process dropped) and the process depends_on set are read from the oracle's integration_spec; the scheduled profile is the canonical rule for a root whose entry is a connector source step.",
+    "source": "tests/fixtures/issue_159/flagship_fanout_legacy_spec.json",
+    "source_sha256": "dfd1c96392e5ba3d876a1a6257b30cb4e008f7efea5917928eb7f567a9021cbc"
+  },
+  "recipe_id": "boomi.compose.db_rest_fanout",
+  "recipe_version": "2.0.0",
+  "request": {
+    "component_material": {
+      "payload_profile": {
+        "format": "json",
+        "root": {
+          "children": [
+            {
+              "data_type": "character",
+              "kind": "simple",
+              "name": "target_a"
+            },
+            {
+              "data_type": "character",
+              "kind": "simple",
+              "name": "target_b"
+            }
+          ],
+          "kind": "object",
+          "name": "Root"
+        }
+      },
+      "source": {
+        "connection": {
+          "credential_ref": "credential://<<opaque credential reference>>",
+          "database": "AppDB",
+          "driver": "microsoft_jdbc",
+          "host": "db.example.invalid",
+          "mode": "create",
+          "username": "<<db user>>"
+        },
+        "read": {
+          "result_fields": [
+            {
+              "data_type": "character",
+              "name": "source_a"
+            },
+            {
+              "data_type": "character",
+              "name": "source_b"
+            }
+          ],
+          "sql": "<<user-authored DB read statement>>"
+        }
+      },
+      "targets": [
+        {
+          "connection": {
+            "base_url": "https://orders.example.invalid",
+            "mode": "create"
+          },
+          "operation": {
+            "path": "/v1/orders",
+            "query_parameters": []
+          },
+          "part_key": "orders"
+        },
+        {
+          "connection": {
+            "base_url": "https://billing.example.invalid",
+            "mode": "create"
+          },
+          "operation": {
+            "path": "/v1/billing",
+            "query_parameters": []
+          },
+          "part_key": "billing"
+        }
+      ],
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a"
+          },
+          {
+            "operation_type": "direct",
+            "source_field": "source_b",
+            "target_path": "Root/target_b"
+          }
+        ]
+      },
+      "version": "2"
+    },
+    "integration_name": "Matrix fan-out 2.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "naming": {
+        "component_prefix": "M8DEMO"
+      },
+      "process_key": "main_process",
+      "source": {
+        "auth_mode": "username_password",
+        "binding_mode": "create",
+        "part_key": "db"
+      },
+      "targets": [
+        {
+          "binding_mode": "create",
+          "label": "Orders",
+          "method": "POST",
+          "part_key": "orders"
+        },
+        {
+          "binding_mode": "create",
+          "label": "Billing",
+          "method": "POST",
+          "part_key": "billing"
+        }
+      ],
+      "transform": {
+        "part_key": "shape"
+      },
+      "version": "2"
+    }
+  },
+  "seed_format": "1"
+}
