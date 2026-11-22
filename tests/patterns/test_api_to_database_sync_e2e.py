@@ -822,6 +822,9 @@ class TestRecipeV1:
 
         registry = _v1_registry()
         monkeypatch.setattr(engine_module, "production_registry", lambda: registry)
+        # OFFLINE, as every replay: only the live metadata boundary is faked.
+        monkeypatch.setattr(_PAGINATE_TARGET, lambda *a, **k: [])
+        monkeypatch.setattr(accounting, "_PLAN_CACHE", {})
         cases = accounting.load_cases()
         retirements = accounting.retirement_ids()
         for case in _V1_CASES:
