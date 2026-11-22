@@ -1496,6 +1496,31 @@ def infer_direct_linear_facts(
     )
 
 
+def infer_stub_facts(unit: Any):
+    """Stub facts for a fact-less root that is EXACTLY ``passthrough -> stop``
+    and references nothing, or None (#159 S2).
+
+    The stub recipe has no preparer and so supplies no facts; like the API->API
+    inference above, its facts are read off the root itself. The root must be
+    the grammar's two-step Stop-only form, and the unit must depend on no
+    component and no step may carry a component reference: anything else
+    infers nothing and projects exactly as before.
+    """
+    from ..models.derived_flows import StubRouteProjectionFactsV1
+
+    steps = _root_steps(unit)
+    if [getattr(step, "kind", None) for step in steps] != ["passthrough", "stop"]:
+        return None
+    if tuple(getattr(unit.envelope, "depends_on", ()) or ()):
+        return None
+    for step in steps:
+        for name in type(step).model_fields:
+            value = getattr(step, name, None)
+            if isinstance(value, str) and value.startswith(REF_PREFIX):
+                return None
+    return StubRouteProjectionFactsV1(process_key=unit.envelope.component_key)
+
+
 def derive_recipe_projection(
     units: Sequence[Any],
     components: Sequence[IntegrationComponentSpec],
@@ -1544,9 +1569,12 @@ def derive_recipe_projection(
         facts = facts_by_key.get(key)
         if facts is None:
             # #159 S2: a DIRECT root that is exactly REST source -> map -> REST
-            # target (the retired API->API producer's canonical form) carries
+            # target (the retired API->API producer's canonical form), or a
+            # reference-free ``passthrough -> stop`` root (the stub), carries
             # its own facts; every other fact-less root infers none.
             facts = infer_direct_linear_facts(unit, components, metadata)
+            if facts is None:
+                facts = infer_stub_facts(unit)
         route = _project_unit_route(
             unit, by_key, components, metadata, facts, transform_rows, key in watermarked,
             frozenset(reused_keys or ()), existing_ids,
@@ -1665,6 +1693,7 @@ __all__ = [
     "derive_transform_flows",
     "flow_row_digest",
     "infer_direct_linear_facts",
+    "infer_stub_facts",
     "normalize_flow_row",
     "normalize_operation_summary",
     "qualified_route_key",

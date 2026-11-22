@@ -788,6 +788,40 @@ def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
     assert rest_success_status_default() == _DEFAULT_STATUS_CODES_V2
 
 
+def test_only_an_exact_unreferencing_passthrough_stop_root_infers_stub_facts():
+    """#159 S2: a fact-less root that is exactly ``passthrough -> stop`` and
+    references nothing infers the stub facts (the stub recipe emits none) and
+    serves the noop row with its two stub endpoints. A third step, a root that
+    references a component, or an envelope that depends on one infers nothing."""
+    from boomi_mcp.authoring.derived_flows import infer_stub_facts
+    from boomi_mcp.models.derived_flows import StubRouteProjectionFactsV1
+
+    stub_root = _seq({"kind": "passthrough"}, {"kind": "stop"})
+    facts = infer_stub_facts(_linear_unit(stub_root))
+    assert facts == StubRouteProjectionFactsV1(process_key=_PROCESS)
+    inferred = _linear_project([], stub_root, None)
+    assert [r.operation for r in inferred.flows] == ["noop"]
+    assert [e.type for e in inferred.endpoints] == ["stub", "stub"]
+
+    # Non-vacuity controls: none of these is a Stop-only, reference-free root.
+    referencing_third_step = _seq(
+        {"kind": "passthrough"},
+        {"kind": "map_ref", "map_ref": "$ref:transform_transform_map", "label": "m"},
+        {"kind": "stop"},
+    )
+    other_terminal = _seq({"kind": "passthrough"}, {"kind": "return_documents"})
+    for root in (referencing_third_step, other_terminal):
+        assert infer_stub_facts(_linear_unit(root)) is None
+        assert _linear_project([], root, None).endpoints == ()
+    depending = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key=_PROCESS, name="P", action="create", depends_on=("some_component",)
+        ),
+        process_ir=parse_process_ir_v1(stub_root),
+    )
+    assert infer_stub_facts(depending) is None
+
+
 def test_the_stub_route_needs_a_stop_only_root_and_its_endpoints_bind_nothing():
     from pydantic import ValidationError
 
