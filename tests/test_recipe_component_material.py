@@ -1305,6 +1305,24 @@ def test_a_plaintext_canary_in_a_secret_capable_field_is_refused_value_free(fiel
     assert _SECRET_CANARY not in "\n".join(str(w.message) for w in caught_warnings)
 
 
+def test_the_served_contract_names_exactly_the_material_registrations():
+    """#159 S2: the contract's component_material and derived_flows texts name
+    the preset recipe ids that carry the material channel (and so supply
+    projection facts). Pinned to the CATALOG, both directions, so a
+    registration added or retired without its served sentence fails here."""
+    import re
+
+    from boomi_mcp.authoring.contract import authoring_workflow_contract
+
+    material_ids = {
+        registration.recipe_id for registration in _material_registrations()
+    }
+    terminology = authoring_workflow_contract()["terminology"]
+    for name in ("component_material", "derived_flows"):
+        named = set(re.findall(r"boomi\.(?:archetype|compose)\.[a-z0-9_]+", terminology[name]))
+        assert named == material_ids, (name, named ^ material_ids)
+
+
 def test_the_opaque_reference_forms_still_pass_the_boundary():
     """The control: the flagship (``credential://`` reference, plain host, base
     URL without userinfo, a literal under a non-secret name) plans cleanly."""
