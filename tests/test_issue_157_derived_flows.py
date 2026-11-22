@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import json
 import random
+import re
 import string
 import sys
 from pathlib import Path
@@ -167,12 +168,28 @@ def test_the_projection_is_absent_from_every_hash(cases):
     assert "preview_kind" not in _plan_hash_preview(result.integration_spec_preview)
 
 
+def _direct_db_to_api_request(cases, case_id):
+    """#159 S2: the DB->API cases are recipe invocations now, so the DIRECT
+    DB source -> map -> REST target intent these tests read is built from the
+    hand-built linear case (baseline components, hand-authored root) — a
+    direct root no inference applies to."""
+    components, root, _facts, _wm = _hand_built_linear_case(cases, case_id)
+    referenced = sorted(set(re.findall(r'"\$ref:([^"]+)"', json.dumps(root))))
+    unit = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key=_PROCESS, name="P", action="create", depends_on=tuple(referenced)
+        ),
+        process_ir=parse_process_ir_v1(root),
+    )
+    return _request([unit], components)
+
+
 def test_a_compiling_intent_plan_hash_is_unmoved_by_the_projection(cases):
     """The pre-#157 hash input: flows empty, no preview kind."""
     from boomi_mcp.authoring.workflow import _plan_hash_preview
     from boomi_mcp.models.integration_models import IntegrationSpecV1
 
-    request = _canonical_case(cases, "database_to_api_sync/wm_off_dlq_off_create")
+    request = _direct_db_to_api_request(cases, "database_to_api_sync/wm_off_dlq_off_create")
     result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile="p")
     preview = result.integration_spec_preview
     assert isinstance(preview, CanonicalIntegrationPreviewV1)
@@ -181,7 +198,7 @@ def test_a_compiling_intent_plan_hash_is_unmoved_by_the_projection(cases):
 
 
 def test_the_projection_serves_one_typed_row_per_map_node(cases):
-    request = _canonical_case(cases, "database_to_api_sync/wm_off_dlq_off_create")
+    request = _direct_db_to_api_request(cases, "database_to_api_sync/wm_off_dlq_off_create")
     result, _ = plan_authoring_request_v1(request, boomi_client=MagicMock(), profile="p")
     (row,) = result.integration_spec_preview.flows
     assert isinstance(row, DerivedTransformFlowV1)
@@ -612,9 +629,15 @@ def _hand_built_linear_case(cases, case_id):
 
     case = cases[case_id]
     producer = case.producer
-    if producer in ("database_to_api_sync", "api_to_api_sync"):
+    if producer == "api_to_api_sync":
         components = copy.deepcopy(case.input_canonical["intent"]["components"])
         root = copy.deepcopy(case.input_canonical["intent"]["units"][0]["process_ir"])
+    elif producer == "database_to_api_sync":
+        # #159 S2: the DB->API cases are recipe invocations now; the hand-built
+        # route reads the BASELINE producer's components (a legacy-oracle
+        # capture) under a hand-authored DB source -> map -> REST target root.
+        components = baseline_supporting_components([case_id])[case_id]
+        root = _linear_root("source", _DB_SOURCE, _transform_row(case)["payload"]["name"], _REST_TARGET)
     elif producer == "stub_minimal":
         return [], _seq({"kind": "passthrough"}, {"kind": "stop"}), StubRouteProjectionFactsV1(process_key=_PROCESS), None
     else:
@@ -646,6 +669,22 @@ def _hand_built_linear_case(cases, case_id):
     facts = _linear_facts(
         _DB_SOURCE, _REST_TARGET, "generated_artifacts",
         reliability=LinearReliabilityFactV1(dlq_component_key="dlq_cache" if dlq else None),
+    )
+    # The caller's per-operation hints, read off the frozen LEGACY input (the
+    # baseline components carry none; the legacy row served them).
+    from boomi_mcp.models.derived_flows import RecipeOperationHintV1
+
+    hints = tuple(
+        RecipeOperationHintV1(
+            operation_type=operation["operation_type"],
+            target_path=operation["target_path"],
+            documentation_hint=operation["documentation_hint"],
+        )
+        for operation in case.input_legacy["input"]["parameters"]["transform"]["operations"]
+        if operation.get("documentation_hint")
+    )
+    facts = facts.model_copy(
+        update={"transform": facts.transform.model_copy(update={"documentation_hints": hints})}
     )
     return components, root, facts, ("source_a" if case_id.split("/")[1].startswith("wm_on") else None)
 
@@ -714,7 +753,10 @@ def test_linear_facts_that_do_not_resolve_never_invent_a_row(cases):
     assert [r.key for r in _linear_project(components, root, facts).flows][0] == "extract"
     wrong_op = facts.model_copy(update={"target": facts.target.model_copy(update={"operation_key": "nope"})})
     dangling = facts.model_copy(update={"reliability": LinearReliabilityFactV1(dlq_component_key="no_such")})
-    unreferenced_root = cases[case_id].input_canonical["intent"]["units"][0]["process_ir"]
+    # the same route WITHOUT the try/catch: nothing in it writes the DLQ cache
+    unreferenced_root = _linear_root(
+        "source", _DB_SOURCE, _transform_row(cases[case_id])["payload"]["name"], _REST_TARGET
+    )
     for components_in, root_in, facts_in in (
         (components, root, wrong_op),
         (components, root, dangling),
@@ -753,8 +795,9 @@ def test_the_dlq_target_follows_its_pointer_never_a_try_catch(cases):
 
 
 def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
-    """The API->API inference is shape-exact: a DB source (the DB->API direct
-    fixtures at the S1 tip) or a second map infers nothing."""
+    """The API->API inference is shape-exact: a DB source (the hand-built
+    DB->API direct roots; the S1 tip's direct fixtures are recipe invocations
+    now) or a target of another family infers nothing."""
     from boomi_mcp.authoring.derived_flows import infer_direct_linear_facts
     from boomi_mcp.authoring.workflow import _connector_metadata_from_components
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
@@ -771,8 +814,14 @@ def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
     assert facts.source.operation_key == "source_rest_source_operation"
     assert facts.target.expected_status_codes == (200, 201, 202)
     assert facts.source.expected_status_codes is None and facts.reliability is None
-    for case_id in sorted(c for c in cases if c.startswith("database_to_api_sync/")):
-        assert infer(case_id) is None, case_id
+    db_cases = sorted(c for c in cases if c.startswith("database_to_api_sync/"))
+    assert db_cases
+    for case_id in db_cases:
+        components, root, _facts, _wm = _hand_built_linear_case(cases, case_id)
+        specs = [IntegrationComponentSpec(**c) for c in components]
+        assert infer_direct_linear_facts(
+            _linear_unit(root), specs, _connector_metadata_from_components(specs)
+        ) is None, case_id
 
     def database_target(intent):
         # the SAME root over a target connection of another family

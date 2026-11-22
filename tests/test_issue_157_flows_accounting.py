@@ -402,7 +402,7 @@ def _binds_a_reused_connection(case):
     intent = (case.input_canonical or {}).get("intent") or {}
     for invocation in intent.get("invocations") or ():
         raw = invocation.get("raw_input") or {}
-        modes = [raw.get("source", {}).get("binding_mode")]
+        modes = [raw.get("source", {}).get("binding_mode"), raw.get("target", {}).get("binding_mode")]
         modes += [target.get("binding_mode") for target in raw.get("targets") or ()]
         if "reuse" in modes:
             return True
@@ -453,11 +453,15 @@ def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived
         assert child["plan_valid"] and child["plan_errors"] == [], (case_id, child["plan_errors"])
         assert child["compile_valid"] is True, (case_id, child["compile_error"])
     # Non-vacuity: the reuse cases really are in the batch — every replayed
-    # case the corpus NAMES a reuse case (its case id), and only those.
+    # case the corpus NAMES a reuse case (its case id), plus the cases whose
+    # material reuses a connection BY NAME (#159 S2: the DB listeners and the
+    # API->DB create case reuse their DB target without saying so in the id),
+    # and only those.
     reuse_named = {case_id for case_id in replayed if "reuse" in case_id.split("/")[1]}
-    assert reuse_named and {
+    expected = reuse_named | (set(_name_bound_reuse_cases(cases)) & set(replayed))
+    assert reuse_named and expected > reuse_named and {
         case_id for case_id in replayed if _binds_a_reused_connection(cases[case_id])
-    } == reuse_named
+    } == expected
     applied = batch["apply"]
     assert applied["success"] is True, applied
     assert applied["created_process"] and applied["attempts_during_apply"] == []
