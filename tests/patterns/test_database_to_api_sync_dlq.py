@@ -589,6 +589,18 @@ def test_l1_retry_above_one_is_refused_not_reduced():
             assert diagnostic.code == "RECIPE_CONSTRAINT_FAILED"
             assert diagnostic.cause_codes == ("DB_TO_API_RETRY_UNAVAILABLE",)
             assert diagnostic.path == "/raw_input/reliability/retry/max_attempts"
+            # #159 S2: the cause's own static remediation names the follow-up.
+            assert "issue #199" in diagnostic.remediation
+    # Control: another single cause, and the same cause beside a second one,
+    # keep the code's generic remediation.
+    from boomi_mcp.recipes.errors import recipe_diagnostic
+
+    generic = recipe_diagnostic("RECIPE_CONSTRAINT_FAILED", phase="input", cause_codes=("OTHER",))
+    paired = recipe_diagnostic(
+        "RECIPE_CONSTRAINT_FAILED", phase="input",
+        cause_codes=("DB_TO_API_RETRY_UNAVAILABLE", "OTHER"),
+    )
+    assert "#199" not in generic.remediation and generic.remediation == paired.remediation
 
 
 def test_l1_retry_five_is_refused_through_the_public_planner():

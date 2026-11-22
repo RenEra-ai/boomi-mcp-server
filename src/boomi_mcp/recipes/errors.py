@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple,
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..errors import (
+    DB_TO_API_RETRY_UNAVAILABLE,
     RECIPE_CAPABILITY_GATED,
     RECIPE_CONSTRAINT_FAILED,
     RECIPE_CONTRIBUTION_INVALID,
@@ -120,6 +121,18 @@ _REMEDIATIONS: Dict[str, str] = {
     ),
 }
 
+#: Per-CAUSE remediations (#159 S2). When a diagnostic carries exactly ONE cause
+#: code listed here, its static remediation replaces the code's generic one,
+#: because the generic text ("fix the condition the cause codes name") cannot
+#: say what the fix is. Static and value-free like every entry above.
+_CAUSE_REMEDIATIONS: Dict[str, str] = {
+    DB_TO_API_RETRY_UNAVAILABLE: (
+        "Set reliability.retry.max_attempts to 1. A retried REST POST send needs "
+        "evidence-gated retries for reused operations, which issue #199 tracks; "
+        "until then the preset refuses 2 to 6 rather than reducing them."
+    ),
+}
+
 
 #: The CLOSED set of codes a recipe diagnostic may carry, derived from the ten
 #: constants this module already imports rather than retyped as string literals —
@@ -200,8 +213,13 @@ def recipe_diagnostic(
 
     ``available_versions`` and ``cause_codes`` are sorted here rather than at
     each call site, so two runs that discovered the same facts in a different
-    order still produce byte-identical diagnostics.
+    order still produce byte-identical diagnostics. A diagnostic whose ONLY
+    cause has a per-cause remediation serves that one instead of the code's.
     """
+    causes = tuple(sorted(set(cause_codes)))
+    remediation = _CAUSE_REMEDIATIONS.get(causes[0]) if len(causes) == 1 else None
+    if remediation is None:
+        remediation = _REMEDIATIONS.get(code, "Consult specs/TYPED_RECIPE_CONTRIBUTIONS_V1.md.")
     return RecipeDiagnosticV1(
         code=code,
         phase=phase,
@@ -212,11 +230,9 @@ def recipe_diagnostic(
         invocation_ids=tuple(invocation_ids),
         contribution_indexes=tuple(contribution_indexes),
         available_versions=tuple(sorted(available_versions)),
-        cause_codes=tuple(sorted(set(cause_codes))),
+        cause_codes=causes,
         message=_MESSAGES.get(code, "recipe processing failed"),
-        remediation=_REMEDIATIONS.get(
-            code, "Consult specs/TYPED_RECIPE_CONTRIBUTIONS_V1.md."
-        ),
+        remediation=remediation,
     )
 
 
