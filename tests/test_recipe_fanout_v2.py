@@ -3760,3 +3760,36 @@ def test_b21_04_an_empty_or_undecodable_body_is_unparseable_not_unanswered(body)
     assert client.component.get_component.called
     (diag,) = [d for d in envelope["authoring_diagnostics"] if d["code"] == "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE"]
     assert diag["remediation"] == UNPARSEABLE_STORED_COMPONENT_REMEDIATION
+
+
+def test_b24r_a_reused_maps_profiles_are_not_refreshed_before_writes(monkeypatch):
+    """B24 review: the pre-write refresh set comes from the maps apply will
+    BUILD. A map apply reuses keeps its stored config, so a profile only it
+    references is not re-read (it must not spend the budget a built map needs)."""
+    spec, stored = _b23_reused_profile_map_spec()
+    # A SECOND map, reused (reference-only, declared id), that alone references
+    # the source profile under a separate key; the built map keeps its target.
+    spec["components"].append(
+        {"key": "prof_only_reused", "type": "profile.json", "name": "Stored JSON 2", "action": "create",
+         "component_id": "11111111-1111-1111-1111-111111111111", "config": {"reference_only": True}}
+    )
+    spec["components"].append(
+        {"key": "reused_map", "type": "transform.map", "name": "Reused map", "action": "create",
+         "component_id": "33333333-3333-4333-8333-333333333333",
+         "depends_on": ["prof_only_reused"],
+         "config": {"reference_only": True, "map_type": "direct",
+                    "source_profile_id": "$ref:prof_only_reused", "source_profile_type": "profile.json",
+                    "target_profile_id": "$ref:prof_only_reused", "target_profile_type": "profile.json",
+                    "field_mappings": [{"source_path": "Root/customer_code",
+                                        "target_path": "Root/customer_code"}]}}
+    )
+    # The built map no longer references the JSON profile id directly.
+    built = next(c for c in spec["components"] if c["key"] == "the_map")
+    built["config"]["source_profile_id"] = "$ref:prof_tgt"
+    built["config"]["source_profile_type"] = "profile.xml"
+    built["config"]["field_mappings"] = [{"source_path": "Order/customer_code",
+                                          "target_path": "Order/customer_code"}]
+    calls, _ = _b23_apply_counting_reads(monkeypatch, spec, stored, sleep_s=0.0)
+    ids = [cid for cid, _d in calls]
+    assert ids.count("22222222-2222-2222-2222-222222222222") == 2, calls  # built map's profile: plan + refresh
+    assert ids.count("11111111-1111-1111-1111-111111111111") <= 1, calls  # only-reused-map profile: never refreshed

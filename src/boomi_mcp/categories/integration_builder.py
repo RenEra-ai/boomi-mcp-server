@@ -10264,17 +10264,35 @@ def _apply_plan(
     # FRESHNESS check, so it re-reads (``fresh=True``) rather than answering
     # from the phase cache — a profile edited after ``_build_plan`` read it
     # must be seen before any map is written.
+    # B24 review: the refresh set is derived from the structured maps apply will
+    # actually BUILD — a map apply reuses keeps its stored config, so its
+    # endpoints are never consulted and must not spend the phase budget.
+    _reused_at_apply = _keys_reused_at_apply(
+        spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
+    )
+    _built_maps = [
+        comp
+        for comp in spec.components
+        if getattr(comp, "type", None) == "transform.map" and comp.key not in _reused_at_apply
+    ]
+    _refresh_spec = spec.model_copy(
+        update={
+            "components": [
+                comp
+                for comp in spec.components
+                if getattr(comp, "type", None) != "transform.map" or comp in _built_maps
+            ]
+        }
+    )
     with phase_reads(_apply_reads, fresh=True):
-        literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
-        # B22 review: only a reused profile a transform map REFERENCES is ever
-        # consulted at apply, so only those are refreshed — an unrelated slow
-        # profile must not spend the budget a map's own profile needs.
-        # Extracted EXACTLY as `resolve_map_profile_index` does (verbatim, no
-        # trim): a key the validator looks up must be the key refreshed.
+        literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, _refresh_spec)
+        # B22 review: only a reused profile a BUILT transform map references is
+        # consulted at apply, so only those are refreshed. Extracted EXACTLY as
+        # `resolve_map_profile_index` does (verbatim, no trim): a key the
+        # validator looks up must be the key refreshed.
         _map_refs = {
             value[len("$ref:"):]
-            for comp in spec.components
-            if getattr(comp, "type", None) == "transform.map"
+            for comp in _built_maps
             for side in ("source_profile_id", "target_profile_id")
             for value in [(comp.config or {}).get(side)]
             if isinstance(value, str) and value.startswith("$ref:")
@@ -10282,13 +10300,7 @@ def _apply_plan(
         selected_profile_indexes = _resolve_selected_profile_indexes(
             boomi_client,
             spec,
-            reused_keys=[
-                key
-                for key in _keys_reused_at_apply(
-                    spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
-                )
-                if key in _map_refs
-            ],
+            reused_keys=[key for key in _reused_at_apply if key in _map_refs],
             conflict_policy=conflict_policy,
         )
 
