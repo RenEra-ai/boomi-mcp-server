@@ -379,7 +379,8 @@ def _stored_binding_profile_facts(component, snapshot, facts):
             continue
         refs.append(None)
         unknown = unknown or side.state == "unknown"
-    return facts._replace(input_profile=refs[0], output_profile=refs[1], unknown=unknown), tuple(stored)
+    # Built, not copied: a map or operation states no cache profile.
+    return _ProfileFacts(refs[0], refs[1], None, unknown=unknown), tuple(stored)
 
 
 def build_symbol_table(
