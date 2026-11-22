@@ -316,6 +316,17 @@ class FanoutFunctionOperationV2(_FanoutMaterialModel):
         return self
 
 
+#: The served map-script port rule (#159 S2): every preset assembles a script
+#: mapping through the shared assembly, which names each port by the legacy rule.
+SCRIPT_PORT_SENTENCE = (
+    "Each input and output path binds the script variable named by its final "
+    "segment, sanitized to an identifier (Root/order-id binds order_id); two paths "
+    "that derive the same variable, across inputs and outputs, are refused with "
+    "COMPOSITION_CONTRACT_MISMATCH, because two ports bound to one script variable "
+    "cannot both be read."
+)
+
+
 class FanoutScriptReferenceOperationV2(_FanoutMaterialModel):
     """A map-script operation that REFERENCES a script component by key.
 
@@ -325,8 +336,8 @@ class FanoutScriptReferenceOperationV2(_FanoutMaterialModel):
 
     operation_type: _Literal["map_script"]
     script_component_key: RecipeComponentKey
-    inputs: Tuple[str, ...] = Field(min_length=1)
-    outputs: Tuple[str, ...] = Field(min_length=1)
+    inputs: Tuple[str, ...] = Field(min_length=1, description=SCRIPT_PORT_SENTENCE)
+    outputs: Tuple[str, ...] = Field(min_length=1, description=SCRIPT_PORT_SENTENCE)
     documentation_hint: Optional[str] = None
 
 
@@ -2264,6 +2275,7 @@ __all__ = [
     # served text and vocabulary
     "LITERAL_QUERY_NAMES_V2",
     "LITERAL_QUERY_GUARANTEE_V2",
+    "SCRIPT_PORT_SENTENCE",
     "QUERY_GRAMMAR_SENTENCE_V2",
     "REUSED_BASE_SENTENCE_V2",
     "REUSED_TARGET_STORED_BASE",

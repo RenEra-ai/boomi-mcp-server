@@ -817,6 +817,54 @@ def test_a_map_script_references_a_base_script_component():
     )
 
 
+def test_fanout_script_ports_that_derive_one_variable_are_refused():
+    """#159 S2: the shared port rule holds on fan-out 2.0.0 too. Distinct ports
+    assemble (positive); a column ``source_b`` mapped to ``Root/source_b``
+    derives ONE variable for an input and an output and is refused value-free,
+    before any component exists, with the reason served on the schema."""
+    from boomi_mcp.recipes.component_material import SCRIPT_PORT_SENTENCE
+
+    def script(inputs, outputs):
+        return IntegrationComponentSpec(
+            key="shared_script", type="script.mapping", name="Shared Script",
+            config={
+                "component_type": "script.mapping", "component_name": "Shared Script",
+                "language": "groovy2", "script_body": "x",
+                "inputs": [{"name": n, "data_type": "character"} for n in inputs],
+                "outputs": [{"name": n} for n in outputs],
+            },
+        )
+
+    raw, material = flagship_v2()
+    material["transform"]["operations"][1] = {
+        "operation_type": "map_script", "script_component_key": "shared_script",
+        "inputs": ["source_b"], "outputs": ["Root/target_b"],
+    }
+    prepared = _prepare(raw, material, base=(script(["source_b"], ["target_b"]),))
+    the_map = next(c for c in prepared.supporting_components if c.type == "transform.map")
+    (mapping,) = the_map.config["script_mappings"]
+    assert [p["input_name"] for p in mapping["inputs"]] == ["source_b"]
+    assert [p["output_name"] for p in mapping["outputs"]] == ["target_b"]
+
+    raw, material = flagship_v2()
+    material["payload_profile"]["root"]["children"].append(
+        {"data_type": "character", "kind": "simple", "name": "source_b"}
+    )
+    material["transform"]["operations"][1] = {
+        "operation_type": "map_script", "script_component_key": "shared_script",
+        "inputs": ["source_b"], "outputs": ["Root/source_b"],
+    }
+    with pytest.raises(RecipeError) as caught:
+        _prepare(raw, material, base=(script(["source_b"], ["source_b"]),))
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/transform/operations/1"
+    assert diagnostic.cause_codes == ("COMPOSITION_CONTRACT_MISMATCH",)
+    assert "source_b" not in repr(caught.value)
+    served = json.dumps(FanoutComponentMaterialV2.model_json_schema())
+    assert json.dumps(SCRIPT_PORT_SENTENCE) in served
+    assert "cannot both be read" in SCRIPT_PORT_SENTENCE
+
+
 def _base_connections():
     db = IntegrationComponentSpec(
         key="shared_db",
