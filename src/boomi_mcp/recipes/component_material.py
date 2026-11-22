@@ -90,7 +90,10 @@ def _rt():
     )
     from ..patterns import archetype_assembly as assembly
     from ..patterns.primitives import _helpers as helpers
-    from ..patterns.primitives import db_extract, field_map, rest_send
+    from ..categories.components.builders.profile_builder import (
+        DatabaseWriteProfileBuilder,
+    )
+    from ..patterns.primitives import db_extract, db_write, field_map, rest_send
 
     return SimpleNamespace(
         BuilderValidationError=BuilderValidationError,
@@ -106,6 +109,8 @@ def _rt():
         ROLE_DB_CONNECTION=helpers.ROLE_DB_CONNECTION,
         ROLE_DB_GET_OPERATION=helpers.ROLE_DB_GET_OPERATION,
         ROLE_DB_READ_PROFILE=helpers.ROLE_DB_READ_PROFILE,
+        ROLE_DB_WRITE_OPERATION=helpers.ROLE_DB_WRITE_OPERATION,
+        ROLE_DB_WRITE_PROFILE=helpers.ROLE_DB_WRITE_PROFILE,
         ROLE_REST_CONNECTION=helpers.ROLE_REST_CONNECTION,
         ROLE_REST_OPERATION=helpers.ROLE_REST_OPERATION,
         ROLE_TARGET_PROFILE=helpers.ROLE_TARGET_PROFILE,
@@ -115,6 +120,13 @@ def _rt():
         DbExtractParameters=db_extract.DbExtractParameters,
         DbExtractPrimitive=db_extract.DbExtractPrimitive,
         db_connection_extension_fields=db_extract.db_connection_extension_fields,
+        DatabaseWriteProfileBuilder=DatabaseWriteProfileBuilder,
+        DbSendOperationParams=db_write.DbSendOperationParams,
+        DbWriteParameters=db_write.DbWriteParameters,
+        DbWritePrimitive=db_write.DbWritePrimitive,
+        DbWriteProfileParams=db_write.DbWriteProfileParams,
+        write_profile_config=db_write._write_profile_config,
+        raise_for_builder_error=helpers.raise_for_builder_error,
         FieldMapParameters=field_map.FieldMapParameters,
         FieldMapPrimitive=field_map.FieldMapPrimitive,
         RestSendWithRetryParameters=rest_send.RestSendWithRetryParameters,
@@ -486,6 +498,78 @@ _SECRET_RULES = (
 )
 
 
+#: The database WRITE field types: a deliberately PINNED copy of the
+#: ``db_write`` primitive's ``_DB_FIELD_TYPE`` (the write-profile builder's
+#: supported set). The primitive reaches ``boomi_mcp`` by absolute import, so it
+#: cannot be read at module scope here; ``tests/test_recipe_component_material.py``
+#: pins the two equal in both directions.
+_DbWriteFieldTypeV1 = _Literal["character", "number", "datetime"]
+
+
+class DbWriteFieldMaterialV1(_FanoutMaterialModel):
+    """One written column. Value rules are ``db_write.DbWriteField``'s."""
+
+    name: str = Field(min_length=1)
+    data_type: _DbWriteFieldTypeV1 = "character"
+    mandatory: bool = False
+    enforce_unique: bool = False
+
+
+class DbWriteConditionMaterialV1(_FanoutMaterialModel):
+    """One WHERE-key column (dynamic update/delete)."""
+
+    name: str = Field(min_length=1)
+    data_type: _DbWriteFieldTypeV1 = "character"
+
+
+class DbWriteProfileMaterialV1(_FanoutMaterialModel):
+    """A database Write profile. Per-statement-type rules are the write-profile
+    builder's (``DatabaseWriteProfileBuilder``), applied before any component
+    is assembled."""
+
+    statement_type: str = Field(
+        min_length=1,
+        description=(
+            "Write statement variant: standardinsertupdatedelete, dynamicinsert, "
+            "dynamicupdate, dynamicdelete, or storedprocedurewrite. Any other "
+            "value (e.g. 'upsert') is rejected by the write-profile builder."
+        ),
+    )
+    sql: Optional[str] = Field(
+        default=None,
+        description="Caller-authored write SQL (required for standard / stored-procedure; omitted for dynamic*).",
+    )
+    table_name: Optional[str] = Field(
+        default=None, description="Target table for the dynamic* statement types."
+    )
+    stored_procedure: Optional[str] = Field(
+        default=None, description="Procedure name for storedprocedurewrite."
+    )
+    fields: Tuple[DbWriteFieldMaterialV1, ...] = ()
+    conditions: Tuple[DbWriteConditionMaterialV1, ...] = ()
+
+
+class DbSendOperationMaterialV1(_FanoutMaterialModel):
+    """Optional database Send tuning. Value rules are the Send builder's."""
+
+    commit_option: Optional[str] = Field(
+        default=None, description="'commitprofile' (default) or 'commitrows'."
+    )
+    batch_count: Optional[int] = Field(default=None, ge=0)
+    enable_batching: Optional[bool] = None
+
+
+class DbWriteMaterialV1(_FanoutMaterialModel):
+    """The shared DB-WRITE block: connection (create or reuse) + write profile +
+    Send operation. Prepared by :func:`authorize_db_write_material` then
+    :func:`emit_db_write_components`."""
+
+    #: Absent exactly when the recipe input names a base ``connection_key``.
+    connection: Optional[FanoutDbConnectionMaterialV2] = None
+    write_profile: DbWriteProfileMaterialV1
+    operation: DbSendOperationMaterialV1 = Field(default_factory=DbSendOperationMaterialV1)
+
+
 #: The shared material BLOCKS a preset composes its root from (#159 S2). The
 #: shared classification table covers exactly the fields these reach — pinned
 #: by ``tests/test_recipe_component_material.py`` — so a block added here
@@ -500,6 +584,7 @@ SHARED_MATERIAL_BLOCKS: Tuple[type, ...] = (
     FanoutRestCreateMaterialV2,
     FanoutRestOperationMaterialV2,
     JSONPayloadProfile,
+    DbWriteMaterialV1,
 )
 
 
@@ -629,6 +714,28 @@ def _common_material_field_classes() -> _Mapping[Tuple[type, str], Optional[str]
             (FanoutQueryParameterV2, "name"): "literal_query_name",
             (FanoutQueryParameterV2, "value_source"): None,  # closed literal
             (FanoutQueryParameterV2, "literal_value"): "named_literal",
+            # -- the shared DB-write block (#159 S2) --------------------------
+            (DbWriteMaterialV1, "connection"): None,  # structural (variant)
+            (DbWriteMaterialV1, "write_profile"): None,  # structural (model)
+            (DbWriteMaterialV1, "operation"): None,  # structural (model)
+            # Closed by the write-profile builder (UNSUPPORTED_DB_STATEMENT_TYPE).
+            (DbWriteProfileMaterialV1, "statement_type"): None,
+            # Free text: the write statement, emitted into the write profile by
+            # design (like the read SQL). A literal in it cannot be told from data.
+            (DbWriteProfileMaterialV1, "sql"): None,
+            (DbWriteProfileMaterialV1, "table_name"): None,  # an identifier emitted by design
+            (DbWriteProfileMaterialV1, "stored_procedure"): None,  # an identifier emitted by design
+            (DbWriteProfileMaterialV1, "fields"): None,  # structural (models)
+            (DbWriteProfileMaterialV1, "conditions"): None,  # structural (models)
+            (DbWriteFieldMaterialV1, "name"): None,  # a column name
+            (DbWriteFieldMaterialV1, "data_type"): None,  # closed literal
+            (DbWriteFieldMaterialV1, "mandatory"): None,  # boolean
+            (DbWriteFieldMaterialV1, "enforce_unique"): None,  # boolean
+            (DbWriteConditionMaterialV1, "name"): None,  # a column name
+            (DbWriteConditionMaterialV1, "data_type"): None,  # closed literal
+            (DbSendOperationMaterialV1, "commit_option"): None,  # closed by the Send builder
+            (DbSendOperationMaterialV1, "batch_count"): None,  # bounded integer
+            (DbSendOperationMaterialV1, "enable_batching"): None,  # boolean
         }
     )
 
@@ -1298,6 +1405,233 @@ class PreparedRecipeComponentsV1:
             f"supporting_keys={tuple(c.key for c in self.supporting_components)!r}, "
             f"selected_base_keys={self.selected_base_keys!r})"
         )
+
+
+def check_connection_binding(
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    *,
+    selected_key: Optional[str],
+    selected_key_pointer: str,
+    material_connection: _Any,
+    material_pointer: str,
+    binding_mode: str,
+    family: str,
+    auth_config_key: str,
+    auth_expected: str,
+    auth_pointer: str,
+) -> Tuple[Optional[str], Optional[Tuple[str, str]]]:
+    """The selected-base rules for ONE connection, in their load-bearing order.
+
+    Material carries the connection exactly when no base key is selected, in
+    the declared binding mode (:func:`_connection_presence`). A selected base
+    must be a ``connector-settings`` of ``family`` bound per apply's own
+    predicate (:func:`_check_base_component`); a CREATE-mode selected base must
+    also carry the declared auth (:func:`_check_base_auth`) and meet the
+    credential boundary over its config (:func:`_check_selected_base_config`).
+
+    Returns ``(selected base key or None, (key, pointer) for
+    ``create_bound_base_keys`` or None)`` — the caller adds them to its
+    prepared result once."""
+    _connection_presence(selected_key, material_connection, binding_mode, path=material_pointer)
+    if selected_key is None:
+        return None, None
+    _check_base_component(
+        base_catalog,
+        selected_key,
+        path=selected_key_pointer,
+        component_type="connector-settings",
+        connector_type=family,
+        binding_mode=binding_mode,
+    )
+    if binding_mode != "create":
+        return selected_key, None
+    _check_base_auth(
+        base_catalog,
+        selected_key,
+        config_key=auth_config_key,
+        expected=auth_expected,
+        path=auth_pointer,
+    )
+    _check_selected_base_config(base_catalog, selected_key, family=family, path=selected_key_pointer)
+    return selected_key, (selected_key, selected_key_pointer)
+
+
+def authorize_db_connection(connection: _Any, *, pointer: str, auth_mode: Optional[str]) -> _Any:
+    """A DB connection material through its neutral authority: the validated
+    ``DbCreateSettings`` (create, under the input's declared ``auth_mode``),
+    the validated ``DbConnectionBinding`` (reuse), or ``None`` (base-key)."""
+    from ..patterns.archetype_parameters import DbConnectionBinding
+
+    if isinstance(connection, FanoutDbCreateMaterialV2):
+        return _authority_check(
+            pointer,
+            DbCreateSettings,
+            driver=connection.driver,
+            auth_mode=auth_mode,
+            host=connection.host,
+            port=connection.port,
+            database=connection.database,
+            username=connection.username,
+            credential_ref=connection.credential_ref,
+        )
+    if isinstance(connection, FanoutConnectionReuseMaterialV2):
+        return _authority_check(
+            pointer,
+            DbConnectionBinding,
+            mode="reuse",
+            component_id=connection.component_id,
+            component_name=connection.component_name,
+        )
+    return None
+
+
+@_dataclass(frozen=True, repr=False)
+class AuthorizedDbWriteV1:
+    """A DB-write block's values AS THE AUTHORITIES RETURNED THEM (repr-redacted).
+
+    ``connection``: validated ``DbCreateSettings`` / ``DbConnectionBinding``,
+    or ``None`` for a base-key binding. ``write_profile`` / ``operation``: the
+    validated ``db_write`` parameter models. ``field_index``: the write
+    profile's map-target field index (``Fields/<col>``, ``Conditions/<col>``),
+    which a transform's target paths are matched against."""
+
+    connection: _Any
+    write_profile: _Any
+    operation: _Any
+    field_index: _Mapping[str, _Any]
+
+    def __repr__(self) -> str:  # noqa: D105
+        return "AuthorizedDbWriteV1(...)"
+
+
+def authorize_db_write_material(
+    material: DbWriteMaterialV1, *, pointer: str, auth_mode: Optional[str]
+) -> AuthorizedDbWriteV1:
+    """Validate a DB-write block through the EXISTING authorities, BEFORE any
+    component is assembled: the connection (:func:`authorize_db_connection`),
+    the write profile (``db_write.DbWriteProfileParams`` and then the
+    write-profile BUILDER's per-statement-type rules), and the Send tuning
+    (``db_write.DbSendOperationParams``). Refusals are value-free, at
+    ``pointer`` + the block field. Call after the credential walk and
+    :func:`check_connection_binding`."""
+    rt = _rt()
+    connection = authorize_db_connection(
+        material.connection, pointer=pointer + "/connection", auth_mode=auth_mode
+    )
+    profile = material.write_profile
+    write_profile = _authority_check(
+        pointer + "/write_profile",
+        rt.DbWriteProfileParams,
+        statement_type=profile.statement_type,
+        sql=profile.sql,
+        table_name=profile.table_name,
+        stored_procedure=profile.stored_procedure,
+        fields=[field.model_dump() for field in profile.fields],
+        conditions=[condition.model_dump() for condition in profile.conditions],
+    )
+    _builder_check(
+        pointer + "/write_profile",
+        lambda: rt.raise_for_builder_error(
+            rt.DatabaseWriteProfileBuilder.validate_config(
+                rt.write_profile_config(write_profile, component_name="_")
+            )
+        ),
+    )
+    operation = _authority_check(
+        pointer + "/operation",
+        rt.DbSendOperationParams,
+        commit_option=material.operation.commit_option,
+        batch_count=material.operation.batch_count,
+        enable_batching=material.operation.enable_batching,
+    )
+    return AuthorizedDbWriteV1(
+        connection=connection,
+        write_profile=write_profile,
+        operation=operation,
+        field_index=_MappingProxyType(dict(rt.DbWritePrimitive.build_field_index(write_profile))),
+    )
+
+
+def db_connection_params(connection: _Any, *, base_connection_key: str) -> _Dict[str, _Any]:
+    """The ``db_extract`` / ``db_write`` primitive ``connection`` parameters for
+    an AUTHORIZED DB connection (:func:`authorize_db_connection`): create
+    settings, a reuse selector, or — for a base-key binding (``None``) — a
+    placeholder reuse naming ``base_connection_key`` that never reaches a spec
+    (the base-bound path emits no connection)."""
+    if isinstance(connection, DbCreateSettings):
+        params: _Dict[str, _Any] = {
+            "mode": "create",
+            "driver_id": connection.driver,
+            "auth_mode": connection.auth_mode,
+            "host": connection.host,
+            "port": connection.port,
+            "dbname": connection.database,
+        }
+        if connection.username is not None:
+            params["username"] = connection.username
+        if connection.credential_ref is not None:
+            params["credential_ref"] = connection.credential_ref
+        return params
+    if connection is not None:
+        params = {"mode": "reuse"}
+        if connection.component_id:
+            params["component_id"] = connection.component_id
+        if connection.component_name:
+            params["component_name"] = connection.component_name
+        return params
+    return {"mode": "reuse", "component_id": base_connection_key}
+
+
+def emit_db_write_components(
+    authorized: AuthorizedDbWriteV1,
+    *,
+    context: _Any,
+    key_prefix: str,
+    pointer: str,
+    base_connection_key: Optional[str] = None,
+    component_names: Optional[_Mapping[str, str]] = None,
+) -> _List[IntegrationComponentSpec]:
+    """The DB-write component group through the ``db_write`` primitive.
+
+    Material connection (create or reuse): connection, write profile, Send
+    operation, keyed from ``key_prefix`` by the primitive's own role keys.
+    Base-key binding (``base_connection_key``): the write profile and Send
+    operation only, the operation bound to the base connection key.
+    ``component_names`` may name ``connection`` / ``write_profile`` /
+    ``send_operation``. Builder refusals are value-free at ``pointer``."""
+    rt = _rt()
+    params = _builder_check(
+        pointer,
+        lambda: rt.DbWriteParameters.model_validate(
+            {
+                "key_prefix": key_prefix,
+                "connection": db_connection_params(
+                    authorized.connection,
+                    base_connection_key=base_connection_key or "",
+                ),
+                "write_profile": authorized.write_profile,
+                "operation": authorized.operation,
+                "component_names": dict(component_names or {}),
+            }
+        ),
+    )
+    if base_connection_key is None:
+        return _builder_check(pointer, lambda: rt.DbWritePrimitive.emit_components(context, params))
+    write_key = rt.primitive_component_key(key_prefix, rt.ROLE_DB_WRITE_PROFILE)
+    operation_key = rt.primitive_component_key(key_prefix, rt.ROLE_DB_WRITE_OPERATION)
+    folder = context.folder_path
+    return [
+        _builder_check(
+            pointer + "/write_profile",
+            lambda: rt.DbWritePrimitive._emit_write_profile(context, params, write_key, folder),
+        ),
+        _builder_check(
+            pointer + "/operation",
+            lambda: rt.DbWritePrimitive._emit_send_operation(
+                context, params, operation_key, base_connection_key, write_key, folder
+            ),
+        ),
+    ]
 
 
 def check_rest_request(

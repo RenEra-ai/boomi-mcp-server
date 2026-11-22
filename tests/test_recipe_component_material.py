@@ -929,9 +929,19 @@ def _reachable_material_fields(*roots):
 def test_the_credential_boundary_classifies_exactly_the_reachable_material_fields():
     from boomi_mcp.recipes.builtins import fanout
 
+    # #159 S2: the walker's table is the shared table (every shared block,
+    # including blocks fan-out does not reach, e.g. DB write) unioned with the
+    # fan-out root table. Every field fan-out reaches is classified, and the
+    # fan-out root rows name only fields it reaches.
     table = fanout._material_field_classes_v2()
-    assert set(table) == _reachable_material_fields()
-    secret_capable = {(model.__name__, name) for (model, name), rule in table.items() if rule}
+    reachable = _reachable_material_fields()
+    assert reachable <= set(table)
+    assert set(fanout._fanout_root_field_classes_v2()) <= reachable
+    secret_capable = {
+        (model.__name__, name)
+        for (model, name), rule in table.items()
+        if rule and (model, name) in reachable
+    }
     assert secret_capable == SECRET_CAPABLE_FIELDS
     assert {rule for rule in table.values() if rule} <= set(fanout._SECRET_RULES)
 
@@ -2255,6 +2265,164 @@ def test_the_bad_escape_offset_is_the_escape_itself():
     assert verdict.offset == len(text) - 3
     assert fanout._first_undecodable("ab%C3%A9%FFx") == 8
     assert fanout._first_undecodable("x%C3%A9") is None
+
+
+# ---------------------------------------------------------------------------
+# #159 S2: the shared DB-write material block (listener -> DB, API -> DB)
+# ---------------------------------------------------------------------------
+
+
+def _db_write_block(**overrides):
+    from boomi_mcp.recipes import component_material
+
+    block = {
+        "connection": {
+            "mode": "create",
+            "driver": "microsoft_jdbc",
+            "host": "db.example.invalid",
+            "database": "AppDb",
+            "username": "svc_writer",
+            "credential_ref": "credential://db/writer",
+        },
+        "write_profile": {
+            "statement_type": "dynamicinsert",
+            "table_name": "orders",
+            "fields": [{"name": "order_id", "mandatory": True}, {"name": "total", "data_type": "number"}],
+        },
+        "operation": {"commit_option": "commitrows", "batch_count": 50},
+    }
+    block.update(overrides)
+    return component_material.DbWriteMaterialV1.model_validate(block)
+
+
+def _db_write_context():
+    from boomi_mcp.patterns.base import PrimitiveBuildContext
+
+    return PrimitiveBuildContext(
+        integration_name="Orders", component_prefix="Orders", folder_path="Recipes/Orders"
+    )
+
+
+def test_the_db_write_field_types_are_pinned_to_the_primitive():
+    """The block's field-type vocabulary is a PINNED copy of the db_write
+    primitive's (it cannot be imported at module scope): equal both ways."""
+    import typing
+
+    from boomi_mcp.patterns.primitives.db_write import DbWriteCondition, DbWriteField
+    from boomi_mcp.recipes import component_material
+
+    pinned = set(typing.get_args(component_material._DbWriteFieldTypeV1))
+    assert pinned == set(typing.get_args(DbWriteField.model_fields["data_type"].annotation))
+    assert pinned == set(typing.get_args(DbWriteCondition.model_fields["data_type"].annotation))
+
+
+def test_the_db_write_block_emits_what_the_db_write_primitive_emits():
+    """Parity with the existing authority: the block's preparation hands the
+    ``db_write`` primitive the same parameters the legacy API -> DB archetype
+    builds from the equivalent ``DbTarget`` (create connection, write profile,
+    Send tuning), so the component group is byte-identical."""
+    from boomi_mcp.patterns.primitives.db_write import DbWriteParameters, DbWritePrimitive
+    from boomi_mcp.recipes import component_material
+
+    authorized = component_material.authorize_db_write_material(
+        _db_write_block(), pointer="/component_material/target", auth_mode="username_password"
+    )
+    assert set(authorized.field_index) == {"Fields/order_id", "Fields/total"}
+    emitted = component_material.emit_db_write_components(
+        authorized, context=_db_write_context(), key_prefix="target", pointer="/component_material/target"
+    )
+    legacy = DbWritePrimitive.emit_components(
+        _db_write_context(),
+        DbWriteParameters.model_validate(
+            {
+                "key_prefix": "target",
+                "connection": {
+                    "mode": "create",
+                    "driver_id": "microsoft_jdbc",
+                    "auth_mode": "username_password",
+                    "host": "db.example.invalid",
+                    "port": 1433,
+                    "dbname": "AppDb",
+                    "username": "svc_writer",
+                    "credential_ref": "credential://db/writer",
+                },
+                "write_profile": {
+                    "statement_type": "dynamicinsert",
+                    "table_name": "orders",
+                    "fields": [
+                        {"name": "order_id", "mandatory": True},
+                        {"name": "total", "data_type": "number"},
+                    ],
+                },
+                "operation": {"commit_option": "commitrows", "batch_count": 50},
+            }
+        ),
+    )
+    assert [spec.model_dump() for spec in emitted] == [spec.model_dump() for spec in legacy]
+    assert [spec.type for spec in emitted] == ["connector-settings", "profile.db", "connector-action"]
+
+
+def test_a_base_bound_db_write_block_emits_only_its_profile_and_operation():
+    from boomi_mcp.recipes import component_material
+
+    authorized = component_material.authorize_db_write_material(
+        _db_write_block(connection=None), pointer="/component_material/target", auth_mode=None
+    )
+    emitted = component_material.emit_db_write_components(
+        authorized,
+        context=_db_write_context(),
+        key_prefix="target",
+        pointer="/component_material/target",
+        base_connection_key="shared_db",
+    )
+    assert [spec.type for spec in emitted] == ["profile.db", "connector-action"]
+    assert emitted[1].config["connection_ref_key"] == "shared_db"
+    assert emitted[1].depends_on == ["shared_db", emitted[0].key]
+
+
+@pytest.mark.parametrize(
+    "profile, pointer",
+    [
+        ({"statement_type": "upsert", "table_name": "orders", "fields": [{"name": "a"}]}, "/write_profile"),
+        ({"statement_type": "dynamicinsert", "fields": [{"name": "a"}]}, "/write_profile"),
+    ],
+    ids=["unsupported_statement_type", "missing_table_name"],
+)
+def test_the_db_write_builder_rules_refuse_before_any_component(profile, pointer, monkeypatch):
+    from boomi_mcp.recipes import component_material
+
+    built = _assembly_spy(monkeypatch)
+    with pytest.raises(RecipeError) as caught:
+        component_material.authorize_db_write_material(
+            _db_write_block(write_profile=profile), pointer="/component_material/target", auth_mode="username_password"
+        )
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/target" + pointer
+    assert built == []
+
+
+def test_the_credential_walker_covers_the_db_write_block():
+    """A plaintext credential in the block's connection is refused by the
+    shared walker at that field — the block's rows are in the shared table."""
+    from boomi_mcp.recipes import component_material
+
+    block = _db_write_block(
+        connection={
+            "mode": "create",
+            "driver": "microsoft_jdbc",
+            "host": "db.example.invalid",
+            "database": "AppDb",
+            "username": "svc_writer",
+            "credential_ref": "hunter2-plaintext",
+        }
+    )
+    with pytest.raises(RecipeError) as caught:
+        component_material.check_credential_boundary(
+            block, component_material._common_material_field_classes(), pointer="/component_material/target"
+        )
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/target/connection/credential_ref"
+    assert component_material._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
 
 
 # ---------------------------------------------------------------------------

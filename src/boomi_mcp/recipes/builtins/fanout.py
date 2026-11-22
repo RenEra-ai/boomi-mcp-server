@@ -326,7 +326,6 @@ from ...models.recipe_contributions import (
 )
 from ...patterns.archetype_parameters import (
     DBResultField,
-    DbCreateSettings,
     JSONPayloadProfile,
     RestCreateSettings,
     RestQueryParameter,
@@ -417,7 +416,10 @@ from ..component_material import (  # noqa: F401 — re-exports
     _check_base_auth,
     _connection_presence,
     _check_selected_base_config,
+    authorize_db_connection,
+    check_connection_binding,
     check_credential_boundary,
+    db_connection_params,
     check_rest_request,
     material_field_classes,
     register_material_root,
@@ -950,83 +952,47 @@ def prepare_db_rest_fanout_v2(
     if set(by_part) != input_parts:
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, "/component_material/targets", phase="input")
 
-    _connection_presence(
-        inp.source.connection_key,
-        material.source.connection,
-        inp.source.binding_mode,
-        path="/component_material/source/connection",
+    source_key, source_bound = check_connection_binding(
+        base_catalog,
+        selected_key=inp.source.connection_key,
+        selected_key_pointer="/raw_input/source/connection_key",
+        material_connection=material.source.connection,
+        material_pointer="/component_material/source/connection",
+        binding_mode=inp.source.binding_mode,
+        family="database",
+        auth_config_key="auth_mode",
+        auth_expected=str(inp.source.auth_mode),
+        auth_pointer="/raw_input/source/auth_mode",
     )
-    if inp.source.connection_key is not None:
-        _check_base_component(
-            base_catalog,
-            inp.source.connection_key,
-            path="/raw_input/source/connection_key",
-            component_type="connector-settings",
-            connector_type="database",
-            binding_mode=inp.source.binding_mode,
-        )
-        if inp.source.binding_mode == "create":
-            _check_base_auth(
-                base_catalog,
-                inp.source.connection_key,
-                config_key="auth_mode",
-                expected=str(inp.source.auth_mode),
-                path="/raw_input/source/auth_mode",
-            )
-            _check_selected_base_config(
-                base_catalog,
-                inp.source.connection_key,
-                family="database",
-                path="/raw_input/source/connection_key",
-            )
-            create_bound.append((inp.source.connection_key, "/raw_input/source/connection_key"))
-        selected.append(inp.source.connection_key)
+    if source_bound is not None:
+        create_bound.append(source_bound)
+    if source_key is not None:
+        selected.append(source_key)
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]] = []
     for index, target in enumerate(inp.targets):
         material_index, entry = by_part[target.part_key]
         ordered_material.append((material_index, entry))
-        _connection_presence(
-            target.connection_key,
-            entry.connection,
-            target.binding_mode,
-            path=f"/component_material/targets/{material_index}/connection",
+        # A created REST connection is always unauthenticated (the extension
+        # policy declares no credential fields for it). A selected create-mode
+        # base's base_url is WRITTEN without the material walk ever seeing it:
+        # its config meets the same credential boundary (ARCH-r1-02), and its
+        # query is judged JOINED with the path below (D12, QA r8-01).
+        target_key, target_bound = check_connection_binding(
+            base_catalog,
+            selected_key=target.connection_key,
+            selected_key_pointer=f"/raw_input/targets/{index}/connection_key",
+            material_connection=entry.connection,
+            material_pointer=f"/component_material/targets/{material_index}/connection",
+            binding_mode=target.binding_mode,
+            family="rest",
+            auth_config_key="auth",
+            auth_expected=_rt().REST_CREATE_AUTH_MAP["none"],
+            auth_pointer=f"/raw_input/targets/{index}/connection_key",
         )
-        if target.connection_key is not None:
-            _check_base_component(
-                base_catalog,
-                target.connection_key,
-                path=f"/raw_input/targets/{index}/connection_key",
-                component_type="connector-settings",
-                connector_type="rest",
-                binding_mode=target.binding_mode,
-            )
-            if target.binding_mode == "create":
-                # A created REST connection is always unauthenticated (the
-                # extension policy declares no credential fields for it).
-                _check_base_auth(
-                    base_catalog,
-                    target.connection_key,
-                    config_key="auth",
-                    expected=_rt().REST_CREATE_AUTH_MAP["none"],
-                    path=f"/raw_input/targets/{index}/connection_key",
-                )
-                # The selected base's base_url is WRITTEN (the plan creates the
-                # component) without the material walk ever seeing it: its own
-                # userinfo check here; its query is judged JOINED with the path
-                # below (D12, QA r8-01).
-                # Its config meets the same credential boundary as material
-                # (ARCH-r1-02): base_url's userinfo rule included.
-                _check_selected_base_config(
-                    base_catalog,
-                    target.connection_key,
-                    family="rest",
-                    path=f"/raw_input/targets/{index}/connection_key",
-                )
-                create_bound.append(
-                    (target.connection_key, f"/raw_input/targets/{index}/connection_key")
-                )
-            if target.connection_key not in selected:
-                selected.append(target.connection_key)
+        if target_bound is not None:
+            create_bound.append(target_bound)
+        if target_key is not None and target_key not in selected:
+            selected.append(target_key)
 
     rest_targets = _check_request_targets_v2(
         inp,
@@ -1237,34 +1203,16 @@ def _authorize_material_v2(
 ) -> _AuthorizedMaterialV2:
     """Run every value rule through its neutral authority; return what came back."""
     from ...patterns.archetype_parameters import (
-        DbConnectionBinding,
         DbReadOperation,
         DbReadParameter,
         RestConnectionBinding,
     )
 
-    db_connection = material.source.connection
-    db: _Any = None
-    if isinstance(db_connection, FanoutDbCreateMaterialV2):
-        db = _authority_check(
-            "/component_material/source/connection",
-            DbCreateSettings,
-            driver=db_connection.driver,
-            auth_mode=inp.source.auth_mode,
-            host=db_connection.host,
-            port=db_connection.port,
-            database=db_connection.database,
-            username=db_connection.username,
-            credential_ref=db_connection.credential_ref,
-        )
-    elif isinstance(db_connection, FanoutConnectionReuseMaterialV2):
-        db = _authority_check(
-            "/component_material/source/connection",
-            DbConnectionBinding,
-            mode="reuse",
-            component_id=db_connection.component_id,
-            component_name=db_connection.component_name,
-        )
+    db = authorize_db_connection(
+        material.source.connection,
+        pointer="/component_material/source/connection",
+        auth_mode=inp.source.auth_mode,
+    )
     result_fields = tuple(
         _authority_check(
             f"/component_material/source/read/result_fields/{field_index}",
@@ -1558,30 +1506,9 @@ def _emit_db_components_v2(
 
     Connection values and result fields are the AUTHORITY-validated ones."""
     read = authorized.read
-    connection = authorized.db
-    if isinstance(connection, DbCreateSettings):
-        connection_params: _Dict[str, _Any] = {
-            "mode": "create",
-            "driver_id": connection.driver,
-            "auth_mode": connection.auth_mode,
-            "host": connection.host,
-            "port": connection.port,
-            "dbname": connection.database,
-        }
-        if connection.username is not None:
-            connection_params["username"] = connection.username
-        if connection.credential_ref is not None:
-            connection_params["credential_ref"] = connection.credential_ref
-    elif connection is not None:
-        connection_params = {"mode": "reuse"}
-        if connection.component_id:
-            connection_params["component_id"] = connection.component_id
-        if connection.component_name:
-            connection_params["component_name"] = connection.component_name
-    else:
-        # A base-key binding: the connection exists already; only its key is
-        # read. The placeholder selector never reaches a spec (see below).
-        connection_params = {"mode": "reuse", "component_id": keys.db_connection}
+    # A base-key binding: the connection exists already; only its key is read.
+    # The placeholder selector never reaches a spec (see below).
+    connection_params = db_connection_params(authorized.db, base_connection_key=keys.db_connection)
 
     read_profile: _Dict[str, _Any] = {
         "query": read.sql,
