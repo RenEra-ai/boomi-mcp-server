@@ -1,0 +1,120 @@
+{
+  "seed_format": "1",
+  "recipe_id": "boomi.archetype.http_listener_to_rest",
+  "recipe_version": "1.0.0",
+  "provenance": {
+    "source": "tests/fixtures/governance/issue_157/cases/http_listener_to_rest/plain/input.legacy.json",
+    "source_sha256": "343a1f679c15048fe0b0fed9ad4b277a3eb5e7b921a38fa2b0367bb1aa4e976f",
+    "derivation": "raw_input/component_material re-spell the frozen legacy parameters of http_listener_to_rest/plain (naming.component_prefix; listener object_name/operation_type/payload_profile -> material.listener.request_profile; inbound_validation.enabled -> raw_input.listener.inbound_validation; target binding/send_request/payload_profile -> the shared REST blocks, the placeholder path '/v1/<<target resource>>' sanitized to '/v1/target-resource' (the shared request-target grammar refuses '<', '>' and space; no row carries the path); transform source_path -> source_field). expected.supporting_component_keys = the baseline producer's components for this input at ba1be9f3 in emission order with main_process excluded; expected.references = that baseline main_process's depends_on, sorted; execution profile 'listener' = the canonical rule for a listener entry step."
+  },
+  "request": {
+    "integration_name": "Matrix listener to REST 1.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "version": "1",
+      "process_key": "main_process",
+      "naming": {
+        "component_prefix": "EventRelay"
+      },
+      "listener": {
+        "inbound_validation": true
+      },
+      "target": {
+        "binding_mode": "create",
+        "method": "POST"
+      }
+    },
+    "component_material": {
+      "version": "1",
+      "listener": {
+        "object_name": "eventRelay",
+        "operation_type": "EXECUTE",
+        "request_profile": {
+          "format": "json",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "event_id",
+                "kind": "simple",
+                "data_type": "character"
+              },
+              {
+                "name": "detail",
+                "kind": "simple",
+                "data_type": "character"
+              }
+            ]
+          }
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "Root/event_id",
+            "target_path": "Root/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_field": "Root/detail",
+            "target_path": "Root/message"
+          }
+        ]
+      },
+      "target": {
+        "connection": {
+          "mode": "create",
+          "base_url": "https://api.example.com"
+        },
+        "operation": {
+          "path": "/v1/target-resource"
+        },
+        "payload_profile": {
+          "format": "json",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "id",
+                "kind": "simple",
+                "data_type": "character"
+              },
+              {
+                "name": "message",
+                "kind": "simple",
+                "data_type": "character"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "process_keys": [
+      "main_process"
+    ],
+    "execution_profiles": {
+      "main_process": "listener"
+    },
+    "supporting_component_keys": [
+      "listener_request_profile",
+      "source_wss_listener_operation",
+      "transform_target_profile",
+      "transform_transform_map",
+      "target_rest_connection",
+      "target_rest_operation"
+    ],
+    "references": {
+      "main_process": [
+        "source_wss_listener_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+        "transform_transform_map"
+      ]
+    }
+  }
+}

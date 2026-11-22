@@ -1,0 +1,96 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay http_listener_to_rest/plain",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "component_material": {
+          "listener": {
+            "object_name": "eventRelay",
+            "operation_type": "EXECUTE",
+            "request_profile": {
+              "format": "json",
+              "root": {
+                "children": [
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "event_id"
+                  },
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "detail"
+                  }
+                ],
+                "kind": "object",
+                "name": "Root"
+              }
+            }
+          },
+          "target": {
+            "connection": {
+              "base_url": "https://api.example.com",
+              "mode": "create"
+            },
+            "operation": {
+              "path": "/v1/target-resource"
+            },
+            "payload_profile": {
+              "format": "json",
+              "root": {
+                "children": [
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "id"
+                  },
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "message"
+                  }
+                ],
+                "kind": "object",
+                "name": "Root"
+              }
+            }
+          },
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_field": "Root/event_id",
+                "target_path": "Root/id"
+              },
+              {
+                "operation_type": "direct",
+                "source_field": "Root/detail",
+                "target_path": "Root/message"
+              }
+            ]
+          },
+          "version": "1"
+        },
+        "invocation_id": "listener",
+        "raw_input": {
+          "listener": {
+            "inbound_validation": true
+          },
+          "naming": {
+            "component_prefix": "EventRelay"
+          },
+          "process_key": "main_process",
+          "target": {
+            "binding_mode": "create",
+            "method": "POST"
+          },
+          "version": "1"
+        },
+        "recipe_id": "boomi.archetype.http_listener_to_rest",
+        "recipe_version": "1.0.0"
+      }
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay http_listener_to_db/advanced_runtime",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "component_material": {
+          "api_service": {},
+          "listener": {
+            "object_name": "orderIntake",
+            "operation_type": "EXECUTE",
+            "request_profile": {
+              "format": "json",
+              "root": {
+                "children": [
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "id"
+                  },
+                  {
+                    "data_type": "number",
+                    "kind": "simple",
+                    "name": "amount"
+                  }
+                ],
+                "kind": "object",
+                "name": "Root"
+              }
+            }
+          },
+          "target": {
+            "connection": {
+              "component_name": "<<existing DB connection>>",
+              "mode": "reuse"
+            },
+            "write_profile": {
+              "fields": [
+                {
+                  "data_type": "character",
+                  "mandatory": true,
+                  "name": "id"
+                },
+                {
+                  "data_type": "number",
+                  "name": "amount"
+                }
+              ],
+              "statement_type": "dynamicinsert",
+              "table_name": "<<target table>>"
+            }
+          },
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_field": "Root/id",
+                "target_path": "Fields/id"
+              },
+              {
+                "operation_type": "direct",
+                "source_field": "Root/amount",
+                "target_path": "Fields/amount"
+              }
+            ]
+          },
+          "version": "1"
+        },
+        "invocation_id": "listener",
+        "raw_input": {
+          "listener": {
+            "publish_mode": "api_service"
+          },
+          "naming": {
+            "component_prefix": "OrderIntake"
+          },
+          "process_key": "main_process",
+          "target": {
+            "binding_mode": "reuse"
+          },
+          "version": "1"
+        },
+        "recipe_id": "boomi.archetype.http_listener_to_db",
+        "recipe_version": "1.0.0"
+      }
+    ]
+  }
+}
