@@ -1,0 +1,232 @@
+[
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "rest-conn-b0d70f36",
+    "role": "rest-conn",
+    "component_id": "b0d70f36-9661-4639-9ad1-b6e74369799e",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/b0d70f36-9661-4639-9ad1-b6e74369799e",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 cds-mock REST",
+    "component_type": "connector-settings",
+    "sha256_archived_bytes": "ba32443eb289eb7769b0b9a08036641c3cef36b2a007d33c7c1273d73467a3ee",
+    "byte_length": 2894,
+    "credential_like_field_ids": [
+      "awsPrivateKey",
+      "awsSecretKey",
+      "customAuthCredentials",
+      "password",
+      "privateCertificate"
+    ],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "profile-get-response-dfa08e0a",
+    "role": "profile-get-response",
+    "component_id": "dfa08e0a-479c-4aa8-b043-2113af48dad4",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/dfa08e0a-479c-4aa8-b043-2113af48dad4",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 Source Profile",
+    "component_type": "profile.json",
+    "sha256_archived_bytes": "5bf116729c850b964ada2b0dd38a517194dbad2147ab2c97fd48f7316ec0b1dd",
+    "byte_length": 1502,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "op-get-3cbe300a",
+    "role": "op-get",
+    "component_id": "3cbe300a-1369-49b7-ad1d-9487b55d1df8",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/3cbe300a-1369-49b7-ad1d-9487b55d1df8",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 REST Fetch",
+    "component_type": "connector-action",
+    "sha256_archived_bytes": "869ee11f62e7675fb3a37be361bf02360e82d2129d0134ced7c5077798eec372",
+    "byte_length": 1519,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "profile-patch-request-d65fda99",
+    "role": "profile-patch-request",
+    "component_id": "d65fda99-ae94-4608-b830-6754ebf229c5",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/d65fda99-ae94-4608-b830-6754ebf229c5",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 Target Profile",
+    "component_type": "profile.json",
+    "sha256_archived_bytes": "a1441e577bb978ca1ee79af25f92c24f7d68b3634c0436c81d58ee5cd9245dcf",
+    "byte_length": 1224,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "op-patch-db9108fc",
+    "role": "op-patch",
+    "component_id": "db9108fc-7b28-4fbc-bd5a-4229216f1742",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/db9108fc-7b28-4fbc-bd5a-4229216f1742",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 REST Send",
+    "component_type": "connector-action",
+    "sha256_archived_bytes": "752889c871e75b2140fdc4983602d64404373e06b5a87752f9148c48448cd4d2",
+    "byte_length": 1461,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "map-a3e236b6",
+    "role": "map",
+    "component_id": "a3e236b6-a736-4811-92c4-8b8a23ea8cb7",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/a3e236b6-a736-4811-92c4-8b8a23ea8cb7",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 Field Map",
+    "component_type": "transform.map",
+    "sha256_archived_bytes": "b4cade868f228a7cfbf9f5a7cc294c44e003ea76848cdadc5cee2ae032a4c140",
+    "byte_length": 1138,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  },
+  {
+    "scenario": "cap159-s3-bound-profiles",
+    "capture": "process-ef865f0a",
+    "role": "process",
+    "component_id": "ef865f0a-396d-468c-9726-4c030d4af80a",
+    "utc": "2026-11-22",
+    "account_id": "demo-account-159",
+    "endpoint": "Component/ef865f0a-396d-468c-9726-4c030d4af80a",
+    "status_code": 200,
+    "truncated": false,
+    "version_marker": "1",
+    "component_name": "_TEST_S3C1 API to API Sync",
+    "component_type": "process",
+    "sha256_archived_bytes": "1e8c47f09788c5197fdadf266b54ad041b727511b471e2dda6ebfba1c7de5c65",
+    "byte_length": 2675,
+    "credential_like_field_ids": [],
+    "credential_value_hits": [],
+    "redacted_before_archive": true,
+    "redactions": [
+      "createdBy/modifiedBy user replaced with redacted@example.invalid",
+      "folderName/folderFullPath replaced with Demo-Account-Folder"
+    ],
+    "encrypted_values_block_present": true,
+    "captured_by": "query_components(action='get') through the MCP tool layer, profile 'renera', read-only",
+    "authored_by": "this repo's builders at ed17dde via build_from_archetype(api_to_api_sync) -> build_integration typed integration_spec apply; connection via manage_connector create",
+    "operable_evidence": [
+      "execution-record.json + PROVENANCE.md in this set: process ef865f0a-396d-468c-9726-4c030d4af80a executed execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22 status COMPLETE on the local Docker atom; ExecutionConnector: two REST EXECUTE rows, each successCount 1 / errorCount 0 (rows carry no operation name/id); mock item name changed to the GET-returned key (map key->name) and modifiedOn advanced to the execution time"
+    ],
+    "binds_placeholder_ids": [],
+    "binding_rule": "#159 S3: canonical safe-edit witness (bound profiles); binds no #157 placeholder. Shape kept loader-compatible with tests/_issue_157_flows_accounting.replay_identity_captures.",
+    "utc_precision": "date only"
+  }
+]

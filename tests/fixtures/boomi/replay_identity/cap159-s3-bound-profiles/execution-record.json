@@ -1,0 +1,84 @@
+{
+  "execution_connector_query": [
+    {
+      "@type": "ExecutionConnector",
+      "actionType": "EXECUTE",
+      "connectorType": "officialboomi-X3979C-rest-prod",
+      "errorCount": 0,
+      "executionConnector": "_TEST_S3C1 REST Send",
+      "executionId": "execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22",
+      "isStartShape": false,
+      "recordType": "connector",
+      "size": 210,
+      "successCount": 1
+    },
+    {
+      "@type": "ExecutionConnector",
+      "actionType": "EXECUTE",
+      "connectorType": "officialboomi-X3979C-rest-prod",
+      "errorCount": 0,
+      "executionConnector": "_TEST_S3C1 REST Fetch",
+      "executionId": "execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22",
+      "isStartShape": false,
+      "recordType": "connector",
+      "size": 199,
+      "successCount": 1
+    },
+    {
+      "@type": "ExecutionConnector",
+      "actionType": "nodata",
+      "connectorType": "nodata",
+      "errorCount": 0,
+      "executionConnector": "Start",
+      "executionId": "execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22",
+      "isStartShape": true,
+      "recordType": "nodata",
+      "size": 0,
+      "successCount": 1
+    }
+  ],
+  "execution_record_query": [
+    {
+      "@type": "ExecutionRecord",
+      "account": "demo-account-159",
+      "atomId": "demo-atom-159",
+      "atomName": "demo-local-atom",
+      "executionDuration": [
+        "Long",
+        370
+      ],
+      "executionId": "execution-76ba0751-3708-4169-8fc5-bcc055dc6c97-2026.11.22",
+      "executionTime": "2026-11-22T15:48:49Z",
+      "executionType": "exec_manual",
+      "inboundDocumentCount": 1,
+      "inboundDocumentSize": [
+        "Long",
+        0
+      ],
+      "inboundErrorDocumentCount": 0,
+      "outboundDocumentCount": 2,
+      "outboundDocumentSize": [
+        "Long",
+        409
+      ],
+      "processId": "ef865f0a-396d-468c-9726-4c030d4af80a",
+      "processName": "_TEST_S3C1 API to API Sync",
+      "recordedDate": "2026-11-22T15:48:50Z",
+      "status": "COMPLETE"
+    }
+  ],
+  "mock_item_evidence": {
+    "after": {
+      "key": "QA_currency_E0D9B5299C",
+      "modifiedOn": "2026-11-22T15:48:49.983Z",
+      "name": "QA_currency_E0D9B5299C"
+    },
+    "before": {
+      "key": "QA_currency_E0D9B5299C",
+      "modifiedOn": "2026-11-22T15:42:35.379Z",
+      "name": "QA currency"
+    },
+    "path": "/admin/refdata/api/v1/rdcds/currency/QA_currency_E0D9B5299C",
+    "restored_after_capture": true
+  }
+}
