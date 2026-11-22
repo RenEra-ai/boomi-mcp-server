@@ -32,7 +32,7 @@ import json
 from types import MappingProxyType
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ..build_info import (
     PACKAGE_NAME,
@@ -50,14 +50,17 @@ from ..errors import (
 from ..models.recipe_contributions import (
     RECIPE_COMPONENT_TYPES,
     RECIPE_CONTRIBUTION_KINDS,
+    scan_forbidden_recipe_shape,
 )
 from .contracts import (
     ExpectedRecipeRegistryV1,
     RecipeCapabilityRequirementV1,
     RecipeDescriptorV1,
+    RecipeExampleV1,
     RecipeExecutorV1,
     RecipeImplementationMismatchV1,
     RecipeInputBase,
+    RecipeNoteText,
     RecipeProvenanceV1,
     RecipeRegistrationV1,
     RecipeRegistrySkewV1,
@@ -216,6 +219,12 @@ RECIPE_LAYER_MODULES: Tuple[str, ...] = (
 
 def _canonical(value: Any) -> str:
     return json.dumps(value, **_CANONICAL)
+
+
+#: The descriptor's served prose fields (#159 S2), in descriptor order.
+_GUIDANCE_NOTE_FIELDS: Tuple[str, ...] = ("limitations", "not_for", "capability_notes")
+
+_NOTES_ADAPTER = TypeAdapter(Tuple[RecipeNoteText, ...])
 
 
 #: Any ONE of these bounds what a property may hold. A property schema carrying
@@ -1003,6 +1012,9 @@ class RecipeRegistry:
         # (issue #145, §6 architect review).
         prerequisites = _canonicalize_declarations(reg.prerequisites)
         capability_requirements = _canonicalize_declarations(reg.capability_requirements)
+        # #159 S2: served guidance, validated and canonicalized BEFORE anything
+        # is hashed, so the digest covers exactly what is served.
+        notes, examples = self._canonical_guidance(reg)
 
         module, symbol, impl_parts = self._implementation_identity(reg)
         input_schema_id: Optional[str] = None
@@ -1040,6 +1052,8 @@ class RecipeRegistry:
                 if reg.adapter_target is not None
                 else None
             ),
+            **{name: list(notes[name]) for name in _GUIDANCE_NOTE_FIELDS},
+            "examples": [example.model_dump(mode="json") for example in examples],
             "provenance_module": module,
             "provenance_symbol": symbol,
             "implementation_sha256": implementation_sha256,
@@ -1072,6 +1086,8 @@ class RecipeRegistry:
             capability_requirements=capability_requirements,
             conflict_policy=reg.conflict_policy,
             adapter_target=reg.adapter_target,
+            examples=examples,
+            **notes,
             provenance=RecipeProvenanceV1(
                 package_name=PACKAGE_NAME,
                 package_version=package_version(),
@@ -1198,6 +1214,105 @@ class RecipeRegistry:
             raise ValueError(f"{reg.recipe_id!r} declares a duplicate output type")
         if list(reg.output_types) != sorted(reg.output_types):
             raise ValueError(f"{reg.recipe_id!r} output_types must be canonically sorted")
+
+    @staticmethod
+    def _canonical_guidance(
+        reg: RecipeRegistrationV1,
+    ) -> Tuple[Dict[str, Tuple[str, ...]], Tuple[RecipeExampleV1, ...]]:
+        """The served guidance, validated and canonicalized (#159 S2).
+
+        Notes are SETS of statements, like prerequisites: sorted and
+        de-duplicated so declaration order cannot move ``descriptor_sha256``.
+        Examples are sorted by ``example_id``; a repeated id is a defect rather
+        than a silent drop, because two examples under one id may differ.
+
+        Every refusal here is value-free: a pydantic error would echo the
+        offending note or input, and these messages reach build logs.
+        """
+        notes: Dict[str, Tuple[str, ...]] = {}
+        for name in _GUIDANCE_NOTE_FIELDS:
+            declared = getattr(reg, name)
+            if not isinstance(declared, tuple):
+                raise ValueError(f"{reg.recipe_id!r} {name} must be a tuple of notes")
+            try:
+                validated = _NOTES_ADAPTER.validate_python(declared)
+            except ValidationError:
+                raise ValueError(
+                    f"{reg.recipe_id!r} {name} carries a note that is not one "
+                    "trimmed line of 1-600 characters"
+                ) from None
+            notes[name] = tuple(sorted(set(validated)))
+
+        examples = reg.examples
+        if not isinstance(examples, tuple) or not all(
+            type(example) is RecipeExampleV1 for example in examples
+        ):
+            raise ValueError(
+                f"{reg.recipe_id!r} examples must be a tuple of RecipeExampleV1"
+            )
+        if examples and reg.input_model is None:
+            raise ValueError(
+                f"{reg.recipe_id!r} declares examples without an input model"
+            )
+        ids = [example.example_id for example in examples]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"{reg.recipe_id!r} declares a duplicate example_id")
+        for example in examples:
+            RecipeRegistry._check_example(reg, example)
+        # DEEP copies: the model is frozen but its JSON mappings are not, so the
+        # registry must not share them with the registration that declared them.
+        return notes, tuple(
+            example.model_copy(deep=True)
+            for example in sorted(examples, key=lambda e: e.example_id)
+        )
+
+    @staticmethod
+    def _check_example(reg: RecipeRegistrationV1, example: RecipeExampleV1) -> None:
+        """An example must be an invocation the registration ACCEPTS.
+
+        ``raw_input`` passes the same forbidden-shape scan the engine applies to
+        every raw recipe input, then the registration's input model. Material is
+        validated by the declared component-material model and is REQUIRED when
+        the registration declares that channel (an executor that receives no
+        material prepares no components, so an example without it is not a
+        runnable invocation), refused when it does not.
+
+        Material is NOT passed through the key-name scan: material legitimately
+        carries opaque ``credential_ref`` keys that scan would refuse, and its
+        value-level credential boundary is the registration's own preparer.
+        """
+        if scan_forbidden_recipe_shape(example.raw_input) is not None:
+            raise ValueError(
+                f"{reg.recipe_id!r} example {example.example_id!r} raw_input carries "
+                "a key the recipe input scan forbids"
+            )
+        try:
+            reg.input_model.model_validate(example.raw_input)
+        except ValidationError:
+            raise ValueError(
+                f"{reg.recipe_id!r} example {example.example_id!r} does not validate "
+                "against its input model"
+            ) from None
+        model = reg.component_material_model
+        if model is None:
+            if example.component_material is not None:
+                raise ValueError(
+                    f"{reg.recipe_id!r} example {example.example_id!r} carries "
+                    "component material the registration does not accept"
+                )
+            return
+        if example.component_material is None:
+            raise ValueError(
+                f"{reg.recipe_id!r} example {example.example_id!r} omits the "
+                "component material its registration requires"
+            )
+        try:
+            model.model_validate(example.component_material)
+        except ValidationError:
+            raise ValueError(
+                f"{reg.recipe_id!r} example {example.example_id!r} component "
+                "material does not validate against its material model"
+            ) from None
 
     @staticmethod
     def _check_component_material(reg: RecipeRegistrationV1) -> None:

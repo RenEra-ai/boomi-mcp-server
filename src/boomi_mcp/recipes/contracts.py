@@ -47,6 +47,7 @@ from typing import (
     Annotated,
     Any,
     Callable,
+    Dict,
     Literal,
     Optional,
     Tuple,
@@ -58,6 +59,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -306,8 +308,57 @@ class RecipeProvenanceV1(_RecipeModel):
     descriptor_sha256: str = Field(..., min_length=64, max_length=64)
 
 
+def _validate_note_text(value: str) -> str:
+    if value != value.strip() or any(ord(char) < 0x20 for char in value):
+        raise PydanticCustomError(
+            "recipe_note_invalid",
+            "a descriptor note is one trimmed line with no control characters",
+        )
+    return value
+
+
+#: One line of served descriptor prose (#159 S2). Bounded and single-line so a
+#: note cannot smuggle a document into discovery; trimmed so two spellings of
+#: one note cannot hash differently.
+RecipeNoteText = Annotated[
+    str,
+    Field(min_length=1, max_length=600),
+    AfterValidator(_validate_note_text),
+]
+
+
+class RecipeExampleV1(_RecipeModel):
+    """One CONCRETE invocation an authoring client may copy (#159 S2).
+
+    ``is_template`` is ``Literal[False]`` and required: an example is a value the
+    registry has validated against the registration's own input model (and its
+    component-material model, when the registration declares one) at
+    construction — never a shape with blanks for a caller to fill. Registry
+    construction refuses an example that does not validate, or that carries a
+    key the recipe input scan forbids, as a build defect.
+
+    ``raw_input`` and ``component_material`` are JSON values, served verbatim and
+    digested through the descriptor's canonical JSON.
+    """
+
+    example_id: RecipeSemanticId
+    summary: RecipeNoteText
+    is_template: Literal[False]
+    raw_input: Dict[str, JsonValue]
+    component_material: Optional[Dict[str, JsonValue]] = None
+
+
 class RecipeDescriptorV1(_RecipeModel):
-    """The published description of one registered recipe version."""
+    """The published description of one registered recipe version.
+
+    ``limitations``, ``not_for``, ``capability_notes`` and ``examples`` (#159 S2)
+    are the choice-making half of discovery: what the recipe does not do, which
+    requests it is the wrong recipe for, what its capability requirements mean
+    for a caller, and concrete validated invocations. All four are code-owned on
+    the registration, canonicalized by the registry (notes sorted and
+    de-duplicated, examples sorted by ``example_id``) and covered by
+    ``descriptor_sha256`` exactly like every other descriptor field.
+    """
 
     schema_version: Literal["1"] = "1"
     recipe_id: RecipeSemanticId
@@ -321,6 +372,10 @@ class RecipeDescriptorV1(_RecipeModel):
     capability_requirements: Tuple[RecipeCapabilityRequirementV1, ...] = ()
     conflict_policy: Optional[RecipeConflictPolicyV1] = None
     adapter_target: Optional[RecipeReferenceV1] = None
+    limitations: Tuple[RecipeNoteText, ...] = ()
+    not_for: Tuple[RecipeNoteText, ...] = ()
+    capability_notes: Tuple[RecipeNoteText, ...] = ()
+    examples: Tuple[RecipeExampleV1, ...] = ()
     provenance: RecipeProvenanceV1
 
     def public_payload(self) -> dict:
@@ -410,6 +465,15 @@ class RecipeRegistrationV1:
     #: to a shared module moves the digest of every recipe that declares it and
     #: of no other. Order and repetition carry no meaning.
     implementation_dependency_modules: Tuple[str, ...] = ()
+    #: #159 S2 — served choice-making guidance (see ``RecipeDescriptorV1``).
+    #: Optional and empty by default, so a registration that declares none
+    #: builds exactly as before. ``examples`` needs an input model: registry
+    #: construction validates each against ``input_model`` (and
+    #: ``component_material_model``) and refuses one that does not validate.
+    limitations: Tuple[str, ...] = ()
+    not_for: Tuple[str, ...] = ()
+    capability_notes: Tuple[str, ...] = ()
+    examples: Tuple[RecipeExampleV1, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -503,11 +567,13 @@ __all__ = [
     "RecipeDescriptorV1",
     "RecipeEntryKind",
     "RecipeExecutionContextKind",
+    "RecipeExampleV1",
     "RecipeExecutorV1",
     "RecipeImplementationMismatchV1",
     "RecipeInputBase",
     "RecipeInvocationProvenanceV1",
     "RecipeMergeRule",
+    "RecipeNoteText",
     "RecipeOutputType",
     "RecipePrerequisiteV1",
     "RecipeProvenanceV1",

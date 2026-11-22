@@ -5398,3 +5398,252 @@ def test_component_preparation_is_served_only_for_the_declaring_registration():
     assert [(d.recipe_id, d.recipe_version) for d in declaring] == [
         ("boomi.compose.db_rest_fanout", "2.0.0")
     ]
+
+
+# ---------------------------------------------------------------------------
+# #159 S2 — descriptor guidance: limitations, not_for, capability notes, examples
+# ---------------------------------------------------------------------------
+
+
+def _sync_example_input(**overrides):
+    raw = {
+        "version": "1",
+        "process_key": "main_process",
+        "source_connection_ref": "$ref:source_conn",
+        "source_operation_ref": "$ref:source_op",
+        "map_ref": "$ref:field_map",
+        "target_connection_ref": "$ref:target_conn",
+        "target_operation_ref": "$ref:target_op",
+        "component_slots": [
+            {
+                "contribution_id": "c.0",
+                "component_key": "source_conn",
+                "component_type": "connector-settings",
+                "materialization_mode": "create",
+                "materializer_slot": "source_conn",
+            }
+        ],
+    }
+    raw.update(overrides)
+    return raw
+
+
+def _example(example_id="sync.basic", **overrides):
+    from boomi_mcp.recipes.contracts import RecipeExampleV1
+
+    fields = dict(
+        example_id=example_id,
+        summary="REST fetch, map and REST send over five referenced components.",
+        is_template=False,
+        raw_input=_sync_example_input(),
+    )
+    fields.update(overrides)
+    return RecipeExampleV1(**fields)
+
+
+def _flagship_material_example(**overrides):
+    from _fanout_v2_support import flagship_v2
+    from boomi_mcp.recipes.contracts import RecipeExampleV1
+
+    raw, material = flagship_v2()
+    fields = dict(
+        example_id="fanout.flagship",
+        summary="Database read fanned out to two REST targets.",
+        is_template=False,
+        raw_input=raw,
+        component_material=material,
+    )
+    fields.update(overrides)
+    return RecipeExampleV1(**fields)
+
+
+def _guided(**overrides):
+    return _reg(
+        limitations=("Sends one document stream; no retry.",),
+        not_for=("Listener-entry processes.",),
+        capability_notes=("Requires a source, a map and a target emitter.",),
+        examples=(_example(),),
+        **overrides,
+    )
+
+
+def test_production_descriptors_carry_empty_guidance_by_default():
+    for descriptor in production_registry().descriptors():
+        payload = descriptor.public_payload()
+        for name in ("limitations", "not_for", "capability_notes", "examples"):
+            assert name in payload, (descriptor.recipe_id, name)
+
+
+def test_guidance_is_served_and_validated_examples_are_never_templates():
+    descriptor = build_test_registry((_guided(),)).resolve("test.recipe", "1.0.0")
+    payload = descriptor.public_payload()
+    assert payload["limitations"] == ["Sends one document stream; no retry."]
+    assert payload["not_for"] == ["Listener-entry processes."]
+    assert payload["capability_notes"] == ["Requires a source, a map and a target emitter."]
+    (example,) = payload["examples"]
+    assert example["is_template"] is False
+    assert example["raw_input"] == _sync_example_input()
+    assert example["component_material"] is None
+
+
+def test_guidance_reaches_the_pinned_discovery_surface():
+    """The served pin path (``_resolve_pinned_target``) carries the new fields."""
+    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
+
+    registry = build_test_registry(
+        (
+            _guided(recipe_id="t.target", recipe_version="0.1.0"),
+            RecipeRegistrationV1(
+                recipe_id="t.adapter",
+                recipe_version="1.0.0",
+                entry_kind="compatibility_adapter",
+                is_default=True,
+                adapter_target=RecipeReferenceV1(recipe_id="t.target", recipe_version="0.1.0"),
+                not_for=("Direct canonical authoring.",),
+            ),
+        )
+    )
+    served = _resolve_pinned_target("t.adapter", "0.1.0", registry)
+    assert served["not_for"] == ["Listener-entry processes."]
+    assert served["examples"][0]["example_id"] == "sync.basic"
+    assert registry.resolve("t.adapter").public_payload()["not_for"] == [
+        "Direct canonical authoring."
+    ]
+
+
+def test_a_template_example_cannot_be_constructed():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _example(is_template=True)
+
+
+def test_guidance_order_and_duplicates_do_not_move_the_digest():
+    one = build_test_registry(
+        (
+            _reg(
+                limitations=("b note.", "a note."),
+                examples=(_example("x.two"), _example("x.one")),
+            ),
+        )
+    )
+    two = build_test_registry(
+        (
+            _reg(
+                limitations=("a note.", "b note.", "a note."),
+                examples=(_example("x.one"), _example("x.two")),
+            ),
+        )
+    )
+    d1, d2 = one.resolve("test.recipe"), two.resolve("test.recipe")
+    assert d1.limitations == ("a note.", "b note.")
+    assert [e.example_id for e in d1.examples] == ["x.one", "x.two"]
+    assert d1.provenance.descriptor_sha256 == d2.provenance.descriptor_sha256
+    assert one.registry_revision == two.registry_revision
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("limitations", ("another note.",)),
+        ("not_for", ("another note.",)),
+        ("capability_notes", ("another note.",)),
+        ("examples", (_example("x.other"),)),
+    ],
+)
+def test_each_guidance_field_is_covered_by_the_descriptor_digest(field, value):
+    base = build_test_registry((_reg(),)).resolve("test.recipe")
+    changed = build_test_registry((_reg(**{field: value}),)).resolve("test.recipe")
+    assert base.provenance.descriptor_sha256 != changed.provenance.descriptor_sha256
+
+
+def test_the_registry_does_not_share_example_mappings_with_its_registration():
+    registration = _guided()
+    registry = build_test_registry((registration,))
+    registration.examples[0].raw_input["process_key"] = "mutated"
+    served = registry.resolve("test.recipe").public_payload()["examples"][0]
+    assert served["raw_input"]["process_key"] == "main_process"
+
+
+def test_a_material_example_validates_against_the_material_model():
+    registry = build_test_registry(
+        (_material_registration(examples=(_flagship_material_example(),)),)
+    )
+    (example,) = registry.resolve("boomi.compose.db_rest_fanout", "2.0.0").examples
+    assert example.component_material["version"] == "2"
+
+
+@pytest.mark.parametrize(
+    "build, message",
+    [
+        pytest.param(lambda: _reg(limitations=["a note."]), "must be a tuple of notes", id="notes_not_tuple"),
+        pytest.param(lambda: _reg(not_for=(" padded.",)), "trimmed line", id="padded_note"),
+        pytest.param(lambda: _reg(capability_notes=("two\nlines",)), "trimmed line", id="multiline_note"),
+        pytest.param(lambda: _reg(limitations=("",)), "trimmed line", id="empty_note"),
+        pytest.param(lambda: _reg(examples=[_example()]), "tuple of RecipeExampleV1", id="examples_not_tuple"),
+        pytest.param(
+            lambda: _reg(examples=({"example_id": "x"},)),
+            "tuple of RecipeExampleV1",
+            id="example_not_a_model",
+        ),
+        pytest.param(
+            lambda: RecipeRegistrationV1(
+                recipe_id="test.advisory",
+                recipe_version="1.0.0",
+                entry_kind="advisory",
+                examples=(_example(),),
+            ),
+            "without an input model",
+            id="example_on_an_advisory",
+        ),
+        pytest.param(
+            lambda: _reg(examples=(_example(), _example())),
+            "duplicate example_id",
+            id="duplicate_example_id",
+        ),
+        pytest.param(
+            lambda: _reg(examples=(_example(raw_input=_sync_example_input(api_key="k")),)),
+            "scan forbids",
+            id="secret_shaped_input_key",
+        ),
+        pytest.param(
+            lambda: _reg(examples=(_example(raw_input=_sync_example_input(version="2")),)),
+            "does not validate against its input model",
+            id="invalid_input",
+        ),
+        pytest.param(
+            lambda: _reg(examples=(_example(component_material={"version": "2"}),)),
+            "does not accept",
+            id="material_without_a_channel",
+        ),
+        pytest.param(
+            lambda: _material_registration(
+                examples=(_flagship_material_example(component_material=None),)
+            ),
+            "omits the component material",
+            id="missing_material",
+        ),
+        pytest.param(
+            lambda: _material_registration(
+                examples=(_flagship_material_example(component_material={"version": "9"}),)
+            ),
+            "does not validate against its material model",
+            id="invalid_material",
+        ),
+    ],
+)
+def test_malformed_guidance_is_a_build_defect(build, message):
+    with pytest.raises(ValueError, match=message):
+        build_test_registry((build(),))
+
+
+def test_a_guidance_build_defect_message_is_value_free():
+    sentinel = "SENTINEL-VALUE-9f3c"
+    with pytest.raises(ValueError) as caught:
+        build_test_registry(
+            (_reg(examples=(_example(raw_input=_sync_example_input(version=sentinel)),)),)
+        )
+    assert sentinel not in str(caught.value)
+    with pytest.raises(ValueError) as caught:
+        build_test_registry((_reg(limitations=(sentinel + "\n",)),))
+    assert sentinel not in str(caught.value)
