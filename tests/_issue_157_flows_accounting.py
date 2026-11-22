@@ -101,6 +101,10 @@ PAIR_CLASSIFICATION: Mapping[str, Mapping[str, str]] = {
     "dlq": {"kind": "payload", "row_key": "reliability", "field": "target", "producer": "database_to_api_sync"},
     "leg_count": {"kind": "payload", "row_key": "fanout", "field": "legs", "producer": "composition"},
     "binding_mode": {"kind": "endpoint", "row_key": "", "producer": "database_to_api_sync"},
+    # #159 S2 (L4): the linear presets' and the staged fan-out's own axes
+    "binding_mode_api_to_db": {"kind": "endpoint", "row_key": "", "producer": "api_to_database_sync"},
+    "publish_mode": {"kind": "endpoint", "row_key": "", "producer": "http_listener_to_db"},
+    "staging_leg": {"kind": "payload", "row_key": "fanout", "field": "legs", "producer": "composition"},
 }
 
 #: The single-parameter differential PAIRS, each ``(parameter, base_case, varied_case)``.
@@ -110,6 +114,9 @@ DIFFERENTIAL_PAIRS: Tuple[Tuple[str, str, str], ...] = (
     ("leg_count", "composition/create_2legs_stream", "composition/create_3legs_stream"),
     ("binding_mode", "database_to_api_sync/wm_off_dlq_off_create", "database_to_api_sync/wm_off_dlq_off_target_reuse"),
     ("binding_mode", "database_to_api_sync/wm_off_dlq_off_create", "database_to_api_sync/wm_off_dlq_off_source_reuse"),
+    ("binding_mode_api_to_db", "api_to_database_sync/create", "api_to_database_sync/source_reuse"),
+    ("publish_mode", "http_listener_to_db/plain", "http_listener_to_db/advanced_runtime"),
+    ("staging_leg", "composition/create_2legs_stream", "composition/create_2legs_staged"),
 )
 
 # ---------------------------------------------------------------------------
@@ -181,6 +188,16 @@ CASES: Mapping[str, Mapping[str, Any]] = {
 PENDING = "pending:#159"
 DISCHARGED = "discharged"
 RETIRED_PREFIX = "retired:"
+
+#: THE ONE-LINE SWITCH (#159 S2 -> the integrator's final replay). While False
+#: the lanes land one by one: a case whose canonical replay reproduces its
+#: COMPLETE frozen sequence is "completed" even while its rows still carry
+#: ``pending:#159`` (reported as reproduced-pending, never as discharged), and
+#: a case that does not yet reproduce it is held to the discharged rows alone.
+#: Set it True once all 21 cases replay: then every case must be completed and
+#: NO row may be pending — the pending-state witness in
+#: ``test_issue_157_flows_accounting.py`` becomes the no-pending assertion.
+FINAL_REPLAY = False
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +720,24 @@ def case_plan_result(case: Case):
     return _PLAN_CACHE[cache_key]
 
 
+def _require_canonical_input(case: Case) -> None:
+    """A case that OWES canonical rows must carry the canonical request.
+
+    Owed means: the final replay (every case), or any row already dispositioned
+    ``discharged``. Refused loudly rather than projected as an empty sequence,
+    which the partial-mode accounting would otherwise read as "nothing yet".
+    """
+    if case.input_canonical is not None:
+        return
+    statuses = list((case.discharges.get("flows") or {}).values()) + list(
+        (case.discharges.get("endpoints") or {}).values()
+    )
+    if FINAL_REPLAY or DISCHARGED in statuses:
+        raise FileNotFoundError(
+            "case {0} owes canonical rows but has no input.canonical.json".format(case.case_id)
+        )
+
+
 def derive_served_projection(case: Case) -> List[Dict[str, Any]]:
     """The case's SERVED rows, un-normalized. The name check reads these.
 
@@ -725,6 +760,7 @@ def derive_case_projection(case: Case) -> List[Dict[str, Any]]:
     """
     from boomi_mcp.authoring.derived_flows import normalize_flow_row
 
+    _require_canonical_input(case)
     result = case_plan_result(case)
     if result is None:
         return []
@@ -747,6 +783,7 @@ def derive_case_endpoints(case: Case) -> List[Dict[str, Any]]:
     null stay distinct, exactly as the legacy producers served them. The
     summary's process key is the map key, never part of the compared payload.
     """
+    _require_canonical_input(case)
     result = case_plan_result(case)
     if result is None:
         return []
@@ -764,6 +801,13 @@ class DischargeReport:
         self.discharged: int = 0
         self.pending: int = 0
         self.retired: int = 0
+        #: Rows the canonical replay reproduces exactly, in order, whose
+        #: disposition is still ``pending:#159`` (legal only while not
+        #: ``FINAL_REPLAY``).
+        self.reproduced_pending: int = 0
+        #: The derived sequence EQUALS the full frozen sequence (retired rows
+        #: removed) — completion is MEASURED, never declared.
+        self.completed: bool = False
 
     @property
     def ok(self) -> bool:
@@ -874,114 +918,179 @@ def _profile_name_problems(case, served_rows):
     return problems
 
 
+def _derived_identity(side: str, payload: Mapping[str, Any]) -> Tuple[Any, Any]:
+    """``(key, kind)`` of a DERIVED row — the identity a frozen row is keyed by.
+
+    A flow row's kind is its ``operation``; on the endpoint side a row with a
+    ``key`` is an ``endpoint`` and the composition summary (which has none) is
+    the ``composition_provenance`` row.
+    """
+    if side == "flows":
+        return payload.get("key"), payload.get("operation")
+    if "key" in payload:
+        return payload.get("key"), "endpoint"
+    return "composition", "composition_provenance"
+
+
+def _account_sequence(
+    case: Case,
+    side: str,
+    derived: Sequence[Mapping[str, Any]],
+    retirements: Mapping[str, Any],
+    *,
+    final: Optional[bool] = None,
+) -> DischargeReport:
+    """THE comparison path — flows and endpoints, partial and final replay alike.
+
+    Explicit row accounting first: every frozen ordinal carries exactly one
+    status, every frozen payload matches its own digest, every retirement cites
+    a record that retires a row of THIS producer. Then ordered full-sequence
+    equality, by full normalized payload digest (nested payload, null versus
+    absent and ordinal all included), against the FULL frozen sequence with only
+    individually retired rows removed. Equal means the case is COMPLETED. While
+    not ``final`` a completed case's still-pending rows are counted as
+    reproduced-pending, and a case that does not reproduce its full sequence is
+    held to its discharged rows alone (the #157/S1 partial rule). ``final``
+    (default: ``FINAL_REPLAY``) requires every case completed and no row
+    pending.
+    """
+    final = FINAL_REPLAY if final is None else final
+    report = DischargeReport()
+    label = "row" if side == "flows" else "endpoint row"
+    frozen = case.flow_rows if side == "flows" else case.endpoint_rows
+    statuses = case.discharges.get(side) or {}
+    if set(statuses) != {str(row["ordinal"]) for row in frozen}:
+        report.problems.append(
+            "discharges.json does not name every frozen {0}ordinal exactly once".format(
+                "" if side == "flows" else "endpoint "
+            )
+        )
+        return report
+    if [row["ordinal"] for row in frozen] != list(range(len(frozen))):
+        report.problems.append("frozen {0}s do not keep their ordinals in order".format(label))
+    identities = [(row["key"], row["kind"]) for row in frozen]
+    if len(set(identities)) != len(identities):
+        report.problems.append("frozen {0} identities are not unique within the case".format(label))
+
+    status_of: Dict[int, str] = {}
+    for row in frozen:
+        status = statuses[str(row["ordinal"])]
+        status_of[row["ordinal"]] = status
+        if _digest(row["payload"]) != row["payload_sha256"]:
+            report.problems.append(
+                "frozen {0} {1} payload does not match its own digest".format(label, row["ordinal"])
+            )
+        if status == DISCHARGED:
+            report.discharged += 1
+            if case.input_canonical is None:
+                report.problems.append(
+                    "{0} {1} discharged with no canonical fixture".format(label, row["ordinal"])
+                )
+        elif status.startswith(RETIRED_PREFIX):
+            report.retired += 1
+            problem = _retirement_problem(
+                "{0} {1}".format(label, row["ordinal"]),
+                status[len(RETIRED_PREFIX):],
+                retirements,
+                producer=case.producer,
+            )
+            if problem:
+                report.problems.append(problem)
+        elif status == PENDING:
+            report.pending += 1
+        else:
+            report.problems.append(
+                "{0} {1} carries an unknown status {2!r}".format(label, row["ordinal"], status)
+            )
+
+    owed = [row for row in frozen if not status_of[row["ordinal"]].startswith(RETIRED_PREFIX)]
+    derived_digests = [_digest(row) for row in derived]
+    if derived_digests == [row["payload_sha256"] for row in owed]:
+        report.completed = True
+        report.reproduced_pending = sum(1 for row in owed if status_of[row["ordinal"]] == PENDING)
+        if final and report.reproduced_pending:
+            report.problems.append(
+                "{0} reproduced {1} still pending: the final replay accepts no pending row".format(
+                    report.reproduced_pending, label + ("s are" if report.reproduced_pending > 1 else " is")
+                )
+            )
+        return report
+
+    # NOT completed. The diagnostics name the exact failure shape.
+    target = owed if final else [row for row in owed if status_of[row["ordinal"]] == DISCHARGED]
+    if final:
+        report.problems.append(
+            "case is not completed: the derived {0} sequence is not the full frozen sequence".format(side)
+        )
+    for row in target:
+        if row["payload_sha256"] not in derived_digests:
+            report.problems.append(
+                "{0} {1} {2} ({3}/{4}) has no full-payload match in the derived output".format(
+                    "discharged" if status_of[row["ordinal"]] == DISCHARGED else "owed",
+                    label, row["ordinal"], row["key"], row["kind"],
+                )
+            )
+    target_digests = [row["payload_sha256"] for row in target]
+    if derived_digests != target_digests:
+        not_owed = {
+            row["payload_sha256"]: status_of[row["ordinal"]]
+            for row in frozen
+            if row["payload_sha256"] not in target_digests
+        }
+        for digest in derived_digests:
+            if digest in not_owed:
+                report.problems.append(
+                    "derived output contains a row whose frozen status is {0} (unexpected row)".format(
+                        not_owed[digest]
+                    )
+                )
+        if len(set(derived_digests)) != len(derived_digests):
+            report.problems.append("derived output contains a duplicate row")
+        if sorted(derived_digests) == sorted(target_digests):
+            report.problems.append("derived output is a reordering of the discharged sequence")
+        elif set(derived_digests) - set(target_digests) - set(not_owed):
+            unknown = [
+                _derived_identity(side, row)
+                for row in derived
+                if _digest(row) not in target_digests and _digest(row) not in not_owed
+            ]
+            report.problems.append(
+                "derived output contains a row the baseline never froze (unexpected row): {0}".format(
+                    unknown
+                )
+            )
+        report.problems.append("derived {0} sequence differs from the discharged sequence".format(side))
+    return report
+
+
 def discharge_case(
     case: Case,
     derived: Sequence[Mapping[str, Any]],
     retirements: Mapping[str, Any],
     served: Optional[Sequence[Mapping[str, Any]]] = None,
+    *,
+    final: Optional[bool] = None,
 ) -> DischargeReport:
-    """Two-sided, ordered accounting of one case's flows sequence."""
-    report = DischargeReport()
-    statuses = case.discharges.get("flows") or {}
-    if set(statuses) != {str(row["ordinal"]) for row in case.flow_rows}:
-        report.problems.append("discharges.json does not name every frozen ordinal exactly once")
-        return report
-    expected: List[Mapping[str, Any]] = []
-    for row in case.flow_rows:
-        status = statuses[str(row["ordinal"])]
-        if status == DISCHARGED:
-            report.discharged += 1
-            if case.input_canonical is None:
-                report.problems.append("row {0} discharged with no canonical fixture".format(row["ordinal"]))
-            expected.append(row)
-        elif status.startswith(RETIRED_PREFIX):
-            report.retired += 1
-            problem = _retirement_problem(
-                "row {0}".format(row["ordinal"]),
-                status[len(RETIRED_PREFIX):],
-                retirements,
-                producer=case.producer,
-            )
-            if problem:
-                report.problems.append(problem)
-        elif status == PENDING:
-            report.pending += 1
-        else:
-            report.problems.append("row {0} carries an unknown status {1!r}".format(row["ordinal"], status))
+    """Two-sided, ordered accounting of one case's flows sequence.
 
-    # side 1: every discharged row matched by FULL normalized payload
-    derived_digests = [_digest(row) for row in derived]
-    for row in expected:
-        if row["payload_sha256"] not in derived_digests:
-            report.problems.append(
-                "discharged row {0} ({1}/{2}) has no full-payload match in the derived output".format(
-                    row["ordinal"], row["key"], row["kind"]
-                )
-            )
-        if _digest(row["payload"]) != row["payload_sha256"]:
-            report.problems.append("frozen row {0} payload does not match its own digest".format(row["ordinal"]))
-
-    # side 1b: the names R3 removes from the DIGEST are checked here instead,
-    # against the SERVED rows, since the frozen payloads carry none
+    :func:`_account_sequence` plus the names R3 removes from the DIGEST, checked
+    against the SERVED rows instead (the frozen payloads carry none).
+    """
+    report = _account_sequence(case, "flows", derived, retirements, final=final)
     report.problems.extend(_profile_name_problems(case, served if served is not None else ()))
-
-    # side 2: the derived sequence EQUALS the discharged sequence, in order
-    expected_digests = [row["payload_sha256"] for row in expected]
-    if derived_digests != expected_digests:
-        undischarged = {
-            row["payload_sha256"]: statuses[str(row["ordinal"])]
-            for row in case.flow_rows
-            if statuses[str(row["ordinal"])] != DISCHARGED
-        }
-        for digest in derived_digests:
-            if digest in undischarged:
-                report.problems.append(
-                    "derived output contains a row whose frozen status is {0} (unexpected row)".format(
-                        undischarged[digest]
-                    )
-                )
-        if len(set(derived_digests)) != len(derived_digests):
-            report.problems.append("derived output contains a duplicate row")
-        if sorted(derived_digests) == sorted(expected_digests) and derived_digests != expected_digests:
-            report.problems.append("derived output is a reordering of the discharged sequence")
-        elif set(derived_digests) - set(expected_digests) - set(undischarged):
-            report.problems.append("derived output contains a row the baseline never froze (unexpected row)")
-        if not report.problems:
-            report.problems.append("derived sequence differs from the discharged sequence")
     return report
 
 
-def discharge_endpoints(case: Case, derived: Sequence[Mapping[str, Any]], retirements: Mapping[str, Any]) -> DischargeReport:
-    """The same ordered two-sided accounting over the endpoint/provenance oracle."""
-    report = DischargeReport()
-    statuses = case.discharges.get("endpoints") or {}
-    if set(statuses) != {str(row["ordinal"]) for row in case.endpoint_rows}:
-        report.problems.append("discharges.json does not name every frozen endpoint ordinal exactly once")
-        return report
-    expected = []
-    for row in case.endpoint_rows:
-        status = statuses[str(row["ordinal"])]
-        if status == DISCHARGED:
-            report.discharged += 1
-            expected.append(row["payload_sha256"])
-        elif status.startswith(RETIRED_PREFIX):
-            report.retired += 1
-            problem = _retirement_problem(
-                "endpoint row {0}".format(row["ordinal"]),
-                status[len(RETIRED_PREFIX):],
-                retirements,
-                producer=case.producer,
-            )
-            if problem:
-                report.problems.append(problem)
-        elif status == PENDING:
-            report.pending += 1
-        else:
-            report.problems.append("endpoint row {0} carries an unknown status".format(row["ordinal"]))
-    derived_digests = [_digest(row) for row in derived]
-    if derived_digests != expected:
-        report.problems.append("derived endpoint sequence differs from the discharged sequence")
-    return report
+def discharge_endpoints(
+    case: Case,
+    derived: Sequence[Mapping[str, Any]],
+    retirements: Mapping[str, Any],
+    *,
+    final: Optional[bool] = None,
+) -> DischargeReport:
+    """The SAME ordered two-sided accounting over the endpoint/provenance oracle
+    (binding mode, ids/keys and ordinal all inside the compared payload)."""
+    return _account_sequence(case, "endpoints", derived, retirements, final=final)
 
 
 # ---------------------------------------------------------------------------
@@ -1083,6 +1192,20 @@ catalog_module.PRODUCTION_REGISTRATIONS = tuple(
     and (reg.recipe_id, reg.recipe_version) not in _OBSOLETE
 )
 registry_module._PRODUCTION_REGISTRY = None
+
+# #159 S2 (L4): the projector's LAZILY imported authorities, imported here under
+# the blocker so a forbidden transitive import surfaces even before a case
+# that reaches them (a listener, a DB write target, the API->API default) exists.
+from boomi_mcp.authoring import derived_flows as _projector
+_projector.rest_success_status_default()
+from boomi_mcp.patterns.primitives.wss_listen import compute_wss_endpoint  # noqa: F401
+from boomi_mcp.categories.components.builders._api_service_paths import (  # noqa: F401
+    effective_api_service_route, wss_http_method,
+)
+from boomi_mcp.categories.components.builders.profile_builder import (  # noqa: F401
+    DatabaseWriteProfileBuilder,
+)
+_authority_attempts = list(attempts)
 
 from unittest.mock import MagicMock, patch
 import _issue_157_flows_accounting as acct
@@ -1213,6 +1336,7 @@ except ImportError:
     control = "refused"
 print(json.dumps({
     "attempts": replay_attempts,
+    "authority_attempts": _authority_attempts,
     "control": control,
     "registrations": sorted(
         [reg.recipe_id, reg.recipe_version] for reg in catalog_module.PRODUCTION_REGISTRATIONS
@@ -1256,6 +1380,27 @@ def obsolete_registrations() -> Tuple[Tuple[str, str], ...]:
 
 ADAPTER_ID_PREFIX = "boomi.adapter."
 
+#: The executable recipe ids the planned retirement removes BEYOND the
+#: superseded adapter targets (#159 S3): API->API retires with no successor,
+#: so ``obsolete_registrations`` cannot find it. Named once, here; the child
+#: filters every registered version of each, and the accounting test proves
+#: each id is registered in the parent (the filter is not vacuous).
+PLANNED_RETIREMENT_RECIPE_IDS: Tuple[str, ...] = ("boomi.archetype.api_to_api_sync",)
+
+
+def simulated_retirements() -> Tuple[Tuple[str, str], ...]:
+    """Every ``(recipe_id, version)`` the blocked child deregisters (adapters
+    aside): the superseded adapter targets plus every registered version of a
+    planned retirement."""
+    from boomi_mcp.recipes.builtins import catalog
+
+    planned = {
+        (reg.recipe_id, reg.recipe_version)
+        for reg in catalog.PRODUCTION_REGISTRATIONS
+        if reg.recipe_id in PLANNED_RETIREMENT_RECIPE_IDS
+    }
+    return tuple(sorted(set(obsolete_registrations()) | planned))
+
 
 def canonical_case_ids() -> Tuple[str, ...]:
     """Every case carrying a canonical fixture — the replayable subset."""
@@ -1285,7 +1430,7 @@ def run_import_blocked_batch(
             json.dumps(list(blocked_prefixes)),
             str(ROOT / "src"),
             str(ROOT / "tests"),
-            json.dumps([list(item) for item in obsolete_registrations()]),
+            json.dumps([list(item) for item in simulated_retirements()]),
             ADAPTER_ID_PREFIX,
             apply_case,
             *case_ids,

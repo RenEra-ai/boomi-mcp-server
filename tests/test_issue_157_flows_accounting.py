@@ -75,6 +75,25 @@ def derived(cases):
     return out
 
 
+@pytest.fixture(scope="module")
+def replay(cases, derived):
+    """Per case ``(flows report, endpoints report)`` on the replay's own mode."""
+    retirements = retirement_ids()
+    out = {}
+    with patch(_PAGINATE, lambda *a, **k: []):
+        for case_id, case in cases.items():
+            out[case_id] = (
+                discharge_case(case, derived[case_id], retirements),
+                discharge_endpoints(case, derive_case_endpoints(case), retirements),
+            )
+    return out
+
+
+def _completed(replay):
+    """The cases whose canonical replay reproduces BOTH full frozen sequences."""
+    return {case_id for case_id, (flows, endpoints) in replay.items() if flows.completed and endpoints.completed}
+
+
 # ---------------------------------------------------------------------------
 # the corpus itself
 # ---------------------------------------------------------------------------
@@ -103,31 +122,41 @@ _RICH_PRODUCERS = ("database_to_api_sync", "api_to_api_sync")
 _S1_PRODUCERS = ("composition",)
 
 
-def _owed_discharges(cases):
+def _owed_discharges(cases, completed=()):
     """``(flow, endpoint)`` row identities the replay owes, DERIVED from the
-    corpus and the scope rule — never a hand-typed count."""
+    corpus and the scope rule — never a hand-typed count.
+
+    The FLOOR is #157's rich transform rows and every composition row (#159
+    S1); ``completed`` (measured by the replay) adds every row of each case
+    whose canonical replay reproduces its full sequences (#159 S2)."""
     flows, endpoints = set(), set()
     for case_id, case in cases.items():
+        whole = case.producer in _S1_PRODUCERS or case_id in completed
         for row in case.flow_rows:
-            if case.producer in _S1_PRODUCERS or (
-                case.producer in _RICH_PRODUCERS and row["key"] == "transform"
-            ):
+            if whole or (case.producer in _RICH_PRODUCERS and row["key"] == "transform"):
                 flows.add((case_id, row["ordinal"]))
-        if case.producer in _S1_PRODUCERS:
+        if whole:
             endpoints.update((case_id, row["ordinal"]) for row in case.endpoint_rows)
     return flows, endpoints
 
 
-def test_frozen_row_counts_are_pinned(cases, manifest):
-    """The denominator is pinned so a deregistration or regeneration cannot shrink it."""
+def test_frozen_row_counts_are_pinned(cases, manifest, replay):
+    """The denominator is pinned so a deregistration or regeneration cannot shrink it.
+
+    The discharged count lies between the floor (#157 + S1) and the rows the
+    replay MEASURES as reproduced; the manifest's counts are the disk's."""
     assert manifest["frozen_flow_rows"] == 83
     assert manifest["frozen_endpoint_rows"] == 58
-    flows, endpoints = _owed_discharges(cases)
-    discharged = len(flows) + len(endpoints)
+    floor_flows, floor_endpoints = _owed_discharges(cases)
+    owed_flows, owed_endpoints = _owed_discharges(cases, _completed(replay))
+    counts = acct._status_counts(acct.CORPUS_DIR)
     total = manifest["frozen_flow_rows"] + manifest["frozen_endpoint_rows"]
-    expected = {"discharged": discharged, "retired": 0, "pending": total - discharged}
-    assert acct._status_counts(acct.CORPUS_DIR) == expected
-    assert manifest["status_counts"] == expected
+    assert counts["retired"] == 0
+    assert len(floor_flows) + len(floor_endpoints) <= counts["discharged"] <= len(owed_flows) + len(owed_endpoints)
+    assert counts["pending"] == total - counts["discharged"] - counts["retired"]
+    if acct.FINAL_REPLAY:
+        assert counts["pending"] == 0
+    assert manifest["status_counts"] == counts
 
 
 def test_every_frozen_row_has_exactly_one_status(cases):
@@ -259,44 +288,79 @@ def test_every_case_discharges_cleanly(cases, derived):
         assert endpoint_report.ok, (case_id, endpoint_report.problems)
 
 
-def test_the_two_rich_forms_are_discharged_by_full_payload_equality(cases, derived):
-    """#157's own obligation: every DB-source and API-source transform row."""
+def test_the_two_rich_forms_are_discharged_by_full_payload_equality(cases, derived, replay):
+    """#157's own obligation: every DB-source and API-source transform row —
+    inspected WITHIN the full derived sequence (#159 S2): the transform occurs
+    exactly once, by full payload, and on a completed case at its frozen
+    ordinal; a case not yet completed derives that row alone."""
     discharged = 0
     for case_id, case in cases.items():
-        if case.producer not in ("database_to_api_sync", "api_to_api_sync"):
+        if case.producer not in _RICH_PRODUCERS:
             continue
         row = _row(case, "transform")
         assert case.status(row["ordinal"]) == DISCHARGED, case_id
         assert case.input_canonical is not None and case.provenance is not None, case_id
         assert case.provenance["executed_at_replay"] is False
-        assert [acct._digest(r) for r in derived[case_id]] == [row["payload_sha256"]], case_id
+        digests = [acct._digest(r) for r in derived[case_id]]
+        assert digests.count(row["payload_sha256"]) == 1, case_id
+        if case_id in _completed(replay):
+            assert digests.index(row["payload_sha256"]) == row["ordinal"], case_id
+            assert len(digests) == len(case.flow_rows), case_id
+        else:
+            assert digests == [row["payload_sha256"]], case_id
         discharged += 1
-    assert discharged == 9
+    assert discharged == sum(1 for case in cases.values() if case.producer in _RICH_PRODUCERS) > 0
+    # non-vacuity of the full-sequence arm: the API->API direct roots complete
+    assert {c for c in _completed(replay) if c.startswith("api_to_api_sync/")} == {
+        c for c in cases if c.startswith("api_to_api_sync/")
+    }
 
 
-def test_the_remaining_rows_are_explicitly_pending_for_159_not_labelled_covered(cases, manifest):
+def test_the_remaining_rows_are_explicitly_pending_for_159_not_labelled_covered(cases, manifest, replay):
     """Every row the replay does not owe is PENDING; every row it owes is discharged.
 
-    The owed set is derived from the corpus and the scope rule
+    The floor is derived from the corpus and the scope rule
     (``_owed_discharges``): the rich producers' transform rows (#157) and every
-    composition row (#159 S1). The five simpler producers and the rich
-    producers' other rows stay #159's (S2).
+    composition row (#159 S1) are DISCHARGED. A row of a case the replay
+    MEASURES as completed may be discharged or still pending (reproduced,
+    disposition pending); every other row is PENDING.
+
+    THE ONE-LINE SWITCH: ``acct.FINAL_REPLAY = True`` turns this witness, in
+    place, into the final no-pending assertion — every case completed, every
+    row discharged.
     """
-    owed_flows, owed_endpoints = _owed_discharges(cases)
+    completed = _completed(replay)
+    if acct.FINAL_REPLAY:
+        assert completed == set(cases), sorted(set(cases) - completed)
+        for case in cases.values():
+            for side in ("flows", "endpoints"):
+                assert set(case.discharges[side].values()) == {DISCHARGED}, (case.case_id, side)
+        return
+    floor_flows, floor_endpoints = _owed_discharges(cases)
+    owed_flows, owed_endpoints = _owed_discharges(cases, completed)
     for case_id, case in cases.items():
-        for row in case.flow_rows:
-            status = case.status(row["ordinal"])
-            assert status == (DISCHARGED if (case_id, row["ordinal"]) in owed_flows else PENDING), (
-                case_id, row["key"], status)
-        for row in case.endpoint_rows:
-            status = case.status(row["ordinal"], side="endpoints")
-            assert status == (
-                DISCHARGED if (case_id, row["ordinal"]) in owed_endpoints else PENDING
-            ), (case_id, row["key"], status)
+        for side, rows, floor, owed in (
+            ("flows", case.flow_rows, floor_flows, owed_flows),
+            ("endpoints", case.endpoint_rows, floor_endpoints, owed_endpoints),
+        ):
+            for row in rows:
+                status = case.status(row["ordinal"], side=side)
+                identity = (case_id, row["ordinal"])
+                if identity in floor:
+                    allowed = {DISCHARGED}
+                elif identity in owed:
+                    allowed = {DISCHARGED, PENDING}
+                else:
+                    allowed = {PENDING}
+                assert status in allowed, (case_id, side, row["key"], status)
     pending_flows = sum(
         1 for case in cases.values() for r in case.flow_rows if case.status(r["ordinal"]) == PENDING
     )
-    assert pending_flows == manifest["frozen_flow_rows"] - len(owed_flows)
+    discharged_flows = sum(
+        1 for case in cases.values() for r in case.flow_rows if case.status(r["ordinal"]) == DISCHARGED
+    )
+    assert pending_flows == manifest["frozen_flow_rows"] - discharged_flows
+    assert len(floor_flows) <= discharged_flows <= len(owed_flows)
 
 
 def test_the_replay_never_touches_a_legacy_producer(cases, monkeypatch):
@@ -377,15 +441,23 @@ def test_the_completed_subset_replays_in_one_import_blocked_child(cases, derived
             parent = acct.case_plan_result(case)
         assert child["plan_valid"] is bool(parent.validation_report.is_valid), case_id
         assert child["plan_errors"] == sorted({d.code for d in parent.errors}), case_id
-        assert child["component_dependencies"] == len(parent.component_dependencies) > 0, case_id
+        assert child["component_dependencies"] == len(parent.component_dependencies), case_id
+        # a route that binds any real endpoint plans its supporting components
+        # (the zero-component stub binds none — its frozen endpoints are stubs)
+        if any(row["payload"].get("type") != "stub" for row in case.endpoint_rows):
+            assert child["component_dependencies"] > 0, case_id
         # ARCH-r1-12: EVERY case — a reused connection included — must plan and
         # compile for real. A reused connection's account read is answered by
         # a SHA-pinned platform capture of a proven-operable connection of the
         # same family (``acct.replay_identity_captures``), in parent and child.
         assert child["plan_valid"] and child["plan_errors"] == [], (case_id, child["plan_errors"])
         assert child["compile_valid"] is True, (case_id, child["compile_error"])
-    # Non-vacuity: the reuse cases really are in the batch.
-    assert sum(1 for case_id in replayed if _binds_a_reused_connection(cases[case_id])) == 7
+    # Non-vacuity: the reuse cases really are in the batch — every replayed
+    # case the corpus NAMES a reuse case (its case id), and only those.
+    reuse_named = {case_id for case_id in replayed if "reuse" in case_id.split("/")[1]}
+    assert reuse_named and {
+        case_id for case_id in replayed if _binds_a_reused_connection(cases[case_id])
+    } == reuse_named
     applied = batch["apply"]
     assert applied["success"] is True, applied
     assert applied["created_process"] and applied["attempts_during_apply"] == []
@@ -457,6 +529,17 @@ def test_the_import_blocker_refuses_a_known_forbidden_import(batch):
     assert not any(recipe_id.startswith(acct.ADAPTER_ID_PREFIX) for recipe_id, _v in registered)
     assert not registered & set(acct.obsolete_registrations())
     assert ("boomi.compose.db_rest_fanout", "2.0.0") in registered
+    # #159 S2: the PLANNED retirement is simulated too, API->API included —
+    # each planned id is registered in this (parent) tree, so the filter is real
+    from boomi_mcp.recipes.builtins import catalog
+
+    parent = {(reg.recipe_id, reg.recipe_version) for reg in catalog.PRODUCTION_REGISTRATIONS}
+    for recipe_id in acct.PLANNED_RETIREMENT_RECIPE_IDS:
+        assert any(rid == recipe_id for rid, _v in parent), recipe_id
+        assert not any(rid == recipe_id for rid, _v in registered), recipe_id
+    assert set(acct.simulated_retirements()) <= parent
+    # the projector's lazily imported authorities import cleanly under the blocker
+    assert batch["authority_attempts"] == []
 
 
 def test_mutant_invented_profile_name_on_a_composition_case_is_refused(cases, derived):
@@ -507,78 +590,150 @@ def _rich(cases):
     return cases["database_to_api_sync/wm_on_dlq_on_create"]
 
 
+#: The completed case the FINAL-path arm of every mutant corrupts: every row
+#: discharged, so the clean replay passes the final replay as-is.
+_FINAL_CASE = "composition/create_2legs_staged"
+
+
+def _partial_arm(cases):
+    """The PARTIAL-replay arm: the rich case in its #157 state, its derived
+    sequence being exactly its DISCHARGED frozen payloads (independent of how
+    far the projection has progressed)."""
+    case = _clone(_rich(cases))
+    output = copy.deepcopy(
+        [r["payload"] for r in case.flow_rows if case.status(r["ordinal"]) == DISCHARGED]
+    )
+    assert discharge_case(case, output, {}, final=False).ok
+    return case, output
+
+
+def _final_arm(cases, derived):
+    """The FINAL-replay arm: a completed case on the final comparison path."""
+    case = _clone(cases[_FINAL_CASE])
+    output = [dict(row) for row in derived[_FINAL_CASE]]
+    clean = discharge_case(case, output, {}, final=True)
+    assert clean.ok and clean.completed, clean.problems
+    return case, output
+
+
+def _refused(report, needle):
+    return (not report.ok) and any(needle in p for p in report.problems)
+
+
 def test_mutant_partial_payload_projection_is_refused(cases, derived):
-    case = _rich(cases)
-    partial = [dict(row) for row in derived[case.case_id]]
-    partial[0] = {k: v for k, v in partial[0].items() if k != "direct_field_mappings"}
-    report = discharge_case(case, partial, {})
-    assert not report.ok and any("no full-payload match" in p for p in report.problems)
+    for arm, final in ((_partial_arm(cases), False), (_final_arm(cases, derived), True)):
+        case, output = arm
+        index = next(i for i, r in enumerate(output) if r["key"] == "transform")
+        output[index] = {k: v for k, v in output[index].items() if k != "direct_field_mappings"}
+        assert _refused(discharge_case(case, output, {}, final=final), "no full-payload match"), final
 
 
 def test_mutant_unexpected_row_fails_even_when_every_discharged_row_matches(cases, derived):
-    """A watermark row on a case where it is frozen but NOT discharged is unexpected."""
-    case = _rich(cases)
+    """A watermark row on a case where it is frozen but NOT discharged is
+    unexpected; on the final path a row the case never froze is."""
+    case, output = _partial_arm(cases)
     watermark = _row(case, "watermark")["payload"]
-    output = list(derived[case.case_id]) + [watermark]
-    report = discharge_case(case, output, {})
-    assert not report.ok and any("unexpected row" in p for p in report.problems)
+    assert _refused(discharge_case(case, output + [watermark], {}, final=False), "unexpected row")
+    case, output = _final_arm(cases, derived)
+    assert _refused(discharge_case(case, output + [watermark], {}, final=True), "unexpected row")
 
 
 def test_mutant_duplicate_row_is_refused(cases, derived):
-    case = _rich(cases)
-    output = list(derived[case.case_id]) * 2
-    report = discharge_case(case, output, {})
-    assert not report.ok and any("duplicate" in p for p in report.problems)
+    for (case, output), final in ((_partial_arm(cases), False), (_final_arm(cases, derived), True)):
+        assert _refused(discharge_case(case, output * 2, {}, final=final), "duplicate"), final
 
 
 def test_mutant_reordered_sequence_is_refused(cases, derived):
-    case = _clone(_rich(cases))
+    case, _output = _partial_arm(cases)
     # discharge two rows so ORDER is observable, then hand them back reversed
     extract = _row(case, "extract")
     case.discharges["flows"][str(extract["ordinal"])] = DISCHARGED
     transform = _row(case, "transform")
-    output = [transform["payload"], extract["payload"]]
-    report = discharge_case(case, output, {})
-    assert not report.ok and any("reordering" in p for p in report.problems)
+    assert _refused(discharge_case(case, [transform["payload"], extract["payload"]], {}, final=False), "reordering")
+    case, output = _final_arm(cases, derived)
+    output[0], output[1] = output[1], output[0]
+    assert _refused(discharge_case(case, output, {}, final=True), "reordering")
 
 
 def test_mutant_modified_baseline_row_is_refused(cases, derived):
-    case = _clone(_rich(cases))
-    row = _row(case, "transform")
-    row["payload"]["name"] = "tampered"
-    report = discharge_case(case, derived[case.case_id], {})
-    assert not report.ok and any("does not match its own digest" in p for p in report.problems)
+    for (case, output), final in ((_partial_arm(cases), False), (_final_arm(cases, derived), True)):
+        _row(case, "transform")["payload"]["name"] = "tampered"
+        assert _refused(discharge_case(case, output, {}, final=final), "does not match its own digest"), final
 
 
 def test_mutant_deleted_baseline_row_is_refused(cases, derived):
-    case = _clone(_rich(cases))
-    case.flow_rows = [r for r in case.flow_rows if r["key"] != "reliability"]
-    report = discharge_case(case, derived[case.case_id], {})
-    assert not report.ok and any("exactly once" in p for p in report.problems)
+    for (case, output), final in ((_partial_arm(cases), False), (_final_arm(cases, derived), True)):
+        case.flow_rows = [r for r in case.flow_rows if r["key"] != "send"]
+        assert _refused(discharge_case(case, output, {}, final=final), "exactly once"), final
 
 
 def test_mutant_double_discharge_is_refused(cases, derived):
-    case = _clone(_rich(cases))
+    case, output = _partial_arm(cases)
     send = _row(case, "send")
     case.discharges["flows"][str(send["ordinal"])] = DISCHARGED  # claimed, never derived
-    report = discharge_case(case, derived[case.case_id], {})
-    assert not report.ok and any("no full-payload match" in p for p in report.problems)
+    assert _refused(discharge_case(case, output, {}, final=False), "no full-payload match")
+    case, output = _final_arm(cases, derived)
+    output = [r for r in output if r["key"] != "send"]  # discharged, no longer derived
+    assert _refused(discharge_case(case, output, {}, final=True), "no full-payload match")
 
 
 def test_mutant_missing_discharge_is_refused(cases, derived):
-    case = _clone(_rich(cases))
+    case, output = _partial_arm(cases)
     transform = _row(case, "transform")
     case.discharges["flows"][str(transform["ordinal"])] = PENDING  # derived, never claimed
-    report = discharge_case(case, derived[case.case_id], {})
-    assert not report.ok and any("unexpected row" in p for p in report.problems)
+    assert _refused(discharge_case(case, output, {}, final=False), "unexpected row")
+    # final path: a fully reproduced row may NOT stay pending
+    case, output = _final_arm(cases, derived)
+    case.discharges["flows"][str(_row(case, "send")["ordinal"])] = PENDING
+    report = discharge_case(case, output, {}, final=True)
+    assert report.completed and _refused(report, "still pending")
+    # and while the lanes land the same state is reported, not refused
+    transitional = discharge_case(case, output, {}, final=False)
+    assert transitional.ok and transitional.reproduced_pending == 1
 
 
 def test_mutant_unknown_retirement_record_is_refused(cases, derived):
-    case = _clone(_rich(cases))
-    send = _row(case, "send")
-    case.discharges["flows"][str(send["ordinal"])] = "retired:RET-157-99"
-    report = discharge_case(case, derived[case.case_id], {})
-    assert not report.ok and any("unknown retirement" in p for p in report.problems)
+    for (case, output), final in ((_partial_arm(cases), False), (_final_arm(cases, derived), True)):
+        send = _row(case, "send")
+        case.discharges["flows"][str(send["ordinal"])] = "retired:RET-157-99"
+        assert _refused(discharge_case(case, output, {}, final=final), "unknown retirement"), final
+
+
+def test_mutant_endpoint_corruptions_fail_on_the_final_path(cases):
+    """The endpoint oracle runs the SAME comparison: binding mode alone, a
+    null-versus-absent flip, a reordering and a pending endpoint all fail the
+    final replay of a completed case."""
+    case = _clone(cases[_FINAL_CASE])
+    with patch(_PAGINATE, lambda *a, **k: []):
+        clean = derive_case_endpoints(case)
+    assert discharge_endpoints(case, clean, {}, final=True).ok
+    flipped = copy.deepcopy(clean)
+    flipped[1]["binding_mode"] = "reuse"
+    nulled = copy.deepcopy(clean)
+    nulled[1]["component_id"] = None  # absent in the frozen row: a null is content
+    for mutant, needle in ((flipped, "no full-payload match"), (nulled, "no full-payload match"),
+                           (list(reversed(clean)), "reordering")):
+        assert _refused(discharge_endpoints(case, mutant, {}, final=True), needle), needle
+    case.discharges["endpoints"]["0"] = PENDING
+    assert _refused(discharge_endpoints(case, clean, {}, final=True), "still pending")
+
+
+def test_the_completed_cases_complete_both_oracles(cases, replay):
+    """A case is completed on its flows exactly when it is on its endpoints —
+    a lane whose endpoint projection lags its rows is not completed — and
+    every case whose canonical fixture is a RECIPE invocation IS completed: a
+    recipe whose facts fail to resolve falls back to transform-only, which the
+    partial rule alone would accept until the final switch."""
+    for case_id, (flows, endpoints) in replay.items():
+        assert flows.completed == endpoints.completed, (case_id, flows.problems, endpoints.problems)
+    recipe_cases = {
+        case_id for case_id, case in cases.items()
+        if ((case.input_canonical or {}).get("intent") or {}).get("intent_kind") == "recipe"
+    }
+    assert recipe_cases and recipe_cases <= _completed(replay), sorted(recipe_cases - _completed(replay))
+    assert {c for c in _completed(replay) if c.startswith("composition/")} == {
+        c for c in replay if c.startswith("composition/")
+    }
 
 
 def test_mutant_input_edit_without_a_refreeze_is_caught_by_the_manifest(tmp_path, monkeypatch):

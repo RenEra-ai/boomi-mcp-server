@@ -271,10 +271,12 @@ def compare() -> int:
             case = cases[case_id]
             if case.input_canonical is None:
                 print(case_id, "NO CANONICAL FIXTURE"); failures += 1; continue
-            derived = derive_case_projection(case)
+            # #159 S2: the transform is inspected WITHIN the full derived
+            # sequence (an API->API direct root now projects fetch/send too).
+            derived = [row for row in derive_case_projection(case) if row.get("key") == "transform"]
             frozen = next(row for row in case.flow_rows if row["key"] == "transform")["payload"]
             if len(derived) != 1:
-                print(case_id, "derived", len(derived), "rows"); failures += 1; continue
+                print(case_id, "derived", len(derived), "transform rows"); failures += 1; continue
             if derived[0] == frozen:
                 print(case_id, "MATCH")
             else:
