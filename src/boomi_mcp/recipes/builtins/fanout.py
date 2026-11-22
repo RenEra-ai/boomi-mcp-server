@@ -327,8 +327,6 @@ from ...models.recipe_contributions import (
 from ...patterns.archetype_parameters import (
     DBResultField,
     JSONPayloadProfile,
-    RestCreateSettings,
-    RestQueryParameter,
     RestSendRequest,
     _flatten_payload_profile_leaves,
 )
@@ -419,6 +417,10 @@ from ..component_material import (  # noqa: F401 — re-exports
     authorize_db_connection,
     check_connection_binding,
     check_credential_boundary,
+    authorize_db_read,
+    authorize_rest_connection,
+    authorize_rest_request,
+    authorize_transform_operations,
     emit_db_read_components,
     emit_rest_send_components,
     emit_transform_components,
@@ -1204,106 +1206,23 @@ def _authorize_material_v2(
     base_catalog: _Mapping[str, IntegrationComponentSpec] = _MappingProxyType({}),
 ) -> _AuthorizedMaterialV2:
     """Run every value rule through its neutral authority; return what came back."""
-    from ...patterns.archetype_parameters import (
-        DbReadOperation,
-        DbReadParameter,
-        RestConnectionBinding,
-    )
-
     db = authorize_db_connection(
         material.source.connection,
         pointer="/component_material/source/connection",
         auth_mode=inp.source.auth_mode,
     )
-    result_fields = tuple(
-        _authority_check(
-            f"/component_material/source/read/result_fields/{field_index}",
-            DBResultField,
-            name=field.name,
-            data_type=field.data_type,
-            required=field.required,
-            description=field.description,
-        )
-        for field_index, field in enumerate(material.source.read.result_fields)
-    )
-    result_names = [field.name for field in result_fields]
-    if len(set(result_names)) != len(result_names):
-        raise _refusal(
-            COMPOSITION_CONTRACT_MISMATCH,
-            "/component_material/source/read/result_fields",
-            phase="input",
-        )
-    read = material.source.read
-    bind_parameters = [
-        _authority_check(
-            f"/component_material/source/read/bind_parameters/{bind_index}",
-            DbReadParameter,
-            name=parameter.name,
-            direction=parameter.direction,
-        )
-        for bind_index, parameter in enumerate(read.bind_parameters)
-    ]
-    read_operation = _authority_check(
-        "/component_material/source/read",
-        DbReadOperation,
-        sql=read.sql,
-        result_schema={"fields": list(result_fields)},
-        parameters=bind_parameters,
-        batch_size=read.batch_size,
-        max_rows=read.max_rows,
+    read_operation = authorize_db_read(
+        material.source.read, pointer="/component_material/source/read"
     )
     targets: _List[Tuple[_Any, RestSendRequest]] = []
     for (material_index, entry), target in zip(ordered_material, inp.targets):
         base = f"/component_material/targets/{material_index}"
-        connection: _Any = None
-        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
-            # `RestCreateSettings` is the URL-shape authority; created REST is
-            # always unauthenticated (the auth vocabulary's ONE create mode).
-            connection = _authority_check(
-                base + "/connection",
-                RestCreateSettings,
-                base_url=entry.connection.base_url,
-                auth_mode="none",
-            )
-        elif isinstance(entry.connection, FanoutConnectionReuseMaterialV2):
-            connection = _authority_check(
-                base + "/connection",
-                RestConnectionBinding,
-                mode="reuse",
-                component_id=entry.connection.component_id,
-                component_name=entry.connection.component_name,
-            )
-        parameters = [
-            _authority_check(
-                f"{base}/operation/query_parameters/{qp_index}",
-                RestQueryParameter,
-                name=parameter.name,
-                value_source=parameter.value_source,
-                literal_value=parameter.literal_value,
-            )
-            for qp_index, parameter in enumerate(entry.operation.query_parameters)
-        ]
-        # CDX-r2-01: names are compared AFTER the authority normalized them, so
-        # ``" mode "`` and ``"mode"`` are one parameter. The emitted query is a
-        # name -> value map; a second entry would silently replace the first
-        # (the legacy composition's dict comprehension does exactly that), so
-        # it is refused at the SECOND entry's declared position instead.
-        seen_names: set = set()
-        for qp_index, parameter in enumerate(parameters):
-            if parameter.name in seen_names:
-                raise _refusal(
-                    COMPOSITION_CONTRACT_MISMATCH,
-                    f"{base}/operation/query_parameters/{qp_index}",
-                    phase="input",
-                )
-            seen_names.add(parameter.name)
-        request = _authority_check(
-            base + "/operation",
-            RestSendRequest,
+        connection = authorize_rest_connection(entry.connection, pointer=base + "/connection")
+        request = authorize_rest_request(
+            entry.operation,
+            pointer=base + "/operation",
             method=target.method,
-            path=entry.operation.path,
-            query_parameters=parameters,
-            expected_status_codes=list(target.expected_status_codes),
+            expected_status_codes=target.expected_status_codes,
         )
         targets.append((connection, request))
     return _AuthorizedMaterialV2(
@@ -1318,122 +1237,13 @@ def _authorize_operations_v2(
     material: FanoutComponentMaterialV2,
     base_catalog: _Mapping[str, IntegrationComponentSpec],
 ) -> Tuple[_Any, ...]:
-    """Each transform operation normalized through its legacy authority (ARCH-r1-11).
-
-    A map-script operation goes through ``MapScriptTransformOperation`` (B12-03:
-    it strips ``inputs``/``outputs`` and the hint). Its ``language`` is the
-    REFERENCED script component's own (that component is the source of truth);
-    the reference itself is checked later against the base catalog, so a
-    script with no readable language is normalized by the SAME function the
-    model's validators call rather than by an invented language."""
-    from typing import get_args
-
-    from ...patterns.archetype_parameters import (
-        DirectTransformOperation,
-        MapFunctionTransformOperation,
-        MapScriptTransformOperation,
-        _stripped_nonblank,
+    """The fan-out transform's operations through the shared normalization
+    (:func:`authorize_transform_operations`)."""
+    return authorize_transform_operations(
+        material.transform.operations,
+        base_catalog=base_catalog,
+        pointer="/component_material/transform/operations",
     )
-
-    languages = get_args(MapScriptTransformOperation.model_fields["language"].annotation)
-
-    normalized: _List[_Any] = []
-    for op_index, operation in enumerate(material.transform.operations):
-        pointer = f"/component_material/transform/operations/{op_index}"
-        if isinstance(operation, FanoutDirectOperationV2):
-            checked = _authority_check(
-                pointer,
-                DirectTransformOperation,
-                operation_type="direct",
-                source_field=operation.source_field,
-                target_path=operation.target_path,
-                documentation_hint=operation.documentation_hint,
-            )
-            normalized.append(
-                operation.model_copy(
-                    update={
-                        "source_field": checked.source_field,
-                        "target_path": checked.target_path,
-                        "documentation_hint": checked.documentation_hint,
-                    }
-                )
-            )
-        elif isinstance(operation, FanoutFunctionOperationV2) and not operation.inputs:
-            # A family that maps NO input (``default_value``): the legacy
-            # model requires at least one input and so cannot carry it; its
-            # names are normalized by the SAME function its validators call.
-            try:
-                target_path = _stripped_nonblank(operation.target_path)
-                hint = (
-                    None
-                    if operation.documentation_hint is None
-                    else _stripped_nonblank(operation.documentation_hint)
-                )
-            except ValueError:
-                raise _material_failure(pointer, ValueError()) from None
-            normalized.append(
-                operation.model_copy(update={"target_path": target_path, "documentation_hint": hint})
-            )
-        elif isinstance(operation, FanoutFunctionOperationV2):
-            checked = _authority_check(
-                pointer,
-                MapFunctionTransformOperation,
-                operation_type="map_function",
-                function_type=operation.function_type,
-                inputs=list(operation.inputs),
-                target_path=operation.target_path,
-                parameters=(
-                    {parameter.name: parameter.value for parameter in operation.parameters}
-                    or None
-                ),
-                documentation_hint=operation.documentation_hint,
-            )
-            normalized.append(
-                operation.model_copy(
-                    update={
-                        "inputs": tuple(checked.inputs),
-                        "target_path": checked.target_path,
-                        "documentation_hint": checked.documentation_hint,
-                    }
-                )
-            )
-        else:
-            script = base_catalog.get(operation.script_component_key)
-            language = ((script.config or {}) if script is not None else {}).get("language")
-            if language in languages:
-                checked = _authority_check(
-                    pointer,
-                    MapScriptTransformOperation,
-                    operation_type="map_script",
-                    script_slot=operation.script_component_key,
-                    language=language,
-                    inputs=list(operation.inputs),
-                    outputs=list(operation.outputs),
-                    script_component_ref="$ref:" + operation.script_component_key,
-                    documentation_hint=operation.documentation_hint,
-                )
-                inputs, outputs, hint = checked.inputs, checked.outputs, checked.documentation_hint
-            else:
-                try:
-                    inputs = [_stripped_nonblank(item) for item in operation.inputs]
-                    outputs = [_stripped_nonblank(item) for item in operation.outputs]
-                    hint = (
-                        None
-                        if operation.documentation_hint is None
-                        else _stripped_nonblank(operation.documentation_hint)
-                    )
-                except ValueError:
-                    raise _material_failure(pointer, ValueError()) from None
-            normalized.append(
-                operation.model_copy(
-                    update={
-                        "inputs": tuple(inputs),
-                        "outputs": tuple(outputs),
-                        "documentation_hint": hint,
-                    }
-                )
-            )
-    return tuple(normalized)
 
 
 #: The route's topology spelling. Pinned against the legacy composition's

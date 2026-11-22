@@ -1634,6 +1634,242 @@ def emit_db_write_components(
     ]
 
 
+def authorize_db_read(read: FanoutDbReadMaterialV2, *, pointer: str) -> _Any:
+    """A DB read leaf through its neutral authorities: each result field
+    (``DBResultField``), unique result names, each bind parameter
+    (``DbReadParameter``), then the whole ``DbReadOperation``. Returns the
+    validated ``DbReadOperation``; refusals point under ``pointer``."""
+    from ..patterns.archetype_parameters import DbReadOperation, DbReadParameter
+
+    result_fields = tuple(
+        _authority_check(
+            f"{pointer}/result_fields/{field_index}",
+            DBResultField,
+            name=field.name,
+            data_type=field.data_type,
+            required=field.required,
+            description=field.description,
+        )
+        for field_index, field in enumerate(read.result_fields)
+    )
+    result_names = [field.name for field in result_fields]
+    if len(set(result_names)) != len(result_names):
+        raise _refusal(COMPOSITION_CONTRACT_MISMATCH, f"{pointer}/result_fields", phase="input")
+    bind_parameters = [
+        _authority_check(
+            f"{pointer}/bind_parameters/{bind_index}",
+            DbReadParameter,
+            name=parameter.name,
+            direction=parameter.direction,
+        )
+        for bind_index, parameter in enumerate(read.bind_parameters)
+    ]
+    return _authority_check(
+        pointer,
+        DbReadOperation,
+        sql=read.sql,
+        result_schema={"fields": list(result_fields)},
+        parameters=bind_parameters,
+        batch_size=read.batch_size,
+        max_rows=read.max_rows,
+    )
+
+
+def authorize_rest_connection(connection: _Any, *, pointer: str) -> _Any:
+    """A REST connection material through its neutral authority: validated
+    ``RestCreateSettings`` (the URL-shape authority; a created REST connection
+    is always unauthenticated — the auth vocabulary's ONE create mode), a
+    validated ``RestConnectionBinding`` (reuse), or ``None`` (base-key)."""
+    from ..patterns.archetype_parameters import RestConnectionBinding, RestCreateSettings
+
+    if isinstance(connection, FanoutRestCreateMaterialV2):
+        return _authority_check(
+            pointer, RestCreateSettings, base_url=connection.base_url, auth_mode="none"
+        )
+    if isinstance(connection, FanoutConnectionReuseMaterialV2):
+        return _authority_check(
+            pointer,
+            RestConnectionBinding,
+            mode="reuse",
+            component_id=connection.component_id,
+            component_name=connection.component_name,
+        )
+    return None
+
+
+def authorize_rest_request(
+    operation: FanoutRestOperationMaterialV2,
+    *,
+    pointer: str,
+    method: str,
+    expected_status_codes: _Sequence[int],
+) -> RestSendRequest:
+    """A REST operation leaf through its neutral authorities: each query
+    parameter (``RestQueryParameter``), names unique AFTER normalization, then
+    the request (``RestSendRequest``) with the recipe input's ``method`` and
+    status expectations. Returns the validated request; refusals point under
+    ``pointer``."""
+    from ..patterns.archetype_parameters import RestQueryParameter
+
+    parameters = [
+        _authority_check(
+            f"{pointer}/query_parameters/{qp_index}",
+            RestQueryParameter,
+            name=parameter.name,
+            value_source=parameter.value_source,
+            literal_value=parameter.literal_value,
+        )
+        for qp_index, parameter in enumerate(operation.query_parameters)
+    ]
+    # CDX-r2-01: names are compared AFTER the authority normalized them, so
+    # ``" mode "`` and ``"mode"`` are one parameter. The emitted query is a
+    # name -> value map; a second entry would silently replace the first (the
+    # legacy composition's dict comprehension does exactly that), so it is
+    # refused at the SECOND entry's declared position instead.
+    seen_names: set = set()
+    for qp_index, parameter in enumerate(parameters):
+        if parameter.name in seen_names:
+            raise _refusal(
+                COMPOSITION_CONTRACT_MISMATCH,
+                f"{pointer}/query_parameters/{qp_index}",
+                phase="input",
+            )
+        seen_names.add(parameter.name)
+    return _authority_check(
+        pointer,
+        RestSendRequest,
+        method=method,
+        path=operation.path,
+        query_parameters=parameters,
+        expected_status_codes=list(expected_status_codes),
+    )
+
+
+def authorize_transform_operations(
+    operations: Tuple[_Any, ...],
+    *,
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    pointer: str,
+) -> Tuple[_Any, ...]:
+    """Each shared transform mapping leaf normalized through its legacy
+    authority (ARCH-r1-11); refusals point at ``pointer/<index>``.
+
+    A map-script operation goes through ``MapScriptTransformOperation`` (B12-03:
+    it strips ``inputs``/``outputs`` and the hint). Its ``language`` is the
+    REFERENCED script component's own (that component is the source of truth);
+    the reference itself is checked later against the base catalog, so a
+    script with no readable language is normalized by the SAME function the
+    model's validators call rather than by an invented language."""
+    from typing import get_args
+
+    from ..patterns.archetype_parameters import (
+        DirectTransformOperation,
+        MapFunctionTransformOperation,
+        MapScriptTransformOperation,
+        _stripped_nonblank,
+    )
+
+    languages = get_args(MapScriptTransformOperation.model_fields["language"].annotation)
+
+    normalized: _List[_Any] = []
+    for op_index, operation in enumerate(operations):
+        here = f"{pointer}/{op_index}"
+        if isinstance(operation, FanoutDirectOperationV2):
+            checked = _authority_check(
+                here,
+                DirectTransformOperation,
+                operation_type="direct",
+                source_field=operation.source_field,
+                target_path=operation.target_path,
+                documentation_hint=operation.documentation_hint,
+            )
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "source_field": checked.source_field,
+                        "target_path": checked.target_path,
+                        "documentation_hint": checked.documentation_hint,
+                    }
+                )
+            )
+        elif isinstance(operation, FanoutFunctionOperationV2) and not operation.inputs:
+            # A family that maps NO input (``default_value``): the legacy
+            # model requires at least one input and so cannot carry it; its
+            # names are normalized by the SAME function its validators call.
+            try:
+                target_path = _stripped_nonblank(operation.target_path)
+                hint = (
+                    None
+                    if operation.documentation_hint is None
+                    else _stripped_nonblank(operation.documentation_hint)
+                )
+            except ValueError:
+                raise _material_failure(here, ValueError()) from None
+            normalized.append(
+                operation.model_copy(update={"target_path": target_path, "documentation_hint": hint})
+            )
+        elif isinstance(operation, FanoutFunctionOperationV2):
+            checked = _authority_check(
+                here,
+                MapFunctionTransformOperation,
+                operation_type="map_function",
+                function_type=operation.function_type,
+                inputs=list(operation.inputs),
+                target_path=operation.target_path,
+                parameters=(
+                    {parameter.name: parameter.value for parameter in operation.parameters}
+                    or None
+                ),
+                documentation_hint=operation.documentation_hint,
+            )
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "inputs": tuple(checked.inputs),
+                        "target_path": checked.target_path,
+                        "documentation_hint": checked.documentation_hint,
+                    }
+                )
+            )
+        else:
+            script = base_catalog.get(operation.script_component_key)
+            language = ((script.config or {}) if script is not None else {}).get("language")
+            if language in languages:
+                checked = _authority_check(
+                    here,
+                    MapScriptTransformOperation,
+                    operation_type="map_script",
+                    script_slot=operation.script_component_key,
+                    language=language,
+                    inputs=list(operation.inputs),
+                    outputs=list(operation.outputs),
+                    script_component_ref="$ref:" + operation.script_component_key,
+                    documentation_hint=operation.documentation_hint,
+                )
+                inputs, outputs, hint = checked.inputs, checked.outputs, checked.documentation_hint
+            else:
+                try:
+                    inputs = [_stripped_nonblank(item) for item in operation.inputs]
+                    outputs = [_stripped_nonblank(item) for item in operation.outputs]
+                    hint = (
+                        None
+                        if operation.documentation_hint is None
+                        else _stripped_nonblank(operation.documentation_hint)
+                    )
+                except ValueError:
+                    raise _material_failure(here, ValueError()) from None
+            normalized.append(
+                operation.model_copy(
+                    update={
+                        "inputs": tuple(inputs),
+                        "outputs": tuple(outputs),
+                        "documentation_hint": hint,
+                    }
+                )
+            )
+    return tuple(normalized)
+
+
 # ---------------------------------------------------------------------------
 # Component assembly a preset may reuse (#159 S2, lifted from fan-out 2.0.0)
 # ---------------------------------------------------------------------------
@@ -1985,3 +2221,63 @@ def _connection_presence(
         return
     if material is None or material.mode != binding_mode:
         raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
+
+
+#: The public surface a preset uses (``SHARED_BOUNDARY_API.md``, #159 S2).
+__all__ = [
+    # material blocks
+    "FanoutDbCreateMaterialV2",
+    "FanoutConnectionReuseMaterialV2",
+    "FanoutDbConnectionMaterialV2",
+    "FanoutResultFieldV2",
+    "FanoutBindParameterV2",
+    "FanoutDbReadMaterialV2",
+    "FanoutDirectOperationV2",
+    "FanoutFunctionParameterV2",
+    "FanoutFunctionOperationV2",
+    "FanoutScriptReferenceOperationV2",
+    "FanoutTransformOperationV2",
+    "FanoutRestCreateMaterialV2",
+    "FanoutRestConnectionMaterialV2",
+    "FanoutQueryParameterV2",
+    "FanoutRestOperationMaterialV2",
+    "DbWriteFieldMaterialV1",
+    "DbWriteConditionMaterialV1",
+    "DbWriteProfileMaterialV1",
+    "DbSendOperationMaterialV1",
+    "DbWriteMaterialV1",
+    "SHARED_MATERIAL_BLOCKS",
+    # served text and vocabulary
+    "LITERAL_QUERY_NAMES_V2",
+    "LITERAL_QUERY_GUARANTEE_V2",
+    "QUERY_GRAMMAR_SENTENCE_V2",
+    "REUSED_BASE_SENTENCE_V2",
+    "REUSED_TARGET_STORED_BASE",
+    "REUSED_TARGET_PATH",
+    # credential boundary
+    "register_material_root",
+    "registered_material_roots",
+    "material_field_classes",
+    "check_credential_boundary",
+    # selected bases and requests
+    "check_connection_binding",
+    "check_rest_request",
+    "judge_reused_request_target",
+    # authorization (value rules through the neutral authorities)
+    "authorize_db_connection",
+    "authorize_db_read",
+    "authorize_db_write_material",
+    "authorize_rest_connection",
+    "authorize_rest_request",
+    "authorize_transform_operations",
+    "AuthorizedDbWriteV1",
+    # assembly
+    "db_connection_params",
+    "rest_connection_params",
+    "emit_db_read_components",
+    "emit_db_write_components",
+    "emit_rest_send_components",
+    "emit_transform_components",
+    # prepared result
+    "PreparedRecipeComponentsV1",
+]
