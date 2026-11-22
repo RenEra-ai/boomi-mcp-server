@@ -1,0 +1,120 @@
+{
+  "expected": {
+    "execution_profiles": {
+      "main_process": "scheduled"
+    },
+    "process_keys": [
+      "main_process"
+    ],
+    "references": {
+      "main_process": [
+        "source_rest_source_connection",
+        "source_rest_source_operation",
+        "target_db_connection",
+        "target_db_write_operation",
+        "transform_transform_map"
+      ]
+    },
+    "supporting_component_keys": [
+      "source_response_profile",
+      "source_rest_source_connection",
+      "source_rest_source_operation",
+      "target_db_connection",
+      "target_db_write_profile",
+      "target_db_write_operation",
+      "transform_transform_map"
+    ]
+  },
+  "provenance": {
+    "derivation": "raw_input/component_material = tests/patterns/test_api_to_database_sync_e2e.py::_v1_split over the frozen case's legacy parameters (the fetch path's '<<placeholder>>' re-spelled to '/v1/source-resource'); supporting_component_keys = the legacy archetype's emitted component order for those parameters (process entry dropped); references = the legacy main process's depends_on set, sorted; scheduled = connector source entry.",
+    "source": "tests/fixtures/governance/issue_157/cases/api_to_database_sync/create/input.legacy.json",
+    "source_sha256": "bacdb6a9bd66af886a6dde8520ee6be408bb13fc6c2ccdb02a46733f09d69143"
+  },
+  "recipe_id": "boomi.archetype.api_to_database_sync",
+  "recipe_version": "1.0.0",
+  "request": {
+    "component_material": {
+      "source": {
+        "connection": {
+          "base_url": "https://api.example.com",
+          "mode": "create"
+        },
+        "request": {
+          "path": "/v1/source-resource",
+          "query_parameters": []
+        },
+        "response_profile": {
+          "format": "json",
+          "root": {
+            "children": [
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "id"
+              },
+              {
+                "data_type": "character",
+                "kind": "simple",
+                "name": "name"
+              }
+            ],
+            "kind": "object",
+            "name": "Root"
+          }
+        }
+      },
+      "target": {
+        "connection": {
+          "component_name": "<<existing DB connection>>",
+          "mode": "reuse"
+        },
+        "write_profile": {
+          "fields": [
+            {
+              "data_type": "character",
+              "mandatory": true,
+              "name": "id"
+            },
+            {
+              "data_type": "character",
+              "name": "name"
+            }
+          ],
+          "statement_type": "dynamicinsert",
+          "table_name": "<<target table>>"
+        }
+      },
+      "transform": {
+        "operations": [
+          {
+            "operation_type": "direct",
+            "source_field": "Root/id",
+            "target_path": "Fields/id"
+          },
+          {
+            "operation_type": "direct",
+            "source_field": "Root/name",
+            "target_path": "Fields/name"
+          }
+        ]
+      },
+      "version": "1"
+    },
+    "integration_name": "Matrix API to DB 1.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "naming": {
+        "component_prefix": "CustSync"
+      },
+      "process_key": "main_process",
+      "source": {
+        "binding_mode": "create"
+      },
+      "target": {
+        "binding_mode": "reuse"
+      },
+      "version": "1"
+    }
+  },
+  "seed_format": "1"
+}

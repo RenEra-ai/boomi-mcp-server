@@ -1,0 +1,33 @@
+{
+  "expected": {
+    "execution_profiles": {
+      "main_process": "passthrough"
+    },
+    "process_keys": [
+      "main_process"
+    ],
+    "references": {
+      "main_process": []
+    },
+    "supporting_component_keys": []
+  },
+  "provenance": {
+    "derivation": "raw_input = tests/patterns/test_stub_archetype.py::_stub_canonical_request over the frozen case's legacy parameters; the legacy spec has zero components, so supporting_component_keys and references are empty; passthrough = the canonical execution profile of a passthrough entry (the Stop-only root is authored passthrough -> stop).",
+    "source": "tests/fixtures/governance/issue_157/cases/stub_minimal/default/input.legacy.json",
+    "source_sha256": "ba0a7ed4167b05f68f9537979b92a1a87b63651c8251d2a6513fcd69ec41621b"
+  },
+  "recipe_id": "boomi.archetype.stub_minimal",
+  "recipe_version": "1.0.0",
+  "request": {
+    "integration_name": "Matrix stub 1.0.0",
+    "invocation_id": "matrix",
+    "raw_input": {
+      "naming": {
+        "component_prefix": "STUB"
+      },
+      "process_key": "main_process",
+      "version": "1"
+    }
+  },
+  "seed_format": "1"
+}

@@ -1,0 +1,13 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_id": "api_to_database_sync/create",
+  "derived_by": "tests/patterns/test_api_to_database_sync_e2e.py::_canonical_request_v1",
+  "executed_at_replay": false,
+  "legacy_input_sha256": "bacdb6a9bd66af886a6dde8520ee6be408bb13fc6c2ccdb02a46733f09d69143",
+  "method": "legacy api_to_database_sync parameters re-spelled into one pinned boomi.archetype.api_to_database_sync 1.0.0 invocation: binding modes, the DB target's auth_mode and the naming prefix into raw_input; the REST source connection, fetch request, response profile, the DB write block (connection, write profile, Send tuning) and the transform operations into component_material (direct source_path -> source_field). process_key main_process (the legacy main-process key).",
+  "rederived_by": "tests/patterns/test_api_to_database_sync_e2e.py::TestRecipeV1::test_v1_canonical_input_is_the_derivation_of_the_legacy_input",
+  "respellings": [
+    "source.fetch_request.path: a '<<placeholder>>' segment becomes its words joined by '-' ('/v1/<<source resource>>' -> '/v1/source-resource'); the shared request-target grammar refuses '<', '>' and spaces, and the path is in no frozen row"
+  ]
+}

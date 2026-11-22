@@ -260,3 +260,159 @@ def test_stub_example_payload_has_no_forbidden_template_markers():
             assert marker not in payload, (
                 f"example {example['name']!r} contains forbidden marker {marker!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# #159 S2: boomi.archetype.stub_minimal 1.0.0 — a Stop-only unit, zero components
+# ---------------------------------------------------------------------------
+#
+# Oracle: the frozen #157 case ``stub_minimal/default`` (its historical input
+# and its flow/endpoint baselines). The canonical input is DERIVED from the
+# legacy input by ``_stub_canonical_request`` and the committed file must equal
+# that derivation.
+
+from pathlib import Path as _Path
+
+from boomi_mcp.recipes.builtins.stub_minimal import (  # noqa: E402
+    StubMinimalInputV1,
+    emit_stub_minimal,
+)
+
+_STUB_RECIPE_ID = "boomi.archetype.stub_minimal"
+_STUB_VERSION = "1.0.0"
+_STUB_CASE = (
+    _Path(__file__).resolve().parents[1]
+    / "fixtures" / "governance" / "issue_157" / "cases" / "stub_minimal" / "default"
+)
+
+
+def _stub_registration():
+    """The registration handed to the integrator (the catalog is not lane-owned)."""
+    from boomi_mcp.recipes.builtins import catalog
+    from boomi_mcp.recipes.contracts import RecipeRegistrationV1
+
+    return RecipeRegistrationV1(
+        recipe_id=_STUB_RECIPE_ID,
+        recipe_version=_STUB_VERSION,
+        entry_kind="executable_recipe",
+        is_default=True,
+        input_model=StubMinimalInputV1,
+        executor=emit_stub_minimal,
+        output_types=("constraint_requirement", "process_unit"),
+        capability_requirements=(),
+        conflict_policy=catalog._SYNC_CONFLICT_POLICY,
+    )
+
+
+def _stub_registry():
+    from boomi_mcp.recipes.builtins import catalog
+    from boomi_mcp.recipes.registry import build_test_registry
+
+    registered = {(reg.recipe_id, reg.recipe_version) for reg in catalog.PRODUCTION_REGISTRATIONS}
+    extra = () if (_STUB_RECIPE_ID, _STUB_VERSION) in registered else (_stub_registration(),)
+    return build_test_registry(catalog.PRODUCTION_REGISTRATIONS + extra)
+
+
+def _stub_canonical_request():
+    """The legacy stub input re-spelled as one pinned 1.0.0 invocation. The
+    legacy display labels are not inputs: they must equal the fixed labels the
+    stub projection serves, or the case cannot be carried."""
+    from boomi_mcp.authoring.derived_flows import STUB_ENDPOINTS
+
+    legacy = json.loads((_STUB_CASE / "input.legacy.json").read_text())
+    parameters = StubMinimalIntegrationParameters(**legacy["input"]["parameters"])
+    assert parameters.source_label == STUB_ENDPOINTS["source"][1]
+    assert parameters.target_label == STUB_ENDPOINTS["target"][1]
+    return {
+        "contract_version": "2",
+        "intent": {
+            "integration_name": "issue-157 replay stub_minimal/default",
+            "intent_kind": "recipe",
+            "invocations": [
+                {
+                    "recipe_id": _STUB_RECIPE_ID,
+                    "recipe_version": _STUB_VERSION,
+                    "invocation_id": "stub_minimal",
+                    "raw_input": {
+                        "version": "1",
+                        "process_key": "main_process",
+                        "naming": {"component_prefix": parameters.component_prefix},
+                    },
+                }
+            ],
+        },
+    }
+
+
+def test_stub_recipe_canonical_input_is_the_derivation_of_the_legacy_input():
+    committed = json.loads((_STUB_CASE / "input.canonical.json").read_text())
+    assert committed == _stub_canonical_request()
+    provenance = json.loads((_STUB_CASE / "provenance.json").read_text())
+    assert provenance["case_id"] == "stub_minimal/default"
+    assert provenance["executed_at_replay"] is False
+
+
+def test_stub_recipe_emits_one_stop_only_unit_and_no_components():
+    raw_input = _stub_canonical_request()["intent"]["invocations"][0]["raw_input"]
+    contributions = emit_stub_minimal(StubMinimalInputV1.model_validate(raw_input))
+    kinds = [c.contribution_kind for c in contributions]
+    assert kinds == ["process_unit", "constraint_requirement"]
+    unit = contributions[0].unit
+    steps = [step.kind for step in unit.process_ir.body.steps]
+    assert steps == ["passthrough", "stop"]
+    assert unit.envelope.depends_on == ()
+    assert unit.envelope.process_extensions.connections == ()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("goal", "Smoke-test"),
+        ("source_label", "Stub source"),
+        ("target_label", "Stub target"),
+        ("integration_name", "demo-stub-integration"),
+    ],
+)
+def test_stub_recipe_input_refuses_the_legacy_display_fields(field, value):
+    with pytest.raises(ValidationError):
+        StubMinimalInputV1.model_validate(
+            {"version": "1", "process_key": "main_process", field: value}
+        )
+
+
+def test_stub_recipe_registers_without_a_material_channel():
+    registry = _stub_registry()
+    descriptor = registry.resolve(_STUB_RECIPE_ID, _STUB_VERSION)
+    assert descriptor.recipe_version == _STUB_VERSION
+    assert registry.component_preparation_for(descriptor) is None
+
+
+def test_stub_recipe_unit_projects_the_frozen_stub_rows_from_stub_facts():
+    """The unit IS stub-projectable: given ``StubRouteProjectionFactsV1`` the
+    projector serves exactly the frozen flow and endpoint rows. (How the facts
+    reach the workflow for a material-free recipe is an integrator decision.)"""
+    from boomi_mcp.authoring.derived_flows import derive_recipe_projection, normalize_flow_row
+    from boomi_mcp.models.derived_flows import StubRouteProjectionFactsV1
+
+    raw_input = _stub_canonical_request()["intent"]["invocations"][0]["raw_input"]
+    unit = emit_stub_minimal(StubMinimalInputV1.model_validate(raw_input))[0].unit
+    projection = derive_recipe_projection(
+        [unit],
+        [],
+        projection_facts={"main_process": StubRouteProjectionFactsV1(process_key="main_process")},
+    )
+    rows = [
+        normalize_flow_row(row.model_dump(mode="json", exclude_unset=True))
+        for row in projection.flows
+    ]
+    endpoints = [row.model_dump(mode="json", exclude_unset=True) for row in projection.endpoints]
+
+    def frozen(name):
+        return [
+            json.loads(line)["payload"]
+            for line in (_STUB_CASE / name).read_text().splitlines()
+            if line.strip()
+        ]
+
+    assert rows == frozen("flows.baseline.jsonl")
+    assert endpoints == frozen("endpoints.baseline.jsonl")

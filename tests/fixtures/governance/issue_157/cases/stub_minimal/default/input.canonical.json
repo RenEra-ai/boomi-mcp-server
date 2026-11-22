@@ -1,0 +1,21 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay stub_minimal/default",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "invocation_id": "stub_minimal",
+        "raw_input": {
+          "naming": {
+            "component_prefix": "STUB"
+          },
+          "process_key": "main_process",
+          "version": "1"
+        },
+        "recipe_id": "boomi.archetype.stub_minimal",
+        "recipe_version": "1.0.0"
+      }
+    ]
+  }
+}
