@@ -1998,8 +1998,9 @@ if prepare_component_edit_action:
                   AuthoringRequestV1 with intent_kind="process_ir" and exactly ONE unit
                   whose envelope has action="update" and component_id equal to this
                   component_id (a live process). Every intent.components row must BIND an
-                  existing component by explicit id (component_id with action="create"
-                  under conflict_policy="reuse", or config.reference_only=true with
+                  existing component by explicit id (the row's component_id with
+                  action="create" under conflict_policy="reuse"; a map, profile or other
+                  non-connector may instead use config.reference_only=true with
                   config.component_id); nothing but this process is written. Not
                   combinable with config or map_context. Compiled like
                   build_integration(action='compile'); every dependency id is read and

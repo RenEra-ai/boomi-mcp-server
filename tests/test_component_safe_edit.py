@@ -679,3 +679,29 @@ def test_canonical_update_admission_refuses_before_any_write(variant):
         if expected_field:
             assert res["field"] == expected_field
     assert client.component.pushed == []
+
+
+@pytest.mark.parametrize("spelling", ["component_id", "reference_only"])
+def test_canonical_update_refuses_a_declared_verb_the_bound_operation_does_not_store(spelling):
+    """The stored PATCH operation (`component_op_patch.xml`, customOperationType="PATCH")
+    is declared a POST. The declaration must never reach the emitted connector shape:
+    bound by the top-level id, the snapshot's identity reading refuses it; bound only
+    through `config.component_id` (which the snapshot does not read), admission refuses
+    the spelling. Either way prepare refuses and nothing is written."""
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    row = patch["authoring_request"]["intent"]["components"][3]
+    assert row["key"] == "OP"
+    row["config"]["method"] = "POST"
+    if spelling == "reference_only":
+        row["config"].update(reference_only=True, component_id=row.pop("component_id"))
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch)
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    if spelling == "reference_only":
+        assert res["error_code"] == "PROCESS_COMPONENT_SCHEMA_INVALID"
+        assert res["field"] == "authoring_request.intent.components.3.component_id"
+    else:
+        codes = {d.get("code") for d in res.get("authoring_diagnostics") or ()}
+        assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in codes, res
+    assert client.component.pushed == []

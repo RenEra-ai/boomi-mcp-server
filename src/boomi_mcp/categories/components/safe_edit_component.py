@@ -437,6 +437,25 @@ def _canonical_refusal(error_code: str, error: str, field: str, hint: str = "") 
     return envelope
 
 
+def _value_free_failure(exc: BaseException, field: str) -> Dict[str, Any]:
+    """An unexpected compile/materialization failure, served the way
+    ``_execute_canonical_process`` serves one: the code a validator named, else the
+    internal-error code, and a message rendered by the value-free renderer — never
+    ``str(exc)``, which can carry the authored (possibly credential-bearing) values the
+    supporting rows hold."""
+    from ...errors import PROCESS_MATERIALIZATION_INTERNAL_ERROR
+    from ..integration_builder import (
+        _named_error_code_from_validation,
+        _validation_error_message,
+    )
+
+    return _canonical_refusal(
+        _named_error_code_from_validation(exc) or PROCESS_MATERIALIZATION_INTERNAL_ERROR,
+        _validation_error_message(exc),
+        field,
+    )
+
+
 def _parse_canonical_request(raw: Dict[str, Any], phase: str):
     """``(request, None)`` or ``(None, refusal)``: the SAME parser plan/compile/apply use.
 
@@ -472,6 +491,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
     spellings, so a ``reference_only`` UPDATE (a write) or a ``clone`` policy (which
     creates) is refused here exactly because apply would write it.
     """
+    from ...authoring.connector_resolution_snapshot import identity_reads_component
     from ..integration_builder import (
         apply_writes_component_config,
         canonical_component_id,
@@ -524,8 +544,9 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
                 "safe edit writes only the process being edited.",
                 pointer,
                 "Bind each supporting component to an existing component by explicit id "
-                "(component_id with action='create' under conflict_policy='reuse', or "
-                "config.reference_only=true with config.component_id).",
+                "(the row's component_id with action='create' under conflict_policy="
+                "'reuse'; a non-connector may use config.reference_only=true with "
+                "config.component_id).",
             )
         bound = bindings.get(comp.key)
         if not bound:
@@ -534,6 +555,21 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
                 f"Supporting component {comp.key!r} does not bind an existing component "
                 "by explicit id; safe edit resolves nothing by name.",
                 pointer,
+            )
+        if identity_reads_component(comp) and not getattr(comp, "component_id", None):
+            # The connector resolution snapshot reads a connector's stored identity
+            # only for the TOP-LEVEL id (`live_readings_for_declared_components`), and
+            # that reading is what refuses a declared family/verb the stored component
+            # contradicts. A connector bound only through `config.component_id` would
+            # carry its declaration to the emitted shape unchecked (measured).
+            return _canonical_refusal(
+                PROCESS_COMPONENT_SCHEMA_INVALID,
+                f"Connector {comp.key!r} must bind its existing component through the "
+                "row's top-level component_id, so its stored identity is read and "
+                "compared with what the row declares.",
+                pointer + ".component_id",
+                "Move config.component_id to the row's component_id (action='create', "
+                "conflict_policy='reuse').",
             )
         if canonical_component_id(bound) == declared_id:
             return _canonical_refusal(
@@ -640,6 +676,8 @@ def _compute_canonical_xml(
         )
     except AuthoringWorkflowError as exc:
         return _authoring_error_envelope(exc, phase)
+    except Exception as exc:  # noqa: BLE001 - served value-free, never str(exc)
+        return _value_free_failure(exc, "authoring_request")
     if internals.component_plan_unjudged:
         return _canonical_refusal(
             AUTHORING_APPLY_VALIDATION_REQUIRED,
@@ -689,6 +727,8 @@ def _compute_canonical_xml(
             exc.error_code or PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
             str(exc), "authoring_request.intent.units.0",
         )
+    except Exception as exc:  # noqa: BLE001 - served value-free, never str(exc)
+        return _value_free_failure(exc, "authoring_request.intent.units.0")
     try:
         merged_xml = merge_for_update(current["xml"], built_xml, PROCESS_PRESERVATION_POLICY)
     except BuilderValidationError as exc:
