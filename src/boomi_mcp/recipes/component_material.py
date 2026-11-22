@@ -1859,6 +1859,14 @@ def authorize_transform_operations(
                     )
                 except ValueError:
                     raise _material_failure(here, ValueError()) from None
+            # The assembly names each port by the legacy rule (a path's
+            # sanitized final segment), and a script's inputs and outputs share
+            # ONE variable namespace: two paths deriving the same variable are
+            # refused here, before anything is assembled, as the legacy
+            # contract refused them (``MapScriptApiTransformOperation``).
+            ports = [_rt().script_var_name(path) for path in (*inputs, *outputs)]
+            if len(set(ports)) != len(ports):
+                raise _refusal(COMPOSITION_CONTRACT_MISMATCH, here, phase="input")
             normalized.append(
                 operation.model_copy(
                     update={

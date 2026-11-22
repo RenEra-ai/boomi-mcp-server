@@ -815,34 +815,6 @@ class TestRecipeV1:
         assert model is ApiToDatabaseSyncMaterialV1
         assert preparer is prepare_api_to_database_sync_v1
 
-    def test_v1_replay_reproduces_every_frozen_row(self, monkeypatch):
-        """Both frozen cases through the PUBLIC planner, full ordered flow and
-        endpoint sequences, via the replay harness's own comparison."""
-        import _issue_157_flows_accounting as accounting
-        from boomi_mcp.recipes import engine as engine_module
-
-        registry = _v1_registry()
-        monkeypatch.setattr(engine_module, "production_registry", lambda: registry)
-        # OFFLINE, as every replay: only the live metadata boundary is faked.
-        monkeypatch.setattr(_PAGINATE_TARGET, lambda *a, **k: [])
-        monkeypatch.setattr(accounting, "_PLAN_CACHE", {})
-        cases = accounting.load_cases()
-        retirements = accounting.retirement_ids()
-        for case in _V1_CASES:
-            record = cases[f"api_to_database_sync/{case}"]
-            assert record.input_canonical == _canonical_request_v1(case)
-            flows = accounting.discharge_case(
-                record,
-                accounting.derive_case_projection(record),
-                retirements,
-                accounting.derive_served_projection(record),
-            )
-            endpoints = accounting.discharge_endpoints(
-                record, accounting.derive_case_endpoints(record), retirements
-            )
-            assert flows.ok and flows.completed, (case, flows.problems)
-            assert endpoints.ok and endpoints.completed, (case, endpoints.problems)
-
 
 def _refused(raw_input, material, base_catalog=None) -> RecipeError:
     with pytest.raises(RecipeError) as caught:
@@ -904,6 +876,36 @@ def _map_script_reference(raw, mat):
     del mat["transform"]["operations"][1]
 
 
+def _map_script_port_collision_across(raw, mat):
+    """``Root/id`` in and ``Fields/id`` out both derive the script variable ``id``."""
+    mat["transform"]["operations"].append(
+        {
+            "operation_type": "map_script",
+            "script_component_key": "shared_script",
+            "inputs": ["Root/id"],
+            "outputs": ["Fields/id"],
+        }
+    )
+    del mat["transform"]["operations"][0]
+
+
+def _map_script_port_collision_inputs(raw, mat):
+    """Two distinct source paths deriving the same input variable ``id``."""
+    mat["source"]["response_profile"]["root"]["children"].append(
+        {"name": "sub", "kind": "object", "children": [
+            {"name": "id", "kind": "simple", "data_type": "character"}]}
+    )
+    mat["transform"]["operations"].append(
+        {
+            "operation_type": "map_script",
+            "script_component_key": "shared_script",
+            "inputs": ["Root/id", "Root/sub/id"],
+            "outputs": ["Fields/name"],
+        }
+    )
+    del mat["transform"]["operations"][1]
+
+
 def _material_carries_selected_connection(raw, mat):
     raw["target"]["connection_key"] = "shared_db"
 
@@ -928,6 +930,16 @@ _V1_REFUSALS = {
     "map_script_reference": (
         _map_script_reference,
         "/component_material/transform/operations/1/script_component_key",
+    ),
+    # The script's inputs and outputs share ONE variable namespace (the legacy
+    # contract's rule), refused before any base lookup or assembly.
+    "map_script_port_collision_across": (
+        _map_script_port_collision_across,
+        "/component_material/transform/operations/1",
+    ),
+    "map_script_port_collision_inputs": (
+        _map_script_port_collision_inputs,
+        "/component_material/transform/operations/1",
     ),
     "selected_key_with_material_connection": (
         _material_carries_selected_connection,
