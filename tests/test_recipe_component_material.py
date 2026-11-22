@@ -2496,3 +2496,51 @@ def test_the_prepared_result_is_the_shared_type_with_the_s1_alias():
     )
     assert isinstance(prepared, component_material.PreparedRecipeComponentsV1)
     assert repr(prepared).startswith("PreparedRecipeComponentsV1(supporting_keys=")
+
+
+def test_a_map_binds_to_the_db_write_profile_through_the_shared_assemblies():
+    """The listener/API -> DB chain: the shared transform assembly binds its
+    map TARGET to the shared DB-write block's write profile (``target_binding``,
+    the binding the legacy API -> DB archetype builds), using the write
+    profile's field index from the block's authorization."""
+    from boomi_mcp.patterns.primitives._helpers import ROLE_DB_WRITE_PROFILE, primitive_component_key
+    from boomi_mcp.recipes import component_material
+
+    authorized = component_material.authorize_db_write_material(
+        _db_write_block(), pointer="/component_material/target", auth_mode="username_password"
+    )
+    written = component_material.emit_db_write_components(
+        authorized, context=_db_write_context(), key_prefix="target", pointer="/component_material/target"
+    )
+    write_profile_key = primitive_component_key("target", ROLE_DB_WRITE_PROFILE)
+    assert write_profile_key in [spec.key for spec in written]
+    operations = component_material.authorize_transform_operations(
+        (
+            component_material.FanoutDirectOperationV2.model_validate(
+                {"operation_type": "direct", "source_field": " id ", "target_path": "Fields/order_id"}
+            ),
+        ),
+        base_catalog={},
+        pointer="/component_material/transform/operations",
+    )
+    assert operations[0].source_field == "id"  # normalized by the legacy authority
+    mapped = component_material.emit_transform_components(
+        operations,
+        context=_db_write_context(),
+        key_prefix="transform",
+        pointer="/component_material/transform",
+        source={
+            "source_profile_id": "$ref:source_response_profile",
+            "source_profile_type": "profile.json",
+            "source_field_index": {"id": {"data_type": "character", "mappable": True}},
+        },
+        target_binding={
+            "target_profile_id": f"$ref:{write_profile_key}",
+            "target_profile_type": "profile.db",
+            "target_field_index": dict(authorized.field_index),
+        },
+    )
+    assert [spec.type for spec in mapped] == ["transform.map"]
+    assert write_profile_key in (mapped[0].depends_on or []) or (
+        f"$ref:{write_profile_key}" in json.dumps(mapped[0].config)
+    )

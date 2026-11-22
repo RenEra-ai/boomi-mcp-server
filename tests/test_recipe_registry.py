@@ -2626,9 +2626,10 @@ def test_a_declaration_entry_cannot_declare_implementation_dependencies():
 def test_the_shared_material_module_moves_only_the_fanout_v2_digest():
     """Production witness for the #159 S2 interface freeze: the shared
     component-material boundary (``recipes.component_material``) is inside the
-    digest of the registration that declares it — fan-out 2.0.0 — and nowhere
-    else. Perturbing its source moves that one ``implementation_sha256`` and
-    leaves the sync recipes (and fan-out 1.0.0) where they were."""
+    digest of every registration that declares it (fan-out 2.0.0 first) and
+    nowhere else. Perturbing its source moves exactly those
+    ``implementation_sha256`` values and leaves the undeclaring sync recipes
+    (and fan-out 1.0.0) where they were."""
     import inspect as inspect_module
 
     import boomi_mcp.recipes.registry as registry_mod
@@ -2657,10 +2658,18 @@ def test_the_shared_material_module_moves_only_the_fanout_v2_digest():
         registry_mod.inspect.getsource = original
 
     moved = {key for key, digest in after.items() if digest != baseline[key]}
-    assert moved == {(catalog.RECIPE_DB_REST_FANOUT, "2.0.0")}
+    # Expected: exactly the registrations that DECLARE the module (derived, so a
+    # preset that later declares it joins the set without editing this test).
+    declaring = {
+        (registration.recipe_id, registration.recipe_version)
+        for registration in PRODUCTION_REGISTRATIONS
+        if component_material.__name__ in registration.implementation_dependency_modules
+    }
+    assert (catalog.RECIPE_DB_REST_FANOUT, "2.0.0") in declaring
+    assert moved == declaring
     for sync_id in (catalog.RECIPE_API_TO_API_SYNC, catalog.RECIPE_API_TO_DATABASE_SYNC):
-        sync_keys = [key for key in baseline if key[0] == sync_id]
-        assert sync_keys, sync_id  # non-vacuous: the sync recipes are registered
+        sync_keys = [key for key in baseline if key[0] == sync_id and key not in declaring]
+        assert sync_keys, sync_id  # non-vacuous: undeclaring sync recipes are registered
         assert all(after[key] == baseline[key] for key in sync_keys)
 
 
