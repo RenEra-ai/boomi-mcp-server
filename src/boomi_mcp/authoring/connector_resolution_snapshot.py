@@ -343,7 +343,7 @@ class StoredProfileBindingV1(_SnapshotModel):
     ``requestProfile``; ``output`` a map's ``toProfile`` or an operation's ``responseProfile`` —
     an operation's read from the same ``GenericOperationConfig`` that settles its family and verb
     (``live_identity_from_component_xml``). Both sides ``unknown`` when the component itself could
-    not be read, did not parse, is of another type, or its binding is unjudged.
+    not be read, did not parse, or is of another type.
     """
 
     component_key: str
@@ -351,9 +351,6 @@ class StoredProfileBindingV1(_SnapshotModel):
     component_id: Optional[str] = None
     input: StoredProfileSideV1
     output: StoredProfileSideV1
-    #: As on the cache reading: the route consulted the account and its binding of the request's
-    #: names failed, so apply may yet reuse this component by name — its profiles are unknown.
-    binding_unjudged: bool = False
 
 
 class TrustedConnectorResolutionSnapshotV1(_SnapshotModel):

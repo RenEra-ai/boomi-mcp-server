@@ -169,7 +169,6 @@ def stored_profile_bindings_for_unwritten_components(
     components,
     conflict_policy="reuse",
     existing_ids=None,
-    binding_unjudged=False,
     reads=None,
 ) -> Optional[Tuple[StoredProfileBindingV1, ...]]:
     """The stored profile links of every map and REST operation apply does NOT write.
@@ -185,8 +184,8 @@ def stored_profile_bindings_for_unwritten_components(
     or, when those could not be read, declared by the request — because only REST operations are
     scoped here; any other family keeps stating no profile, as before.
 
-    ``binding_unjudged`` is accepted for symmetry with the cache reader and does NOT change the
-    answer: a component apply writes is skipped either way (see the loop).
+    Unlike the cache reader there is no ``binding_unjudged`` arm: a component apply writes is
+    skipped even on a route whose name binding is unjudged (see the loop).
     """
     from ..categories.integration_builder import (
         _bound_existing_id,

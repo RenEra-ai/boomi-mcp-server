@@ -512,6 +512,12 @@ def canonical_patch(mapped=False, *, name="S3a canonical process", **envelope_ov
 # (same base URL). Every byte is served VERBATIM: no attribute is substituted. The oracle
 # comparison maps these real ids onto golden-000079's ids (`ORACLE_IDS_BY_CAPTURED_ID`) and
 # drops layout coordinates — nothing else is normalized.
+# Two documented limits: (1) the operations' `requestProfile`/`responseProfile` SPELLING was emitted
+# by the builders; the green run proves the set operable, not that the REST runtime reads those two
+# attributes (its PROVENANCE.md). (2) golden-000081's IR labels the target writer's element "3" as
+# `requestId (Root/Object/requestId)`; in the captured PATCH request profile key 3 is `name`.
+# Nothing offline reads that label (the emitter writes the authored id and label); a LIVE run of
+# this witness will meet it.
 _CAP159S3 = _FIX / "boomi/replay_identity/cap159-s3-bound-profiles"
 _CAP159S1_CONN = _FIX / "boomi/replay_identity/cap159-s1-reuse-identity/rest-conn-aa5c5042.xml"
 CAPTURED_GET_OP = "3cbe300a-1369-49b7-ad1d-9487b55d1df8"

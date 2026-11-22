@@ -2725,8 +2725,7 @@ def _validate_processes(
             # profile verified from its own envelope.
             profile_bindings=stored_profile_bindings_for_unwritten_components(
                 boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
-                existing_ids=existing_ids, reads=target_reads,
-                binding_unjudged=boomi_client is not None and existing_ids is None),
+                existing_ids=existing_ids, reads=target_reads),
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the

@@ -368,8 +368,6 @@ def _stored_binding_profile_facts(component, snapshot, facts):
     reading = snapshot.lookup_profile_binding(component.key)
     if reading is None:
         return facts, ()
-    if reading.binding_unjudged:
-        return facts._replace(input_profile=None, output_profile=None, unknown=True), ()
     stored = []
     refs = []
     unknown = False
@@ -544,13 +542,8 @@ def build_symbol_table(
             facts, stored_symbol = _stored_cache_profile_facts(component, connector_resolution_snapshot, facts)
             if stored_symbol is not None and stored_symbol.ref not in {item.ref for item in stored_profiles}:
                 stored_profiles.append(stored_symbol)
-        stored_binding = (
-            connector_resolution_snapshot.lookup_profile_binding(component.key)
-            if getattr(connector_resolution_snapshot, "profile_bindings_read", False) else None
-        )
-        if not written or getattr(stored_binding, "binding_unjudged", False):
-            # #159 S3: a map or REST operation apply does not write declares what the ACCOUNT
-            # stores; one whose name binding is unjudged, unknown profiles.
+        if not written:
+            # #159 S3: a map or REST operation apply does not write declares what the ACCOUNT stores.
             facts, stored_symbols = _stored_binding_profile_facts(
                 component, connector_resolution_snapshot, facts)
             for stored_symbol in stored_symbols:

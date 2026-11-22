@@ -4178,11 +4178,12 @@ def test_an_unjudged_name_binding_leaves_a_created_map_or_rest_operation_its_own
         {"key": "PREAD", "type": "profile.json", "name": "PREAD", "action": "create", "config": {}},
         {"key": "PREQ", "type": "profile.json", "name": "PREQ", "action": "create", "config": {}},
     ]
-    for unjudged in (True, False):
+    # Unjudged (no component plan: no existing_ids) and judged (every name bound to nothing).
+    for existing_ids in (None, {row["key"]: None for row in created}):
         reads = _S3bReads({})
         readings = stored_profile_bindings_for_unwritten_components(
-            object(), _s3b_specs(created), binding_unjudged=unjudged, reads=reads)
-        assert readings == () and reads.fetched == [], unjudged
+            object(), _s3b_specs(created), existing_ids=existing_ids, reads=reads)
+        assert readings == () and reads.fetched == [], existing_ids
         symbols, _table = _s3b_symbols(created, readings)
         assert (symbols["$ref:MAP"].input_profile_ref, symbols["$ref:MAP"].output_profile_ref,
                 symbols["$ref:MAP"].profiles_unknown) == ("$ref:PREAD", "$ref:PREQ", None)
