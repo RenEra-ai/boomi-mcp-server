@@ -469,8 +469,8 @@ _API_TO_DB_V1_GUIDANCE = dict(
         "A watermark-sourced query parameter is refused (GOVERNANCE_WATERMARK_INCONSISTENT), "
         "and runtime-bound {token} path segments are refused.",
         "The write statement_type is one of the five confirmed variants.",
-        "Transform operations are direct or side-effect-free map_function; map_script "
-        "is refused.",
+        "Transform operations are direct, side-effect-free map_function, or map_script "
+        "by reference to an existing script.mapping base component.",
         "Every mandatory column and condition is mapped, each at most once.",
         "Pagination, retry, dead-letter, watermark and schedule activation are out of "
         "scope.",

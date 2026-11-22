@@ -103,6 +103,7 @@ def _rt():
         profile_from_json_schema=profile_from_json_schema,
         required_target_coverage_gaps=required_target_coverage_gaps,
         REST_CREATE_AUTH_MAP=assembly._REST_CREATE_AUTH_MAP,
+        script_var_name=assembly._script_var_name,
         SOURCE_PREFIX=assembly._SOURCE_PREFIX,
         TARGET_PREFIX=assembly._TARGET_PREFIX,
         TRANSFORM_PREFIX=assembly._TRANSFORM_PREFIX,
@@ -1994,13 +1995,18 @@ def emit_transform_components(
                 }
             functions.append(entry)
         else:
+            # A script port is named by the legacy authority's rule (the
+            # source/target path's sanitized final segment), so a JSON leaf
+            # PATH such as ``Root/id`` binds port ``id``; a column name that is
+            # already an identifier is its own port, unchanged.
             scripts.append(
                 {
                     "inputs": [
-                        {"source_path": name, "input_name": name} for name in operation.inputs
+                        {"source_path": name, "input_name": rt.script_var_name(name)}
+                        for name in operation.inputs
                     ],
                     "outputs": [
-                        {"output_name": path.rsplit("/", 1)[-1], "target_path": path}
+                        {"output_name": rt.script_var_name(path), "target_path": path}
                         for path in operation.outputs
                     ],
                     "script_component_ref": f"$ref:{operation.script_component_key}",

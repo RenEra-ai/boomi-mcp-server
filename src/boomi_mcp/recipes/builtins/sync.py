@@ -258,6 +258,7 @@ from ..component_material import (
     _FanoutMaterialModel,
     _authority_check,
     _builder_check,
+    _check_base_component,
     _refusal,
     _rt,
     authorize_db_write_material,
@@ -581,11 +582,17 @@ def _check_transform_contract_v1(
     operations: Tuple[_Any, ...],
     source_leaves: _Mapping[str, str],
     write_index: _Mapping[str, _Any],
+    *,
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    selected: _List[str],
 ) -> None:
     """The port of the legacy ``_validate_transform_refs``, on the AUTHORIZED
     operations: every input a declared response-profile leaf, every output a
     write-profile column/condition, each bound at most once, every required
-    column/condition bound. Value-free, at the operation's pointer."""
+    column/condition bound. A map-script reference must name a base
+    ``script.mapping`` component (selected once); its ports are named by the
+    shared assembly from each path's final segment. Value-free, at the
+    operation's pointer."""
     rt = _rt()
     bound: set = set()
     for op_index, operation in enumerate(operations):
@@ -595,10 +602,15 @@ def _check_transform_contract_v1(
         elif isinstance(operation, FanoutFunctionOperationV2):
             inputs, outputs = list(operation.inputs), [operation.target_path]
         else:
-            # The shared map-script assembly names each input port by its
-            # source field; a JSON leaf PATH is not a script identifier, so a
-            # referenced script cannot be bound to a REST response here.
-            raise _refusal(_UNSUPPORTED_TOPOLOGY, here + "/operation_type", phase="input")
+            inputs, outputs = list(operation.inputs), list(operation.outputs)
+            _check_base_component(
+                base_catalog,
+                operation.script_component_key,
+                path=here + "/script_component_key",
+                component_type="script.mapping",
+            )
+            if operation.script_component_key not in selected:
+                selected.append(operation.script_component_key)
         if any(name not in source_leaves for name in inputs):
             raise _refusal(_CONTRACT_MISMATCH, here, phase="input")
         for output in outputs:
@@ -717,7 +729,9 @@ def prepare_api_to_database_sync_v1(
 
     # -- 6. producer -> consumer contract ----------------------------------
     source_leaves = _flatten_payload_profile_leaves(material.source.response_profile)
-    _check_transform_contract_v1(operations, source_leaves, write.field_index)
+    _check_transform_contract_v1(
+        operations, source_leaves, write.field_index, base_catalog=base_catalog, selected=selected
+    )
 
     # -- 7. components -----------------------------------------------------
     context = PrimitiveBuildContext(

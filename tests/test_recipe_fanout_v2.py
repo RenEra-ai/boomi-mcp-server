@@ -801,6 +801,12 @@ def test_a_map_script_references_a_base_script_component():
     the_map = next(c for c in prepared.supporting_components if c.type == "transform.map")
     assert the_map.config["map_type"] == "script"
     assert the_map.config["script_mappings"][0]["script_component_id"] == "$ref:shared_script"
+    # #159 S2: ports are named by the legacy rule (a path's sanitized final
+    # segment); a DB column that is already an identifier is its own port, so
+    # the fan-out bytes are unchanged.
+    (mapping,) = the_map.config["script_mappings"]
+    assert [(p["source_path"], p["input_name"]) for p in mapping["inputs"]] == [("source_b", "source_b")]
+    assert [(p["output_name"], p["target_path"]) for p in mapping["outputs"]] == [("target_b", "Root/target_b")]
     assert "shared_script" in the_map.depends_on
     assert prepared.selected_base_keys == ("shared_script",)
 
@@ -1224,8 +1230,10 @@ def test_a_direct_intent_carries_no_leg_provenance():
     from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
     case = (
-        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "database_to_api_sync"
-        / "wm_off_dlq_off_create" / "input.canonical.json"
+        # #159 S2: the DB->API cases are recipe invocations now; API->API is
+        # the corpus's direct (process_ir) intent.
+        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "api_to_api_sync"
+        / "create" / "input.canonical.json"
     )
     request = AuthoringRequestV1.model_validate(json.loads(case.read_text()))
     result, _ = plan_authoring_request_v1(request, profile="p")
@@ -1711,8 +1719,10 @@ def test_arch_r1_08_a_direct_intent_result_gains_no_recipe_keys():
     from boomi_mcp.categories import integration_builder
 
     case = (
-        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "database_to_api_sync"
-        / "wm_off_dlq_off_create" / "input.canonical.json"
+        # #159 S2: the DB->API cases are recipe invocations now; API->API is
+        # the corpus's direct (process_ir) intent.
+        _TESTS / "fixtures" / "governance" / "issue_157" / "cases" / "api_to_api_sync"
+        / "create" / "input.canonical.json"
     )
     payload = json.loads(case.read_text())
     for action in ("plan", "compile"):
@@ -1723,9 +1733,11 @@ def test_arch_r1_08_a_direct_intent_result_gains_no_recipe_keys():
         assert envelope["_success"] is True, envelope.get("error")
         result = envelope["authoring_result"]
         assert "recipe_provenance" not in result and "recipe_diagnostics" not in result, action
-        # The preview's ``endpoints: []`` is NOT a gained key: measured at the
-        # S1 parent cb7034b, a direct preview already served it.
-        assert result["integration_spec_preview"]["endpoints"] == [], action
+        # The preview's ``endpoints`` is NOT a gained key: measured at the S1
+        # parent cb7034b, a direct preview already served it. (#159 S2: this
+        # direct REST -> map -> REST root infers its linear facts, S2-D5, so the
+        # list now carries its two endpoints.)
+        assert len(result["integration_spec_preview"]["endpoints"]) == 2, action
 
 
 def test_arch_r1_08_a_recipe_intent_result_keeps_its_recipe_keys():

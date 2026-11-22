@@ -923,9 +923,11 @@ _V1_REFUSALS = {
         _unpublished_literal_query_name,
         "/component_material/source/request/query_parameters/0/name",
     ),
+    # #159 S2 integration: a map script is ACCEPTED by reference to a base
+    # script.mapping component; with no such base the reference is refused.
     "map_script_reference": (
         _map_script_reference,
-        "/component_material/transform/operations/1/operation_type",
+        "/component_material/transform/operations/1/script_component_key",
     ),
     "selected_key_with_material_connection": (
         _material_carries_selected_connection,
@@ -960,6 +962,38 @@ class TestRecipeV1Refusals:
         rendered = json.dumps([d.model_dump(mode="json") for d in error.diagnostics])
         for planted in ("sekret-value", "not_declared", "item_id", "upsert"):
             assert planted not in rendered
+
+    def test_v1_map_script_binds_a_base_script_by_its_leaf_ports(self):
+        """A map-script reference to a base ``script.mapping`` component is
+        assembled: the JSON leaf PATHS bind script ports named by the legacy
+        rule (each path's final segment), the script is selected once, and the
+        map depends on it."""
+        from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+        script = IntegrationComponentSpec(
+            key="shared_script",
+            type="script.mapping",
+            name="Shared Script",
+            config={
+                "component_type": "script.mapping",
+                "component_name": "Shared Script",
+                "language": "groovy2",
+                "script_body": "name = id",
+                "inputs": [{"name": "id", "data_type": "character"}],
+                "outputs": [{"name": "name"}],
+            },
+        )
+        raw_input, material = _mutated(_map_script_reference)
+        prepared = _v1_prepared(raw_input, material, base_catalog={"shared_script": script})
+        the_map = next(c for c in prepared.supporting_components if c.type == "transform.map")
+        (mapping,) = the_map.config["script_mappings"]
+        assert mapping["script_component_id"] == "$ref:shared_script"
+        assert [port["input_name"] for port in mapping["inputs"]] == ["id"]
+        assert [port["source_path"] for port in mapping["inputs"]] == ["Root/id"]
+        assert [port["output_name"] for port in mapping["outputs"]] == ["name"]
+        assert [port["target_path"] for port in mapping["outputs"]] == ["Fields/name"]
+        assert "shared_script" in the_map.depends_on
+        assert prepared.selected_base_keys.count("shared_script") == 1
 
     def test_v1_create_target_requires_its_auth_mode(self):
         raw_input, _material = _v1_split(_legacy_parameters("create"))
