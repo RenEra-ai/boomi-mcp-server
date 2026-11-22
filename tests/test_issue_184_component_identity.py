@@ -4158,3 +4158,32 @@ def test_an_unknown_stored_profile_link_marks_the_symbols_profiles_unknown():
     assert symbols["$ref:OP"].input_profile_ref is None and symbols["$ref:OP"].profiles_unknown is True
     # The GET operation's links all verified: untouched.
     assert symbols["$ref:ROP"].profiles_unknown is None and symbols["$ref:ROP"].output_profile_ref
+
+
+def test_an_unjudged_name_binding_leaves_a_created_map_or_rest_operation_its_own_facts():
+    """Pins a deliberate DIFFERENCE from caches (ARCH-186-e1-02): on a route that holds an account
+    whose component plan could not bind the request's names, a map or REST operation the request
+    CREATES keeps the profiles its own configuration declares, so the degraded plan/compile keeps
+    compiling the create control (measured: marking them unknown refused it at the map). Typed apply
+    refuses an unjudged binding before any write. Nothing is read for them."""
+    from boomi_mcp.authoring.stored_profile_bindings import (
+        stored_profile_bindings_for_unwritten_components,
+    )
+
+    created = [
+        {"key": "MAP", "type": "transform.map", "name": "MAP", "action": "create", "config": {
+            "source_profile_id": "$ref:PREAD", "target_profile_id": "$ref:PREQ"}},
+        {"key": "OP", "type": "connector-action", "name": "OP", "action": "create", "config": {
+            "connector_type": "rest", "method": "PATCH", "request_profile_id": "$ref:PREQ"}},
+        {"key": "PREAD", "type": "profile.json", "name": "PREAD", "action": "create", "config": {}},
+        {"key": "PREQ", "type": "profile.json", "name": "PREQ", "action": "create", "config": {}},
+    ]
+    for unjudged in (True, False):
+        reads = _S3bReads({})
+        readings = stored_profile_bindings_for_unwritten_components(
+            object(), _s3b_specs(created), binding_unjudged=unjudged, reads=reads)
+        assert readings == () and reads.fetched == [], unjudged
+        symbols, _table = _s3b_symbols(created, readings)
+        assert (symbols["$ref:MAP"].input_profile_ref, symbols["$ref:MAP"].output_profile_ref,
+                symbols["$ref:MAP"].profiles_unknown) == ("$ref:PREAD", "$ref:PREQ", None)
+        assert (symbols["$ref:OP"].input_profile_ref, symbols["$ref:OP"].profiles_unknown) == ("$ref:PREQ", None)

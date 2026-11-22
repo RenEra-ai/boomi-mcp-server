@@ -185,8 +185,8 @@ def stored_profile_bindings_for_unwritten_components(
     or, when those could not be read, declared by the request — because only REST operations are
     scoped here; any other family keeps stating no profile, as before.
 
-    ``binding_unjudged``: as for caches (ARCH-186-e1-02), a create naming no id under ``reuse``
-    on a route whose name binding failed may yet be reused by name: its profiles are unknown.
+    ``binding_unjudged`` is accepted for symmetry with the cache reader and does NOT change the
+    answer: a component apply writes is skipped either way (see the loop).
     """
     from ..categories.integration_builder import (
         _bound_existing_id,
@@ -217,11 +217,12 @@ def stored_profile_bindings_for_unwritten_components(
             component_key=key, component_type=component_type, input=_UNKNOWN, output=_UNKNOWN
         )
         if apply_writes_component_config(component, conflict_policy, existing_ids=existing_ids):
-            if (binding_unjudged and conflict_policy == "reuse"
-                    and getattr(component, "action", None) == "create"
-                    and _bound_existing_id(component, existing_ids) is None
-                    and (component_type == _MAP_TYPE or _declares_rest(component))):
-                readings.append(unknown_reading.model_copy(update={"binding_unjudged": True}))
+            # Described by the configuration apply submits — INCLUDING on a route whose name
+            # binding is unjudged (the account held, the component plan not built). Unlike a
+            # document cache (ARCH-186-e1-02), a created map or operation is NOT made unknown
+            # there: measured, that refused the create control's compile that the degraded
+            # plan/compile rule (owner decision 2026-09-14) keeps working, and typed apply
+            # refuses an unjudged binding before any write. Left to the integrator (#159 S3b).
             continue
         component_id = canonical_component_id(_bound_existing_id(component, existing_ids))
         if component_id is None:

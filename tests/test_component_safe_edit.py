@@ -843,7 +843,10 @@ def test_captured_mapped_update_refuses_apply_when_the_stored_map_changed_since_
     res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
     assert res["_success"] is False, res
     assert res["boomi_mutation"] is False
-    assert _profile_mismatch_at_the_map(res) or res.get("error_code") == "COMPONENT_EDIT_DRIFT_DETECTED", res
+    # Apply RECOMPILES against the fresh account: the stored map now maps into the GET's profile,
+    # which the PATCH does not accept.
+    assert res["error_code"] == "AUTHORING_COMPILE_BLOCKED", res
+    assert _profile_mismatch_at_the_map(res), res
     assert client.component.pushed == []
 
 
@@ -858,6 +861,10 @@ def test_captured_mapped_update_refuses_apply_when_a_linked_profile_became_unrea
     res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
     assert res["_success"] is False, res
     assert res["boomi_mutation"] is False
+    # The map's stored target is now UNKNOWN: refused at the map, by the fresh compile, value-free.
+    assert res["error_code"] == "AUTHORING_COMPILE_BLOCKED", res
+    assert _profile_mismatch_at_the_map(res), res
+    assert CAPTURED_PATCH_REQUEST_PROFILE not in _json.dumps(res)
     assert client.component.pushed == []
 
 
