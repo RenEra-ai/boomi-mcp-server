@@ -1525,6 +1525,11 @@ def derive_recipe_projection(
             )
         )
         facts = facts_by_key.get(key)
+        if facts is None:
+            # #159 S2: a DIRECT root that is exactly REST source -> map -> REST
+            # target (the retired API->API producer's canonical form) carries
+            # its own facts; every other fact-less root infers none.
+            facts = infer_direct_linear_facts(unit, components, metadata)
         route = _project_unit_route(
             unit, by_key, components, metadata, facts, transform_rows, key in watermarked,
             frozenset(reused_keys or ()), existing_ids,

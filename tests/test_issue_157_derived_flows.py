@@ -797,3 +797,164 @@ def test_the_stub_route_needs_a_stop_only_root_and_its_endpoints_bind_nothing():
         DerivedEndpointRowV1(key="x", type="stub", direction="source", binding_mode="create")
     with pytest.raises(ValidationError):
         DerivedEndpointRowV1(key="x", type="rest", direction="source", binding_mode="create", label="l")
+
+
+# ---------------------------------------------------------------------------
+# #159 S2 (L4): a small deterministic GENERATED batch through the linear route
+# ---------------------------------------------------------------------------
+
+
+def _gen_json_profile(rng, depth=0):
+    """A nested JSON object profile with shuffled sibling order."""
+    children = []
+    names = rng.sample(string.ascii_lowercase, rng.randint(1, 4))
+    for name in names:
+        if depth < 2 and rng.random() < 0.35:
+            child = _gen_json_profile(rng, depth + 1)
+            child["name"] = name
+            children.append(child)
+        else:
+            children.append({"name": name, "kind": "simple", "data_type": rng.choice(_TYPES),
+                             "required": rng.random() < 0.4})
+    rng.shuffle(children)  # leaf ORDER varies; the served leaves are path-sorted
+    return {"name": "Root", "kind": "object", "children": children}
+
+
+def _generated_linear_case(seed):
+    """``(components, root, facts, expectations)`` for one generated route.
+
+    Even seeds: a listener -> map -> DB write route (``schema_summary``);
+    odd seeds: a REST fetch -> map -> REST send route (``generated_artifacts``).
+    The mapping structure (direct subset + order, map functions) and the
+    profile nesting and leaf order all vary with the seed."""
+    rng = random.Random(1000 + seed)
+    source_root = _gen_json_profile(rng)
+    source_leaves = _leaf_paths(source_root)
+    db_route = seed % 2 == 0
+    if db_route:
+        fields = [
+            {"name": "c{0}_{1}".format(i, rng.choice(string.ascii_lowercase)),
+             "data_type": rng.choice(("character", "number", "date")),
+             "mandatory": rng.random() < 0.5, "enforce_unique": False}
+            for i in range(rng.randint(1, 5))
+        ]
+        target_leaves = ["Fields/" + f["name"] for f in fields]
+    else:
+        target_root = _unique_children(_gen_json_profile(rng))
+        target_leaves = _leaf_paths(target_root)
+    chosen = rng.sample(target_leaves, rng.randint(1, len(target_leaves)))
+    split = rng.randint(0, len(chosen))
+    direct = [{"source_path": rng.choice(source_leaves), "target_path": t} for t in chosen[:split]]
+    functions = [
+        {"function_type": rng.choice(("string_concat", "string_to_upper", "date_format")),
+         "inputs": rng.sample(source_leaves, min(len(source_leaves), rng.randint(1, 2))),
+         "target_path": t}
+        for t in chosen[split:]
+    ]
+    the_map = {"key": "transform_transform_map", "type": "transform.map", "action": "create", "name": "Map",
+               "config": {"map_type": "function" if functions else "direct",
+                          "source_profile_id": "$ref:src_profile", "source_profile_type": "profile.json",
+                          "target_profile_id": "$ref:tgt_profile",
+                          "target_profile_type": "profile.db" if db_route else "profile.json",
+                          "field_mappings": direct, "function_mappings": functions}}
+    src = {"key": "src_profile", "type": "profile.json", "action": "create", "name": "Src",
+           "config": {"profile_type": "json.generated", "root": source_root}}
+    if db_route:
+        tgt = {"key": "tgt_profile", "type": "profile.db", "action": "create", "name": "Write",
+               "config": {"profile_type": "database.write", "statement_type": "dynamicinsert",
+                          "table_name": "t", "fields": fields}}
+        components = [
+            src, tgt, the_map,
+            {"key": "listen_op", "type": "connector-action", "action": "create", "name": "Listen",
+             "config": {"connector_type": "wss", "operation_mode": "listen", "object_name": "gen{0}".format(seed),
+                        "operation_type": "EXECUTE", "input_type": "singlejson", "output_type": "none",
+                        "request_profile": "$ref:src_profile"}},
+            {"key": "db_conn", "type": "connector-settings", "action": "create", "name": "DB",
+             "config": {"connector_type": "database", "reference_only": True, "component_name": "Existing DB"}},
+            {"key": "db_op", "type": "connector-action", "action": "create", "name": "Send",
+             "config": {"connector_type": "database", "operation_mode": "send",
+                        "write_profile_id": "$ref:tgt_profile", "connection_ref_key": "db_conn"}},
+        ]
+        source, target = (None, "listen_op"), ("db_conn", "db_op")
+        root = _linear_root("listener", source, "Generated", target)
+        detail = "schema_summary"
+    else:
+        tgt = {"key": "tgt_profile", "type": "profile.json", "action": "create", "name": "Tgt",
+               "config": {"profile_type": "json.generated", "root": target_root}}
+        components = [src, tgt, the_map]
+        for role, method in (("src", "GET"), ("tgt", "POST")):
+            components.append({"key": role + "_conn", "type": "connector-settings", "action": "create",
+                               "name": role, "config": {"connector_type": "rest", "auth": "NONE",
+                                                        "base_url": "https://x.example.com"}})
+            op = {"connector_type": "rest", "operation_mode": "execute", "method": method, "path": "/v1/r",
+                  "connection_ref_key": role + "_conn"}
+            op["response_profile_id" if role == "src" else "request_profile_id"] = "$ref:" + role + "_profile"
+            components.append({"key": role + "_op", "type": "connector-action", "action": "create",
+                               "name": role + " op", "config": op})
+        source, target = ("src_conn", "src_op"), ("tgt_conn", "tgt_op")
+        root = _linear_root("source", source, "Generated", target)
+        detail = "generated_artifacts"
+    facts = _linear_facts(source, target, detail, source_conn=source[0] is not None)
+    expected = {
+        "keys": ["listen" if db_route else "fetch", "transform", "write" if db_route else "send"],
+        "ops": [("direct", m["target_path"]) for m in direct] + [("map_function", f["target_path"]) for f in functions],
+        "function_inputs": [list(f["inputs"]) for f in functions],
+        "source_leaves": sorted(source_leaves),
+        "target_leaves": sorted(target_leaves),
+        "required_writes": sorted("Fields/" + f["name"] for f in fields if f["mandatory"]) if db_route else None,
+        "direct_count": len(direct),
+        "db_route": db_route,
+    }
+    return components, root, facts, expected
+
+
+def _structural_problems(projection, expected):
+    """Compare a projection STRUCTURALLY to the generator's input."""
+    problems = []
+    flows = [r.model_dump(mode="json", exclude_unset=True) for r in projection.flows]
+    if [r["key"] for r in flows] != expected["keys"]:
+        return ["row keys {0}".format([r["key"] for r in flows])]
+    transform = flows[1]
+    ops = [(op["operation_type"], op.get("target_path")) for op in transform["operations"]]
+    if ops != expected["ops"]:
+        problems.append("operations")
+    inputs = [op["inputs"] for op in transform["operations"] if op["operation_type"] == "map_function"]
+    if inputs != expected["function_inputs"]:
+        problems.append("function inputs")
+    if [leaf["path"] for leaf in transform["source_schema"]["leaves"]] != expected["source_leaves"]:
+        problems.append("source leaves")
+    if expected["db_route"]:
+        summary = transform.get("target_write_profile") or {}
+        if [p["path"] for p in summary.get("target_paths", ())] != expected["target_leaves"]:
+            problems.append("write target paths")
+        if sorted(p["path"] for p in summary.get("target_paths", ()) if p["required"]) != expected["required_writes"]:
+            problems.append("write required flags")
+        if any(k in transform for k in ("direct_field_mappings", "source_profile_generation")):
+            problems.append("summary form serves a generation key")
+    else:
+        if [leaf["path"] for leaf in transform["target_payload_profile"]["leaves"]] != expected["target_leaves"]:
+            problems.append("target leaves")
+        if len(transform["direct_field_mappings"]) != expected["direct_count"]:
+            problems.append("direct mappings")
+    return problems
+
+
+def test_generated_linear_batch_tracks_its_input_and_a_constant_projection_fails():
+    """Eight seeded routes vary mapping structure, profile nesting, leaf order
+    and map functions; each projection matches its OWN input structurally, and
+    a constant projection (seed 0's, or seed 1's for the other route kind)
+    fails every other seed's input."""
+    seeds = range(8)
+    built = {seed: _generated_linear_case(seed) for seed in seeds}
+    projections = {}
+    for seed, (components, root, facts, expected) in built.items():
+        projections[seed] = _linear_project(components, root, facts)
+        assert _structural_problems(projections[seed], expected) == [], seed
+    constant_failures = 0
+    for seed, (_c, _r, _f, expected) in built.items():
+        constant = projections[seed % 2]  # same route kind, different input
+        if seed in (0, 1):
+            continue
+        if _structural_problems(constant, expected):
+            constant_failures += 1
+    assert constant_failures == len(seeds) - 2
