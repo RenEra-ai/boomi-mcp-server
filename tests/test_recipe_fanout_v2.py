@@ -3914,3 +3914,22 @@ def test_b27r_blank_map_xml_is_reported_by_the_plan_and_the_dry_run(mode):
         result = integration_builder.build_integration_action(mock.MagicMock(), "p", action, config)
     rendered = json.dumps(result, default=str)
     assert "MAP_RAW_XML_BLANK" in rendered, rendered[:1500]
+
+
+def test_b28r_a_map_apply_reuses_is_not_refused_for_blank_xml():
+    """B28 review: a declared create carrying an id under conflict_policy=reuse
+    keeps planned_action="create" while apply REUSES it without reading its XML
+    — the blank-XML check is gated on apply's own reuse predicate."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+
+    spec = {"integration_name": "Raw", "components": [
+        {"key": "ws_map", "type": "transform.map", "name": "Whitespace map", "action": "create",
+         "component_id": "44444444-4444-4444-8444-444444444444", "config": {"xml": "   "}},
+    ]}
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        result = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"integration_spec": spec, "conflict_policy": "reuse"}
+        )
+    assert "MAP_RAW_XML_BLANK" not in json.dumps(result, default=str), result

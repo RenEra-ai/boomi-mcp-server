@@ -7778,10 +7778,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # reports it (and dry-run and apply refuse the unresolvable step
             # before any write) — a reused map is never written, so it is exempt.
             _map_xml = raw_config.get("xml")
+            # B28 review: "will be written" is apply's OWN reuse predicate, not the
+            # plan label — a declared create carrying an id keeps
+            # planned_action="create" while apply reuses it (never reading its XML).
             if (
                 gen_profile_err is None
                 and is_direct_map
                 and planned_action in ("create", "create_clone", "update")
+                and not _will_reuse_at_apply(
+                    declared_action=comp.action,
+                    existing_component_id=existing_id,
+                    reference_only=_component_reference_only(comp),
+                    conflict_policy=conflict_policy,
+                )
                 and isinstance(_map_xml, str)
                 and _map_xml
                 and not _map_xml.strip()
