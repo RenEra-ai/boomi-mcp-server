@@ -1,0 +1,94 @@
+{
+  "contract_version": "2",
+  "intent": {
+    "integration_name": "issue-157 replay api_to_database_sync/create",
+    "intent_kind": "recipe",
+    "invocations": [
+      {
+        "component_material": {
+          "source": {
+            "connection": {
+              "base_url": "https://api.example.com",
+              "mode": "create"
+            },
+            "request": {
+              "path": "/v1/source-resource",
+              "query_parameters": []
+            },
+            "response_profile": {
+              "format": "json",
+              "root": {
+                "children": [
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "id"
+                  },
+                  {
+                    "data_type": "character",
+                    "kind": "simple",
+                    "name": "name"
+                  }
+                ],
+                "kind": "object",
+                "name": "Root"
+              }
+            }
+          },
+          "target": {
+            "connection": {
+              "component_name": "<<existing DB connection>>",
+              "mode": "reuse"
+            },
+            "write_profile": {
+              "fields": [
+                {
+                  "data_type": "character",
+                  "mandatory": true,
+                  "name": "id"
+                },
+                {
+                  "data_type": "character",
+                  "name": "name"
+                }
+              ],
+              "statement_type": "dynamicinsert",
+              "table_name": "<<target table>>"
+            }
+          },
+          "transform": {
+            "operations": [
+              {
+                "operation_type": "direct",
+                "source_field": "Root/id",
+                "target_path": "Fields/id"
+              },
+              {
+                "operation_type": "direct",
+                "source_field": "Root/name",
+                "target_path": "Fields/name"
+              }
+            ]
+          },
+          "version": "1"
+        },
+        "invocation_id": "api_to_database_sync",
+        "raw_input": {
+          "naming": {
+            "component_prefix": "CustSync"
+          },
+          "process_key": "main_process",
+          "source": {
+            "binding_mode": "create"
+          },
+          "target": {
+            "binding_mode": "reuse"
+          },
+          "version": "1"
+        },
+        "recipe_id": "boomi.archetype.api_to_database_sync",
+        "recipe_version": "1.0.0"
+      }
+    ]
+  }
+}

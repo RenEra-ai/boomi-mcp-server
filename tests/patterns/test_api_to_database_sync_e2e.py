@@ -521,5 +521,510 @@ class TestFullLocalChain:
         mock_exec.assert_not_called()
 
 
+# ===========================================================================
+# #159 S2: API->DB 1.0.0 — typed direct unit through the component-material channel
+# ===========================================================================
+#
+# Oracles: the two frozen #157 cases' historical inputs (``input.legacy.json``)
+# and the legacy archetype at HEAD (read-only, called as an oracle only). The
+# canonical inputs are DERIVED from the legacy inputs by
+# :func:`_canonical_request_v1` (a mechanical re-spelling) and the committed
+# ``input.canonical.json`` files must equal that derivation byte-for-value.
+
+import re as _re
+import sys as _sys
+from pathlib import Path as _Path
+
+_TESTS_DIR = _Path(__file__).resolve().parents[1]
+if str(_TESTS_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_TESTS_DIR))
+
+from boomi_mcp.recipes import component_material as _component_material  # noqa: E402
+from boomi_mcp.recipes.builtins import catalog as _catalog  # noqa: E402
+from boomi_mcp.recipes.builtins.sync import (  # noqa: E402
+    ApiToDatabaseSyncInputV1,
+    ApiToDatabaseSyncMaterialV1,
+    emit_api_to_database_sync_v1,
+    prepare_api_to_database_sync_v1,
+)
+from boomi_mcp.recipes.contracts import RecipeRegistrationV1  # noqa: E402
+from boomi_mcp.recipes.errors import RecipeError  # noqa: E402
+from boomi_mcp.recipes.registry import build_test_registry  # noqa: E402
+from pydantic import ValidationError as _ValidationError  # noqa: E402
+
+_V1 = "1.0.0"
+_CASES_DIR = _TESTS_DIR / "fixtures" / "governance" / "issue_157" / "cases" / "api_to_database_sync"
+_V1_CASES = ("create", "source_reuse")
+
+
+def _v1_registration() -> RecipeRegistrationV1:
+    """The registration handed to the integrator (the catalog is not lane-owned)."""
+    return RecipeRegistrationV1(
+        recipe_id=_catalog.RECIPE_API_TO_DATABASE_SYNC,
+        recipe_version=_V1,
+        entry_kind="executable_recipe",
+        is_default=False,
+        input_model=ApiToDatabaseSyncInputV1,
+        executor=emit_api_to_database_sync_v1,
+        output_types=("constraint_requirement", "process_unit"),
+        capability_requirements=(
+            _catalog._SOURCE_EMITTER,
+            _catalog._TARGET_EMITTER,
+            _catalog._MAP_EMITTER,
+        ),
+        conflict_policy=_catalog._SYNC_CONFLICT_POLICY,
+        component_material_model=ApiToDatabaseSyncMaterialV1,
+        component_preparer=prepare_api_to_database_sync_v1,
+        implementation_dependency_modules=(_component_material.__name__,),
+    )
+
+
+def _v1_registry():
+    """Production registrations plus 1.0.0 (unless the catalog already has it)."""
+    registered = {
+        (reg.recipe_id, reg.recipe_version) for reg in _catalog.PRODUCTION_REGISTRATIONS
+    }
+    extra = () if (_catalog.RECIPE_API_TO_DATABASE_SYNC, _V1) in registered else (_v1_registration(),)
+    return build_test_registry(_catalog.PRODUCTION_REGISTRATIONS + extra)
+
+
+def _respelled_path(path: str) -> str:
+    """The ONE value re-spelling: a ``<<placeholder>>`` path segment becomes its
+    words joined by ``-``. The shared request-target grammar refuses ``<``,
+    ``>`` and spaces; the path is in no frozen row."""
+    return _re.sub(
+        r"<<([^<>]*)>>",
+        lambda match: _re.sub(r"[^A-Za-z0-9]+", "-", match.group(1)).strip("-"),
+        path,
+    )
+
+
+def _legacy_selector(binding: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "mode": "reuse",
+        **{key: binding[key] for key in ("component_id", "component_name") if binding.get(key)},
+    }
+
+
+def _v1_split(parameters: Dict[str, Any]):
+    """``(raw_input, component_material)`` re-spelled from LEGACY parameters."""
+    naming = {"component_prefix": parameters["naming"]["component_prefix"]}
+    if parameters["naming"].get("folder_path"):
+        naming["folder_name"] = parameters["naming"]["folder_path"]
+    source_binding = parameters["source"]["binding"]
+    target_connection = parameters["target"]["connection"]
+    target: Dict[str, Any] = {"binding_mode": target_connection["mode"]}
+    if target_connection["mode"] == "create":
+        target["auth_mode"] = target_connection["auth_mode"]
+    raw_input = {
+        "version": "1",
+        "process_key": "main_process",
+        "naming": naming,
+        "source": {"binding_mode": source_binding["mode"]},
+        "target": target,
+    }
+    if source_binding["mode"] == "create":
+        source_connection = {"mode": "create", "base_url": source_binding["settings"]["base_url"]}
+    else:
+        source_connection = _legacy_selector(source_binding)
+    fetch = parameters["source"]["fetch_request"]
+    if target_connection["mode"] == "create":
+        db_connection = {"mode": "create", "driver": target_connection["driver_id"]}
+        for key in ("host", "port", "database", "username", "credential_ref"):
+            if target_connection.get(key) is not None:
+                db_connection[key] = target_connection[key]
+    else:
+        db_connection = _legacy_selector(target_connection)
+    operations = []
+    for operation in parameters["transform"]["operations"]:
+        if operation["operation_type"] == "direct":
+            converted = {
+                "operation_type": "direct",
+                "source_field": operation["source_path"],
+                "target_path": operation["target_path"],
+            }
+        else:
+            converted = {k: v for k, v in operation.items() if k != "parameters"}
+            if operation.get("parameters"):
+                converted["parameters"] = [
+                    {"name": name, "value": value} for name, value in operation["parameters"].items()
+                ]
+        if operation.get("documentation_hint") is not None:
+            converted["documentation_hint"] = operation["documentation_hint"]
+        operations.append(converted)
+    target_material: Dict[str, Any] = {
+        "connection": db_connection,
+        "write_profile": copy.deepcopy(parameters["target"]["write_profile"]),
+    }
+    if parameters["target"].get("send_operation"):
+        target_material["operation"] = copy.deepcopy(parameters["target"]["send_operation"])
+    material = {
+        "version": "1",
+        "source": {
+            "connection": source_connection,
+            "request": {
+                "path": _respelled_path(fetch["path"]),
+                "query_parameters": [
+                    {"name": name, "value_source": "literal", "literal_value": value}
+                    for name, value in (fetch.get("query_parameters") or {}).items()
+                ],
+            },
+            "response_profile": copy.deepcopy(parameters["source"]["response_profile"]),
+        },
+        "target": target_material,
+        "transform": {"operations": operations},
+    }
+    return raw_input, material
+
+
+def _canonical_request_v1(case: str) -> Dict[str, Any]:
+    """The case's canonical ``AuthoringRequestV1``: one pinned 1.0.0 invocation."""
+    legacy = json.loads((_CASES_DIR / case / "input.legacy.json").read_text())
+    raw_input, material = _v1_split(legacy["input"]["parameters"])
+    return {
+        "contract_version": "2",
+        "intent": {
+            "integration_name": f"issue-157 replay api_to_database_sync/{case}",
+            "intent_kind": "recipe",
+            "invocations": [
+                {
+                    "recipe_id": _catalog.RECIPE_API_TO_DATABASE_SYNC,
+                    "recipe_version": _V1,
+                    "invocation_id": "api_to_database_sync",
+                    "raw_input": raw_input,
+                    "component_material": material,
+                }
+            ],
+        },
+    }
+
+
+def _legacy_parameters(case: str) -> Dict[str, Any]:
+    return json.loads((_CASES_DIR / case / "input.legacy.json").read_text())["input"]["parameters"]
+
+
+def _legacy_spec(case: str):
+    from boomi_mcp.patterns.archetypes.api_to_database_sync import (
+        ApiToDatabaseSyncArchetype,
+        ApiToDatabaseSyncParameters,
+    )
+
+    return ApiToDatabaseSyncArchetype.emit_spec(
+        ApiToDatabaseSyncParameters.model_validate(_legacy_parameters(case))
+    )
+
+
+def _v1_prepared(raw_input, material, base_catalog=None):
+    return prepare_api_to_database_sync_v1(
+        ApiToDatabaseSyncInputV1.model_validate(raw_input),
+        ApiToDatabaseSyncMaterialV1.model_validate(material),
+        base_catalog=base_catalog or {},
+    )
+
+
+def canary_api_to_database_sync_v1():
+    """Seed for ``_CANARY_SEEDS`` in ``tests/test_recipe_component_material.py``
+    (handed to the integrator): ``(raw_input, material)`` reaching every
+    secret-classified shared field — a REST create ``base_url``, the fetch
+    ``path``, a LITERAL query parameter's name and value, and a DB create
+    target's ``host``, ``database`` and ``credential_ref``."""
+    raw_input, material = _v1_split(_legacy_parameters("create"))
+    raw_input["target"] = {"binding_mode": "create", "auth_mode": "username_password"}
+    material["source"]["request"]["query_parameters"] = [
+        {"name": "limit", "value_source": "literal", "literal_value": "50"}
+    ]
+    material["target"]["connection"] = {
+        "mode": "create",
+        "driver": "microsoft_jdbc",
+        "host": "db.example.invalid",
+        "database": "AppDB",
+        "username": "svc_sync",
+        "credential_ref": "credential://secrets/db/svc_sync",
+    }
+    return raw_input, material
+
+
+class TestRecipeV1:
+    @pytest.mark.parametrize("case", _V1_CASES)
+    def test_v1_canonical_input_is_the_derivation_of_the_legacy_input(self, case):
+        committed = json.loads((_CASES_DIR / case / "input.canonical.json").read_text())
+        assert committed == _canonical_request_v1(case)
+        provenance = json.loads((_CASES_DIR / case / "provenance.json").read_text())
+        assert provenance["case_id"] == f"api_to_database_sync/{case}"
+        assert provenance["executed_at_replay"] is False
+
+    @pytest.mark.parametrize("case", _V1_CASES)
+    def test_v1_components_match_the_legacy_route(self, case):
+        """Component-set parity: keys, order, types, names, configs and
+        dependencies equal the legacy archetype's — except the fetch path,
+        re-spelled by the derivation's one documented rule on BOTH sides."""
+        spec = _legacy_spec(case)
+        expected = [component.model_dump(mode="json") for component in spec.components[:-1]]
+        for component in expected:
+            if component["key"] == "source_rest_source_operation":
+                component["config"]["path"] = _respelled_path(component["config"]["path"])
+        invocation = _canonical_request_v1(case)["intent"]["invocations"][0]
+        prepared = _v1_prepared(invocation["raw_input"], invocation["component_material"])
+        assert [c.model_dump(mode="json") for c in prepared.supporting_components] == expected
+        assert prepared.selected_base_keys == ()
+        assert len(prepared.rest_request_targets) == 1
+
+    @pytest.mark.parametrize("case", _V1_CASES)
+    def test_v1_root_is_the_legacy_sync_pipeline_root(self, case):
+        """Process parity: the unit's root equals the legacy adapter's root once
+        its adapter pointers are resolved against the legacy process config —
+        the same IR the canonical compiler emits for both — and the envelope
+        carries the legacy name, folder and dependency set."""
+        from boomi_mcp.compiler.process_ir.legacy_adapters.sync_pipeline import (
+            adapt_sync_pipeline_config,
+        )
+
+        process = _legacy_spec(case).components[-1]
+        adapted = adapt_sync_pipeline_config(process.config)
+        prefix = "$ref:legacy.adapter:"
+
+        def resolved(node):
+            if isinstance(node, dict):
+                return {key: resolved(value) for key, value in node.items()}
+            if isinstance(node, list):
+                return [resolved(value) for value in node]
+            if isinstance(node, str) and node.startswith(prefix):
+                cursor = process.config
+                for part in node[len(prefix):].strip("/").split("/"):
+                    cursor = cursor[int(part)] if isinstance(cursor, list) else cursor[part]
+                return cursor
+            return node
+
+        raw_input = _canonical_request_v1(case)["intent"]["invocations"][0]["raw_input"]
+        unit = emit_api_to_database_sync_v1(ApiToDatabaseSyncInputV1.model_validate(raw_input))[0].unit
+        assert unit.process_ir.model_dump(mode="json") == resolved(
+            adapted.process_ir.model_dump(mode="json")
+        )
+        assert unit.envelope.component_key == process.key
+        assert unit.envelope.name == process.name
+        assert unit.envelope.folder_name == process.config.get("folder_name")
+        assert set(unit.envelope.depends_on) == set(process.depends_on)
+
+    def test_v1_registers_beside_the_default_0_1_0_pin(self):
+        registry = _v1_registry()
+        pinned = registry.resolve(_catalog.RECIPE_API_TO_DATABASE_SYNC, _V1)
+        default = registry.resolve(_catalog.RECIPE_API_TO_DATABASE_SYNC, None)
+        assert pinned.recipe_version == _V1
+        assert default.recipe_version == _catalog._SYNC_VERSION
+        model, preparer = registry.component_preparation_for(pinned)
+        assert model is ApiToDatabaseSyncMaterialV1
+        assert preparer is prepare_api_to_database_sync_v1
+
+    def test_v1_replay_reproduces_every_frozen_row(self, monkeypatch):
+        """Both frozen cases through the PUBLIC planner, full ordered flow and
+        endpoint sequences, via the replay harness's own comparison."""
+        import _issue_157_flows_accounting as accounting
+        from boomi_mcp.recipes import engine as engine_module
+
+        registry = _v1_registry()
+        monkeypatch.setattr(engine_module, "production_registry", lambda: registry)
+        # OFFLINE, as every replay: only the live metadata boundary is faked.
+        monkeypatch.setattr(_PAGINATE_TARGET, lambda *a, **k: [])
+        monkeypatch.setattr(accounting, "_PLAN_CACHE", {})
+        cases = accounting.load_cases()
+        retirements = accounting.retirement_ids()
+        for case in _V1_CASES:
+            record = cases[f"api_to_database_sync/{case}"]
+            assert record.input_canonical == _canonical_request_v1(case)
+            flows = accounting.discharge_case(
+                record,
+                accounting.derive_case_projection(record),
+                retirements,
+                accounting.derive_served_projection(record),
+            )
+            endpoints = accounting.discharge_endpoints(
+                record, accounting.derive_case_endpoints(record), retirements
+            )
+            assert flows.ok and flows.completed, (case, flows.problems)
+            assert endpoints.ok and endpoints.completed, (case, endpoints.problems)
+
+
+def _refused(raw_input, material, base_catalog=None) -> RecipeError:
+    with pytest.raises(RecipeError) as caught:
+        _v1_prepared(raw_input, material, base_catalog)
+    return caught.value
+
+
+def _mutated(mutate):
+    raw_input, material = _v1_split(_legacy_parameters("create"))
+    mutate(raw_input, material)
+    return raw_input, material
+
+
+def _set_source_path(raw, mat):
+    mat["source"]["request"]["path"] = "/v1/items/{item_id}"
+
+
+def _unknown_source_leaf(raw, mat):
+    mat["transform"]["operations"][0]["source_field"] = "Root/not_declared"
+
+
+def _unknown_target_column(raw, mat):
+    mat["transform"]["operations"][1]["target_path"] = "Fields/not_declared"
+
+
+def _required_column_unmapped(raw, mat):
+    del mat["transform"]["operations"][0]
+
+
+def _column_bound_twice(raw, mat):
+    mat["transform"]["operations"][1]["target_path"] = "Fields/id"
+
+
+def _upsert_statement(raw, mat):
+    mat["target"]["write_profile"]["statement_type"] = "upsert"
+
+
+def _watermark_query_parameter(raw, mat):
+    mat["source"]["request"]["query_parameters"] = [
+        {"name": "updated_since", "value_source": "watermark"}
+    ]
+
+
+def _unpublished_literal_query_name(raw, mat):
+    mat["source"]["request"]["query_parameters"] = [
+        {"name": "api_key", "value_source": "literal", "literal_value": "sekret-value"}
+    ]
+
+
+def _map_script_reference(raw, mat):
+    mat["transform"]["operations"].append(
+        {
+            "operation_type": "map_script",
+            "script_component_key": "shared_script",
+            "inputs": ["Root/id"],
+            "outputs": ["Fields/name"],
+        }
+    )
+    del mat["transform"]["operations"][1]
+
+
+def _material_carries_selected_connection(raw, mat):
+    raw["target"]["connection_key"] = "shared_db"
+
+
+_V1_REFUSALS = {
+    "dynamic_path_token": (_set_source_path, "/component_material/source/request/path"),
+    "unknown_source_leaf": (_unknown_source_leaf, "/component_material/transform/operations/0"),
+    "unknown_target_column": (_unknown_target_column, "/component_material/transform/operations/1"),
+    "required_column_unmapped": (_required_column_unmapped, "/component_material/transform"),
+    "column_bound_twice": (_column_bound_twice, "/component_material/transform/operations/1"),
+    "unsupported_statement_type": (_upsert_statement, "/component_material/target/write_profile"),
+    "watermark_query_parameter": (
+        _watermark_query_parameter,
+        "/component_material/source/request/query_parameters/0",
+    ),
+    "unpublished_literal_query_name": (
+        _unpublished_literal_query_name,
+        "/component_material/source/request/query_parameters/0/name",
+    ),
+    "map_script_reference": (
+        _map_script_reference,
+        "/component_material/transform/operations/1/operation_type",
+    ),
+    "selected_key_with_material_connection": (
+        _material_carries_selected_connection,
+        "/component_material/target/connection",
+    ),
+}
+
+
+class TestRecipeV1Refusals:
+    @pytest.mark.parametrize("name", sorted(_V1_REFUSALS))
+    def test_v1_refusal_is_value_free_and_precedes_assembly(self, name, monkeypatch):
+        from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+        mutate, pointer = _V1_REFUSALS[name]
+        raw_input, material = _mutated(mutate)
+        built = []
+        real_init = IntegrationComponentSpec.__init__
+
+        def spying_init(self, *args, **kwargs):
+            built.append(kwargs.get("key"))
+            real_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(IntegrationComponentSpec, "__init__", spying_init)
+        # Control: the unmutated material DOES assemble (the spy sees it).
+        _v1_prepared(*_mutated(lambda raw, mat: None))
+        assert built
+        del built[:]
+        error = _refused(raw_input, material)
+        assert built == []
+        (diagnostic,) = error.diagnostics
+        assert diagnostic.path == pointer
+        rendered = json.dumps([d.model_dump(mode="json") for d in error.diagnostics])
+        for planted in ("sekret-value", "not_declared", "item_id", "upsert"):
+            assert planted not in rendered
+
+    def test_v1_create_target_requires_its_auth_mode(self):
+        raw_input, _material = _v1_split(_legacy_parameters("create"))
+        raw_input["target"] = {"binding_mode": "create"}
+        with pytest.raises(_ValidationError):
+            ApiToDatabaseSyncInputV1.model_validate(raw_input)
+
+    def test_v1_legacy_only_fetch_options_are_not_accepted(self):
+        _raw_input, material = _v1_split(_legacy_parameters("create"))
+        for option, value in (
+            ("request_headers", {"Accept": "application/json"}),
+            ("follow_redirects", "STRICT"),
+            ("track_response", True),
+        ):
+            bad = copy.deepcopy(material)
+            bad["source"]["request"][option] = value
+            with pytest.raises(_ValidationError):
+                ApiToDatabaseSyncMaterialV1.model_validate(bad)
+
+    def test_v1_base_key_bindings_emit_no_connection_and_bind_by_key(self):
+        """Both sides selected by base key: no connection is generated, the
+        fetch and Send operations bind to the base keys, and both bases are
+        selected exactly once."""
+        from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+        bases = {
+            "shared_rest": IntegrationComponentSpec(
+                key="shared_rest",
+                type="connector-settings",
+                name="Shared REST",
+                component_id="rest-id",
+                config={"reference_only": True, "connector_type": "rest", "component_id": "rest-id"},
+            ),
+            "shared_db": IntegrationComponentSpec(
+                key="shared_db",
+                type="connector-settings",
+                name="Shared DB",
+                component_id="db-id",
+                config={"reference_only": True, "connector_type": "database", "component_id": "db-id"},
+            ),
+        }
+        raw_input, material = _v1_split(_legacy_parameters("create"))
+        raw_input["source"] = {"binding_mode": "reuse", "connection_key": "shared_rest"}
+        raw_input["target"] = {"binding_mode": "reuse", "connection_key": "shared_db"}
+        material["source"].pop("connection")
+        material["target"].pop("connection")
+        prepared = _v1_prepared(raw_input, material, bases)
+        by_key = {c.key: c for c in prepared.supporting_components}
+        assert "source_rest_source_connection" not in by_key
+        assert "target_db_connection" not in by_key
+        assert by_key["source_rest_source_operation"].config["connection_ref_key"] == "shared_rest"
+        assert by_key["target_db_write_operation"].config["connection_ref_key"] == "shared_db"
+        assert prepared.selected_base_keys == ("shared_rest", "shared_db")
+        assert prepared.rest_request_targets[0][0] == "shared_rest"
+        unit = emit_api_to_database_sync_v1(ApiToDatabaseSyncInputV1.model_validate(raw_input))[0].unit
+        assert {"shared_rest", "shared_db"} <= set(unit.envelope.depends_on)
+
+    def test_v1_canary_seed_assembles_and_breaches_are_refused(self):
+        raw_input, material = canary_api_to_database_sync_v1()
+        assert _v1_prepared(raw_input, material).supporting_components
+        breached = copy.deepcopy(material)
+        breached["target"]["connection"]["credential_ref"] = "plain-password"
+        error = _refused(raw_input, breached)
+        assert error.diagnostics[0].path == "/component_material/target/connection/credential_ref"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -686,5 +686,66 @@ class TestFullLocalChain:
         mock_exec.assert_not_called()
 
 
+# ===========================================================================
+# #159 S2: the two frozen API->API cases as DIRECT canonical units
+# ===========================================================================
+#
+# API->API has no typed successor recipe (its executable registration retires
+# in S3); its frozen working behaviour is carried by the committed direct
+# ``input.canonical.json`` fixtures. These checks are cheap and structural; the
+# full replay runs in ``tests/test_issue_157_flows_accounting.py``.
+
+from pathlib import Path as _Path
+
+_API_API_CASES = _Path(__file__).resolve().parents[1] / (
+    "fixtures/governance/issue_157/cases/api_to_api_sync"
+)
+
+
+def _strip_hints(components):
+    """The map's served ``documentation_hint`` keys: the canonical fixture
+    carries them on the map so the rich transform row serves them; the legacy
+    map component never did (it served them on the flow row only)."""
+    for component in components:
+        for entry in (component.get("config") or {}).get("field_mappings") or ():
+            entry.pop("documentation_hint", None)
+        for entry in (component.get("config") or {}).get("function_mappings") or ():
+            entry.pop("documentation_hint", None)
+    return components
+
+
+class TestDirectCanonicalCases:
+    @pytest.mark.parametrize("case", ["create", "reuse_with_function"])
+    def test_direct_canonical_case_carries_the_legacy_route(self, case):
+        from boomi_mcp.authoring.derived_flows import infer_direct_linear_facts
+        from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+        from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
+
+        directory = _API_API_CASES / case
+        legacy = json.loads((directory / "input.legacy.json").read_text())
+        spec = ApiToApiSyncArchetype.emit_spec(
+            ApiToApiSyncArchetype.parameters_model.model_validate(legacy["input"]["parameters"])
+        )
+        request = AuthoringRequestV1.model_validate(
+            json.loads((directory / "input.canonical.json").read_text())
+        )
+        intent = request.intent
+        assert intent.intent_kind == "process_ir"
+        (unit,) = intent.units
+        kinds = [step.kind for step in unit.process_ir.body.steps]
+        assert kinds == ["source", "map_ref", "target", "stop"]
+        process = spec.components[-1]
+        assert unit.envelope.component_key == process.key
+        assert unit.envelope.name == process.name
+        assert set(unit.envelope.depends_on) == set(process.depends_on)
+        assert _strip_hints([c.model_dump(mode="json") for c in intent.components]) == [
+            c.model_dump(mode="json") for c in spec.components[:-1]
+        ]
+        facts = infer_direct_linear_facts(unit, intent.components)
+        assert facts is not None
+        assert facts.source.operation_key == "source_rest_source_operation"
+        assert facts.target.operation_key == "target_rest_operation"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -1,0 +1,10 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "baseline_tree_sha": "27487413b2d54234fe73bd57ae8779cb0d1352f5",
+  "case_id": "stub_minimal/default",
+  "derived_by": "tests/patterns/test_stub_archetype.py::_stub_canonical_request",
+  "executed_at_replay": false,
+  "legacy_input_sha256": "ba0a7ed4167b05f68f9537979b92a1a87b63651c8251d2a6513fcd69ec41621b",
+  "method": "legacy stub_minimal_integration parameters re-spelled into one pinned boomi.archetype.stub_minimal 1.0.0 invocation: component_prefix into raw_input.naming; process_key main_process. The legacy goal and integration_name are display-only and not carried; source_label/target_label equal the fixed labels the stub projection serves (asserted by the derivation), so they are not inputs.",
+  "rederived_by": "tests/patterns/test_stub_archetype.py::test_stub_recipe_canonical_input_is_the_derivation_of_the_legacy_input"
+}
