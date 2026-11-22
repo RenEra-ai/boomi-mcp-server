@@ -2433,6 +2433,197 @@ def test_a_recipe_in_another_module_is_unaffected_by_a_shared_helper_change():
 
 
 # ---------------------------------------------------------------------------
+# #159 S2: a recipe's digest covers the shared modules it names
+# ---------------------------------------------------------------------------
+
+
+def _hash_with_perturbed_module(registration_factory, recipe_id, module_name):
+    """``(baseline, perturbed)`` implementation hashes of one registration when
+    ``inspect.getsource`` reports a changed ``module_name`` and nothing else."""
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    baseline = build_test_registry((registration_factory(),)).resolve(recipe_id)
+    target = importlib.import_module(module_name)
+    real_getsource = inspect_module.getsource
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is target:
+            return text + "\n# a shared helper changed\n"
+        return text
+
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = perturbed
+    try:
+        after = build_test_registry((registration_factory(),)).resolve(recipe_id)
+    finally:
+        registry_mod.inspect.getsource = original
+    return (
+        baseline.provenance.implementation_sha256,
+        after.provenance.implementation_sha256,
+    )
+
+
+_SHARED_HELPER_MODULE = "boomi_mcp.recipes.builtins.fanout"
+
+
+def _reg_declaring_shared_helper():
+    return _reg(
+        recipe_id="r.consumer",
+        implementation_dependency_modules=(_SHARED_HELPER_MODULE,),
+    )
+
+
+def test_a_declared_dependency_module_change_moves_the_consumer_hash():
+    """Shared recipe code in a sibling module is INSIDE the digest of a recipe
+    that declares it.
+
+    The #149 precondition for moving shared checks out of an executor's module:
+    before this, such a move took the code out of every per-entry digest, and a
+    hash-only comparison kept answering ``match`` for two registries running
+    different shared code.
+    """
+    baseline, after = _hash_with_perturbed_module(
+        _reg_declaring_shared_helper, "r.consumer", _SHARED_HELPER_MODULE
+    )
+    assert after != baseline
+
+
+def test_an_undeclared_module_change_leaves_an_unrelated_recipe_hash_alone():
+    """The widening is per DECLARATION, not per package: the same change to the
+    same module moves nothing for a recipe that did not name it."""
+    baseline, after = _hash_with_perturbed_module(
+        lambda: _reg(recipe_id="r.unrelated"), "r.unrelated", _SHARED_HELPER_MODULE
+    )
+    assert after == baseline
+
+
+def test_a_hash_only_comparison_reports_a_changed_dependency_module():
+    """The skew report — the consumer of the digest — sees the change too."""
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+
+    before = build_test_registry((_reg_declaring_shared_helper(),))
+    expected = ExpectedRecipeRegistryV1(
+        entries=(
+            ExpectedRecipeEntryV1(
+                recipe_id="r.consumer",
+                recipe_version="1.0.0",
+                implementation_sha256=before.resolve(
+                    "r.consumer"
+                ).provenance.implementation_sha256,
+            ),
+        )
+    )
+    assert not before.compare(expected).implementation_mismatches
+
+    target = importlib.import_module(_SHARED_HELPER_MODULE)
+    real_getsource = inspect_module.getsource
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = lambda obj: (
+        real_getsource(obj) + "\n# changed\n" if obj is target else real_getsource(obj)
+    )
+    try:
+        after = build_test_registry((_reg_declaring_shared_helper(),))
+    finally:
+        registry_mod.inspect.getsource = original
+    skew = after.compare(expected)
+    assert skew.status == "mismatch"
+    assert [m.recipe_id for m in skew.implementation_mismatches] == ["r.consumer"]
+
+
+def test_the_models_defining_module_is_in_the_digest_without_a_declaration():
+    """The input model's module is derived from the registered object, so a
+    preset whose model lives beside a shared boundary cannot forget to name it."""
+    from boomi_mcp.recipes.builtins.fanout import ComposeDbRestFanoutInputV1
+
+    def reg():
+        return _reg(recipe_id="r.split", input_model=ComposeDbRestFanoutInputV1)
+
+    assert reg().executor.__module__ != ComposeDbRestFanoutInputV1.__module__
+    baseline, after = _hash_with_perturbed_module(
+        reg, "r.split", ComposeDbRestFanoutInputV1.__module__
+    )
+    assert after != baseline
+
+
+def test_dependency_declaration_order_and_repetition_do_not_move_the_hash():
+    other = "boomi_mcp.recipes.builtins.catalog"
+
+    def hash_of(*names):
+        return (
+            build_test_registry(
+                (_reg(recipe_id="r.c", implementation_dependency_modules=names),)
+            )
+            .resolve("r.c")
+            .provenance.implementation_sha256
+        )
+
+    assert hash_of(_SHARED_HELPER_MODULE, other) == hash_of(other, _SHARED_HELPER_MODULE)
+    assert hash_of(_SHARED_HELPER_MODULE) == hash_of(
+        _SHARED_HELPER_MODULE, _SHARED_HELPER_MODULE
+    )
+    assert hash_of(_SHARED_HELPER_MODULE) != hash_of(_SHARED_HELPER_MODULE, other)
+    # The executor's own module is already hashed: naming it adds nothing.
+    assert hash_of() == hash_of(emit_api_to_api_sync.__module__)
+
+
+def test_a_registration_without_dependencies_keeps_its_four_part_digest():
+    """No existing digest moved when the coverage was added: one module, no
+    declaration, the same four parts as before."""
+    import inspect as inspect_module
+
+    reg = _reg()
+    assert reg.input_model.__module__ == reg.executor.__module__
+    assert registry_module.RecipeRegistry._implementation_identity(reg)[2] == (
+        reg.executor.__module__,
+        reg.executor.__qualname__,
+        inspect_module.getsource(reg.executor),
+        inspect_module.getsource(inspect_module.getmodule(reg.executor)),
+    )
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        ("boomi_mcp.recipes.no_such_module",),
+        ("not a module name",),
+        ("",),
+        "boomi_mcp.recipes.builtins.fanout",
+    ],
+    ids=["unimportable", "not-dotted", "empty", "bare-string"],
+)
+def test_an_unusable_dependency_declaration_refuses_the_registration(declared):
+    """Fail closed: a dependency left out of the digest is a ``match`` nobody
+    established."""
+    with pytest.raises(ValueError, match="implementation"):
+        build_test_registry(
+            (_reg(recipe_id="r.bad", implementation_dependency_modules=declared),)
+        )
+
+
+def test_a_declaration_entry_cannot_declare_implementation_dependencies():
+    """An adapter has no code of its own; its digest is the catalog's."""
+    adapter = next(
+        r for r in catalog.PRODUCTION_REGISTRATIONS if r.executor is None
+    )
+    import dataclasses as dataclasses_module
+
+    with pytest.raises(ValueError, match="without an executor"):
+        build_test_registry(
+            (
+                dataclasses_module.replace(
+                    adapter,
+                    implementation_dependency_modules=(_SHARED_HELPER_MODULE,),
+                ),
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
 # Live-QA regression (issue #145): a partial comparison is reported as such
 # ---------------------------------------------------------------------------
 

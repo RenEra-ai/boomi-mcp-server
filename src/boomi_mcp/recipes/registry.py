@@ -988,6 +988,7 @@ class RecipeRegistry:
             raise ValueError(str(exc)) from None
 
         self._check_entry_kind(reg)
+        self._check_implementation_dependencies(reg)
 
         # Prerequisites and capability requirements are CANONICALIZED here:
         # sorted by their own canonical bytes and duplicate-free. Registrations
@@ -1311,13 +1312,24 @@ class RecipeRegistry:
         registration still hashes its own source alongside the module's, so two
         recipes sharing a module remain distinguishable.
 
-        A helper in a DIFFERENT module is still outside the digest. That bound is
-        stated rather than papered over: chasing the full import closure would
-        make every recipe's hash move on any change anywhere in the package,
-        which is a hash of the package, not of a recipe. The
-        ``source_revision``/``registry_revision`` round-trip is what covers that
-        wider surface, and ``compare`` now refuses to report a bare ``match``
-        when neither was supplied.
+        A helper in a DIFFERENT module joins the digest only when the
+        registration NAMES it: the defining modules of the registered input
+        model, material model and preparer are derived from those objects, and
+        any further shared module is listed in
+        ``implementation_dependency_modules`` (#159 S2 — the precondition for
+        moving shared recipe code out of an executor's module: without it the
+        move would take that code out of every per-entry digest while a
+        hash-only comparison went on reporting ``match``). An undeclared helper
+        elsewhere is still outside. That bound is stated rather than papered
+        over: chasing the full import closure would make every recipe's hash
+        move on any change anywhere in the package, which is a hash of the
+        package, not of a recipe. The ``source_revision``/``registry_revision``
+        round-trip is what covers that wider surface, and ``compare`` now
+        refuses to report a bare ``match`` when neither was supplied.
+
+        A registration whose model, preparer and executor share ONE module and
+        which declares no dependency hashes exactly the four parts it always
+        did, so adding this coverage moved no existing digest.
 
         Fails CLOSED when the source cannot be read: an empty or defaulted hash
         would make every skew comparison report ``match``, which is worse than
@@ -1376,7 +1388,76 @@ class RecipeRegistry:
                 f"recipe provenance requires readable source for "
                 f"{module}.{symbol}"
             ) from exc
-        return module, symbol, (module, symbol, source, module_source)
+        return (
+            module,
+            symbol,
+            (module, symbol, source, module_source)
+            + RecipeRegistry._dependency_module_parts(reg, module),
+        )
+
+    @staticmethod
+    def _dependency_module_parts(
+        reg: RecipeRegistrationV1, executor_module: str
+    ) -> Tuple[str, ...]:
+        """``(name, source, name, source, …)`` for every module this recipe's
+        behaviour lives in besides its executor's own.
+
+        The set is the defining modules of the input model, the material model
+        and the preparer — derived from the registered objects, never restated —
+        plus the declared ``implementation_dependency_modules``. It is
+        de-duplicated and sorted by name, so neither declaration order nor a
+        repeated name can move a hash; the executor's own module is dropped
+        because the caller already hashed it.
+
+        Fails CLOSED on a module whose source cannot be read, for the same
+        reason the executor's does: a dependency silently left out of the digest
+        is a ``match`` nobody established.
+        """
+        names = set(reg.implementation_dependency_modules)
+        for owner in (
+            reg.input_model,
+            reg.component_material_model,
+            reg.component_preparer,
+        ):
+            owner_module = getattr(owner, "__module__", None)
+            if isinstance(owner_module, str) and owner_module:
+                names.add(owner_module)
+        names.discard(executor_module)
+        parts: List[str] = []
+        for name in sorted(names):
+            try:
+                text = inspect.getsource(importlib.import_module(name))
+            except (OSError, TypeError, ImportError) as exc:
+                raise ValueError(
+                    f"{reg.recipe_id!r} implementation dependency {name!r} has no "
+                    "readable source"
+                ) from exc
+            parts.extend((name, text))
+        return tuple(parts)
+
+    @staticmethod
+    def _check_implementation_dependencies(reg: RecipeRegistrationV1) -> None:
+        """Declared dependency modules are dotted names, on executable code only.
+
+        A declaration entry (adapter, advisory) has no code of its own to depend
+        on anything; its digest is the catalog's. Readability is checked where
+        the source is actually read (``_dependency_module_parts``).
+        """
+        declared = reg.implementation_dependency_modules
+        if not isinstance(declared, tuple) or not all(
+            isinstance(name, str) and name and name == name.strip()
+            and all(part.isidentifier() for part in name.split("."))
+            for name in declared
+        ):
+            raise ValueError(
+                f"{reg.recipe_id!r} implementation_dependency_modules must be a "
+                "tuple of dotted module names"
+            )
+        if declared and reg.executor is None:
+            raise ValueError(
+                f"{reg.recipe_id!r} declares implementation dependencies without "
+                "an executor"
+            )
 
     #: The states a STATEFUL authority can actually report. A required_state that
     #: no state here satisfies is unsatisfiable by construction — e.g.

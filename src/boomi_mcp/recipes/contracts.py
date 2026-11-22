@@ -402,6 +402,14 @@ class RecipeRegistrationV1:
     #: registration that declares neither refuses any material it is sent.
     component_material_model: Optional[type] = None
     component_preparer: Optional[Callable[..., Any]] = None
+    #: #159 S2 — modules OUTSIDE the executor's own whose source this recipe's
+    #: behaviour depends on (a shared helper module it delegates to). Dotted
+    #: module names, code-owned like everything else here. Their source joins
+    #: ``implementation_sha256`` together with the defining modules of the input
+    #: model, the material model and the preparer, so a behaviour-changing edit
+    #: to a shared module moves the digest of every recipe that declares it and
+    #: of no other. Order and repetition carry no meaning.
+    implementation_dependency_modules: Tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
