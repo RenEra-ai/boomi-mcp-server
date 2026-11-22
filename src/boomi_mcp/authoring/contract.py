@@ -587,7 +587,7 @@ def _fanout_material_guarantee() -> str:
     """The fan-out 2.0.0 material guarantee (#159 S1, decision D12), served
     verbatim from the recipe module, whose published query names it renders.
     The refusal causes are named here so a caller can act on them."""
-    from ..recipes.builtins.fanout import (
+    from ..recipes.component_material import (
         LITERAL_QUERY_GUARANTEE_V2,
         QUERY_GRAMMAR_SENTENCE_V2,
         REUSED_BASE_SENTENCE_V2,

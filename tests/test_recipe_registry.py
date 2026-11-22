@@ -2623,6 +2623,47 @@ def test_a_declaration_entry_cannot_declare_implementation_dependencies():
         )
 
 
+def test_the_shared_material_module_moves_only_the_fanout_v2_digest():
+    """Production witness for the #159 S2 interface freeze: the shared
+    component-material boundary (``recipes.component_material``) is inside the
+    digest of the registration that declares it — fan-out 2.0.0 — and nowhere
+    else. Perturbing its source moves that one ``implementation_sha256`` and
+    leaves the sync recipes (and fan-out 1.0.0) where they were."""
+    import inspect as inspect_module
+
+    import boomi_mcp.recipes.registry as registry_mod
+    from boomi_mcp.recipes import component_material
+
+    def all_hashes():
+        return {
+            (d.recipe_id, d.recipe_version): d.provenance.implementation_sha256
+            for d in build_test_registry(PRODUCTION_REGISTRATIONS).descriptors()
+        }
+
+    baseline = all_hashes()
+    real_getsource = inspect_module.getsource
+
+    def perturbed(obj):
+        text = real_getsource(obj)
+        if obj is component_material:
+            return text + "\n# a shared material rule changed\n"
+        return text
+
+    original = registry_mod.inspect.getsource
+    registry_mod.inspect.getsource = perturbed
+    try:
+        after = all_hashes()
+    finally:
+        registry_mod.inspect.getsource = original
+
+    moved = {key for key, digest in after.items() if digest != baseline[key]}
+    assert moved == {(catalog.RECIPE_DB_REST_FANOUT, "2.0.0")}
+    for sync_id in (catalog.RECIPE_API_TO_API_SYNC, catalog.RECIPE_API_TO_DATABASE_SYNC):
+        sync_keys = [key for key in baseline if key[0] == sync_id]
+        assert sync_keys, sync_id  # non-vacuous: the sync recipes are registered
+        assert all(after[key] == baseline[key] for key in sync_keys)
+
+
 # ---------------------------------------------------------------------------
 # Live-QA regression (issue #145): a partial comparison is reported as such
 # ---------------------------------------------------------------------------

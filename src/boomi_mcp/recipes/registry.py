@@ -204,6 +204,7 @@ RECIPE_LAYER_MODULES: Tuple[str, ...] = (
     f"{_IMPORT_PREFIX}.recipes.builtins.catalog",
     f"{_IMPORT_PREFIX}.recipes.builtins.fanout",
     f"{_IMPORT_PREFIX}.recipes.builtins.sync",
+    f"{_IMPORT_PREFIX}.recipes.component_material",
     f"{_IMPORT_PREFIX}.recipes.composer",
     f"{_IMPORT_PREFIX}.recipes.contracts",
     f"{_IMPORT_PREFIX}.recipes.engine",

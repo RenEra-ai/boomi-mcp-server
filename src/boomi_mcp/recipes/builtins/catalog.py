@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
+from .. import component_material as _component_material
 from ..contracts import (
     RecipeCapabilityRequirementV1,
     RecipeConflictPolicyV1,
@@ -183,6 +184,7 @@ PRODUCTION_REGISTRATIONS: Tuple[RecipeRegistrationV1, ...] = (
         conflict_policy=_FANOUT_CONFLICT_POLICY,
         component_material_model=FanoutComponentMaterialV2,
         component_preparer=prepare_db_rest_fanout_v2,
+        implementation_dependency_modules=(_component_material.__name__,),
     ),
     RecipeRegistrationV1(
         recipe_id=RECIPE_API_TO_API_SYNC,

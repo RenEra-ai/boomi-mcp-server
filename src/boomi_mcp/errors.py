@@ -48,7 +48,7 @@ COMPOSITION_COMPONENT_KEY_COLLISION = "COMPOSITION_COMPONENT_KEY_COLLISION"
 
 # --- Fan-out 2.0.0 component material (#159 S1, decision D12) -----------------
 # A literal REST query value is emitted only under the published names
-# (``recipes.builtins.fanout.LITERAL_QUERY_NAMES_V2``). Any other literal name,
+# (``recipes.component_material.LITERAL_QUERY_NAMES_V2``). Any other literal name,
 # or inline query syntax that cannot be read unambiguously, is refused
 # value-free with this cause (never echoing the submitted name or value).
 FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED = "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED"

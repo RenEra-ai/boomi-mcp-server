@@ -1384,7 +1384,7 @@ def judge_recipe_rest_targets(
         return ()
     from ..categories.integration_builder import _bound_existing_id
     from ..connector_replay.digests import connection_base_url
-    from ..recipes.builtins.fanout import REUSED_TARGET_STORED_BASE, judge_reused_request_target
+    from ..recipes.component_material import REUSED_TARGET_STORED_BASE, judge_reused_request_target
 
     by_key = {component.key: component for component in components}
     unwritten = _unwritten_connection_keys(components, conflict_policy, existing_ids)
