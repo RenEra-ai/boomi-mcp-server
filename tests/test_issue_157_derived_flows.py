@@ -741,6 +741,15 @@ def test_the_dlq_target_follows_its_pointer_never_a_try_catch(cases):
     assert with_dlq[3].target == "dlq" and retry_only[3].target is None
     no_row = _linear_project(components, root, facts.model_copy(update={"reliability": None})).flows
     assert [r.key for r in no_row] == ["extract", "transform", "send"]
+    # the legacy DLQ is an EXISTING cache: a literal id the root writes verbatim
+    literal = "<<dlq document cache component id>>"
+    literal_root = json.loads(json.dumps(root).replace("$ref:dlq_cache", literal))
+    literal_facts = facts.model_copy(update={"reliability": LinearReliabilityFactV1(dlq_component_key=literal)})
+    without_cache = [c for c in components if c["key"] != "dlq_cache"]
+    served = _linear_project(without_cache, literal_root, literal_facts).flows
+    assert [r.key for r in served] == [r.key for r in with_dlq] and served[3].target == "dlq"
+    # ...and a literal the root never writes is no DLQ at all
+    assert [r.key for r in _linear_project(without_cache, root, literal_facts).flows] == ["transform"]
 
 
 def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):

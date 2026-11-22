@@ -1110,6 +1110,23 @@ def _root_references(nodes: Sequence[Any], key: str) -> bool:
     return False
 
 
+def _dlq_is_wired(nodes: Sequence[Any], by_key: Mapping[str, Any], dlq: str) -> bool:
+    """Whether the root writes the DLQ the facts name.
+
+    Either form a ``ComponentRefV1`` takes: a plan component referenced as
+    ``$ref:<key>`` (the key must resolve), or an EXISTING component referenced
+    by its literal id (the legacy DB->REST DLQ is an existing document cache
+    the producer never emitted) — the root must carry that literal verbatim.
+    """
+    if dlq in by_key and _root_references(nodes, dlq):
+        return True
+    for node in nodes:
+        for name in type(node).model_fields:
+            if getattr(node, name, None) == dlq:
+                return True
+    return False
+
+
 def write_profile_summary(config: Mapping[str, Any]) -> Dict[str, Any]:
     """The served DB write-profile summary, read off the write profile's config.
 
@@ -1364,7 +1381,7 @@ def _linear_route_projection(
     ]
     if facts.reliability is not None:
         dlq_key = facts.reliability.dlq_component_key
-        if dlq_key is not None and (dlq_key not in by_key or not _root_references(nodes, dlq_key)):
+        if dlq_key is not None and not _dlq_is_wired(nodes, by_key, dlq_key):
             return None
         rows.append(
             DerivedReliabilityFlowV1(

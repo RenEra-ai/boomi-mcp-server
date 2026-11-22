@@ -718,11 +718,19 @@ def test_mutant_endpoint_corruptions_fail_on_the_final_path(cases):
     assert _refused(discharge_endpoints(case, clean, {}, final=True), "still pending")
 
 
-def test_the_completed_cases_complete_both_oracles(replay):
+def test_the_completed_cases_complete_both_oracles(cases, replay):
     """A case is completed on its flows exactly when it is on its endpoints —
-    a lane whose endpoint projection lags its rows is not completed."""
+    a lane whose endpoint projection lags its rows is not completed — and
+    every case whose canonical fixture is a RECIPE invocation IS completed: a
+    recipe whose facts fail to resolve falls back to transform-only, which the
+    partial rule alone would accept until the final switch."""
     for case_id, (flows, endpoints) in replay.items():
         assert flows.completed == endpoints.completed, (case_id, flows.problems, endpoints.problems)
+    recipe_cases = {
+        case_id for case_id, case in cases.items()
+        if ((case.input_canonical or {}).get("intent") or {}).get("intent_kind") == "recipe"
+    }
+    assert recipe_cases and recipe_cases <= _completed(replay), sorted(recipe_cases - _completed(replay))
     assert {c for c in _completed(replay) if c.startswith("composition/")} == {
         c for c in replay if c.startswith("composition/")
     }

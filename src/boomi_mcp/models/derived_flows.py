@@ -598,11 +598,13 @@ class LinearTransformFactV1(_DerivedFlowModel):
 class LinearReliabilityFactV1(_DerivedFlowModel):
     """The route reports a reliability row (the DB→REST preset does, always).
 
-    ``dlq_component_key`` points at the DLQ component (the document cache the
-    catch path writes). The row's ``target`` is ``dlq`` only when that key
-    resolves to a plan component AND the root references it; None — retry
-    only, or DLQ disabled — renders the canonical default row (``target``
-    null). A retry-only ``try_catch`` therefore never reports a DLQ.
+    ``dlq_component_key`` points at the DLQ the catch path writes, in either
+    form a ``ComponentRefV1`` takes: a plan component KEY (the root must then
+    reference ``$ref:<key>``) or the literal id of an EXISTING component (the
+    root must carry that literal verbatim, e.g. as a ``cache_put.cache_ref``).
+    The row's ``target`` is ``dlq`` only then; None — retry only, or DLQ
+    disabled — renders the canonical default row (``target`` null). A
+    retry-only ``try_catch`` therefore never reports a DLQ.
     """
 
     dlq_component_key: Optional[NonEmptyString] = None
