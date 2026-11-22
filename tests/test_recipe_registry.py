@@ -5392,7 +5392,6 @@ def _example(example_id="sync.basic", **overrides):
 
 
 def _flagship_material_example(**overrides):
-    sys.path.insert(0, str(_project_root / "tests"))
     from _fanout_v2_support import flagship_v2
     from boomi_mcp.recipes.contracts import RecipeExampleV1
 
