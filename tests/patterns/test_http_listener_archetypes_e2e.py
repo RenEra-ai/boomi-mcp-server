@@ -721,6 +721,36 @@ class TestTypedListenerPresets:
             (_DB_RECIPE, _PRESET_VERSION),
             (_REST_RECIPE, _PRESET_VERSION),
         }
+        plan = acct.case_plan_result(case)
+        edges = {(edge.component_key, edge.depends_on) for edge in plan.component_dependencies}
+        # The API Service is materialized AFTER the process its route names.
+        assert (("api_service", "main_process") in edges) is case_id.endswith("advanced_runtime")
+        # The two DB cases reuse their connection BY NAME (the frozen input's
+        # selector, which the endpoint row serves). Offline, no account answers
+        # that name, so the one step the plan cannot execute is that reuse —
+        # exactly as the legacy route's own plan of the same input (asserted
+        # below). Nothing else may block.
+        blocked = {(d.path, tuple(d.cause_codes)) for d in plan.errors}
+        if case_id.startswith("http_listener_to_db/"):
+            assert blocked == {("/components/target_db_connection", ("error_missing_target",))}
+            legacy = _legacy_spec(case_id).model_dump(mode="json")
+            legacy_plan = build_integration_action(
+                MagicMock(), _PROFILE, "plan", {"integration_spec": legacy, "conflict_policy": "reuse"}
+            )
+            legacy_steps = {step["key"]: step for step in legacy_plan["steps"]}
+            assert str(legacy_steps["target_db_connection"].get("planned_action", "")).startswith("error")
+        else:
+            assert blocked == set() and plan.validation_report.is_valid
+            from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+            from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+            with patch(acct._GET_XML, acct.replay_component_get_xml()):
+                compiled, _internals = compile_authoring_request_v1(
+                    AuthoringRequestV1.model_validate(case.input_canonical),
+                    boomi_client=MagicMock(),
+                    profile="issue-157-replay",
+                )
+            assert compiled.validation_report.is_valid
         flows = acct.derive_case_projection(case)
         endpoints = acct.derive_case_endpoints(case)
         assert [acct._digest(row) for row in flows] == [row["payload_sha256"] for row in case.flow_rows]
@@ -910,13 +940,9 @@ class TestTypedListenerPresets:
         ),
     }
 
-    @pytest.mark.parametrize("name", sorted(_REFUSALS))
-    def test_a_refusal_is_typed_value_free_and_precedes_assembly(self, name, monkeypatch):
+    def test_every_refusal_is_typed_value_free_and_precedes_assembly(self, monkeypatch):
         from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
-        case_id, mutate, pointer, cause = self._REFUSALS[name]
-        invocation = _copy.deepcopy(_invocation(case_id))
-        mutate(invocation["raw_input"], invocation["component_material"])
         built = []
         real_init = IntegrationComponentSpec.__init__
 
@@ -925,13 +951,22 @@ class TestTypedListenerPresets:
             real_init(self, *args, **kwargs)
 
         monkeypatch.setattr(IntegrationComponentSpec, "__init__", spy)
-        with pytest.raises(RecipeError) as caught:
-            _prepare(invocation)
-        (diagnostic,) = caught.value.diagnostics
-        assert diagnostic.path == pointer
-        assert cause in diagnostic.cause_codes
-        assert "plaintext-5ecret-7a1c" not in repr(caught.value)
-        assert built == []
+        # Control: each unmutated case DOES assemble (the spy sees it).
+        for case_id in _LISTENER_CASES:
+            del built[:]
+            _prepare(_invocation(case_id))
+            assert built, case_id
+        for name, (case_id, mutate, pointer, cause) in sorted(self._REFUSALS.items()):
+            invocation = _copy.deepcopy(_invocation(case_id))
+            mutate(invocation["raw_input"], invocation["component_material"])
+            del built[:]
+            with pytest.raises(RecipeError) as caught:
+                _prepare(invocation)
+            (diagnostic,) = caught.value.diagnostics
+            assert diagnostic.path == pointer, name
+            assert cause in diagnostic.cause_codes, name
+            assert "plaintext-5ecret-7a1c" not in repr(caught.value), name
+            assert built == [], name
 
     def test_the_root_is_a_listener_entry_and_publishing_requires_the_api_service(self):
         """The executor's root is listener -> map -> target -> stop; inbound

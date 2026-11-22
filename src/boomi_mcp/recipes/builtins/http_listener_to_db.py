@@ -127,16 +127,12 @@ def _listener_rt():
     from ...categories.components.builders.json_profile_builder import (
         JSONGeneratedProfileBuilder,
     )
-    from ...categories.deployment.orchestration import LISTENER_ASC_ROUTE_UNCALLABLE
-    from ...patterns.primitives import _helpers as helpers
     from ...patterns.primitives import wss_listen
 
     return SimpleNamespace(
         api_service_http_method=api_service_http_method,
         route_refuses_its_input=route_refuses_its_input,
         JSONGeneratedProfileBuilder=JSONGeneratedProfileBuilder,
-        LISTENER_ASC_ROUTE_UNCALLABLE=LISTENER_ASC_ROUTE_UNCALLABLE,
-        ROLE_WSS_LISTENER_OPERATION=helpers.ROLE_WSS_LISTENER_OPERATION,
         WssListenParameters=wss_listen.WssListenParameters,
         WssListenPrimitive=wss_listen.WssListenPrimitive,
     )
@@ -362,13 +358,19 @@ class ListenerKeysV1:
     api_service: Optional[str]
 
 
+def _wss_listen_role() -> str:
+    """The Listen operation's role key, read from the primitives' role table
+    (imported at call time, like every primitive authority)."""
+    from ...patterns.primitives._helpers import ROLE_WSS_LISTENER_OPERATION
+
+    return ROLE_WSS_LISTENER_OPERATION
+
+
 def listener_keys(inp: Any) -> ListenerKeysV1:
     rt = _rt()
     return ListenerKeysV1(
         request_profile=LISTENER_REQUEST_PROFILE_KEY,
-        listen_operation=rt.primitive_component_key(
-            rt.SOURCE_PREFIX, _listener_rt().ROLE_WSS_LISTENER_OPERATION
-        ),
+        listen_operation=rt.primitive_component_key(rt.SOURCE_PREFIX, _wss_listen_role()),
         transform_map=rt.primitive_component_key(rt.TRANSFORM_PREFIX, rt.ROLE_TRANSFORM_MAP),
         api_service=API_SERVICE_KEY if inp.listener.publish_mode == "api_service" else None,
     )
@@ -466,7 +468,11 @@ def check_api_service_route(inp: Any, material: Any) -> None:
             if service.http_method
             else "/component_material/listener/operation_type"
         )
-        raise _refusal(lrt.LISTENER_ASC_ROUTE_UNCALLABLE, pointer, phase="input")
+        # The cause orchestrate_deploy refuses the same route with, read from
+        # it (imported only on this refusal path).
+        from ...categories.deployment.orchestration import LISTENER_ASC_ROUTE_UNCALLABLE
+
+        raise _refusal(LISTENER_ASC_ROUTE_UNCALLABLE, pointer, phase="input")
 
 
 def emit_listener_request_profile(
