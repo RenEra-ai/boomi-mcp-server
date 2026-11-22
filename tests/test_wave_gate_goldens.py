@@ -256,6 +256,58 @@ def test_the_connection_override_survivor_tracks_its_typed_binding(mutate, expec
         assert len(overrides) == 1, emitted
 
 
+# ---------------------------------------------------------------------------
+# #159 S2 — the migrated recipe renderers' frozen inputs are checked, not asserted
+# ---------------------------------------------------------------------------
+
+_SPEC_COMPONENT_FIELDS = ("key", "type", "action", "name", "config", "depends_on", "component_id")
+
+
+@pytest.mark.parametrize("name", sorted(corpus.RECIPE_GOLDEN_ARMS))
+def test_a_migrated_recipe_golden_plans_the_frozen_spec_it_was_captured_against(name):
+    """``process-xml-v1`` bytes carry only ``id-<key>`` references and labels, so
+    byte parity alone would accept almost any invocation material. This pins the
+    rest of what the migrated request plans — every supporting component and the
+    process envelope — to the frozen ``recipe_parity`` spec the golden was
+    captured with. The one difference allowed is fan-out 2.0.0's single
+    re-spelling (a create-mode DB ``credential_ref`` under ``credential://``),
+    applied to the expected side.
+    """
+    import json as _json
+
+    from _fanout_v2_support import respell_oracle_credential_refs
+
+    spec = _json.loads(
+        (_ROOT / "tests" / "fixtures" / "recipe_parity" / (name + ".json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    unit, _symbols, internals = corpus.plan_recipe_golden_request(
+        corpus.recipe_golden_request(name)
+    )
+
+    planned = [
+        {field: c.model_dump(mode="json")[field] for field in _SPEC_COMPONENT_FIELDS}
+        for c in internals.normalized.integration_spec.components
+    ]
+    expected = [
+        {field: c[field] for field in _SPEC_COMPONENT_FIELDS}
+        for c in respell_oracle_credential_refs(spec["components"])
+        if c["type"] != "process"
+    ]
+    assert planned == expected
+
+    process = spec["components"][-1]
+    envelope = unit.envelope
+    assert envelope.component_key == process["key"]
+    assert envelope.name == process["name"]
+    assert envelope.action == process["action"]
+    assert set(envelope.depends_on) == set(process["depends_on"])
+    assert envelope.process_extensions.model_dump(mode="json", exclude_none=True) == (
+        process["config"].get("process_extensions", {"connections": []})
+    )
+
+
 #: The container types every walker here descends, and the SINGLE authority for
 #: that set — the root collector below reads it too, so widening this constant
 #: widens the whole guard rather than three of its four sites. What falls
@@ -485,10 +537,11 @@ def test_no_case_factory_hands_module_state_to_a_helper_by_reference():
     passes it straight to a production builder would go unreported here, as
     would state that only BECOMES module state during the render (a memoising
     helper's cache). The consequence test still covers the case where such state
-    is actually mutated. Coverage: every active case except three contributes
-    at least one container-carrying corpus call; the three that do not are the
-    ``recipe:*`` cases, whose factories call no corpus function at all and parse
-    their inputs fresh from committed JSON. Closing the residue needs
+    is actually mutated. Coverage: until #159 S2 the three ``recipe:*`` cases
+    called no corpus function at all; they now build their typed requests in
+    corpus functions from copied module constants (``fanout_v2_golden_request``,
+    ``api_to_api_sync_golden_request``), so their inputs cross the boundary this
+    test watches. Closing the residue needs
     interception at the production boundary — a different mechanism, and an
     accepted limitation rather than tracked work.
     """
@@ -660,6 +713,74 @@ else:
 
 import _wave_gate_golden_corpus as corpus  # noqa: E402
 
+# #159 S2: the cases migrated off the retiring legacy producers render FIRST, and
+# no function defined in those producers may EXECUTE while they render. An import
+# block is not achievable before the S3 cutover: the production recipe registry
+# imports `patterns.archetypes`, `patterns.composition` and `patterns.recipe_bridge`
+# to hash their source (`recipes/registry.py::RECIPE_LAYER_MODULES`), so every
+# public-workflow route loads them without running them. Execution is the property
+# the migration changes, so execution is what is traced. Optional third argument
+# (a JSON list of case keys), so the disarmed control above keeps its two-argument
+# shape.
+legacy_free = {}
+legacy_calls = []
+legacy_control = "not_run"
+if len(sys.argv) > 3:
+    import importlib
+    import threading
+
+    _LEGACY_MODULES = (
+        "boomi_mcp.patterns.archetypes",
+        "boomi_mcp.patterns.composition",
+        "boomi_mcp.patterns.recipe_bridge",
+        "boomi_mcp.compiler.process_ir.legacy_adapters",
+    )
+    _legacy_roots = []
+    for _name in _LEGACY_MODULES:
+        _module = importlib.import_module(_name)
+        _origin = os.path.realpath(_module.__file__)
+        # A package covers its whole directory; a module covers its one file.
+        _legacy_roots.append(
+            os.path.dirname(_origin) + os.sep
+            if os.path.basename(_origin) == "__init__.py" else _origin
+        )
+    _legacy_roots = tuple(_legacy_roots)
+    _real = {}
+
+    def _is_legacy_code(filename):
+        real = _real.get(filename)
+        if real is None:
+            real = _real[filename] = os.path.realpath(filename)
+        return any(real == root or real.startswith(root) for root in _legacy_roots
+                   if root.endswith(os.sep)) or real in _legacy_roots
+
+    def _trace(frame, event, arg):
+        if event == "call" and frame.f_code.co_name != "<module>":
+            if _is_legacy_code(frame.f_code.co_filename):
+                legacy_calls.append("%s:%s" % (
+                    os.path.basename(frame.f_code.co_filename), frame.f_code.co_name))
+
+    # Warm the per-process authoring revisions first: they are computed once per
+    # process, outside any case, and are not part of what a renderer executes.
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    get_authoring_revisions()
+
+    threading.setprofile(_trace)
+    sys.setprofile(_trace)
+    try:
+        for key in json.loads(open(sys.argv[3], "rb").read().decode("utf-8")):
+            payload = corpus.render_golden_case(key, corpus.declared_renderer(key))
+            legacy_free[key] = hashlib.sha256(payload).hexdigest()
+        rendered_calls = sorted(set(legacy_calls))
+        # Non-vacuity: the tracer really sees a legacy producer function run.
+        from boomi_mcp.patterns.recipe_bridge import _slot_for
+        _slot_for("probe")
+        legacy_control = "seen" if any(c.endswith(":_slot_for") for c in legacy_calls) else "unseen"
+    finally:
+        sys.setprofile(None)
+        threading.setprofile(None)
+    legacy_calls[:] = rendered_calls
+
 rows = json.loads(open(sys.argv[2], "rb").read().decode("utf-8"))
 shas = {}
 for row in rows:
@@ -682,8 +803,24 @@ print(json.dumps({
     "shas": shas,
     "leaked_test_modules": leaked,
     "modules_loaded_from_tests": from_tests,
+    "legacy_free_shas": legacy_free,
+    "legacy_calls": legacy_calls,
+    "legacy_control": legacy_control,
 }))
 """
+
+#: #159 S2: the cases whose renderers execute no retiring legacy producer
+#: (recipe bridge, archetypes, composition, legacy adapters), with their expected
+#: files. The survivor is listed by its file because its manifest row is appended
+#: by the integrator; the three ``recipe:*`` rows are byte-compared by the manifest.
+_LEGACY_FREE_CASES = {
+    "recipe:api_to_api_sync_0": "api_to_api_sync_fetch_map_send.xml",
+    "recipe:compose_all_cache": "composed_db_to_api_cache_fanout.xml",
+    "recipe:compose_stream": "composed_db_to_api_fanout.xml",
+    "trycatch_dlq:notify_document_cache_connection_override": (
+        "issue159_cache_notify_connection_override.xml"
+    ),
+}
 
 
 def test_the_import_blocker_witness_fails_when_the_blocker_is_disarmed(tmp_path):
@@ -744,13 +881,16 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     ]
     request_path = tmp_path / "request.json"
     request_path.write_text(_json.dumps(request), encoding="utf-8")
+    legacy_free_path = tmp_path / "legacy_free.json"
+    legacy_free_path.write_text(_json.dumps(sorted(_LEGACY_FREE_CASES)), encoding="utf-8")
     child_path = tmp_path / "render_without_test_modules.py"
     child_path.write_text(_UNIMPORTABLE_CHILD, encoding="utf-8")
 
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     proc = subprocess.run(
-        [sys.executable, str(child_path), str(_ROOT / "tests"), str(request_path)],
+        [sys.executable, str(child_path), str(_ROOT / "tests"), str(request_path),
+         str(legacy_free_path)],
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
@@ -804,6 +944,18 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     # by resolved FILE, so a file-path import under a non-`test_` name cannot
     # hide a dependency on a module #159/#160 will delete. The corpus itself is
     # the one legitimate resident of tests/.
+    # #159 S2: the migrated recipe renderers and the ConnectionOverride survivor
+    # rendered to their frozen bytes FIRST, and no function of a retiring legacy
+    # producer (recipe bridge, archetypes, composition, legacy adapters) executed
+    # while they did; the tracer really sees such a call (non-vacuity).
+    assert report["legacy_control"] == "seen", report["legacy_control"]
+    assert report["legacy_calls"] == [], report["legacy_calls"]
+    golden_dir = _ROOT / "tests" / "fixtures" / "golden_xml"
+    assert report["legacy_free_shas"] == {
+        key: hashlib.sha256((golden_dir / name).read_bytes()).hexdigest()
+        for key, name in _LEGACY_FREE_CASES.items()
+    }
+
     assert report["leaked_test_modules"] == [], report["leaked_test_modules"]
     assert report["modules_loaded_from_tests"] == ["_wave_gate_golden_corpus"], (
         report["modules_loaded_from_tests"]
