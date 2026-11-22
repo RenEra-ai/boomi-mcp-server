@@ -550,6 +550,7 @@ from boomi_mcp.recipes.builtins.sync import (  # noqa: E402
 from boomi_mcp.recipes.contracts import RecipeRegistrationV1  # noqa: E402
 from boomi_mcp.recipes.errors import RecipeError  # noqa: E402
 from boomi_mcp.recipes.registry import build_test_registry  # noqa: E402
+from pydantic import ValidationError as _ValidationError  # noqa: E402
 
 _V1 = "1.0.0"
 _CASES_DIR = _TESTS_DIR / "fixtures" / "governance" / "issue_157" / "cases" / "api_to_database_sync"
@@ -948,6 +949,10 @@ class TestRecipeV1Refusals:
             real_init(self, *args, **kwargs)
 
         monkeypatch.setattr(IntegrationComponentSpec, "__init__", spying_init)
+        # Control: the unmutated material DOES assemble (the spy sees it).
+        _v1_prepared(*_mutated(lambda raw, mat: None))
+        assert built
+        del built[:]
         error = _refused(raw_input, material)
         assert built == []
         (diagnostic,) = error.diagnostics
@@ -959,7 +964,7 @@ class TestRecipeV1Refusals:
     def test_v1_create_target_requires_its_auth_mode(self):
         raw_input, _material = _v1_split(_legacy_parameters("create"))
         raw_input["target"] = {"binding_mode": "create"}
-        with pytest.raises(Exception):
+        with pytest.raises(_ValidationError):
             ApiToDatabaseSyncInputV1.model_validate(raw_input)
 
     def test_v1_legacy_only_fetch_options_are_not_accepted(self):
@@ -971,8 +976,46 @@ class TestRecipeV1Refusals:
         ):
             bad = copy.deepcopy(material)
             bad["source"]["request"][option] = value
-            with pytest.raises(Exception):
+            with pytest.raises(_ValidationError):
                 ApiToDatabaseSyncMaterialV1.model_validate(bad)
+
+    def test_v1_base_key_bindings_emit_no_connection_and_bind_by_key(self):
+        """Both sides selected by base key: no connection is generated, the
+        fetch and Send operations bind to the base keys, and both bases are
+        selected exactly once."""
+        from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+        bases = {
+            "shared_rest": IntegrationComponentSpec(
+                key="shared_rest",
+                type="connector-settings",
+                name="Shared REST",
+                component_id="rest-id",
+                config={"reference_only": True, "connector_type": "rest", "component_id": "rest-id"},
+            ),
+            "shared_db": IntegrationComponentSpec(
+                key="shared_db",
+                type="connector-settings",
+                name="Shared DB",
+                component_id="db-id",
+                config={"reference_only": True, "connector_type": "database", "component_id": "db-id"},
+            ),
+        }
+        raw_input, material = _v1_split(_legacy_parameters("create"))
+        raw_input["source"] = {"binding_mode": "reuse", "connection_key": "shared_rest"}
+        raw_input["target"] = {"binding_mode": "reuse", "connection_key": "shared_db"}
+        material["source"].pop("connection")
+        material["target"].pop("connection")
+        prepared = _v1_prepared(raw_input, material, bases)
+        by_key = {c.key: c for c in prepared.supporting_components}
+        assert "source_rest_source_connection" not in by_key
+        assert "target_db_connection" not in by_key
+        assert by_key["source_rest_source_operation"].config["connection_ref_key"] == "shared_rest"
+        assert by_key["target_db_write_operation"].config["connection_ref_key"] == "shared_db"
+        assert prepared.selected_base_keys == ("shared_rest", "shared_db")
+        assert prepared.rest_request_targets[0][0] == "shared_rest"
+        unit = emit_api_to_database_sync_v1(ApiToDatabaseSyncInputV1.model_validate(raw_input))[0].unit
+        assert {"shared_rest", "shared_db"} <= set(unit.envelope.depends_on)
 
     def test_v1_canary_seed_assembles_and_breaches_are_refused(self):
         raw_input, material = canary_api_to_database_sync_v1()
