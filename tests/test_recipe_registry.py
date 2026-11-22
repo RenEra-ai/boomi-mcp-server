@@ -1123,9 +1123,11 @@ def test_every_production_input_model_forbids_extras():
         )  # must not raise
         checked += 1
     # A census pin: a new input model must come with a deliberate update here.
-    # Five since #159 S1 (fan-out 2.0.0 beside 1.0.0), plus ONE component-material
-    # model, which must pass the same gates as an input model.
-    assert checked == 5
+    # Five since #159 S1 (fan-out 2.0.0 beside 1.0.0); ten since #159 S2 (the
+    # typed API->DB 1.0.0, DB->API, the two listeners and the stub), plus one
+    # component-material model per material registration, each of which must
+    # pass the same gates as an input model.
+    assert checked == 10
     materials = [
         registration.component_material_model
         for registration in PRODUCTION_REGISTRATIONS
@@ -1134,7 +1136,7 @@ def test_every_production_input_model_forbids_extras():
     for model in materials:
         registry_module._check_input_schema_closed("material", model)
         registry_module._check_input_model_forbids_extras("material", model)
-    assert len(materials) == 1
+    assert len(materials) == 5
 
 
 @pytest.mark.parametrize("lie", ["post_hoc_edit", "replaced_config", "lying_get"])
@@ -2741,13 +2743,13 @@ def test_a_source_revision_alone_is_enough_for_a_real_match():
 def test_an_empty_entries_list_is_a_mismatch_not_unknown():
     """An empty entries list ASSERTS "this registry has no recipes".
 
-    That is a claim, not an absent one — so the live registry's eight entries are
-    a real difference, reported with ``live_only``. ``unknown`` is for a
+    That is a claim, not an absent one — so the live registry's twelve recipe
+    ids are a real difference, reported with ``live_only``. ``unknown`` is for a
     comparison that could not establish parity, not for one whose answer is no.
     """
     skew = production_registry().compare(ExpectedRecipeRegistryV1())
     assert skew.status == "mismatch"
-    assert len(skew.live_only) == 8
+    assert len(skew.live_only) == 12
     assert skew.missing_from_live == ()
 
 
@@ -3046,6 +3048,10 @@ def test_every_published_entry_pins_some_code():
         "boomi_mcp.recipes.builtins.catalog",
         "boomi_mcp.recipes.builtins.sync",
         "boomi_mcp.recipes.builtins.fanout",
+        "boomi_mcp.recipes.builtins.database_to_api_sync",
+        "boomi_mcp.recipes.builtins.http_listener_to_db",
+        "boomi_mcp.recipes.builtins.http_listener_to_rest",
+        "boomi_mcp.recipes.builtins.stub_minimal",
     ):
         target = importlib.import_module(module_name)
         real_getsource = inspect_module.getsource
@@ -5396,7 +5402,11 @@ def test_component_preparation_is_served_only_for_the_declaring_registration():
         if registry.component_preparation_for(descriptor) is not None
     ]
     assert [(d.recipe_id, d.recipe_version) for d in declaring] == [
-        ("boomi.compose.db_rest_fanout", "2.0.0")
+        ("boomi.archetype.api_to_database_sync", "1.0.0"),
+        ("boomi.archetype.database_to_api_sync", "1.0.0"),
+        ("boomi.archetype.http_listener_to_db", "1.0.0"),
+        ("boomi.archetype.http_listener_to_rest", "1.0.0"),
+        ("boomi.compose.db_rest_fanout", "2.0.0"),
     ]
 
 

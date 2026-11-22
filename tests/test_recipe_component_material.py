@@ -1035,7 +1035,103 @@ _RULE_BREACHES = {
 #: Per material ROOT: ``() -> (raw input, material)`` whose material carries an
 #: instance of every model with a secret-classified field. A material
 #: registration without a seed fails the canary (no silent skip).
-_CANARY_SEEDS = {FanoutComponentMaterialV2: canary_v2}
+_MATRIX_SEEDS = _TESTS / "fixtures" / "recipe_matrix_seeds"
+
+
+def _matrix_seed(name):
+    """``(raw_input, material)`` of one committed matrix seed (its provenance is
+    recorded in the seed file itself)."""
+    request = json.loads((_MATRIX_SEEDS / name).read_text(encoding="utf-8"))["request"]
+    return copy.deepcopy(request["raw_input"]), copy.deepcopy(request["component_material"])
+
+
+_CANARY_DB_CREATE = {
+    "mode": "create",
+    "driver": "microsoft_jdbc",
+    "host": "db.example.invalid",
+    "database": "AppDB",
+    "username": "svc_sync",
+    "credential_ref": "credential://secrets/db/svc_sync",
+}
+_CANARY_LITERAL_QUERY = [{"name": "limit", "value_source": "literal", "literal_value": "50"}]
+#: A one-leaf JSON root ``Root/id`` (the L2 lane's canary profile).
+_CANARY_PROFILE = {
+    "format": "json",
+    "root": {"name": "Root", "kind": "object", "children": [
+        {"name": "id", "kind": "simple", "data_type": "character"}
+    ]},
+}
+
+
+def canary_db_to_api_v1():
+    """DB->API 1.0.0: the matrix seed (both sides created) plus a LITERAL query
+    parameter, so the REST target's name and value are reached too."""
+    raw, material = _matrix_seed("boomi.archetype.database_to_api_sync@1.0.0.json")
+    material["source"]["read"]["sql"] = "SELECT source_field_a FROM orders"
+    material["target"]["operation"]["query_parameters"] = copy.deepcopy(_CANARY_LITERAL_QUERY)
+    return raw, material
+
+
+def canary_api_to_database_sync_v1():
+    """API->DB 1.0.0: the matrix seed with a LITERAL fetch query parameter and a
+    CREATED database target (the L3 lane's canary)."""
+    raw, material = _matrix_seed("boomi.archetype.api_to_database_sync@1.0.0.json")
+    raw["target"] = {"binding_mode": "create", "auth_mode": "username_password"}
+    material["source"]["request"]["query_parameters"] = copy.deepcopy(_CANARY_LITERAL_QUERY)
+    material["target"]["connection"] = dict(_CANARY_DB_CREATE)
+    material["target"]["write_profile"]["table_name"] = "customers"
+    return raw, material
+
+
+def canary_listener_to_db():
+    """Listener->DB 1.0.0 with a CREATED database target (the L2 lane's canary)."""
+    return (
+        {"version": "1", "naming": {"component_prefix": "CANARY"},
+         "target": {"binding_mode": "create", "auth_mode": "username_password"}},
+        {"version": "1",
+         "listener": {"object_name": "canaryIntake", "request_profile": copy.deepcopy(_CANARY_PROFILE)},
+         "transform": {"operations": [
+             {"operation_type": "direct", "source_field": "Root/id", "target_path": "Fields/id"}]},
+         "target": {"connection": {"mode": "create", "driver": "microsoft_jdbc", "host": "db.example.invalid",
+                                   "database": "AppDB", "username": "svc",
+                                   "credential_ref": "credential://secrets/db/svc"},
+                    "write_profile": {"statement_type": "dynamicinsert", "table_name": "orders",
+                                      "fields": [{"name": "id", "data_type": "character", "mandatory": True}]}}},
+    )
+
+
+def canary_listener_to_rest():
+    """Listener->REST 1.0.0 with a CREATED target and a LITERAL query parameter
+    (the L2 lane's canary)."""
+    return (
+        {"version": "1", "naming": {"component_prefix": "CANARY"}, "target": {"binding_mode": "create"}},
+        {"version": "1",
+         "listener": {"object_name": "canaryRelay", "request_profile": copy.deepcopy(_CANARY_PROFILE)},
+         "transform": {"operations": [
+             {"operation_type": "direct", "source_field": "Root/id", "target_path": "Root/id"}]},
+         "target": {"connection": {"mode": "create", "base_url": "https://api.example.invalid"},
+                    "operation": {"path": "/v1/items", "query_parameters": [
+                        {"name": "limit", "value_source": "literal", "literal_value": "10"}]},
+                    "payload_profile": copy.deepcopy(_CANARY_PROFILE)}},
+    )
+
+
+def _canary_seeds():
+    from boomi_mcp.recipes.builtins.database_to_api_sync import DatabaseToApiSyncMaterialV1
+    from boomi_mcp.recipes.builtins.http_listener_to_db import HttpListenerToDbMaterialV1
+    from boomi_mcp.recipes.builtins.http_listener_to_rest import HttpListenerToRestMaterialV1
+    from boomi_mcp.recipes.builtins.sync import ApiToDatabaseSyncMaterialV1
+
+    return {
+        FanoutComponentMaterialV2: canary_v2,
+        DatabaseToApiSyncMaterialV1: canary_db_to_api_v1,
+        ApiToDatabaseSyncMaterialV1: canary_api_to_database_sync_v1,
+        HttpListenerToDbMaterialV1: canary_listener_to_db,
+        HttpListenerToRestMaterialV1: canary_listener_to_rest,
+    }
+
+
+_CANARY_SEEDS = _canary_seeds()
 
 
 def _field_occurrences(node, pointer=()):
@@ -1095,10 +1191,15 @@ def test_every_material_registration_refuses_each_secret_field_before_assembly(m
     for registration in _material_registrations():
         root = registration.component_material_model
         assert root in _CANARY_SEEDS, root  # a new material root needs a seed here
+        # The walker's table is the shared table UNIONED with the root's own: a
+        # shared block the root never reaches (e.g. the DB write block, for
+        # fan-out) cannot be planted, so only the fields REACHABLE from this
+        # root are owed.
+        reachable = _reachable_material_fields(root)
         secret = {
             key: rule
             for key, rule in component_material.material_field_classes(root).items()
-            if rule
+            if rule and key in reachable
         }
         assert secret  # non-vacuous: the tables mark at least one field
         raw, seed = _CANARY_SEEDS[root]()
