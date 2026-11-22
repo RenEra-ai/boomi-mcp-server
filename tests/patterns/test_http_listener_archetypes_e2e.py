@@ -730,27 +730,38 @@ class TestTypedListenerPresets:
         # that name, so the one step the plan cannot execute is that reuse —
         # exactly as the legacy route's own plan of the same input (asserted
         # below). Nothing else may block.
-        blocked = {(d.path, tuple(d.cause_codes)) for d in plan.errors}
-        if case_id.startswith("http_listener_to_db/"):
-            assert blocked == {("/components/target_db_connection", ("error_missing_target",))}
-            legacy = _legacy_spec(case_id).model_dump(mode="json")
-            legacy_plan = build_integration_action(
-                MagicMock(), _PROFILE, "plan", {"integration_spec": legacy, "conflict_policy": "reuse"}
-            )
-            legacy_steps = {step["key"]: step for step in legacy_plan["steps"]}
-            assert str(legacy_steps["target_db_connection"].get("planned_action", "")).startswith("error")
-        else:
-            assert blocked == set() and plan.validation_report.is_valid
-            from boomi_mcp.authoring.workflow import compile_authoring_request_v1
-            from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+        # Unconditional on purpose (the apply-boundary witness sweep refuses an
+        # assertion behind a branch): each case's EXPECTED outcome is computed,
+        # then every assertion runs for every case.
+        from boomi_mcp.authoring.workflow import AuthoringWorkflowError, compile_authoring_request_v1
+        from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
-            with patch(acct._GET_XML, acct.replay_component_get_xml()):
+        name_bound = case_id.startswith("http_listener_to_db/")
+        blocked = {(d.path, tuple(d.cause_codes)) for d in plan.errors}
+        assert blocked == (
+            {("/components/target_db_connection", ("error_missing_target",))} if name_bound else set()
+        )
+        assert plan.validation_report.is_valid is (not name_bound)
+        legacy = _legacy_spec(case_id).model_dump(mode="json")
+        legacy_plan = build_integration_action(
+            MagicMock(), _PROFILE, "plan", {"integration_spec": legacy, "conflict_policy": "reuse"}
+        )
+        legacy_blocked = {
+            step["key"] for step in legacy_plan["steps"]
+            if str(step.get("planned_action", "")).startswith("error")
+        }
+        assert legacy_blocked == ({"target_db_connection"} if name_bound else set())
+        with patch(acct._GET_XML, acct.replay_component_get_xml()):
+            try:
                 compiled, _internals = compile_authoring_request_v1(
                     AuthoringRequestV1.model_validate(case.input_canonical),
                     boomi_client=MagicMock(),
                     profile="issue-157-replay",
                 )
-            assert compiled.validation_report.is_valid
+                outcome = (bool(compiled.validation_report.is_valid), None)
+            except AuthoringWorkflowError as exc:
+                outcome = (False, exc.code)
+        assert outcome == ((False, "AUTHORING_COMPILE_BLOCKED") if name_bound else (True, None))
         flows = acct.derive_case_projection(case)
         endpoints = acct.derive_case_endpoints(case)
         assert [acct._digest(row) for row in flows] == [row["payload_sha256"] for row in case.flow_rows]
