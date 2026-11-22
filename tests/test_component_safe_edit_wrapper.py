@@ -184,3 +184,75 @@ def test_prepare_passes_parsed_patch_and_returns_token(monkeypatch):
     assert payload["confirmation_token"] == "TKN"
     assert seen["patch_data"] == {"config": {"name": "x"}}
     assert seen["max_diff_lines"] == 200
+
+
+# ---------------------------------------------------------------------------
+# #159 S3: the canonical process update arm through the REGISTERED tools
+# ---------------------------------------------------------------------------
+
+_tests_dir = str(Path(__file__).resolve().parent)
+if _tests_dir not in sys.path:
+    sys.path.insert(0, _tests_dir)
+
+
+def public_safe_edit(monkeypatch, account, patch, component_id):
+    """prepare_component_edit then apply_component_edit, through ``server.mcp``.
+
+    Only the account transport is faked: ``server.Boomi`` constructs ``account``
+    (its component API answers reads and records writes); credentials are stubbed
+    so the tool reaches it. Returns ``(prepared, pushes_after_prepare, applied)``.
+    """
+    monkeypatch.setattr(server, "get_current_user", lambda: "tester")
+    monkeypatch.setattr(server, "get_secret", lambda *a, **k: {
+        "account_id": account.account_id, "username": "u", "password": "pw",
+    })
+    monkeypatch.setattr(server, "Boomi", lambda **kw: account)
+    prepared = _payload(_run_async(server.mcp.call_tool(
+        "prepare_component_edit",
+        {"profile": "p", "component_id": component_id, "patch": json.dumps(patch)},
+    )))
+    pushes_after_prepare = list(account.component.pushed)
+    if not prepared.get("_success"):
+        return prepared, pushes_after_prepare, None
+    applied = _payload(_run_async(server.mcp.call_tool(
+        "apply_component_edit",
+        {"profile": "p", "component_id": component_id, "patch": json.dumps(patch),
+         "confirmation_token": prepared["confirmation_token"], "confirm_apply": True},
+    )))
+    return prepared, pushes_after_prepare, applied
+
+
+def test_the_public_safe_edit_applies_a_canonical_source_bound_update(monkeypatch):
+    """The source-only canonical spelling (golden-000080's), bound to existing
+    operations, end to end through the registered tools: zero writes on prepare, one
+    update of the named process, the frozen golden's shapes, preservation intact."""
+    from test_component_safe_edit import (
+        CANONICAL_PROCESS_ID,
+        CanonicalAccount,
+        assert_live_process_preserved,
+        canonical_account_store,
+        canonical_patch,
+        shapes_without_layout,
+    )
+
+    account = CanonicalAccount(canonical_account_store())
+    prepared, pushes_after_prepare, applied = public_safe_edit(
+        monkeypatch, account, canonical_patch(), CANONICAL_PROCESS_ID
+    )
+    assert prepared["_success"] is True, prepared
+    assert prepared["boomi_mutation"] is False and pushes_after_prepare == []
+    assert applied["_success"] is True, applied
+    assert [cid for cid, _ in account.component.pushed] == [CANONICAL_PROCESS_ID]
+    pushed = account.component.pushed[0][1]
+    golden = (Path(_tests_dir) / "fixtures/golden_xml/issue184_source_dynamic_path_dpp.xml").read_text(
+        encoding="utf-8"
+    )
+    assert shapes_without_layout(pushed) == shapes_without_layout(golden)
+    assert_live_process_preserved(pushed)
+
+
+def test_the_public_safe_edit_publishes_the_canonical_arm():
+    prep = _run_async(server.mcp.get_tool("prepare_component_edit"))
+    apply = _run_async(server.mcp.get_tool("apply_component_edit"))
+    assert "authoring_request" in (prep.description or "")
+    assert "authoring_request" in (apply.description or "")
