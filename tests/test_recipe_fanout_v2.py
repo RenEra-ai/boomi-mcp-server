@@ -3793,3 +3793,44 @@ def test_b24r_a_reused_maps_profiles_are_not_refreshed_before_writes(monkeypatch
     ids = [cid for cid, _d in calls]
     assert ids.count("22222222-2222-2222-2222-222222222222") == 2, calls  # built map's profile: plan + refresh
     assert ids.count("11111111-1111-1111-1111-111111111111") <= 1, calls  # only-reused-map profile: never refreshed
+
+
+def test_b25r_a_raw_xml_maps_profile_fields_trigger_no_pre_write_reads(monkeypatch):
+    """B25 review: the refresh set uses the dispatcher's own predicate
+    (`map_consults_profile_indexes`) — a raw-XML map is submitted as authored, so
+    neither its literal UUID nor its `$ref` profile field triggers a re-read."""
+    spec, stored = _b23_reused_profile_map_spec()
+    spec["components"].append(
+        {"key": "prof_raw_ref", "type": "profile.json", "name": "Stored JSON raw", "action": "create",
+         "component_id": "11111111-1111-1111-1111-111111111111", "config": {"reference_only": True}}
+    )
+    spec["components"].append(
+        {"key": "raw_map", "type": "transform.map", "name": "Raw map", "action": "create",
+         "depends_on": ["prof_raw_ref"],
+         "config": {"xml": "<Component type='transform.map'/>",
+                    "source_profile_id": "11111111-1111-1111-1111-111111111111",
+                    "target_profile_id": "$ref:prof_raw_ref"}}
+    )
+    built = next(c for c in spec["components"] if c["key"] == "the_map")
+    built["config"]["source_profile_id"] = "$ref:prof_tgt"
+    built["config"]["source_profile_type"] = "profile.xml"
+    built["config"]["field_mappings"] = [{"source_path": "Order/customer_code",
+                                          "target_path": "Order/customer_code"}]
+    calls, _ = _b23_apply_counting_reads(monkeypatch, spec, stored, sleep_s=0.0)
+    ids = [cid for cid, _d in calls]
+    assert ids.count("22222222-2222-2222-2222-222222222222") == 2, calls  # built map: plan + refresh
+    assert ids.count("11111111-1111-1111-1111-111111111111") <= 1, calls  # raw map's fields: never refreshed
+
+
+def test_b25r_the_dispatcher_and_the_refresh_share_one_map_predicate():
+    """B25 review: one authority — the dispatcher's gate IS the refresh's gate."""
+    import inspect
+
+    from boomi_mcp.categories import integration_builder
+
+    assert integration_builder.map_consults_profile_indexes("transform.map", {"map_type": "direct"})
+    assert not integration_builder.map_consults_profile_indexes("transform.map", {"xml": "<x/>"})
+    assert not integration_builder.map_consults_profile_indexes("profile.json", {})
+    assert "map_consults_profile_indexes(comp.type, payload)" in inspect.getsource(
+        integration_builder._execute_component
+    )

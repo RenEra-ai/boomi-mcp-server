@@ -4457,7 +4457,7 @@ def _execute_component(
     # UUIDs by _resolve_dependency_tokens — but to find the in-spec profile
     # component for index computation, we need the ORIGINAL comp.config
     # (where $ref:KEY is still a $ref:KEY string).
-    if comp.type == "transform.map" and not submits_raw_component_xml(payload):
+    if map_consults_profile_indexes(comp.type, payload):
         map_type = (payload.get("map_type") or "").lower()
         map_builder_instance = get_map_builder(comp.type, map_type)
         if map_builder_instance is None:
@@ -5549,6 +5549,14 @@ def _discover_profile_index(
         "profile_component_type": indexed.get("profile_component_type"),
         "field_index_by_path": indexed.get("field_index_by_path"),
     }
+
+
+def map_consults_profile_indexes(component_type, config) -> bool:
+    """Whether a component is a map whose BUILD consults profile field indexes —
+    the dispatcher's own gate (`_execute_component`), shared with apply's
+    pre-write refresh so the two cannot disagree (#159 S1, B25 review): a
+    raw-XML map is submitted as authored and never reads an index."""
+    return component_type == "transform.map" and not submits_raw_component_xml(config or {})
 
 
 def _resolve_literal_profile_indexes(
@@ -10270,17 +10278,22 @@ def _apply_plan(
     _reused_at_apply = _keys_reused_at_apply(
         spec=spec, existing_ids=existing_ids, conflict_policy=conflict_policy
     )
+    # B25 review: and only maps whose build CONSULTS an index — the dispatcher's
+    # own predicate (`map_consults_profile_indexes`), so a raw-XML map's ignored
+    # profile fields never trigger a read.
     _built_maps = [
         comp
         for comp in spec.components
-        if getattr(comp, "type", None) == "transform.map" and comp.key not in _reused_at_apply
+        if map_consults_profile_indexes(getattr(comp, "type", None), comp.config)
+        and comp.key not in _reused_at_apply
     ]
+    _built_map_keys = {comp.key for comp in _built_maps}
     _refresh_spec = spec.model_copy(
         update={
             "components": [
                 comp
                 for comp in spec.components
-                if getattr(comp, "type", None) != "transform.map" or comp in _built_maps
+                if getattr(comp, "type", None) != "transform.map" or comp.key in _built_map_keys
             ]
         }
     )
