@@ -26,6 +26,7 @@ from typing import List as _List
 from typing import Literal as _Literal
 from typing import Mapping as _Mapping
 from typing import Optional, Tuple
+from typing import Sequence as _Sequence
 from typing import Union as _Union
 
 from pydantic import BaseModel as _BaseModel
@@ -991,6 +992,77 @@ def _joined_targets(base: str, path: str) -> Tuple[Tuple[str, int], ...]:
     trimmed = base.rstrip("/")
     slashed = (trimmed + "/" + path.lstrip("/"), len(trimmed))
     return (concatenated,) if slashed[0] == concatenated[0] else (concatenated, slashed)
+
+
+def check_rest_request(
+    *,
+    connection_key: str,
+    path: str,
+    path_pointer: str,
+    created_base_url: Optional[str],
+    connection_pointer: str,
+    selected_key: Optional[str],
+    selected_key_pointer: str,
+    binding_mode: str,
+    base_catalog: _Mapping[str, IntegrationComponentSpec],
+    query_parameters: _Sequence[_Any] = (),
+    query_parameters_pointer: str = "",
+) -> Tuple[str, str, str, str]:
+    """Judge ONE REST request's EFFECTIVE request target (QA r8-01) — a send
+    or a fetch alike — and return the ``rest_request_targets`` entry the
+    workflow rechecks: ``(connection key, path, path pointer, binding pointer)``.
+
+    The target is the connection URL joined with the operation path, exactly
+    as emitted, judged AFTER each stored field is judged on its own (r7-01).
+    The connection URL is ``created_base_url`` when the material creates the
+    connection (pass the value the builder receives); a create-mode selected
+    base's stored ``base_url`` when ``selected_key`` names one; otherwise the
+    connection is reused, its URL is not in hand, and the path is judged alone
+    (the workflow judges it against the stored URL later).
+
+    The refusal points at the field that CONTRIBUTES the offending text: the
+    path when the offset falls in the path's portion, else the base URL (or,
+    for a selected base, the raw-input field that selected it). A structured
+    parameter (anything with a ``name``) repeating an inline name is refused
+    at its name. The binding pointer is the selecting raw-input field when a
+    base is selected, else the material ``connection``.
+    """
+    if created_base_url is not None:
+        base_url, base_field = created_base_url, connection_pointer + "/base_url"
+    elif selected_key is not None and binding_mode == "create":
+        base_url = _selected_base_url(base_catalog, selected_key)
+        base_field = selected_key_pointer
+    else:
+        base_url, base_field = "", path_pointer
+    # r7-01: every PERSISTED field is judged on its own first — the stored
+    # base_url (material or selected base) and the stored path — because
+    # each is written as-is, and appending the path can hide a base value
+    # from the builder's whole-value patterns.
+    if base_url:
+        standalone = _judge_request_target(base_url)
+        if standalone.cause is not None:
+            raise _refusal(standalone.cause, base_field, phase="input")
+    standalone = _judge_request_target(path)
+    if standalone.cause is None and _path_continues_a_query(path):
+        standalone = _TargetVerdict(_QUERY_NAME_CAUSE)
+    if standalone.cause is not None:
+        raise _refusal(standalone.cause, path_pointer, phase="input")
+    names: set = set()
+    for joined, path_start in _joined_targets(base_url, path):
+        verdict = _judge_request_target(joined)
+        if verdict.cause is not None:
+            field = path_pointer if verdict.offset >= path_start else base_field
+            raise _refusal(verdict.cause, field, phase="input")
+        names.update(verdict.names)
+    for qp_index, parameter in enumerate(query_parameters):
+        if parameter.name.strip() in names:
+            raise _refusal(
+                _QUERY_NAME_CAUSE,
+                f"{query_parameters_pointer}/{qp_index}/name",
+                phase="input",
+            )
+    binding_pointer = selected_key_pointer if selected_key is not None else connection_pointer
+    return (connection_key, path, path_pointer, binding_pointer)
 
 
 def _check_base_auth(

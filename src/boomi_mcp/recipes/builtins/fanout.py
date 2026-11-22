@@ -417,6 +417,7 @@ from ..component_material import (  # noqa: F401 — re-exports
     _joined_targets,
     _check_base_auth,
     _connection_presence,
+    check_rest_request,
 )
 
 
@@ -1046,92 +1047,42 @@ def _check_selected_base_config(
             raise _refusal(cause, path, phase="input")
 
 
-def _rest_request_targets_v2(
-    inp: ComposeDbRestFanoutInputV2,
-    ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
-    keys: _FanoutKeysV2,
-) -> Tuple[Tuple[str, str, str, str], ...]:
-    """Every REST target, with the pointer of the field that BINDS its
-    connection (B15): the material ``connection`` (create or reuse) or the
-    raw-input ``connection_key`` that selected a base. No target is skipped by
-    its declaration: a connection requested in create mode is still reused when
-    the component plan binds an existing same-name component."""
-    found = []
-    for index, (target, (material_index, entry)) in enumerate(zip(inp.targets, ordered_material)):
-        binding = (
-            f"/raw_input/targets/{index}/connection_key"
-            if target.connection_key is not None
-            else f"/component_material/targets/{material_index}/connection"
-        )
-        found.append(
-            (
-                keys.targets[index][1],
-                entry.operation.path.strip(),
-                f"/component_material/targets/{material_index}/operation/path",
-                binding,
-            )
-        )
-    return tuple(found)
-
-
 def _check_request_targets_v2(
     inp: ComposeDbRestFanoutInputV2,
     ordered_material: _List[Tuple[int, FanoutTargetMaterialV2]],
     authorized_paths: _Mapping[int, Tuple[str, str]],
     base_catalog: _Mapping[str, IntegrationComponentSpec],
-) -> None:
-    """Judge each target's EFFECTIVE request target (QA r8-01): the connection
-    URL joined with the operation path, exactly as emitted (authority-stripped
-    material; a selected create-mode base's ``base_url`` as written), AFTER
-    each stored field is judged on its own (r7-01). A reused connection's URL
-    is not in hand, so its path is judged alone.
-
-    The refusal points at the field that CONTRIBUTES the offending text: the
-    path when the offset falls in the path's portion, else the base URL (or,
-    for a selected base, the raw-input ``connection_key`` that selected it).
-    A structured parameter repeating an inline name is refused at its name.
-    """
+    keys: _FanoutKeysV2,
+) -> Tuple[Tuple[str, str, str, str], ...]:
+    """The fan-out loop over targets: each target is ONE REST request, judged
+    by the shared single-request check (:func:`check_rest_request`), in Branch
+    order. Returns, per target, ``(connection key, path, path pointer,
+    binding pointer)`` — the ``rest_request_targets`` the workflow rechecks
+    against a reused connection's stored URL. No target is skipped by its
+    declaration (B15): a connection requested in create mode is still reused
+    when the component plan binds an existing same-name component."""
+    found = []
     for index, (target, (material_index, entry)) in enumerate(zip(inp.targets, ordered_material)):
         base_pointer = f"/component_material/targets/{material_index}"
         base_url, path = authorized_paths[index]
-        if isinstance(entry.connection, FanoutRestCreateMaterialV2):
-            base_field = base_pointer + "/connection/base_url"
-        elif target.connection_key is not None and target.binding_mode == "create":
-            base_url = _selected_base_url(base_catalog, target.connection_key)
-            base_field = f"/raw_input/targets/{index}/connection_key"
-        else:
-            base_url, base_field = "", base_pointer + "/operation/path"
-        # r7-01: every PERSISTED field is judged on its own first — the stored
-        # base_url (material or selected base) and the stored path — because
-        # each is written as-is, and appending the path can hide a base value
-        # from the builder's whole-value patterns.
-        if base_url:
-            standalone = _judge_request_target(base_url)
-            if standalone.cause is not None:
-                raise _refusal(standalone.cause, base_field, phase="input")
-        standalone = _judge_request_target(path)
-        if standalone.cause is None and _path_continues_a_query(path):
-            standalone = _TargetVerdict(_QUERY_NAME_CAUSE)
-        if standalone.cause is not None:
-            raise _refusal(standalone.cause, base_pointer + "/operation/path", phase="input")
-        names: set = set()
-        for joined, path_start in _joined_targets(base_url, path):
-            verdict = _judge_request_target(joined)
-            if verdict.cause is not None:
-                field = (
-                    base_pointer + "/operation/path"
-                    if verdict.offset >= path_start
-                    else base_field
-                )
-                raise _refusal(verdict.cause, field, phase="input")
-            names.update(verdict.names)
-        for qp_index, parameter in enumerate(entry.operation.query_parameters):
-            if parameter.name.strip() in names:
-                raise _refusal(
-                    _QUERY_NAME_CAUSE,
-                    f"{base_pointer}/operation/query_parameters/{qp_index}/name",
-                    phase="input",
-                )
+        found.append(
+            check_rest_request(
+                connection_key=keys.targets[index][1],
+                path=path,
+                path_pointer=base_pointer + "/operation/path",
+                created_base_url=(
+                    base_url if isinstance(entry.connection, FanoutRestCreateMaterialV2) else None
+                ),
+                connection_pointer=base_pointer + "/connection",
+                selected_key=target.connection_key,
+                selected_key_pointer=f"/raw_input/targets/{index}/connection_key",
+                binding_mode=target.binding_mode,
+                base_catalog=base_catalog,
+                query_parameters=entry.operation.query_parameters,
+                query_parameters_pointer=base_pointer + "/operation/query_parameters",
+            )
+        )
+    return tuple(found)
 
 
 def _leaf_contract(profile: JSONPayloadProfile) -> Tuple[_Dict[str, str], set]:
@@ -1275,7 +1226,7 @@ def prepare_db_rest_fanout_v2(
             if target.connection_key not in selected:
                 selected.append(target.connection_key)
 
-    _check_request_targets_v2(
+    rest_targets = _check_request_targets_v2(
         inp,
         ordered_material,
         {
@@ -1288,6 +1239,7 @@ def prepare_db_rest_fanout_v2(
             for index, (_material_index, entry) in enumerate(ordered_material)
         },
         base_catalog,
+        keys,
     )
 
     # -- 4. value rules through the authorities ----------------------------
@@ -1438,7 +1390,7 @@ def prepare_db_rest_fanout_v2(
         supporting_components=tuple(components),
         selected_base_keys=tuple(selected),
         create_bound_base_keys=tuple(create_bound),
-        rest_request_targets=_rest_request_targets_v2(inp, ordered_material, keys),
+        rest_request_targets=rest_targets,
         deferred_query_parameter_names=deferred,
         projection_facts=_projection_facts_v2(inp, keys, authorized.operations),
     )

@@ -2079,3 +2079,49 @@ def test_the_bad_escape_offset_is_the_escape_itself():
     assert verdict.offset == len(text) - 3
     assert fanout._first_undecodable("ab%C3%A9%FFx") == 8
     assert fanout._first_undecodable("x%C3%A9") is None
+
+
+# ---------------------------------------------------------------------------
+# #159 S2: the single-request check is preset-agnostic (send OR fetch)
+# ---------------------------------------------------------------------------
+
+
+def test_the_single_request_check_judges_a_fetch_request_and_returns_its_recheck_entry():
+    """``check_rest_request`` judges ONE request from the values the builder
+    receives, whatever its verb: a reused-connection GET path is judged alone
+    and returned with its binding pointer for the workflow's stored-URL
+    recheck; a created connection's base URL is judged JOINED with the path."""
+    from boomi_mcp.recipes import component_material
+
+    entry = component_material.check_rest_request(
+        connection_key="source_rest_connection",
+        path="/v1/orders?limit=50",
+        path_pointer="/component_material/source/operation/path",
+        created_base_url=None,
+        connection_pointer="/component_material/source/connection",
+        selected_key=None,
+        selected_key_pointer="/raw_input/source/connection_key",
+        binding_mode="reuse",
+        base_catalog={},
+    )
+    assert entry == (
+        "source_rest_connection",
+        "/v1/orders?limit=50",
+        "/component_material/source/operation/path",
+        "/component_material/source/connection",
+    )
+    with pytest.raises(RecipeError) as caught:
+        component_material.check_rest_request(
+            connection_key="source_rest_connection",
+            path="/v1/orders",
+            path_pointer="/component_material/source/operation/path",
+            created_base_url="https://api.example.invalid/?token=abc",
+            connection_pointer="/component_material/source/connection",
+            selected_key=None,
+            selected_key_pointer="/raw_input/source/connection_key",
+            binding_mode="create",
+            base_catalog={},
+        )
+    (diagnostic,) = caught.value.diagnostics
+    assert diagnostic.path == "/component_material/source/connection/base_url"
+    assert QUERY_NAME_CAUSE in diagnostic.cause_codes
