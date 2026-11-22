@@ -2,68 +2,228 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "M11 (#125): composed DDP/DPP authoring — a flow_sequence that sets a per-document DDP from profile+static sources, sets a persisted run-flag DPP from the current document, and routes on the DDP with a Decision. Demonstrates 1:1 same-branch carry-forward and the trunk-write-then-read lineage contract.",
+  "purpose": "M11 (#125): composed DDP/DPP authoring \u2014 a flow_sequence that sets a per-document DDP from profile+static sources, sets a persisted run-flag DPP from the current document, and routes on the DDP with a Decision. Demonstrates 1:1 same-branch carry-forward and the trunk-write-then-read lineage contract.",
   "do_not_reuse": "Concrete values below are demo-grade (example.invalid endpoints, fixed UUIDs) so the spec plans clean in tests; author real bindings from actual requirements.",
   "integration_spec": {
-    "naming": {"integration_name": "M11 Basic Cache Property Demo"},
+    "naming": {
+      "integration_name": "M11 Basic Cache Property Demo"
+    },
     "components": [
       {
-        "key": "demo_process",
-        "type": "process",
+        "key": "demo_db_connection",
+        "type": "connector-settings",
         "action": "create",
-        "name": "M11 DDP DPP Basic Flow",
+        "name": "M11 Basic DB Connection",
         "config": {
-          "process_kind": "database_to_api_sync",
-          "source": {
-            "connector_type": "database",
-            "connection_id": "11111111-1111-1111-1111-111111111111",
-            "operation_id": "22222222-2222-2222-2222-222222222222",
-            "action_type": "Get"
-          },
-          "transform": {"mode": "passthrough"},
-          "target": {
-            "connector_type": "rest",
-            "connection_id": "33333333-3333-3333-3333-333333333333",
-            "operation_id": "44444444-4444-4444-4444-444444444444",
-            "action_type": "POST"
-          },
-          "flow_sequence": [
+          "connector_type": "database",
+          "component_name": "M11 Basic DB Connection",
+          "driver_id": "microsoft_jdbc",
+          "auth_mode": "username_password",
+          "username": "<<db user>>",
+          "credential_ref": "<<opaque credential reference>>",
+          "host": "db.example.invalid",
+          "port": 1433,
+          "dbname": "AppDB"
+        },
+        "depends_on": [],
+        "component_id": null
+      },
+      {
+        "key": "demo_db_read_profile",
+        "type": "profile.db",
+        "action": "create",
+        "name": "M11 Basic DB Read Profile",
+        "config": {
+          "profile_type": "database.read",
+          "component_name": "M11 Basic DB Read Profile",
+          "query": "<<user-authored DB read statement>>",
+          "output_fields": [
             {
-              "kind": "set_ddp",
-              "name": "DDP_ORDER_KEY",
-              "label": "Build order key",
-              "source_values": [
-                {"value_type": "static", "value": "ORD-"},
-                {
-                  "value_type": "profile",
-                  "element_id": "3",
-                  "element_name": "orderId (Root/Object/orderId)",
-                  "profile_id": "55555555-5555-5555-5555-555555555555",
-                  "profile_type": "profile.json"
-                }
-              ]
-            },
-            {
-              "kind": "set_dpp",
-              "name": "DPP_LAST_ORDER_SEEN",
-              "label": "Persist last order payload",
-              "persist": true,
-              "source_values": [{"value_type": "current"}]
-            },
-            {
-              "kind": "decision",
-              "comparison": "equals",
-              "label": "Route unkeyed orders away",
-              "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_ORDER_KEY"},
-              "right": {"value_type": "static", "static_value": "ORD-"},
-              "true_steps": [
-                {"kind": "message", "message_text": "order key missing"}
-              ],
-              "false_steps": [
-                {"kind": "message", "message_text": "order keyed"}
-              ]
+              "name": "orderId",
+              "data_type": "character",
+              "mandatory": false,
+              "enforce_unique": false
             }
           ]
+        },
+        "depends_on": [],
+        "component_id": null
+      },
+      {
+        "key": "demo_db_get_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "M11 Basic DB Get",
+        "config": {
+          "connector_type": "database",
+          "operation_mode": "get",
+          "component_name": "M11 Basic DB Get",
+          "read_profile_id": "$ref:demo_db_read_profile",
+          "connection_ref_key": "demo_db_connection"
+        },
+        "depends_on": [
+          "demo_db_connection",
+          "demo_db_read_profile"
+        ],
+        "component_id": null
+      },
+      {
+        "key": "demo_order_profile",
+        "type": "profile.json",
+        "action": "create",
+        "name": "M11 Basic Order Profile",
+        "config": {
+          "profile_type": "json.generated",
+          "component_name": "M11 Basic Order Profile",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "data_type": null,
+            "required": false,
+            "description": null,
+            "children": [
+              {
+                "name": "orderId",
+                "kind": "simple",
+                "data_type": "character",
+                "required": false,
+                "description": null,
+                "children": null
+              }
+            ]
+          }
+        },
+        "depends_on": [],
+        "component_id": null
+      },
+      {
+        "key": "demo_rest_connection",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "M11 Basic REST Connection",
+        "config": {
+          "connector_type": "rest",
+          "component_name": "M11 Basic REST Connection",
+          "base_url": "https://orders.example.invalid",
+          "auth": "NONE"
+        },
+        "depends_on": [],
+        "component_id": null
+      },
+      {
+        "key": "demo_rest_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "M11 Basic REST Send",
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "M11 Basic REST Send",
+          "connection_ref_key": "demo_rest_connection",
+          "method": "POST",
+          "path": "/v1/orders",
+          "request_profile_id": "$ref:demo_order_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "demo_rest_connection",
+          "demo_order_profile"
+        ],
+        "component_id": null
+      }
+    ],
+    "processes": [
+      {
+        "envelope": {
+          "component_key": "demo_process",
+          "name": "M11 DDP DPP Basic Flow",
+          "action": "create",
+          "depends_on": [
+            "demo_db_connection",
+            "demo_db_get_operation",
+            "demo_order_profile",
+            "demo_rest_connection",
+            "demo_rest_operation"
+          ]
+        },
+        "process_ir": {
+          "version": "1",
+          "body": {
+            "kind": "sequence",
+            "steps": [
+              {
+                "kind": "source",
+                "connection_ref": "$ref:demo_db_connection",
+                "operation_ref": "$ref:demo_db_get_operation"
+              },
+              {
+                "kind": "set_ddp",
+                "name": "DDP_ORDER_KEY",
+                "source_values": [
+                  {
+                    "value_type": "static",
+                    "value": "ORD-"
+                  },
+                  {
+                    "value_type": "profile",
+                    "element_id": "3",
+                    "element_name": "orderId (Root/Object/orderId)",
+                    "profile_ref": "$ref:demo_order_profile",
+                    "profile_type": "profile.json"
+                  }
+                ],
+                "label": "Build order key"
+              },
+              {
+                "kind": "set_dpp",
+                "name": "DPP_LAST_ORDER_SEEN",
+                "source_values": [
+                  {
+                    "value_type": "current"
+                  }
+                ],
+                "persist": true,
+                "label": "Persist last order payload"
+              },
+              {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {
+                  "value_type": "track",
+                  "property_id": "dynamicdocument.DDP_ORDER_KEY"
+                },
+                "right": {
+                  "value_type": "static",
+                  "static_value": "ORD-"
+                },
+                "true_arm": {
+                  "steps": [
+                    {
+                      "kind": "message",
+                      "text": "order key missing"
+                    }
+                  ],
+                  "terminal": {
+                    "kind": "target",
+                    "connection_ref": "$ref:demo_rest_connection",
+                    "operation_ref": "$ref:demo_rest_operation"
+                  }
+                },
+                "false_arm": {
+                  "steps": [
+                    {
+                      "kind": "message",
+                      "text": "order keyed"
+                    }
+                  ],
+                  "terminal": {
+                    "kind": "stop"
+                  }
+                },
+                "label": "Route unkeyed orders away"
+              }
+            ]
+          }
         }
       }
     ]

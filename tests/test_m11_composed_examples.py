@@ -2,10 +2,13 @@
 
 Each example under examples/m11/ must (a) parse as IntegrationSpecV1, (b) plan
 clean through _build_plan, and (c) emit the expected typed XML shapes. The
-basic-flow process XML and the property-graft map XML are byte-locked as
-goldens; the join example asserts the live-captured DocumentCacheJoins wire
-section and demonstrates the #123 lineage contract (reversing the branch legs
-must fail with the branch-order error).
+process-bearing examples author their process as a DIRECT canonical unit
+(``integration_spec.processes``, #159 L7). The basic-flow process XML and the
+property-graft map XML are byte-locked as goldens, and the join process is
+byte-locked against the legacy builder's frozen output; the join example also
+asserts the live-captured DocumentCacheJoins wire section and demonstrates the
+#123 lineage contract (reversing the branch legs must fail the canonical
+semantic gate with the branch-order error).
 """
 
 from __future__ import annotations
@@ -22,11 +25,11 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from src.boomi_mcp.categories.integration_builder import _apply_plan, _build_plan
-from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
 
 # The example definitions live in examples/m11/*.json; the corpus (#165) owns
 # their one loader and this module CONSUMES it.
 import _wave_gate_golden_corpus as _corpus
+import _example_unit_support as _units
 
 _EXAMPLES_DIR = Path(_project_root) / "examples" / "m11"
 _GOLDEN_DIR = Path(__file__).resolve().parent / "fixtures" / "golden_xml"
@@ -115,8 +118,13 @@ def test_every_example_applies_clean_in_dry_run():
 
 def test_basic_example_process_matches_golden():
     spec = _load_example("cache_property_authoring_basic.integration.json")
-    process = next(c for c in spec["components"] if c["type"] == "process")
-    xml = ProcessFlowBuilder.build(process["config"], name=process["name"])
+    # The process is a DIRECT canonical unit: no component carries a legacy config.
+    assert not [c for c in spec["components"] if c["type"] == "process"]
+    assert [u["envelope"]["component_key"] for u in spec["processes"]] == ["demo_process"]
+    rendered = _corpus.render_golden_case(
+        "m11:cache_property_basic", "process-component-v1"
+    )
+    xml = rendered.decode("utf-8") if isinstance(rendered, bytes) else rendered
     golden = _GOLDEN_DIR / "m11_cache_property_basic.xml"
     assert xml == golden.read_text()
     shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
@@ -179,14 +187,44 @@ def test_join_example_emits_live_captured_joins_section():
     )
 
 
+def test_join_example_process_matches_the_frozen_legacy_bytes():
+    spec = _load_example("cache_property_authoring_join.integration.json")
+    assert not [c for c in spec["components"] if c["type"] == "process"]
+    xml = _units.render_process_xml(spec, _units.uuid5_registry(spec))
+    frozen = (
+        _units.LEGACY_ORACLE_DIR / "cache_property_authoring_join.process.legacy.xml"
+    ).read_text(encoding="utf-8")
+    assert xml == frozen
+    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
+    assert shapes.count("branch") == 1
+    assert shapes.count("doccacheload") == 1
+    assert shapes.count("doccacheretrieve") == 1
+
+
+def _lineage_codes(plan_result):
+    return {
+        code
+        for diagnostic in plan_result.errors
+        for code in (diagnostic.code, *diagnostic.cause_codes)
+    }
+
+
 def test_join_example_reversed_legs_fail_lineage():
     # The #123 contract demonstrated on the composed example: consuming leg
-    # before staging leg is a provable ordering bug, caught pre-mutation.
+    # before staging leg is a provable ordering bug, caught pre-mutation by the
+    # canonical semantic gate (the same compile an apply binds to).
     spec = _load_example("cache_property_authoring_join.integration.json")
-    process = next(c for c in spec["components"] if c["type"] == "process")
-    config = json.loads(json.dumps(process["config"]))  # deep copy
-    legs = config["flow_sequence"][0]["legs"]
-    legs.reverse()
-    err = ProcessFlowBuilder.validate_config(config, depends_on=["handoff_cache"])
-    assert err is not None
-    assert err.error_code == "PROCESS_LINEAGE_BRANCH_ORDER_INVALID"
+    clean, _ = _units.plan_example(spec)
+    assert not _lineage_codes(clean)
+
+    tampered = json.loads(json.dumps(spec))  # deep copy
+    (branch,) = [
+        step
+        for step in tampered["processes"][0]["process_ir"]["body"]["steps"]
+        if step["kind"] == "branch"
+    ]
+    branch["legs"].reverse()
+    plan_result, _ = _units.plan_example(tampered)
+    assert any("LINEAGE" in code for code in _lineage_codes(plan_result)), (
+        [d.model_dump(mode="json") for d in plan_result.errors]
+    )
