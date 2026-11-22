@@ -107,3 +107,38 @@ def test_example_uses_placeholder_sentinels(path):
     if "tool_call" not in data:
         pytest.skip(f"{path.name} carries no tool parameters")
     assert "<<" in path.read_text(), f"{path.name}: no <<placeholder>> sentinels found"
+
+
+@pytest.mark.parametrize("path", _example_files(), ids=lambda p: p.name)
+def test_example_process_is_a_direct_canonical_unit(path):
+    """#159: a process-bearing example authors its process as a typed unit.
+
+    The tool-call examples show ``build_integration`` with a typed
+    ``config.authoring_request`` (``intent_kind: process_ir``): the process is an
+    envelope plus a ProcessIR root, every supporting component is named by key and
+    referenced as ``$ref:KEY``. No legacy adapter config (``process_kind``,
+    ``flow_sequence``) and no archetype call may appear, and the request must parse
+    against the served typed model.
+    """
+    data = json.loads(path.read_text())
+    if "tool_call" not in data:
+        pytest.skip(f"{path.name} carries no tool call")
+    text = path.read_text()
+    for legacy in ("process_kind", "flow_sequence", "build_from_archetype"):
+        assert legacy not in text, f"{path.name}: legacy authoring spelling {legacy!r}"
+
+    call = data["tool_call"]
+    assert call["tool"] == "build_integration"
+    config = call["arguments"]["config"]
+    assert set(config) == {"authoring_request"}
+
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    request = AuthoringRequestV1.model_validate(config["authoring_request"])
+    assert request.intent.intent_kind == "process_ir"
+    (unit,) = request.intent.units
+    declared = {component.key for component in request.intent.components}
+    assert set(unit.envelope.depends_on) <= declared
+    # Every authored reference resolves to a supporting component of the request.
+    refs = set(re.findall(r"\$ref:([A-Za-z0-9_.\-]+)", json.dumps(config)))
+    assert refs and refs <= declared, sorted(refs - declared)
