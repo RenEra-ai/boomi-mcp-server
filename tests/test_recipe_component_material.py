@@ -889,8 +889,9 @@ SECRET_CAPABLE_FIELDS = {
 QUERY_NAME_CAUSE = "FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED"
 
 
-def _reachable_material_fields():
-    """Every ``(model, field)`` reachable from the material model — DERIVED."""
+def _reachable_material_fields(*roots):
+    """Every ``(model, field)`` reachable from ``roots`` (default: the fan-out
+    material model) — DERIVED."""
     import typing
 
     from pydantic import BaseModel
@@ -920,7 +921,8 @@ def _reachable_material_fields():
             for nested in models_in(field.annotation):
                 walk(nested)
 
-    walk(FanoutComponentMaterialV2)
+    for root in roots or (FanoutComponentMaterialV2,):
+        walk(root)
     return found
 
 
@@ -946,6 +948,180 @@ def test_the_credential_boundary_fails_closed_on_an_unclassified_field(monkeypat
     (diagnostic,) = _blocked(recipe_request(raw, material))
     assert diagnostic.path == "/intent/invocations/0/component_material/source/read/sql"
     assert fanout._PLAINTEXT_SECRET_CAUSE in diagnostic.cause_codes
+
+
+# ---------------------------------------------------------------------------
+# #159 S2: ONE credential authority for every preset (component_material)
+# ---------------------------------------------------------------------------
+
+
+def _material_registrations():
+    registrations = [
+        registration
+        for registration in catalog_module.PRODUCTION_REGISTRATIONS
+        if registration.component_material_model is not None
+    ]
+    assert registrations  # non-vacuous: at least fan-out 2.0.0 declares material
+    return registrations
+
+
+def test_the_shared_table_classifies_exactly_the_shared_block_fields():
+    """The shared table's keys are DERIVED from the shared blocks' models: a
+    field added to a block without a row, or a row left for a removed field,
+    fails here — whichever preset reaches the block."""
+    from boomi_mcp.recipes import component_material
+
+    common = component_material._common_material_field_classes()
+    assert set(common) == _reachable_material_fields(*component_material.SHARED_MATERIAL_BLOCKS)
+    assert {rule for rule in common.values() if rule} <= set(component_material._SECRET_RULES)
+
+
+def test_every_material_root_is_registered_and_classified_from_its_models():
+    """Every production registration that declares a material model has it
+    registered with the shared walker, and the walker's table covers EVERY
+    field reachable from that root; the root's own rows name only fields the
+    root reaches (no stale or borrowed rows)."""
+    from boomi_mcp.recipes import component_material
+
+    roots = {registration.component_material_model for registration in _material_registrations()}
+    assert roots <= set(component_material.registered_material_roots())
+    for root in component_material.registered_material_roots():
+        reachable = _reachable_material_fields(root)
+        assert reachable <= set(component_material.material_field_classes(root)), root
+        own = set(component_material._MATERIAL_ROOTS[root]())
+        assert own <= reachable, root
+
+
+def test_a_root_table_may_not_reclassify_a_shared_field(monkeypatch):
+    """Non-vacuity of the one-authority rule: a root table carrying a row for
+    a SHARED model's field is refused, so a preset cannot loosen a shared rule."""
+    from boomi_mcp.recipes import component_material
+
+    class _BorrowingRoot:
+        pass
+
+    monkeypatch.setitem(
+        component_material._MATERIAL_ROOTS,
+        _BorrowingRoot,
+        lambda: {(component_material.FanoutDbCreateMaterialV2, "credential_ref"): None},
+    )
+    with pytest.raises(ValueError, match="reclassifies a shared material field"):
+        component_material.material_field_classes(_BorrowingRoot)
+    with pytest.raises(ValueError, match="not a registered material root"):
+        component_material.material_field_classes(type("_Unregistered", (), {}))
+
+
+#: One plaintext value per SECRET RULE that the rule refuses wherever it applies.
+_RULE_BREACHES = {
+    "credential_reference": "plaintext-5ecret-7a1c",
+    "jdbc_host": "db.example.invalid;password=plaintext-5ecret-7a1c",
+    "jdbc_property": "AppDB;password=plaintext-5ecret-7a1c",
+    "url": "https://svc:plaintext-5ecret-7a1c@billing.example.invalid/v1",
+    "literal_query_name": "plaintext-5ecret-7a1c",
+    # Escaped space: the value GRAMMAR admits it, the BUILDER refuses it.
+    "named_literal": "Bearer%20plaintext-5ecret-7a1c",
+}
+
+#: Per material ROOT: ``() -> (raw input, material)`` whose material carries an
+#: instance of every model with a secret-classified field. A material
+#: registration without a seed fails the canary (no silent skip).
+_CANARY_SEEDS = {FanoutComponentMaterialV2: canary_v2}
+
+
+def _field_occurrences(node, pointer=()):
+    """``(model, field) -> [pointer tuple]`` for every field of a validated material."""
+    from pydantic import BaseModel
+
+    found = {}
+    if isinstance(node, BaseModel):
+        for name in type(node).model_fields:
+            here = pointer + (name,)
+            found.setdefault((type(node), name), []).append(here)
+            for key, pointers in _field_occurrences(getattr(node, name), here).items():
+                found.setdefault(key, []).extend(pointers)
+    elif isinstance(node, (tuple, list)):
+        for index, item in enumerate(node):
+            for key, pointers in _field_occurrences(item, pointer + (index,)).items():
+                found.setdefault(key, []).extend(pointers)
+    return found
+
+
+def _assembly_spy(monkeypatch):
+    """Record every ``IntegrationComponentSpec`` constructed or validated."""
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    built = []
+    real_init = IntegrationComponentSpec.__init__
+    real_validate = IntegrationComponentSpec.model_validate.__func__
+    real_construct = IntegrationComponentSpec.model_construct.__func__
+
+    def init(self, *args, **kwargs):
+        built.append("init")
+        real_init(self, *args, **kwargs)
+
+    def validate(cls, *args, **kwargs):
+        built.append("model_validate")
+        return real_validate(cls, *args, **kwargs)
+
+    def construct(cls, *args, **kwargs):
+        built.append("model_construct")
+        return real_construct(cls, *args, **kwargs)
+
+    monkeypatch.setattr(IntegrationComponentSpec, "__init__", init)
+    monkeypatch.setattr(IntegrationComponentSpec, "model_validate", classmethod(validate))
+    monkeypatch.setattr(IntegrationComponentSpec, "model_construct", classmethod(construct))
+    return built
+
+
+def test_every_material_registration_refuses_each_secret_field_before_assembly(monkeypatch):
+    """Registry-derived canary (#159 S2): for EVERY production registration
+    that declares a material model, a plaintext secret planted in EACH field
+    the classification tables mark secret-capable is refused by the shared
+    walker, at that field, before the preparer assembles any component."""
+    from boomi_mcp.recipes import component_material
+
+    assert set(_RULE_BREACHES) == set(component_material._SECRET_RULES)
+    built = _assembly_spy(monkeypatch)
+    for registration in _material_registrations():
+        root = registration.component_material_model
+        assert root in _CANARY_SEEDS, root  # a new material root needs a seed here
+        secret = {
+            key: rule
+            for key, rule in component_material.material_field_classes(root).items()
+            if rule
+        }
+        assert secret  # non-vacuous: the tables mark at least one field
+        raw, seed = _CANARY_SEEDS[root]()
+        validated_input = registration.input_model.model_validate(raw)
+        occurrences = _field_occurrences(root.model_validate(seed))
+        # Control: the clean seed DOES assemble components (the spy sees them).
+        del built[:]
+        registration.component_preparer(validated_input, root.model_validate(seed), base_catalog={})
+        assert built
+        planted = set()
+        for (model, name), rule in sorted(secret.items(), key=lambda item: (item[0][0].__name__, item[0][1])):
+            assert occurrences.get((model, name)), (model.__name__, name)  # the seed reaches it
+            pointer = occurrences[(model, name)][0]
+            material = copy.deepcopy(seed)
+            node = material
+            for step in pointer[:-1]:
+                node = node[step]
+            node[pointer[-1]] = _RULE_BREACHES[rule]
+            del built[:]
+            with pytest.raises(RecipeError) as caught:
+                registration.component_preparer(
+                    validated_input, root.model_validate(material), base_catalog={}
+                )
+            (diagnostic,) = caught.value.diagnostics
+            assert diagnostic.path == "/component_material/" + "/".join(map(str, pointer))
+            assert set(diagnostic.cause_codes) & {
+                component_material._PLAINTEXT_SECRET_CAUSE,
+                component_material._QUERY_NAME_CAUSE,
+            }
+            assert "plaintext-5ecret-7a1c" not in repr(caught.value)
+            assert built == [], (model.__name__, name)
+            planted.add((model, name))
+        assert planted == set(secret)
 
 
 _SECRET_CANARY = "plaintext-5ecret-9b3d"

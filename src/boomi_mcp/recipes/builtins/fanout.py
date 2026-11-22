@@ -296,7 +296,6 @@ from typing import List as _List
 from typing import Literal as _Literal
 from typing import Mapping as _Mapping
 
-from pydantic import BaseModel as _BaseModel
 
 from ...errors import (
     COMPOSITION_COMPONENT_KEY_COLLISION,
@@ -417,7 +416,11 @@ from ..component_material import (  # noqa: F401 — re-exports
     _joined_targets,
     _check_base_auth,
     _connection_presence,
+    _check_selected_base_config,
+    check_credential_boundary,
     check_rest_request,
+    material_field_classes,
+    register_material_root,
 )
 from ..component_material import PreparedRecipeComponentsV1
 
@@ -602,58 +605,12 @@ class FanoutComponentMaterialV2(_FanoutMaterialModel):
     targets: Tuple[FanoutTargetMaterialV2, ...] = Field(min_length=2, max_length=_MAX_TARGETS)
 
 
-# ---------------------------------------------------------------------------
-# The credential boundary (#159 S1, CDX-r1-01/02 structural fix)
-# ---------------------------------------------------------------------------
-#
-# ONE check, applied to every field of the material that can carry a secret,
-# driven by ONE table that classifies EVERY field of every model reachable from
-# ``FanoutComponentMaterialV2`` (including the shared ``JSONPayloadProfile``
-# tree). The walk reads the table for every field it visits and FAILS CLOSED on
-# a field the table does not classify, so a field added to the material later
-# cannot bypass the boundary silently: ``tests/test_recipe_component_material.py``
-# pins the table's keys to the set derived from the models, and the
-# secret-capable subset to the enumeration below.
-#
-# Secret-capable (a rule that can REFUSE plaintext):
-#   FanoutDbCreateMaterialV2.credential_ref   credential_reference: the opaque
-#       ``credential://`` form the REST/SOAP builders already enforce.
-#   FanoutDbCreateMaterialV2.host             jdbc_host: no userinfo (``@``) and
-#       no JDBC property (``;`` / ``=``) — the two ways a password rides a host.
-#   FanoutDbCreateMaterialV2.database         jdbc_property: no ``;`` / ``=``
-#       (a ``;password=...`` suffix lands in the JDBC URL).
-#   FanoutRestCreateMaterialV2.base_url       url: no userinfo; every inline query
-#       pair readable, under a published name, and with a value the REST builder
-#       admits (D12).
-#   FanoutRestOperationMaterialV2.path        url: same rule (a path may carry a
-#       query string, or an authority when written scheme-/protocol-relative).
-#   FanoutQueryParameterV2.name               literal_query_name: a LITERAL
-#       parameter's name must be a published name (D12).
-#   FanoutQueryParameterV2.literal_value      named_literal: the value must pass
-#       the REST builder's value check.
-#
-# Every other field is classified ``None`` with its reason in the table. There
-# is no ``jdbc_options`` (or other open map) in the v2 material: the only maps it
-# can reach are the closed models below.
-#
-# Literal REST query NAMES are a closed vocabulary (D12,
-# :data:`LITERAL_QUERY_NAMES_V2`); no name classifier exists. Query VALUES are
-# judged by the REST BUILDER's own authority — the customProperties check
-# ``RestClientOperationBuilder`` applies to the very ``query_parameters`` these
-# values become (``REST_SECRET_VALUE_FORBIDDEN``) — asked, never re-typed.
-
-
-def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
-    """``(model, field) -> rule`` for EVERY material field; ``None`` = not a carrier.
-
-    The reasons for ``None`` are stated per entry. "Free text" entries CAN hold
-    arbitrary characters; they are classified non-carrier because no shape rule
-    can tell a secret from legitimate content there and the contract declares a
-    different, checked channel for the secret (``credential_ref``), not because
-    they are physically incapable of holding one.
-    """
-    from ...patterns.archetype_parameters import JSONProfileNode
-
+def _fanout_root_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
+    """Fan-out 2.0.0's ROOT-field classifications: the fields of the four
+    fan-out material models (the root and its three part blocks). Every shared
+    block they reach is classified by the shared table
+    (``component_material._common_material_field_classes``); the walker reads
+    the union (:func:`material_field_classes`)."""
     return _MappingProxyType(
         {
             (FanoutComponentMaterialV2, "version"): None,  # closed literal
@@ -663,111 +620,27 @@ def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
             (FanoutComponentMaterialV2, "targets"): None,  # structural (models)
             (FanoutDbMaterialV2, "connection"): None,  # structural (variant)
             (FanoutDbMaterialV2, "read"): None,  # structural (model)
-            (FanoutDbCreateMaterialV2, "mode"): None,  # closed literal
-            (FanoutDbCreateMaterialV2, "driver"): None,  # closed literal
-            (FanoutDbCreateMaterialV2, "host"): "jdbc_host",
-            (FanoutDbCreateMaterialV2, "port"): None,  # bounded integer
-            (FanoutDbCreateMaterialV2, "database"): "jdbc_property",
-            # An identity, emitted as the connection's user; the secret half is
-            # credential_ref. Azure-style ``user@server`` identities are
-            # legitimate, so no shape rule separates a smuggled secret.
-            (FanoutDbCreateMaterialV2, "username"): None,
-            (FanoutDbCreateMaterialV2, "credential_ref"): "credential_reference",
-            (FanoutConnectionReuseMaterialV2, "mode"): None,  # closed literal
-            # Selectors of an EXISTING component (platform id / display name),
-            # served on the endpoint rows by design; they name, never unlock.
-            (FanoutConnectionReuseMaterialV2, "component_id"): None,
-            (FanoutConnectionReuseMaterialV2, "component_name"): None,
-            # Free text: query material emitted into the read profile by design
-            # (the addendum's D1). A literal in it cannot be told from data.
-            (FanoutDbReadMaterialV2, "sql"): None,
-            (FanoutDbReadMaterialV2, "result_fields"): None,  # structural (models)
-            (FanoutDbReadMaterialV2, "bind_parameters"): None,  # structural (models)
-            (FanoutDbReadMaterialV2, "batch_size"): None,  # bounded integer
-            (FanoutDbReadMaterialV2, "max_rows"): None,  # bounded integer
-            # A field name (``DBResultField`` refuses path separators).
-            (FanoutResultFieldV2, "name"): None,
-            (FanoutResultFieldV2, "data_type"): None,  # closed literal
-            (FanoutResultFieldV2, "required"): None,  # boolean
-            (FanoutResultFieldV2, "description"): None,  # free text: profile docs
-            (FanoutBindParameterV2, "name"): None,  # a statement parameter NAME; no value
-            (FanoutBindParameterV2, "direction"): None,  # closed literal
             (FanoutTransformMaterialV2, "operations"): None,  # structural (variants)
-            (FanoutDirectOperationV2, "operation_type"): None,  # closed literal
-            # Field references, each checked against a DECLARED source field or
-            # payload leaf by the producer -> consumer contract.
-            (FanoutDirectOperationV2, "source_field"): None,
-            (FanoutDirectOperationV2, "target_path"): None,
-            (FanoutDirectOperationV2, "documentation_hint"): None,  # free text: served hint
-            (FanoutFunctionOperationV2, "operation_type"): None,  # closed literal
-            (FanoutFunctionOperationV2, "function_type"): None,  # a registered family name
-            (FanoutFunctionOperationV2, "inputs"): None,  # declared source fields
-            (FanoutFunctionOperationV2, "target_path"): None,  # a declared payload leaf
-            (FanoutFunctionOperationV2, "parameters"): None,  # structural (models)
-            (FanoutFunctionOperationV2, "documentation_hint"): None,  # free text: served hint
-            # A name the family DECLARES (closed by ``FunctionFamily``).
-            (FanoutFunctionParameterV2, "name"): None,
-            # A scalar transform constant emitted into the map by design; its
-            # name is family-declared (never secret-shaped), so no named rule
-            # applies, and a constant cannot be told from a secret by shape.
-            (FanoutFunctionParameterV2, "value"): None,
-            (FanoutScriptReferenceOperationV2, "operation_type"): None,  # closed literal
-            (FanoutScriptReferenceOperationV2, "script_component_key"): None,  # a bounded key
-            (FanoutScriptReferenceOperationV2, "inputs"): None,  # declared source fields
-            (FanoutScriptReferenceOperationV2, "outputs"): None,  # declared payload leaves
-            (FanoutScriptReferenceOperationV2, "documentation_hint"): None,  # free text
-            (JSONPayloadProfile, "format"): None,  # closed literal
-            (JSONPayloadProfile, "root"): None,  # structural (model)
-            (JSONProfileNode, "name"): None,  # a schema node name
-            (JSONProfileNode, "kind"): None,  # closed literal
-            (JSONProfileNode, "data_type"): None,  # closed literal
-            (JSONProfileNode, "required"): None,  # boolean
-            (JSONProfileNode, "description"): None,  # free text: profile docs
-            (JSONProfileNode, "children"): None,  # structural (models)
             (FanoutTargetMaterialV2, "part_key"): None,  # must equal a raw-input part key
             (FanoutTargetMaterialV2, "connection"): None,  # structural (variant)
             (FanoutTargetMaterialV2, "operation"): None,  # structural (model)
             (FanoutTargetMaterialV2, "expected_payload_profile"): None,  # structural (model)
-            (FanoutRestCreateMaterialV2, "mode"): None,  # closed literal
-            (FanoutRestCreateMaterialV2, "base_url"): "url",
-            (FanoutRestOperationMaterialV2, "path"): "url",
-            (FanoutRestOperationMaterialV2, "query_parameters"): None,  # structural (models)
-            # A LITERAL parameter's name must be published (D12).
-            (FanoutQueryParameterV2, "name"): "literal_query_name",
-            (FanoutQueryParameterV2, "value_source"): None,  # closed literal
-            (FanoutQueryParameterV2, "literal_value"): "named_literal",
         }
     )
 
 
+register_material_root(FanoutComponentMaterialV2, _fanout_root_field_classes_v2)
+
+
+def _material_field_classes_v2() -> _Mapping[Tuple[type, str], Optional[str]]:
+    """``(model, field) -> rule`` for EVERY fan-out material field: the shared
+    table and the fan-out root table, unioned (#159 S2)."""
+    return material_field_classes(FanoutComponentMaterialV2)
+
+
 def _check_credential_boundary_v2(material: FanoutComponentMaterialV2) -> None:
-    """Refuse, value-free, the first material field that carries a plaintext secret.
-
-    Walks the validated material; every field visited is looked up in
-    :func:`_material_field_classes_v2`. An unclassified field is refused too
-    (fail closed). The pointer is built from DECLARED field names and indices
-    only, so it never carries caller content.
-    """
-    classes = _material_field_classes_v2()
-
-    def walk(node: _Any, pointer: str) -> None:
-        if isinstance(node, _BaseModel):
-            for name in type(node).model_fields:
-                here = f"{pointer}/{name}"
-                key = (type(node), name)
-                if key not in classes:
-                    raise _refusal(_PLAINTEXT_SECRET_CAUSE, here, phase="input")
-                value = getattr(node, name)
-                rule = classes[key]
-                cause = _breaches(rule, value, node) if rule is not None else None
-                if cause is not None:
-                    raise _refusal(cause, here, phase="input")
-                walk(value, here)
-        elif isinstance(node, (tuple, list)):
-            for index, item in enumerate(node):
-                walk(item, f"{pointer}/{index}")
-
-    walk(material, "/component_material")
+    """The shared credential walker over the fan-out material and its table."""
+    check_credential_boundary(material, _material_field_classes_v2())
 
 
 # ---------------------------------------------------------------------------
@@ -974,32 +847,6 @@ def _validate_fanout_topology_v2(inp: ComposeDbRestFanoutInputV2, *, phase: str)
 # ---------------------------------------------------------------------------
 # The preparer (trusted, server-side)
 # ---------------------------------------------------------------------------
-
-
-def _check_selected_base_config(
-    base_catalog: _Mapping[str, IntegrationComponentSpec],
-    key: str,
-    *,
-    family: str,
-    path: str,
-) -> None:
-    """The credential boundary over a WRITTEN selected base's config (ARCH-r1-02).
-
-    The same rules the material walk applies (looked up in
-    :func:`_material_field_classes_v2` through the key map above), plus fail
-    closed on any key the material cannot express. Value-free: the pointer is
-    the raw-input field that selected the base."""
-    config = (base_catalog[key].config or {}) if key in base_catalog else {}
-    classes = _material_field_classes_v2()
-    allowed = _selected_base_key_classes()[family]
-    for name, value in config.items():
-        if name not in allowed:
-            raise _refusal(COMPOSITION_CONTRACT_MISMATCH, path, phase="input")
-        field = allowed[name]
-        rule = classes.get(field) if field is not None else None
-        cause = _breaches(rule, value, None) if rule is not None else None
-        if cause is not None:
-            raise _refusal(cause, path, phase="input")
 
 
 def _check_request_targets_v2(
