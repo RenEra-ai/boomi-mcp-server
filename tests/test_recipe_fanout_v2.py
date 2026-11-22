@@ -3834,3 +3834,61 @@ def test_b25r_the_dispatcher_and_the_refresh_share_one_map_predicate():
     assert "map_consults_profile_indexes(comp.type, payload)" in inspect.getsource(
         integration_builder._execute_component
     )
+
+
+def test_b26r_a_whitespace_only_map_xml_is_refused_before_any_write(monkeypatch):
+    """B26 review: whitespace-only `config.xml` is NOT raw XML for any route
+    (`submits_raw_component_xml` and the drift check agree), so a map carrying it
+    and no structured fields is refused before the first write — never after
+    earlier components were created."""
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
+    from boomi_mcp.categories.components import _shared
+
+    spec, stored = _b23_reused_profile_map_spec()
+    # Profiles ONLY the whitespace map references (no structured map uses them):
+    # under the old split decision the refresh dropped them as "raw", so the
+    # drift check had nothing to judge the map with and skipped it.
+    spec["components"] += [
+        {"key": "ws_src", "type": "profile.json", "name": "WS JSON", "action": "create",
+         "component_id": "11111111-1111-1111-1111-111111111111", "config": {"reference_only": True}},
+        {"key": "ws_tgt", "type": "profile.xml", "name": "WS XML", "action": "create",
+         "component_id": "22222222-2222-2222-2222-222222222222", "config": {"reference_only": True}},
+        {"key": "ws_map", "type": "transform.map", "name": "Whitespace map", "action": "create",
+         "depends_on": ["ws_src", "ws_tgt"],
+         "config": {"xml": "   ", "source_profile_id": "$ref:ws_src",
+                    "target_profile_id": "$ref:ws_tgt"}},
+    ]
+
+    def get_xml(_client, component_id, deadline_seconds=None, *a, **k):
+        kind, xml = stored[component_id]
+        return {"component_id": component_id, "id": component_id, "type": kind, "xml": xml}
+
+    writes = []
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []), \
+            mock.patch.object(_shared, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "component_get_xml", get_xml), \
+            mock.patch.object(integration_builder, "_execute_component",
+                              side_effect=lambda *a, **k: writes.append(1) or {"_success": True, "component_id": "x"}):
+        result = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "apply", {"integration_spec": spec, "dry_run": False}
+        )
+    assert result.get("_success") is False, result
+    assert result.get("error_code") == "MAP_RAW_XML_BLANK", result
+    assert writes == [], result
+
+
+def test_b26r_whitespace_only_xml_is_not_raw_for_the_shared_predicate():
+    """Node id kept; the contract is the OPPOSITE of the name: QA-154-r4-02 pins
+    the shared predicate to TRUTHINESS (whitespace-only XML is raw, posted
+    verbatim), and the B26 fix refuses it explicitly before any write instead of
+    re-deciding the route. This pins that both route decisions stay one."""
+    from boomi_mcp.categories.components._shared import submits_raw_component_xml
+    from boomi_mcp.categories.integration_builder import map_consults_profile_indexes
+
+    assert submits_raw_component_xml({"xml": "<Component/>"})
+    assert submits_raw_component_xml({"xml": "   "})
+    assert not submits_raw_component_xml({"xml": ""})
+    assert not submits_raw_component_xml({})
+    assert not map_consults_profile_indexes("transform.map", {"xml": "   "})

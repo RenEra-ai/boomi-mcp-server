@@ -10348,7 +10348,30 @@ def _apply_plan(
         # both _build_plan and _execute_component — they submit the XML directly.
         # Don't run validate_transform_map on them here (it would fail with
         # UNSUPPORTED_TRANSFORM_ROUTE on a map with no map_type/field_mappings).
-        if isinstance(cfg.get("xml"), str) and cfg["xml"].strip():
+        # B26 review: a whitespace-only `config.xml` is RAW by the shared
+        # truthiness predicate (QA-154-r4-02 pins it), so the builder would post
+        # it verbatim and the platform would refuse it AT THE MAP STEP, after
+        # earlier components were written. Refused here, before any write.
+        _xml = cfg.get("xml")
+        if isinstance(_xml, str) and _xml and not _xml.strip():
+            return {
+                "_success": False,
+                "error_code": "MAP_RAW_XML_BLANK",
+                "error": (
+                    f"Map '{comp.key}' supplies config.xml that is only "
+                    "whitespace; it would be submitted as the component and "
+                    "refused by the platform."
+                ),
+                "field": "xml",
+                "failed_step": comp.key,
+                "hint": (
+                    "Supply the map's component XML, or omit config.xml and "
+                    "declare map_type and field_mappings. No components were "
+                    "created."
+                ),
+            }
+        # B26 review: the SAME route decision the dispatcher and the refresh use.
+        if not map_consults_profile_indexes(comp.type, cfg):
             continue
         # A MAP OVER A REUSED PROFILE IS DECIDABLE HERE TOO. This gate covered
         # only literal-UUID endpoints, because those were the only ones whose
