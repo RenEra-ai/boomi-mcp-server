@@ -84,16 +84,30 @@ class SourceSchemaSummaryV1(_DerivedFlowModel):
     fields: Tuple[SchemaFieldSummaryV1, ...] = ()
 
 
-class WriteProfileSummaryV1(_DerivedFlowModel):
-    """A DB write profile target summary.
+class WriteTargetPathV1(_DerivedFlowModel):
+    """One map-target leaf of a database write profile (``Fields/<col>`` or
+    ``Conditions/<col>``), as the write profile's own field index names it."""
 
-    Carried for the three DB-write producers' rows, which #159 discharges; the
-    two rich forms this issue discharges never populate it. Kept opaque-but-
-    frozen rather than typed here so this issue does not hand-model a shape it
-    does not derive yet — #159 types it when it derives it.
+    path: NonEmptyString
+    data_type: Optional[str] = None
+    required: bool = False
+
+
+class WriteProfileSummaryV1(_DerivedFlowModel):
+    """A DB write profile target summary (#159 S2: typed now that it is derived).
+
+    The shape the three DB-write legacy producers served, read off the write
+    profile COMPONENT through ``DatabaseWriteProfileBuilder.build_field_index``
+    — the index the map builder binds against — never off a recipe input.
+    ``target_paths`` is sorted by path; the counts are the index's own
+    namespaces. Value-free: no SQL, no table name.
     """
 
-    summary: Mapping[str, Any]
+    kind: Literal["database.write"] = "database.write"
+    statement_type: NonEmptyString
+    field_count: int = Field(ge=0)
+    condition_count: int = Field(ge=0)
+    target_paths: Tuple[WriteTargetPathV1, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +305,21 @@ class DerivedConnectorFlowV1(_DerivedFlowModel):
     name: str = ""
     source: str = ""
     target: Optional[str] = None
-    operation: Literal["db_get", "rest_send"]
+    #: ``db_get`` / ``rest_fetch`` / ``wss_listen`` on the source side,
+    #: ``rest_send`` / ``db_write`` on the target side (#159 S2 adds the
+    #: linear presets' three).
+    operation: Literal["db_get", "rest_send", "rest_fetch", "db_write", "wss_listen"]
+    executable: Literal[False] = False
+
+
+class DerivedNoopFlowV1(_DerivedFlowModel):
+    """The stub route's single row: a Stop-only root moves no document (#159 S2)."""
+
+    key: NonEmptyString
+    name: str = ""
+    source: str = ""
+    target: Optional[str] = None
+    operation: Literal["noop"] = "noop"
     executable: Literal[False] = False
 
 
@@ -338,6 +366,7 @@ _DERIVED_FLOW_MEMBERS: Tuple[type, ...] = (
     DerivedReliabilityFlowV1,
     DerivedWatermarkFlowV1,
     DerivedFanoutFlowV1,
+    DerivedNoopFlowV1,
 )
 
 DerivedFlowRowV1 = Annotated[
@@ -382,18 +411,45 @@ class DerivedEndpointRowV1(_OmitUnsetModel):
     A created connection serves its classification (``driver`` and ``auth_mode``
     for a database, ``auth_mode`` for REST); a reused one serves the selector
     it binds by. Never a host, URL, credential or SQL.
+
+    #159 S2 widens it for the linear presets, every key still read off a
+    component: a database WRITE target also serves its operation and the write
+    profile's ``statement_type``; a WSS listener serves its computed
+    ``endpoint_path`` (and ``publish_mode`` behind an API Service component); a
+    REST endpoint serves ``expected_status_codes`` only when its route DECLARES
+    them; and a stub endpoint is a bare labelled placeholder with no binding
+    and no ``executable`` key at all — so ``binding_mode`` is required on every
+    type EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.
     """
 
     key: NonEmptyString
-    type: Literal["database", "rest"]
+    type: Literal["database", "rest", "wss", "stub"]
     direction: Literal["source", "target"]
-    binding_mode: Literal["create", "reuse"]
+    binding_mode: Optional[Literal["create", "reuse"]] = None
     executable: Literal[False] = False
     method: Optional[str] = None
     driver: Optional[str] = None
     auth_mode: Optional[str] = None
     component_id: Optional[str] = None
     component_name: Optional[str] = None
+    expected_status_codes: Optional[Tuple[int, ...]] = None
+    operation: Optional[str] = None
+    statement_type: Optional[str] = None
+    endpoint_path: Optional[str] = None
+    publish_mode: Optional[Literal["api_service"]] = None
+    label: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _binding_matches_the_type(self):
+        if self.type == "stub":
+            if self.binding_mode is not None or "executable" in self.model_fields_set:
+                raise ValueError("a stub endpoint binds nothing and serves no executable flag")
+        else:
+            if self.binding_mode is None:
+                raise ValueError("a {0} endpoint serves its binding mode".format(self.type))
+            if self.label is not None:
+                raise ValueError("only a stub endpoint serves a label")
+        return self
 
 
 class DerivedCompositionPartV1(_OmitUnsetModel):
@@ -485,6 +541,112 @@ class RecipeUnitProjectionFactsV1(_DerivedFlowModel):
     documentation_hints: Tuple[RecipeOperationHintV1, ...] = ()
 
 
+# ---------------------------------------------------------------------------
+# linear projection facts (#159 S2) — INTERNAL, never served, never hashed
+# ---------------------------------------------------------------------------
+
+
+class LinearConnectorFactV1(_DerivedFlowModel):
+    """Which components ONE connector step of a linear route owns.
+
+    A typed pointer, never row text: the projector resolves both keys against
+    the plan's components AND requires the root to carry a connector node whose
+    ``operation_ref`` names ``operation_key``. Family, row key, row operation,
+    endpoint token, binding mode, method, selector, auth classification,
+    statement type and listener path are all READ off those components.
+
+    ``connection_key`` is None exactly for an operation-only step (a WSS
+    listener has no connection component).
+
+    ``expected_status_codes`` is the route's DECLARED success-status
+    expectation for a REST target. Set means served on the endpoint row; None
+    means the key is absent. The DB→REST and listener→REST presets froze no
+    such key and MUST leave it None; only the direct API→API inference sets it
+    (to the existing REST success-status default both frozen API→API cases
+    carry).
+    """
+
+    connection_key: Optional[NonEmptyString] = None
+    operation_key: NonEmptyString
+    expected_status_codes: Optional[Tuple[int, ...]] = None
+
+
+class LinearTransformFactV1(_DerivedFlowModel):
+    """Transform hints for the route's single ``map_ref``.
+
+    ``detail`` is the ONE fact the root and components cannot carry: which of
+    the two frozen transform-row forms the route serves.
+
+    * ``generated_artifacts`` — the rich #157 row: source/target profile
+      generation summaries, the validated direct mappings and the JSON target
+      payload profile (DB→REST and API→API froze this form).
+    * ``schema_summary`` — the summary row the API→DB and listener presets
+      froze: source schema, operations and EITHER the JSON target payload
+      profile OR the DB write-profile summary, and none of the generation
+      keys (absent, not null).
+
+    ``row_name`` overrides the map node's label as the served row name (as on
+    the fan-out facts); None serves the label. ``documentation_hints`` are the
+    caller's per-operation hints, served on the operation summary they annotate.
+    """
+
+    detail: Literal["generated_artifacts", "schema_summary"]
+    row_name: Optional[NonEmptyString] = None
+    documentation_hints: Tuple[RecipeOperationHintV1, ...] = ()
+
+
+class LinearReliabilityFactV1(_DerivedFlowModel):
+    """The route reports a reliability row (the DB→REST preset does, always).
+
+    ``dlq_component_key`` points at the DLQ component (the document cache the
+    catch path writes). The row's ``target`` is ``dlq`` only when that key
+    resolves to a plan component AND the root references it; None — retry
+    only, or DLQ disabled — renders the canonical default row (``target``
+    null). A retry-only ``try_catch`` therefore never reports a DLQ.
+    """
+
+    dlq_component_key: Optional[NonEmptyString] = None
+
+
+class LinearRouteProjectionFactsV1(_DerivedFlowModel):
+    """A linear preset's facts: ``source -> map_ref -> target`` (#159 S2).
+
+    Supplied by a server-side preparer from its VALIDATED input — never by a
+    caller — exactly like :class:`RecipeUnitProjectionFactsV1`, and the
+    trigger for the route rows the same way. Rows: the source connector row
+    (``extract``/``fetch``/``listen``), the transform row, the target connector
+    row (``send``/``write``), then ``reliability`` when declared, then
+    ``watermark`` when the unit carries a recorded watermark declaration.
+    Endpoints: source, then target.
+    """
+
+    shape: Literal["linear"] = "linear"
+    process_key: NonEmptyString
+    source: LinearConnectorFactV1
+    transform: LinearTransformFactV1
+    target: LinearConnectorFactV1
+    reliability: Optional[LinearReliabilityFactV1] = None
+
+
+class StubRouteProjectionFactsV1(_DerivedFlowModel):
+    """The stub preset's facts: a Stop-only root and zero components (#159 S2).
+
+    The projector checks the root IS Stop-only before serving the
+    ``stub_noop_flow`` row and the two labelled ``stub`` endpoints.
+    """
+
+    shape: Literal["stub"] = "stub"
+    process_key: NonEmptyString
+
+
+#: Every linear-preset facts form, discriminated by ``shape``. The fan-out
+#: facts (:class:`RecipeUnitProjectionFactsV1`) stay their own unchanged class.
+LinearProjectionFactsV1 = Annotated[
+    Union[LinearRouteProjectionFactsV1, StubRouteProjectionFactsV1],
+    Field(discriminator="shape"),
+]
+
+
 __all__ = [
     "DERIVED_FLOW_OPERATIONS",
     "DbOutputFieldV1",
@@ -496,6 +658,7 @@ __all__ = [
     "DerivedFanoutFlowV1",
     "DerivedFanoutLegV1",
     "DerivedFlowRowV1",
+    "DerivedNoopFlowV1",
     "DerivedReliabilityFlowV1",
     "DerivedTransformFlowV1",
     "DerivedWatermarkFlowV1",
@@ -505,6 +668,11 @@ __all__ = [
     "GeneratedProfileSummaryV1",
     "JsonProfileConfigV1",
     "JsonProfileNodeV1",
+    "LinearConnectorFactV1",
+    "LinearProjectionFactsV1",
+    "LinearReliabilityFactV1",
+    "LinearRouteProjectionFactsV1",
+    "LinearTransformFactV1",
     "MapFunctionOperationSummaryV1",
     "MapScriptOperationSummaryV1",
     "PayloadProfileSummaryV1",
@@ -514,6 +682,8 @@ __all__ = [
     "RecipeUnitProjectionFactsV1",
     "SchemaFieldSummaryV1",
     "SourceSchemaSummaryV1",
+    "StubRouteProjectionFactsV1",
     "TransformOperationSummaryV1",
     "WriteProfileSummaryV1",
+    "WriteTargetPathV1",
 ]
