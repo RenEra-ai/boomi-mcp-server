@@ -3975,3 +3975,186 @@ def test_a_passthrough_child_writing_its_callers_documents_into_a_stored_cache_i
             assert got["twin_plan"] == [(_MISMATCH, twin_at)], (label, got)
             assert any(code == _MISMATCH for code, _path in got["compile"]), (label, got)
             assert got["apply"][0] == "refused" and got["apply"][1] in (_MISMATCH, placement), (label, got)
+
+
+# ---------------------------------------------------------------------------
+# #159 S3 (lane S3b): the stored profile links of maps and REST operations the request does not write.
+# ---------------------------------------------------------------------------
+#
+# Fixtures: `replay_identity/cap159-s3-bound-profiles/` (proven operable: executed green, its
+# PROVENANCE.md) for the profiled map and operations, served VERBATIM; the cap155 GET/PATCH
+# operations (`connector_replay/captures/cap155-e3b-patch-canonical/`), which store NO profile, are
+# the negative controls. Helpers come from `test_component_safe_edit`'s "#159 S3" section.
+
+
+class _S3bReads:
+    """The REAL phase budget (``workflow.BudgetedComponentReads``) over the canonical fake account,
+    whose transport records every platform GET (``fetched``)."""
+
+    def __init__(self, store):
+        import test_component_safe_edit as cap
+        from boomi_mcp.authoring.workflow import BudgetedComponentReads
+
+        self.account = cap.CanonicalAccount(store)
+        self.budget = BudgetedComponentReads(self.account)
+
+    @property
+    def fetched(self):
+        return list(self.account.component.reads)
+
+    def fetch(self, component_id, *, refetch=False):
+        return self.budget.fetch(component_id, refetch=refetch)
+
+
+def _s3b_specs(rows):
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    return [IntegrationComponentSpec.model_validate(row) for row in rows]
+
+
+def _s3b_captured():
+    import test_component_safe_edit as cap
+
+    rows = cap.captured_bound_profiles_patch()["authoring_request"]["intent"]["components"]
+    return cap, rows, cap.captured_bound_profiles_store()
+
+
+def _s3b_read(rows, store):
+    from boomi_mcp.authoring.stored_profile_bindings import (
+        stored_profile_bindings_for_unwritten_components,
+    )
+
+    reads = _S3bReads(store)
+    readings = stored_profile_bindings_for_unwritten_components(object(), _s3b_specs(rows), reads=reads)
+    return {reading.component_key: reading for reading in readings}, reads
+
+
+def _s3b_sides(reading):
+    return tuple((side.state, side.profile_component_id, side.profile_component_type)
+                 for side in (reading.input, reading.output))
+
+
+def test_stored_profile_bindings_read_the_captured_map_and_operations_once_each():
+    cap, rows, store = _s3b_captured()
+    readings, reads = _s3b_read(rows, store)
+    get_out, patch_in = cap.CAPTURED_GET_RESPONSE_PROFILE, cap.CAPTURED_PATCH_REQUEST_PROFILE
+    assert set(readings) == {"MAP", "ROP", "OP"}
+    assert _s3b_sides(readings["MAP"]) == (("known", get_out, "profile.json"), ("known", patch_in, "profile.json"))
+    assert _s3b_sides(readings["ROP"]) == (("absent", None, None), ("known", get_out, "profile.json"))
+    assert _s3b_sides(readings["OP"]) == (("known", patch_in, "profile.json"), ("absent", None, None))
+    # Deduplicated by resolved id: a profile two components link is read once — and the
+    # bound connections and profiles themselves are never read by this reader.
+    assert sorted(reads.fetched) == sorted({cap.CAPTURED_MAP, cap.CAPTURED_GET_OP, cap.CAPTURED_PATCH_OP,
+                                            get_out, patch_in})
+
+
+def test_stored_profile_bindings_of_the_unprofiled_cap155_operations_are_absent_not_unknown():
+    """NEGATIVE control: the cap155 operations store no profile attribute at all."""
+    import test_component_safe_edit as cap
+
+    rows = cap.canonical_patch()["authoring_request"]["intent"]["components"]
+    readings, _reads = _s3b_read(rows, cap.canonical_account_store())
+    assert set(readings) == {"ROP", "OP"}
+    for key in ("ROP", "OP"):
+        assert _s3b_sides(readings[key]) == (("absent", None, None), ("absent", None, None)), key
+
+
+@pytest.mark.parametrize("fault", [
+    "profile_unreadable", "profile_envelope_names_another_id", "profile_is_not_a_profile",
+    "malformed_stored_id", "map_unreadable", "map_declares_an_entity",
+])
+def test_a_stored_profile_link_that_cannot_be_verified_is_unknown(fault):
+    cap, rows, store = _s3b_captured()
+    patch_in = cap.CAPTURED_PATCH_REQUEST_PROFILE
+    if fault == "profile_unreadable":
+        del store[patch_in]
+    elif fault == "profile_envelope_names_another_id":
+        store[patch_in] = store[cap.CAPTURED_GET_RESPONSE_PROFILE]
+    elif fault == "profile_is_not_a_profile":
+        store[patch_in] = store[cap.CAPTURED_GET_OP]
+    elif fault == "malformed_stored_id":
+        store[cap.CAPTURED_MAP] = store[cap.CAPTURED_MAP].replace(
+            f'toProfile="{patch_in}"', 'toProfile="PROFILE-REQUEST"')
+    elif fault == "map_unreadable":
+        del store[cap.CAPTURED_MAP]
+    elif fault == "map_declares_an_entity":
+        store[cap.CAPTURED_MAP] = store[cap.CAPTURED_MAP].replace(
+            "?>", '?><!DOCTYPE x [<!ENTITY e "e">]>', 1)
+    readings, _reads = _s3b_read(rows, store)
+    assert readings["MAP"].output.state == "unknown", (fault, readings["MAP"])
+    if fault.startswith("profile_"):
+        # The same profile id serves the PATCH operation's request side, read once.
+        assert readings["OP"].input.state == "unknown", (fault, readings["OP"])
+
+
+def test_a_route_with_no_account_reads_no_stored_profile_links():
+    from boomi_mcp.authoring.stored_profile_bindings import (
+        stored_profile_bindings_for_unwritten_components,
+    )
+
+    _cap, rows, _store = _s3b_captured()
+    assert stored_profile_bindings_for_unwritten_components(None, _s3b_specs(rows)) is None
+
+
+def _s3b_symbols(rows, readings):
+    from boomi_mcp.authoring.connector_resolution_snapshot import TrustedConnectorResolutionSnapshotV1
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    snapshot = TrustedConnectorResolutionSnapshotV1(
+        profile_bindings=tuple(readings), profile_bindings_read=readings is not None) \
+        if readings is not None else TrustedConnectorResolutionSnapshotV1()
+    table = build_symbol_table(_s3b_specs(rows), connector_resolution_snapshot=snapshot)
+    return {symbol.ref: symbol for symbol in table.symbols}, table
+
+
+def test_stored_profile_links_project_to_the_identity_of_the_bound_plan_profile():
+    """The stored link and the plan's bound profile row are ONE profile to the compiler; a profile the
+    request CREATES never is; and a route that read nothing states exactly what it stated before."""
+    from boomi_mcp.compiler.process_ir.connector_resolution import _profile_identity
+
+    cap, rows, store = _s3b_captured()
+    readings, _reads = _s3b_read(rows, store)
+    symbols, table = _s3b_symbols(rows, tuple(readings.values()))
+    index = table.build_index()
+    pread, preq = _profile_identity(index, "$ref:PREAD"), _profile_identity(index, "$ref:PREQ")
+    assert pread == (cap.CAPTURED_GET_RESPONSE_PROFILE, "profile.json")
+    assert preq == (cap.CAPTURED_PATCH_REQUEST_PROFILE, "profile.json")
+    assert _profile_identity(index, symbols["$ref:MAP"].input_profile_ref) == pread
+    assert _profile_identity(index, symbols["$ref:MAP"].output_profile_ref) == preq
+    assert _profile_identity(index, symbols["$ref:ROP"].output_profile_ref) == pread
+    assert _profile_identity(index, symbols["$ref:OP"].input_profile_ref) == preq
+    assert (symbols["$ref:ROP"].input_profile_ref, symbols["$ref:OP"].output_profile_ref) == (None, None)
+    assert all(symbols[ref].profiles_unknown is None for ref in ("$ref:MAP", "$ref:ROP", "$ref:OP"))
+
+    # A profile the request CREATES is not the stored one, even under the same key.
+    created = [dict(row, component_id=None, config={"component_name": row["key"]})
+               if row["key"] == "PREQ" else row for row in rows]
+    created_symbols, created_table = _s3b_symbols(created, tuple(readings.values()))
+    created_index = created_table.build_index()
+    assert _profile_identity(created_index, "$ref:PREQ") != _profile_identity(
+        created_index, created_symbols["$ref:MAP"].output_profile_ref)
+
+    # Not read (no account, or no snapshot): unchanged — an unwritten map or operation states no profile.
+    from boomi_mcp.recipes.materialization import build_symbol_table
+
+    for plain_snapshot in (None,):
+        plain = {symbol.ref: symbol for symbol in build_symbol_table(
+            _s3b_specs(rows), connector_resolution_snapshot=plain_snapshot).symbols}
+        for ref in ("$ref:MAP", "$ref:ROP", "$ref:OP"):
+            assert (plain[ref].input_profile_ref, plain[ref].output_profile_ref,
+                    plain[ref].profiles_unknown) == (None, None, None), ref
+    unread, _table = _s3b_symbols(rows, None)
+    for ref in ("$ref:MAP", "$ref:ROP", "$ref:OP"):
+        assert (unread[ref].input_profile_ref, unread[ref].output_profile_ref,
+                unread[ref].profiles_unknown) == (None, None, None), ref
+
+
+def test_an_unknown_stored_profile_link_marks_the_symbols_profiles_unknown():
+    cap, rows, store = _s3b_captured()
+    del store[cap.CAPTURED_PATCH_REQUEST_PROFILE]
+    readings, _reads = _s3b_read(rows, store)
+    symbols, _table = _s3b_symbols(rows, tuple(readings.values()))
+    assert symbols["$ref:MAP"].output_profile_ref is None and symbols["$ref:MAP"].profiles_unknown is True
+    assert symbols["$ref:OP"].input_profile_ref is None and symbols["$ref:OP"].profiles_unknown is True
+    # The GET operation's links all verified: untouched.
+    assert symbols["$ref:ROP"].profiles_unknown is None and symbols["$ref:ROP"].output_profile_ref

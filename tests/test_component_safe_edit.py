@@ -501,6 +501,78 @@ def canonical_patch(mapped=False, *, name="S3a canonical process", **envelope_ov
     }}}
 
 
+# #159 S3 (lane S3b): the mapped both-bound witness, bound to PROVEN-OPERABLE captures.
+#
+# FIXTURE PROVENANCE: `replay_identity/cap159-s3-bound-profiles/` (its PROVENANCE.md) — a REST
+# GET operation storing `responseProfile`, a REST PATCH operation storing `requestProfile`, a
+# map between those two JSON profiles, the profiles and the connection, executed GREEN on the
+# platform runtime (`execution-76ba0751-…`) with the mapped PATCH effect observed. The bytes
+# were emitted by this repo's builders at ed17dde; the green run is the independent evidence.
+# The second connection is the S1 capture `cap159-s1-reuse-identity/rest-conn-aa5c5042.xml`
+# (same base URL). Every byte is served VERBATIM: no attribute is substituted. The oracle
+# comparison maps these real ids onto golden-000079's ids (`ORACLE_IDS_BY_CAPTURED_ID`) and
+# drops layout coordinates — nothing else is normalized.
+_CAP159S3 = _FIX / "boomi/replay_identity/cap159-s3-bound-profiles"
+_CAP159S1_CONN = _FIX / "boomi/replay_identity/cap159-s1-reuse-identity/rest-conn-aa5c5042.xml"
+CAPTURED_GET_OP = "3cbe300a-1369-49b7-ad1d-9487b55d1df8"
+CAPTURED_PATCH_OP = "db9108fc-7b28-4fbc-bd5a-4229216f1742"
+CAPTURED_MAP = "a3e236b6-a736-4811-92c4-8b8a23ea8cb7"
+CAPTURED_GET_RESPONSE_PROFILE = "dfa08e0a-479c-4aa8-b043-2113af48dad4"
+CAPTURED_PATCH_REQUEST_PROFILE = "d65fda99-ae94-4608-b830-6754ebf229c5"
+CAPTURED_GET_CONN = "b0d70f36-9661-4639-9ad1-b6e74369799e"
+CAPTURED_PATCH_CONN = "aa5c5042-75d1-4bd3-85df-a65739cb920e"
+_CAPTURED_PATH = "/admin/refdata/api/v1/rdcds/currency/QA_currency_E0D9B5299C"
+#: The documented id substitution of the oracle comparison: captured id -> golden-000079 id.
+ORACLE_IDS_BY_CAPTURED_ID = {
+    CAPTURED_GET_CONN: "RCONN",
+    CAPTURED_GET_OP: "ROP",
+    CAPTURED_PATCH_CONN: "CONN-UUID",
+    CAPTURED_PATCH_OP: "OP-UUID",
+    CAPTURED_MAP: "MAP-UUID",
+    CAPTURED_GET_RESPONSE_PROFILE: "PROFILE-READ",
+    CAPTURED_PATCH_REQUEST_PROFILE: "PROFILE-REQUEST",
+}
+
+
+def captured_bound_profiles_store():
+    """``{component id: stored XML}``: the live process plus the cap159-s3 set, verbatim."""
+    store = {CANONICAL_PROCESS_ID: _live_process_xml()}
+    for name in ("op-get-3cbe300a.xml", "op-patch-db9108fc.xml", "map-a3e236b6.xml",
+                 "profile-get-response-dfa08e0a.xml", "profile-patch-request-d65fda99.xml",
+                 "rest-conn-b0d70f36.xml"):
+        text = (_CAP159S3 / name).read_text(encoding="utf-8")
+        store[_re.search(r'componentId="([^"]+)"', text).group(1)] = text
+    conn = _CAP159S1_CONN.read_text(encoding="utf-8")
+    store[_re.search(r'componentId="([^"]+)"', conn).group(1)] = conn
+    return store
+
+
+def captured_bound_profiles_patch(**envelope_overrides):
+    """golden-000081's mapped both-sides IR, every reference bound to a cap159-s3 capture."""
+    patch = canonical_patch(mapped=True, **envelope_overrides)
+    intent = patch["authoring_request"]["intent"]
+    intent["components"] = [
+        _connection_row("RCONN", CAPTURED_GET_CONN),
+        _connection_row("CONN", CAPTURED_PATCH_CONN),
+        _operation_row("ROP", CAPTURED_GET_OP, "RCONN", "GET", _CAPTURED_PATH),
+        _operation_row("OP", CAPTURED_PATCH_OP, "CONN", "PATCH", _CAPTURED_PATH),
+        _bound_row("MAP", "transform.map", CAPTURED_MAP),
+        _bound_row("PREAD", "profile.json", CAPTURED_GET_RESPONSE_PROFILE),
+        _bound_row("PREQ", "profile.json", CAPTURED_PATCH_REQUEST_PROFILE),
+    ]
+    return patch
+
+
+def with_oracle_ids(xml_text):
+    """``xml_text`` with every attribute value that IS a captured id replaced by the oracle's."""
+    root = ET.fromstring(xml_text)
+    for element in root.iter():
+        for name, value in element.attrib.items():
+            if value in ORACLE_IDS_BY_CAPTURED_ID:
+                element.set(name, ORACLE_IDS_BY_CAPTURED_ID[value])
+    return ET.tostring(root, encoding="unicode")
+
+
 def shapes_without_layout(xml_text):
     """The `<shapes>` tree with only the layout coordinates removed."""
     root = ET.fromstring(xml_text)
@@ -705,3 +777,116 @@ def test_canonical_update_refuses_a_declared_verb_the_bound_operation_does_not_s
         codes = {d.get("code") for d in res.get("authoring_diagnostics") or ()}
         assert "CONNECTOR_REPLAY_IDENTITY_MISMATCH" in codes, res
     assert client.component.pushed == []
+
+
+# #159 S3 (lane S3b): controls for the mapped both-bound witness
+# (`test_issue_184_cutover.py::test_the_public_safe_edit_applies_the_canonical_mapped_both_sides_update`).
+# Each mutates ONE captured byte of the cap159-s3 set in the fake account — the control's whole point —
+# and asserts the refusal's code and pointer, and that nothing is written.
+
+_MAP_POINTER = "/body/steps/2/map_ref"
+_UNREAD_PROFILE = "0b0b0b0b-1111-4222-8333-444444444444"  # a valid id the account does not hold
+
+
+def _profile_mismatch_at_the_map(result):
+    return any(
+        "PROCESS_IR_SEMANTIC_PROFILE_MISMATCH" in (item.get("cause_codes") or ())
+        and item.get("path") == _MAP_POINTER
+        for item in result.get("authoring_diagnostics") or ()
+    )
+
+
+def _captured_map_with_target(store, profile_id):
+    store[CAPTURED_MAP] = store[CAPTURED_MAP].replace(
+        f'toProfile="{CAPTURED_PATCH_REQUEST_PROFILE}"', f'toProfile="{profile_id}"', 1)
+    assert f'toProfile="{profile_id}"' in store[CAPTURED_MAP]
+    return store
+
+
+@pytest.mark.parametrize("stored_target", ["another_profile", "unreadable_profile"])
+def test_captured_mapped_update_refuses_a_stored_map_target_the_patch_does_not_accept(stored_target):
+    """Non-vacuity of the stored reading: the bound map's STORED `toProfile` names another real
+    profile (the GET's response profile) or a profile the account cannot read. Prepare refuses
+    PROFILE_MISMATCH at the map, value-free, and writes nothing."""
+    profile_id = CAPTURED_GET_RESPONSE_PROFILE if stored_target == "another_profile" else _UNREAD_PROFILE
+    client = CanonicalAccount(_captured_map_with_target(captured_bound_profiles_store(), profile_id))
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, captured_bound_profiles_patch())
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert _profile_mismatch_at_the_map(res), res
+    assert profile_id not in _json.dumps(res)
+    assert client.component.pushed == []
+
+
+def test_captured_mapped_update_needs_the_stored_reading(monkeypatch):
+    """With the stored-binding projection switched off, the very request the witness applies refuses
+    at the map — so the witness's success is the stored reading's, not something else's."""
+    from boomi_mcp.recipes import materialization
+
+    monkeypatch.setattr(materialization, "_stored_binding_profile_facts",
+                        lambda component, snapshot, facts: (facts, ()))
+    client = CanonicalAccount(captured_bound_profiles_store())
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, captured_bound_profiles_patch())
+    assert res["_success"] is False and _profile_mismatch_at_the_map(res), res
+    assert client.component.pushed == []
+
+
+def test_captured_mapped_update_refuses_apply_when_the_stored_map_changed_since_prepare(monkeypatch):
+    """Prepare previews against the stored map; before apply the account's map is re-pointed at
+    another profile (a new version). Apply refuses before the write: nothing is pushed."""
+    _spy_compare(monkeypatch)
+    client = CanonicalAccount(captured_bound_profiles_store())
+    patch = captured_bound_profiles_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    _captured_map_with_target(client.component.store, CAPTURED_GET_RESPONSE_PROFILE)
+    client.component.versions[CAPTURED_MAP] += 1
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert _profile_mismatch_at_the_map(res) or res.get("error_code") == "COMPONENT_EDIT_DRIFT_DETECTED", res
+    assert client.component.pushed == []
+
+
+def test_captured_mapped_update_refuses_apply_when_a_linked_profile_became_unreadable(monkeypatch):
+    """The profile the map and the PATCH link is gone from the account between prepare and apply:
+    apply refuses before the write and pushes nothing."""
+    _spy_compare(monkeypatch)
+    client = CanonicalAccount(captured_bound_profiles_store())
+    patch = captured_bound_profiles_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    del client.component.store[CAPTURED_PATCH_REQUEST_PROFILE]
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert client.component.pushed == []
+
+
+def _captured_unmapped_patch():
+    """golden-000080's UNMAPPED source-only IR with the operations bound to the profiled cap159-s3
+    captures (the IR's request path is a binding; the declared path equals the stored one)."""
+    patch = canonical_patch()
+    rows = {row["key"]: row for row in patch["authoring_request"]["intent"]["components"]}
+    rows["RCONN"]["component_id"] = CAPTURED_GET_CONN
+    rows["CONN"]["component_id"] = CAPTURED_PATCH_CONN
+    for key, op_id in (("ROP", CAPTURED_GET_OP), ("OP", CAPTURED_PATCH_OP)):
+        rows[key]["component_id"] = op_id
+        rows[key]["config"]["path"] = _CAPTURED_PATH
+    return patch
+
+
+@pytest.mark.parametrize("linked_profiles", ["readable", "unreadable"])
+def test_unknown_stored_operation_profiles_change_nothing_in_an_unmapped_update(linked_profiles):
+    """An unknown stored link refuses only where a profile is REQUIRED (the map pointer above).
+    In an unmapped flow the operations' linked profiles are never required, so the same update
+    prepares identically whether the account can read them or not (measured, not assumed:
+    the unknown side sets ``profiles_unknown`` on the operation symbols)."""
+    store = captured_bound_profiles_store()
+    if linked_profiles == "unreadable":
+        del store[CAPTURED_GET_RESPONSE_PROFILE]
+        del store[CAPTURED_PATCH_REQUEST_PROFILE]
+    client = CanonicalAccount(store)
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, _captured_unmapped_patch())
+    assert res["_success"] is True, res
+    assert client.component.pushed == []
+    # The reader DID consult the account for both linked profiles, so the unknown arm was reached.
+    assert {CAPTURED_GET_RESPONSE_PROFILE, CAPTURED_PATCH_REQUEST_PROFILE} <= set(client.component.reads)
