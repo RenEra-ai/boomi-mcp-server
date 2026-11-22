@@ -1033,7 +1033,7 @@ CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS = (
 )
 
 
-def _notify_request(document, components, *, name, folder_name):
+def _notify_request(document, components, *, name, folder_name, process_extensions=None):
     from boomi_mcp.models.authoring_workflow import (
         AuthoringRequestV1,
         ProcessIRAuthoringIntentV1,
@@ -1044,11 +1044,17 @@ def _notify_request(document, components, *, name, folder_name):
     )
     from boomi_mcp.models.process_ir import parse_process_ir_v1
 
+    envelope = {
+        "component_key": "notify_dlq", "name": name, "action": "create",
+        "folder_name": folder_name,
+        "depends_on": tuple(component["key"] for component in components),
+    }
+    if process_extensions is not None:
+        # The TYPED extension bindings, validated by the envelope model itself
+        # (``ProcessExtensionBindingsV1``); omitted, the envelope keeps its default.
+        envelope["process_extensions"] = process_extensions
     unit = ProcessAuthoringUnitV1(
-        envelope=ProcessComponentEnvelopeV1(
-            component_key="notify_dlq", name=name, action="create", folder_name=folder_name,
-            depends_on=tuple(component["key"] for component in components),
-        ),
+        envelope=ProcessComponentEnvelopeV1(**envelope),
         process_ir=parse_process_ir_v1(document),
     )
     return AuthoringRequestV1(
@@ -1059,7 +1065,7 @@ def _notify_request(document, components, *, name, folder_name):
 
 
 def _normalized_notify_case(document, components, *, name, folder_name, contracts=None,
-                            expected_diagnostics=None):
+                            expected_diagnostics=None, process_extensions=None):
     """``(unit, symbols)`` from the PUBLIC typed plan (``plan_authoring_request_v1``,
     offline): normalization, the request-local connector-resolution snapshot,
     semantic validation and the component-plan lint — the workflow's own unit
@@ -1078,7 +1084,8 @@ def _normalized_notify_case(document, components, *, name, folder_name, contract
     from boomi_mcp.errors import AUTHORING_COMPILE_BLOCKED
 
     plan_result, internals = plan_authoring_request_v1(
-        _notify_request(document, components, name=name, folder_name=folder_name),
+        _notify_request(document, components, name=name, folder_name=folder_name,
+                        process_extensions=process_extensions),
         profile="golden", account_id="golden",
     )
     if expected_diagnostics is not None:
@@ -1166,7 +1173,8 @@ def notify_id_registry(include_map=False):
 
 
 def render_notify_canonical_case(document, components, *, name, folder_name, id_registry,
-                                 contracts=None, expected_diagnostics):
+                                 contracts=None, expected_diagnostics,
+                                 process_extensions=None):
     """The compile-gated canonical route for one Notify survivor.
 
     authored unit + supporting components ->
@@ -1174,7 +1182,9 @@ def render_notify_canonical_case(document, components, *, name, folder_name, id_
     (compiles through ``compile_process_ir_v1``) -> ``materialize_canonical_process_xml``
     (late binding of the placeholders to ``id_registry``, the #180 effect-channel
     recompile, the complete component file). The caller hands COPIES; nothing
-    here aliases corpus module state.
+    here aliases corpus module state. ``process_extensions`` (optional) are the
+    unit envelope's typed extension bindings; their ``$ref`` connection ids are
+    late-bound through the same ``id_registry``.
     """
     from boomi_mcp.authoring.contract import get_authoring_revisions
     from boomi_mcp.authoring.process_materialization import build_materialization_plan
@@ -1186,7 +1196,7 @@ def render_notify_canonical_case(document, components, *, name, folder_name, id_
 
     unit, symbols = _normalized_notify_case(
         document, components, name=name, folder_name=folder_name, contracts=contracts,
-        expected_diagnostics=expected_diagnostics,
+        expected_diagnostics=expected_diagnostics, process_extensions=process_extensions,
     )
     plan = build_materialization_plan(
         envelope=unit.envelope,
@@ -1242,6 +1252,60 @@ def _case_connector_scoped_trycatch_notify():
         id_registry=notify_id_registry(include_map=True),
         contracts=connector_scope_notify_contracts(),
         expected_diagnostics=copy.deepcopy(CONNECTOR_SCOPE_NOTIFY_OFFLINE_DIAGNOSTICS),
+    )
+
+
+#: #159 S2: the ``ConnectionOverride`` SURVIVOR's typed extension bindings.
+#:
+#: The two archetype-path goldens retiring in S3 (golden-000056 and golden-000088)
+#: are the corpus's only carriers of a ``<ConnectionOverride>`` block, and both
+#: carry the SAME one: the DB connection's ``username``/``password`` fields,
+#: XPath-keyed under ``DatabaseConnectionSettings``. Field ids, labels and XPaths
+#: are the platform's (the #92 transcription of a UI-authored exemplar,
+#: ``tests/fixtures/process_overrides/database_connection_fields_process_overrides.xml``);
+#: the connection is the case's own DB connection by ``$ref``, so late binding
+#: supplies its frozen id exactly as it does for the shapes.
+#:
+#: The expected file is NOT a render of this route. It is golden-000087's frozen
+#: bytes with its one empty ``<bns:processOverrides/>`` replaced by the block cut
+#: verbatim from the retiring goldens (recorded transform and hashes:
+#: ``tests/fixtures/process_ir/issue159/PROVENANCE.md``).
+NOTIFY_DLQ_CONNECTION_OVERRIDE_EXTENSIONS = {
+    "connections": [
+        {
+            "connection_id": "$ref:DBCONN",
+            "connector_type": "database",
+            "fields": [
+                {"id": "username", "label": "User",
+                 "xpath": "DatabaseConnectionSettings/@username"},
+                {"id": "password", "label": "Password",
+                 "xpath": "DatabaseConnectionSettings/@password"},
+            ],
+        }
+    ]
+}
+
+
+def render_notify_connection_override_case(process_extensions):
+    """golden-000087's graph and envelope, plus ``process_extensions`` on the unit.
+
+    The ONE varying input is the typed extension binding, so the negative control
+    in ``test_wave_gate_goldens.py`` can remove or change a binding and watch byte
+    parity fail. The caller hands a COPY."""
+    return render_notify_canonical_case(
+        copy.deepcopy(NOTIFY_DLQ_DOCUMENT),
+        notify_dlq_components(),
+        name=NOTIFY_DLQ_GOLDEN_NAME,
+        folder_name=NOTIFY_GOLDEN_FOLDER_NAME,
+        id_registry=notify_id_registry(),
+        expected_diagnostics=copy.deepcopy(NOTIFY_DLQ_OFFLINE_DIAGNOSTICS),
+        process_extensions=process_extensions,
+    )
+
+
+def _case_try_catch_notify_dlq_connection_override():
+    return render_notify_connection_override_case(
+        copy.deepcopy(NOTIFY_DLQ_CONNECTION_OVERRIDE_EXTENSIONS)
     )
 
 
@@ -2419,6 +2483,11 @@ def _build_registry():
         "trycatch_dlq:notify_document_cache_terminal": ("process-component-v1", _case_try_catch_notify_dlq_document_cache),
         "trycatch_dlq:connector_scope_notify_terminal": ("process-component-v1", _case_connector_scoped_trycatch_notify),
         "trycatch_dlq:exception_catch_path": ("process-component-v1", _case_exception_catch_path),
+        # #159 S2: the ConnectionOverride survivor, through the canonical typed route,
+        # before S3 retires the two archetype-path goldens that carried the block.
+        "trycatch_dlq:notify_document_cache_connection_override": (
+            "process-component-v1", _case_try_catch_notify_dlq_connection_override
+        ),
         # D — listener start
         "sync_pipeline:listener_wss_start": ("process-component-v1", _case_listener_wss_start),
         # E — M11 composed examples

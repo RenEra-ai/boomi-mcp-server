@@ -23,6 +23,7 @@ Two design points that are load-bearing:
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import sys
 import xml.etree.ElementTree as ET
@@ -177,6 +178,82 @@ def test_unknown_cases_and_renderer_mismatches_are_refused():
     wrong = next(r for r in corpus.RENDERERS if r != sample["renderer"])
     with pytest.raises(corpus.RendererMismatch):
         corpus.render_golden_case(sample["input_case"], wrong)
+
+
+# ---------------------------------------------------------------------------
+# #159 S2 — the ConnectionOverride survivor's typed-binding negative control
+# ---------------------------------------------------------------------------
+
+_CONNECTION_OVERRIDE_GOLDEN = (
+    _ROOT / "tests" / "fixtures" / "golden_xml" / "issue159_cache_notify_connection_override.xml"
+)
+#: golden-000087: the same graph and envelope with NO extension binding.
+_UNEXTENDED_NOTIFY_GOLDEN = (
+    _ROOT / "tests" / "fixtures" / "golden_xml" / "issue184_cache_notify_terminal.xml"
+)
+
+
+def _connection_override_bindings(mutate):
+    bindings = copy.deepcopy(corpus.NOTIFY_DLQ_CONNECTION_OVERRIDE_EXTENSIONS)
+    mutate(bindings)
+    return bindings
+
+
+def _drop_the_binding(bindings):
+    bindings["connections"].clear()
+
+
+def _drop_the_password_field(bindings):
+    fields = bindings["connections"][0]["fields"]
+    assert [field["id"] for field in fields] == ["username", "password"], fields
+    del fields[1]
+
+
+def _rebind_to_the_rest_connection(bindings):
+    connection = bindings["connections"][0]
+    assert connection["connection_id"] == "$ref:DBCONN", connection
+    connection["connection_id"] = "$ref:RESTCONN"
+
+
+@pytest.mark.parametrize(
+    "mutate, expected_file",
+    [
+        pytest.param(lambda bindings: None, _CONNECTION_OVERRIDE_GOLDEN, id="as_authored"),
+        # Removing the ONE binding reproduces the unextended frozen golden exactly:
+        # the extension block is the files' only difference, so this proves the
+        # survivor's block comes from the typed binding and from nothing else.
+        pytest.param(_drop_the_binding, _UNEXTENDED_NOTIFY_GOLDEN, id="binding_removed"),
+        pytest.param(_drop_the_password_field, None, id="field_removed"),
+        pytest.param(_rebind_to_the_rest_connection, None, id="connection_changed"),
+    ],
+)
+def test_the_connection_override_survivor_tracks_its_typed_binding(mutate, expected_file):
+    """The survivor's bytes are a function of the unit's typed extension binding.
+
+    ``as_authored`` is the positive half (the same comparison the manifest row
+    makes); every mutant changes or removes one typed binding and must lose byte
+    parity with the survivor's frozen file. A mutant that still matched would
+    mean the block is produced by something other than the binding under test.
+    """
+    survivor = _CONNECTION_OVERRIDE_GOLDEN.read_bytes()
+    emitted = corpus.render_notify_connection_override_case(
+        _connection_override_bindings(mutate)
+    ).encode("utf-8")
+
+    if expected_file is _CONNECTION_OVERRIDE_GOLDEN:
+        assert emitted == survivor
+        return
+    assert emitted != survivor
+    if expected_file is not None:
+        assert emitted == expected_file.read_bytes()
+    else:
+        # The mutant still carries a well-formed override declaration; only the
+        # binding it was told to change moved.
+        root = ET.fromstring(emitted.decode("utf-8"))
+        overrides = root.findall(
+            "bns:processOverrides/Overrides/Connections/ConnectionOverride", _BNS
+        )
+        assert len(overrides) == 1, emitted
 
 
 #: The container types every walker here descends, and the SINGLE authority for
