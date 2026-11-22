@@ -2038,6 +2038,7 @@ def l1_cache_answers(legacy_cache_id: str, xml: "str | None"):
     import _issue_157_flows_accounting as accounting
 
     answers = dict(accounting.replay_identity_captures())
+    answers.pop(legacy_cache_id, None)
     if xml is not None:
         answers[legacy_cache_id] = {"component_id": legacy_cache_id, "version": "1", "xml": xml}
     return answers
@@ -2634,3 +2635,21 @@ def test_l1_watermark_refusals():
     assert _l1_refusal(stray, material, base) == (
         ("GOVERNANCE_WATERMARK_INCONSISTENT",), "/raw_input/watermark/query_parameter_refs/1")
     del invocation_base
+
+
+def test_l1_replay_identity_dlq_capture_is_the_recorded_transform():
+    """The replay transport's DLQ cache answer (``replay_identity/cap159-s2-dlq-cache``)
+    is byte-for-byte the recorded unprofiled transform of the live capture,
+    bound to the frozen cases' placeholder, and the production classifier reads
+    it as an unprofiled cache (and the untransformed capture as profiled)."""
+    from boomi_mcp.authoring.connector_resolution_snapshot import stored_document_cache_profile
+
+    directory = _TESTS_DIR / "fixtures" / "boomi" / "replay_identity" / "cap159-s2-dlq-cache"
+    (record,) = json.loads((directory / "records.json").read_text())
+    data = (directory / (record["capture"] + ".xml")).read_bytes()
+    assert data == l1_unprofiled_cache_xml().encode("utf-8")
+    assert record["sha256_archived_bytes"] == _hashlib.sha256(data).hexdigest()
+    assert record["derived_from"]["sha256"] == L1_DLQ_CAPTURE_SHA256
+    assert record["binds_placeholder_ids"] == ["<<dlq document cache component id>>"]
+    assert stored_document_cache_profile("c", data.decode("utf-8")).profile_state == "absent"
+    assert stored_document_cache_profile("c", l1_profiled_cache_xml()).profile_state == "known"
