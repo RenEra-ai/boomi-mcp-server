@@ -1320,6 +1320,75 @@ def _recipe_invocation_draft(
     }
 
 
+def _rest_source_connection_role() -> str:
+    from ..patterns.primitives import _helpers
+
+    return _helpers.ROLE_REST_SOURCE_CONNECTION
+
+
+_API_TO_API_MATERIAL: Dict[str, Any] = {}
+
+
+def _api_to_api_material_model() -> type:
+    """The closed material the REST -> REST draft is validated as: the shared
+    REST connection / request / payload-profile blocks and transform leaves, in
+    a source / target / transform root (built once, lazily, so importing this
+    module does not import the recipe layer)."""
+    if "model" in _API_TO_API_MATERIAL:
+        return _API_TO_API_MATERIAL["model"]
+    from ..recipes.component_material import (
+        FanoutRestConnectionMaterialV2,
+        FanoutRestOperationMaterialV2,
+        FanoutTransformOperationV2,
+        _FanoutMaterialModel,
+    )
+    from pydantic import Field as _Field
+
+    class ImportApiSourceMaterialV1(_FanoutMaterialModel):
+        connection: FanoutRestConnectionMaterialV2
+        request: FanoutRestOperationMaterialV2
+        response_profile: JSONPayloadProfile
+
+    class ImportApiTargetMaterialV1(_FanoutMaterialModel):
+        connection: FanoutRestConnectionMaterialV2
+        operation: FanoutRestOperationMaterialV2
+        payload_profile: JSONPayloadProfile
+
+    class ImportApiTransformMaterialV1(_FanoutMaterialModel):
+        operations: Tuple[FanoutTransformOperationV2, ...] = _Field(min_length=1)
+
+    class ImportApiToApiMaterialV1(_FanoutMaterialModel):
+        source: ImportApiSourceMaterialV1
+        target: ImportApiTargetMaterialV1
+        transform: ImportApiTransformMaterialV1
+
+    _API_TO_API_MATERIAL["model"] = ImportApiToApiMaterialV1
+    _API_TO_API_MATERIAL["roots"] = {
+        (ImportApiToApiMaterialV1, "source"): None,  # structural (model)
+        (ImportApiToApiMaterialV1, "target"): None,  # structural (model)
+        (ImportApiToApiMaterialV1, "transform"): None,  # structural (model)
+        (ImportApiSourceMaterialV1, "connection"): None,  # structural (shared variant)
+        (ImportApiSourceMaterialV1, "request"): None,  # structural (shared block)
+        (ImportApiSourceMaterialV1, "response_profile"): None,  # structural (shared block)
+        (ImportApiTargetMaterialV1, "connection"): None,  # structural (shared variant)
+        (ImportApiTargetMaterialV1, "operation"): None,  # structural (shared block)
+        (ImportApiTargetMaterialV1, "payload_profile"): None,  # structural (shared block)
+        (ImportApiTransformMaterialV1, "operations"): None,  # structural (shared variants)
+    }
+    return ImportApiToApiMaterialV1
+
+
+def _api_to_api_material_classes():
+    """The credential walker's table: the SHARED table (the one authority for
+    every shared block's rules) plus this root's structural rows only."""
+    from types import MappingProxyType
+
+    from ..recipes.component_material import _common_material_field_classes
+
+    _api_to_api_material_model()
+    return MappingProxyType({**_common_material_field_classes(), **_API_TO_API_MATERIAL["roots"]})
+
+
 def _api_to_api_unit_draft(
     params: Dict[str, Any], integration_name: str, gaps: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -1330,17 +1399,14 @@ def _api_to_api_unit_draft(
     (``assemble_rest_fetch_source_v1``), the shared transform group, and the
     shared REST send group; the root is ``source -> map_ref -> target -> stop``.
     """
-    from pydantic import TypeAdapter
-
     from ..patterns.base import PrimitiveBuildContext
     from ..recipes.builtins.sync import assemble_rest_fetch_source_v1
     from ..recipes.component_material import (
-        FanoutRestConnectionMaterialV2,
-        FanoutRestOperationMaterialV2,
-        FanoutTransformOperationV2,
         _DEFAULT_STATUS_CODES_V2,
         _rt,
         authorize_rest_connection,
+        check_credential_boundary,
+        check_rest_request,
         authorize_rest_request,
         authorize_transform_operations,
         emit_rest_send_components,
@@ -1384,22 +1450,60 @@ def _api_to_api_unit_draft(
             )
         raise _DraftBlocked()
     prefix_field = f"{_DRAFT_FIELD}.material"
+    material_model = _api_to_api_material_model()
     try:
-        source_conn = TypeAdapter(FanoutRestConnectionMaterialV2).validate_python(source_connection)
-        source_req = FanoutRestOperationMaterialV2.model_validate(source_request)
-        target_conn = TypeAdapter(FanoutRestConnectionMaterialV2).validate_python(target_connection)
-        target_req = FanoutRestOperationMaterialV2.model_validate(target_request)
-        operations = tuple(
-            TypeAdapter(FanoutTransformOperationV2).validate_python(op)
-            for op in transform["operations"]
+        material = material_model.model_validate(
+            {
+                "source": {
+                    "connection": source_connection,
+                    "request": source_request,
+                    "response_profile": source["response_profile"],
+                },
+                "target": {
+                    "connection": target_connection,
+                    "operation": target_request,
+                    "payload_profile": target["payload_profile"],
+                },
+                "transform": transform,
+            }
         )
-        response_profile = JSONPayloadProfile.model_validate(source["response_profile"])
-        payload_profile = JSONPayloadProfile.model_validate(target["payload_profile"])
     except ValidationError as exc:
         gaps.extend(_validation_error_gaps(exc, prefix_field))
         raise _DraftBlocked() from None
+    source_conn, source_req = material.source.connection, material.source.request
+    target_conn, target_req = material.target.connection, material.target.operation
+    operations = tuple(material.transform.operations)
+    response_profile = material.source.response_profile
+    payload_profile = material.target.payload_profile
     rt = _rt()
+    source_connection_key = rt.primitive_component_key(
+        rt.SOURCE_PREFIX, _rest_source_connection_role()
+    )
     try:
+        # The shared credential boundary, exactly as a preset's preparer runs it
+        # (userinfo, literal query names and values, credential references), then
+        # each request's effective target judged on its own.
+        check_credential_boundary(material, _api_to_api_material_classes(), pointer="")
+        for side, conn, req, req_field in (
+            ("source", source_conn, source_req, "request"),
+            ("target", target_conn, target_req, "operation"),
+        ):
+            check_rest_request(
+                connection_key=(
+                    source_connection_key if side == "source"
+                    else rt.primitive_component_key(rt.TARGET_PREFIX, rt.ROLE_REST_CONNECTION)
+                ),
+                path=req.path,
+                path_pointer=f"/{side}/{req_field}/path",
+                created_base_url=getattr(conn, "base_url", None) if conn.mode == "create" else None,
+                connection_pointer=f"/{side}/connection",
+                selected_key=None,
+                selected_key_pointer=f"/{side}/connection",
+                binding_mode=conn.mode,
+                base_catalog={},
+                query_parameters=req.query_parameters,
+                query_parameters_pointer=f"/{side}/{req_field}/query_parameters",
+            )
         fetched = assemble_rest_fetch_source_v1(
             source_conn,
             source_req,

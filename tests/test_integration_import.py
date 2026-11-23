@@ -951,3 +951,28 @@ def test_every_pinned_preset_recipe_is_a_production_executable():
         assert descriptor.entry_kind == "executable_recipe", preset
         assert _selected_recipe_ref(preset) == {
             "recipe_id": recipe_id, "recipe_version": version, "entry_kind": "executable_recipe"}
+
+
+@pytest.mark.parametrize("factory", [_rest_to_rest_artifact, _listener_to_rest_artifact])
+@pytest.mark.parametrize("mutation, field_tail", [
+    ("query_name", "operation.query_parameters.0.name"),
+    ("secret_query_value", "operation.query_parameters.0.literal_value"),
+    ("userinfo", "connection.base_url"),
+])
+def test_both_rest_shapes_hold_the_shared_rest_boundary(factory, mutation, field_tail):
+    """REST -> REST (a direct unit) and listener -> REST (a recipe) judge the target
+    request by the SAME shared authorities: an unpublished literal query name, a
+    secret-shaped query value and userinfo in the base URL are each a blocking,
+    value-free gap at the target field, never a ready draft."""
+    artifact = factory()
+    if mutation == "query_name":
+        artifact["target"]["query_parameters"] = {"upsertMode": "x"}
+    elif mutation == "secret_query_value":
+        artifact["target"]["query_parameters"] = {"filter": "Bearer abc.def.ghi"}
+    else:
+        artifact["target"]["base_url"] = "https://user:s3cr3t@t.example.com"
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is False
+    assert "authoring_request_draft" not in r
+    assert any(g["field"].endswith("target." + field_tail) for g in r["gaps"]), r["gaps"]
+    assert "s3cr3t" not in json.dumps(r["gaps"]) and "abc.def.ghi" not in json.dumps(r["gaps"])
