@@ -143,3 +143,91 @@ def test_a_target_writer_reading_the_pre_map_profile_is_refused():
         parse_and_compile_process_ir_v1(doc, corpus.issue184_symbols())
     diagnostics = [(item.code, item.path) for item in excinfo.value.diagnostics]
     assert (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH, "/body/steps/3/source_values/1/profile_ref") in diagnostics, diagnostics
+
+
+# ---------------------------------------------------------------------------
+# #159 caller census (L9) — EVAL-155-02 / EVAL-155-02a. TRANSITIONAL witnesses: they
+# drive the retained legacy oracle input (`legacy_both_sides_config.json`, golden-000079's
+# frozen input) through the two serving routes that can hand a hand-authored
+# `database_to_api_sync` config to the legacy renderer, so the census row for each route
+# is executable rather than asserted. When #159 migrates or retires a route, rewrite the
+# matching body in place (keep the node id); #160 deletes them with the legacy renderer.
+# ---------------------------------------------------------------------------
+
+_ORACLE_INPUT = _ROOT / "tests/fixtures/process_ir/issue184/legacy_both_sides_config.json"
+
+
+def _shape_tree(text: str):
+    """The `<shapes>` element as a comparable tree, ignoring only the x/y layout
+    attributes (the safe-edit route arranges the canvas, #188)."""
+    def canon(element):
+        return (element.tag,
+                tuple(sorted((k, v) for k, v in element.attrib.items() if k not in ("x", "y"))),
+                (element.text or "").strip(), tuple(canon(child) for child in element))
+    return canon(ET.fromstring(_shapes(text)))
+
+
+def test_the_build_integration_plan_refuses_the_retained_oracle_input():
+    """The create/reuse and literal-reference spellings of the legacy both-bound config
+    are refused at plan time on the build_integration route: its validator runs with the
+    database_to_api_sync source gate, which admits no REST source (golden-000079's input
+    validates only under `allow_rest_source=True`, which no serving caller of this route
+    passes). Apply re-runs this plan, so nothing reaches the renderer."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories import integration_builder as ib
+
+    literal = json.loads(_ORACLE_INPUT.read_text(encoding="utf-8"))
+    referenced = json.loads(_ORACLE_INPUT.read_text(encoding="utf-8"))
+    referenced["source"].update(connection_id="$ref:rconn", operation_id="$ref:rop")
+    referenced["target"].update(connection_id="$ref:conn", operation_id="$ref:op")
+    referenced["transform"]["map_ref"] = "$ref:map"
+    # In-spec dependencies on the update path (existing ids), so only the process step
+    # reaches builder validation.
+    dependencies = [
+        {"key": key, "type": kind, "action": "update", "name": key,
+         "component_id": "00000000-0000-0000-0000-00000000000%d" % index, "config": config}
+        for index, (key, kind, config) in enumerate((
+            ("rconn", "connector-settings", {"connector_type": "rest", "base_url": "http://x"}),
+            ("rop", "connector-action", {"connector_type": "rest", "method": "GET"}),
+            ("conn", "connector-settings", {"connector_type": "rest", "base_url": "http://x"}),
+            ("op", "connector-action", {"connector_type": "rest", "method": "PATCH"}),
+            ("map", "transform.map", {})))]
+    for process_config, others in ((literal, []), (referenced, dependencies)):
+        spec = {"conflict_policy": "reuse", "integration_spec": {"version": "1.0", "name": "l9", "components": [
+            *others, {"key": "proc", "type": "process", "action": "create", "name": "P",
+                      "config": process_config, "depends_on": [other["key"] for other in others]}]}}
+        with patch.object(ib, "paginate_metadata", return_value=[]):
+            plan = ib._build_plan(MagicMock(), spec)
+        step = next(step for step in plan["steps"] if step["key"] == "proc")
+        assert step["planned_action"] == "error_process_validation", step
+        assert (step["validation_error"]["error_code"], step["validation_error"]["field"]) == (
+            "PROCESS_CONNECTOR_BINDING_INVALID", "source.connector_type"), step
+
+
+def test_the_safe_edit_route_builds_the_retained_oracle_input_into_the_oracles_shapes():
+    """The census's one working caller: prepare_component_edit / apply_component_edit
+    hand a structured process body straight to the legacy builder without the plan-time
+    validator, so the retained oracle input is built and PUSHED, and its shapes are the
+    frozen oracle's (golden-000079) up to canvas layout. golden-000081 renders the same
+    shapes from the canonical spelling (the first test above), which is the transfer this
+    route must take. Offline: only the live fetch and the SDK client are stand-ins."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories.components import safe_edit_component as safe_edit
+
+    current = {"type": "process", "version": 3, "xml": (
+        _ROOT / "tests/fixtures/golden_xml/dynamic_path_target_profile.xml").read_text(encoding="utf-8")}
+    body = {"config": {**json.loads(_ORACLE_INPUT.read_text(encoding="utf-8")), "name": "Edited"}}
+    client = MagicMock()
+    with patch.object(safe_edit, "component_get_xml", return_value=current):
+        prepared = safe_edit.prepare_component_edit_action(client, "prof", "PROC-ID", body)
+        assert prepared["_success"] is True, prepared
+        applied = safe_edit.apply_component_edit_action(
+            client, "prof", "PROC-ID", body,
+            confirmation_token=prepared["confirmation_token"], confirm_apply=True)
+    assert applied["_success"] is True and applied["boomi_mutation"] is True, applied
+    pushed = client.component.update_component_raw.call_args.args[1]
+    assert _shape_tree(pushed) == _shape_tree(_ORACLE.read_text(encoding="utf-8"))
