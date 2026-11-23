@@ -79,8 +79,9 @@ def _rest_conn(key, name, **overrides):
 def _process(key, name, **cfg_overrides):
     """A flat process row. #159 S3: such a row only BINDS an existing process by
     explicit id (here a top-level component_id under conflict_policy='reuse'), so
-    the name lints still see it; any body override makes it a refused raw process
-    body (PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED)."""
+    it plans as ``reuse``: the advisory name lints still WARN on it, but no
+    create-only error conversion applies to a bind; any body override makes it a
+    refused raw process body (PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED)."""
     cfg = dict(cfg_overrides)
     return {"key": key, "type": "process", "action": "create", "name": name,
             "component_id": "99999999-9999-9999-9999-999999999999", "config": cfg}
