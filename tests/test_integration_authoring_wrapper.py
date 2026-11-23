@@ -608,24 +608,22 @@ def test_the_import_recipe_ref_names_what_actually_executes():
     version from this payload pinned the wrong one
     (issue #145, §6 architect review).
     """
-    from boomi_mcp.categories.integration_import import _selected_recipe_ref
+    #159 S3: the import's draft now PINS the executable recipe itself (no
+    # compatibility adapter is selected any more), so the served reference IS the
+    # code that runs: an executable registration, the exact pin the draft carries.
+    # REST -> REST is drafted as a direct unit and names no recipe at all.
+    from boomi_mcp.categories.integration_import import (
+        _PRESET_RECIPES,
+        _selected_recipe_ref,
+    )
     from boomi_mcp.recipes import production_registry
 
-    ref = _selected_recipe_ref("api_to_api_sync")
-    assert ref is not None
-    assert ref["entry_kind"] == "compatibility_adapter"
-
-    target = ref["adapter_target"]
-    # Not merely present — it must match what the registry would actually run.
-    descriptor = production_registry().resolve(ref["recipe_id"], ref["recipe_version"])
-    assert target["recipe_id"] == descriptor.adapter_target.recipe_id
-    assert target["recipe_version"] == descriptor.adapter_target.recipe_version
-    # ...and it is a DIFFERENT entry from the adapter, which is the whole point.
-    assert target["recipe_id"] != ref["recipe_id"]
-    executable = production_registry().resolve(
-        target["recipe_id"], target["recipe_version"]
-    )
-    assert executable.entry_kind == "executable_recipe"
+    assert _selected_recipe_ref("api_to_api_sync") is None
+    for preset in _PRESET_RECIPES:
+        ref = _selected_recipe_ref(preset)
+        assert "adapter_target" not in ref
+        executable = production_registry().resolve(ref["recipe_id"], ref["recipe_version"])
+        assert executable.entry_kind == ref["entry_kind"] == "executable_recipe"
 
 
 def test_an_unmigrated_preset_still_reports_an_honest_absence():
