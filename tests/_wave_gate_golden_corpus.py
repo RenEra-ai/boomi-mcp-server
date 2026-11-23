@@ -1391,13 +1391,64 @@ def load_m11_example(name):
     return payload["integration_spec"]
 
 
-def _case_m11_cache_property_basic():
-    spec = load_m11_example("cache_property_authoring_basic.integration.json")
-    process = next(c for c in spec["components"] if c["type"] == "process")
-    # The ``src.`` spelling — the one tests/test_m11_composed_examples.py uses.
-    from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
+#: golden-000023 (``m11_cache_property_basic.xml``): the frozen ids the legacy builder
+#: read from the example's literal config. The migrated example names its supporting
+#: components by key, so late binding maps each key onto the SAME frozen id.
+M11_BASIC_ID_REGISTRY = {
+    "demo_db_connection": "11111111-1111-1111-1111-111111111111",
+    "demo_db_get_operation": "22222222-2222-2222-2222-222222222222",
+    "demo_rest_connection": "33333333-3333-3333-3333-333333333333",
+    "demo_rest_operation": "44444444-4444-4444-4444-444444444444",
+    "demo_order_profile": "55555555-5555-5555-5555-555555555555",
+}
 
-    return ProcessFlowBuilder.build(process["config"], name=process["name"])
+
+def _case_m11_cache_property_basic():
+    """Render the migrated example's TYPED process unit through the canonical chain.
+
+    ``plan_authoring_request_v1`` (the unit and the request-local symbol table) ->
+    ``build_materialization_plan`` -> late binding to the frozen ids ->
+    ``materialize_canonical_process_xml`` (the complete component file). The expected
+    bytes were frozen from the legacy builder BEFORE the example migrated.
+    """
+    from boomi_mcp.authoring.contract import get_authoring_revisions
+    from boomi_mcp.authoring.process_materialization import build_materialization_plan
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.categories.components.canonical_process_apply import (
+        materialize_canonical_process_xml,
+    )
+    from boomi_mcp.categories.integration_builder import _materializer_revision
+    from boomi_mcp.compiler.process_ir.emitter_registry import emitter_revision
+    from boomi_mcp.models.authoring_workflow import (
+        AuthoringRequestV1,
+        ProcessIRAuthoringIntentV1,
+    )
+
+    spec = load_m11_example("cache_property_authoring_basic.integration.json")
+    request = AuthoringRequestV1(
+        intent=ProcessIRAuthoringIntentV1(
+            integration_name=spec["naming"]["integration_name"],
+            units=tuple(copy.deepcopy(spec["processes"])),
+            components=tuple(copy.deepcopy(spec["components"])),
+        )
+    )
+    _result, internals = plan_authoring_request_v1(
+        request, profile="golden", account_id="golden"
+    )
+    unit = internals.normalized.integration_spec.processes[0]
+    symbols = internals.symbols
+    plan = build_materialization_plan(
+        envelope=unit.envelope,
+        process_ir=unit.process_ir,
+        symbols=symbols,
+        conflict_policy="reuse",
+        compiler_revision=get_authoring_revisions()["compiler_revision"],
+        emitter_revision=emitter_revision(),
+        materializer_revision=_materializer_revision(),
+    )
+    return materialize_canonical_process_xml(
+        plan=plan, id_registry=dict(M11_BASIC_ID_REGISTRY), symbols=symbols
+    )
 
 
 def _case_m11_processproperty_map_function():

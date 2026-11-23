@@ -2,77 +2,223 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "Show the SHAPE of a build_from_archetype call that REUSES existing secured connection components (binding.mode='reuse') instead of authoring new ones — the preferred doctrine: reuse keeps credentials out of the conversation.",
-  "do_not_reuse": "Every value below is a <<placeholder>> sentinel. Discover real component ids with query_components(action='list') and author all other values from the user's actual requirements.",
+  "purpose": "Show the SHAPE of a direct canonical authoring request that REUSES existing secured connection components (a reference-only connector-settings entry carrying component_id) instead of authoring new ones \u2014 the preferred doctrine: reuse keeps credentials out of the conversation.",
+  "do_not_reuse": "Every value below is a <<placeholder>> sentinel. Author your own read statement, fields, URLs, and names from the user's actual requirements \u2014 never copy these values into a real build. Discover real component ids with query_components(action='list').",
   "tool_call": {
-    "tool": "build_from_archetype",
+    "tool": "build_integration",
     "arguments": {
-      "name": "database_to_api_sync",
-      "parameters": {
-        "naming": {
-          "integration_name": "<<integration name>>",
-          "component_prefix": "<<PREFIX>>"
-        },
-        "source": {
-          "binding": {
-            "mode": "reuse",
-            "component_id": "<<existing DB connection component id>>"
-          },
-          "read_operation": {
-            "sql": "<<user-authored DB read statement>>",
-            "result_schema": {
-              "fields": [
-                {"name": "<<source field a>>", "data_type": "character", "required": true},
-                {"name": "<<source field b>>", "data_type": "datetime"}
-              ]
-            }
+      "profile": "<<profile name>>",
+      "action": "plan",
+      "config": {
+        "authoring_request": {
+          "contract_version": "2",
+          "intent": {
+            "intent_kind": "process_ir",
+            "integration_name": "<<integration name>>",
+            "units": [
+              {
+                "envelope": {
+                  "component_key": "main_process",
+                  "name": "<<PREFIX>> DB to API Sync",
+                  "action": "create",
+                  "depends_on": [
+                    "source_db_connection",
+                    "source_db_get_operation",
+                    "transform_transform_map",
+                    "target_rest_connection",
+                    "target_rest_operation"
+                  ]
+                },
+                "process_ir": {
+                  "version": "1",
+                  "body": {
+                    "kind": "sequence",
+                    "steps": [
+                      {
+                        "kind": "source",
+                        "connection_ref": "$ref:source_db_connection",
+                        "operation_ref": "$ref:source_db_get_operation"
+                      },
+                      {
+                        "kind": "map_ref",
+                        "map_ref": "$ref:transform_transform_map",
+                        "label": "Map source to JSON payload"
+                      },
+                      {
+                        "kind": "target",
+                        "connection_ref": "$ref:target_rest_connection",
+                        "operation_ref": "$ref:target_rest_operation"
+                      },
+                      {
+                        "kind": "stop"
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "components": [
+              {
+                "key": "source_db_connection",
+                "type": "connector-settings",
+                "action": "create",
+                "component_id": "<<existing DB connection component id>>",
+                "depends_on": [],
+                "config": {
+                  "component_id": "<<existing DB connection component id>>",
+                  "connector_type": "database",
+                  "reference_only": true
+                }
+              },
+              {
+                "key": "source_db_read_profile",
+                "type": "profile.db",
+                "action": "create",
+                "component_id": null,
+                "name": "<<PREFIX>> DB Read Profile",
+                "depends_on": [],
+                "config": {
+                  "profile_type": "database.read",
+                  "component_name": "<<PREFIX>> DB Read Profile",
+                  "query": "<<user-authored DB read statement>>",
+                  "output_fields": [
+                    {
+                      "name": "<<source field a>>",
+                      "data_type": "character",
+                      "mandatory": true,
+                      "enforce_unique": false
+                    },
+                    {
+                      "name": "<<source field b>>",
+                      "data_type": "datetime",
+                      "mandatory": false,
+                      "enforce_unique": false
+                    }
+                  ]
+                }
+              },
+              {
+                "key": "source_db_get_operation",
+                "type": "connector-action",
+                "action": "create",
+                "component_id": null,
+                "name": "<<PREFIX>> DB Get",
+                "depends_on": [
+                  "source_db_connection",
+                  "source_db_read_profile"
+                ],
+                "config": {
+                  "connector_type": "database",
+                  "operation_mode": "get",
+                  "component_name": "<<PREFIX>> DB Get",
+                  "connection_ref_key": "source_db_connection",
+                  "read_profile_id": "$ref:source_db_read_profile"
+                }
+              },
+              {
+                "key": "transform_target_profile",
+                "type": "profile.json",
+                "action": "create",
+                "component_id": null,
+                "name": "<<PREFIX>> Target Profile",
+                "depends_on": [],
+                "config": {
+                  "profile_type": "json.generated",
+                  "component_name": "<<PREFIX>> Target Profile",
+                  "root": {
+                    "name": "Root",
+                    "kind": "object",
+                    "data_type": null,
+                    "required": false,
+                    "description": null,
+                    "children": [
+                      {
+                        "name": "<<target field a>>",
+                        "kind": "simple",
+                        "data_type": "character",
+                        "required": true,
+                        "description": null,
+                        "children": null
+                      },
+                      {
+                        "name": "<<target field b>>",
+                        "kind": "simple",
+                        "data_type": "datetime",
+                        "required": false,
+                        "description": null,
+                        "children": null
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "key": "transform_transform_map",
+                "type": "transform.map",
+                "action": "create",
+                "component_id": null,
+                "name": "<<PREFIX>> Field Map",
+                "depends_on": [
+                  "transform_target_profile",
+                  "source_db_read_profile"
+                ],
+                "config": {
+                  "component_name": "<<PREFIX>> Field Map",
+                  "map_type": "direct",
+                  "source_profile_id": "$ref:source_db_read_profile",
+                  "source_profile_type": "profile.db",
+                  "target_profile_id": "$ref:transform_target_profile",
+                  "target_profile_type": "profile.json",
+                  "field_mappings": [
+                    {
+                      "source_path": "<<source field a>>",
+                      "target_path": "Root/<<target field a>>"
+                    },
+                    {
+                      "source_path": "<<source field b>>",
+                      "target_path": "Root/<<target field b>>"
+                    }
+                  ]
+                }
+              },
+              {
+                "key": "target_rest_connection",
+                "type": "connector-settings",
+                "action": "create",
+                "component_id": "<<existing REST connection component id>>",
+                "depends_on": [],
+                "config": {
+                  "component_id": "<<existing REST connection component id>>",
+                  "connector_type": "rest",
+                  "reference_only": true
+                }
+              },
+              {
+                "key": "target_rest_operation",
+                "type": "connector-action",
+                "action": "create",
+                "component_id": null,
+                "name": "<<PREFIX>> REST Send",
+                "depends_on": [
+                  "target_rest_connection",
+                  "transform_target_profile"
+                ],
+                "config": {
+                  "connector_type": "rest",
+                  "operation_mode": "execute",
+                  "component_name": "<<PREFIX>> REST Send",
+                  "connection_ref_key": "target_rest_connection",
+                  "method": "POST",
+                  "path": "<<api path>>",
+                  "request_profile_id": "$ref:transform_target_profile",
+                  "request_profile_type": "json"
+                }
+              }
+            ]
           }
-        },
-        "target": {
-          "binding": {
-            "mode": "reuse",
-            "component_id": "<<existing REST connection component id>>"
-          },
-          "send_request": {
-            "method": "POST",
-            "path": "<<api path>>"
-          },
-          "payload_profile": {
-            "format": "json",
-            "root": {
-              "name": "Root",
-              "kind": "object",
-              "children": [
-                {"name": "<<target field a>>", "kind": "simple", "data_type": "character", "required": true},
-                {"name": "<<target field b>>", "kind": "simple", "data_type": "datetime"}
-              ]
-            }
-          }
-        },
-        "transform": {
-          "operations": [
-            {
-              "operation_type": "direct",
-              "source_field": "<<source field a>>",
-              "target_path": "Root/<<target field a>>"
-            },
-            {
-              "operation_type": "direct",
-              "source_field": "<<source field b>>",
-              "target_path": "Root/<<target field b>>"
-            }
-          ]
-        },
-        "execution": {
-          "trigger": {"mode": "manual"}
-        },
-        "reliability": {
-          "retry": {"max_attempts": 1},
-          "dlq": {"enabled": false},
-          "error_classifier": {}
         }
       }
     }
   },
-  "next_steps": "Reused connections are referenced, never modified. Pass the returned integration_spec to build_integration(action='plan'), then review_transformation(action='validate_unmapped') BEFORE apply."
+  "next_steps": "Reused connections are referenced, never modified. Send the authoring_request as the JSON-string config of build_integration(action='plan'), then action='compile' and review_transformation(action='validate_unmapped') BEFORE apply."
 }
