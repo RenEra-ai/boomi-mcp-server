@@ -420,9 +420,8 @@ class DerivedEndpointRowV1(_OmitUnsetModel):
     profile's ``statement_type``; a WSS listener serves its computed
     ``endpoint_path`` (and ``publish_mode`` behind an API Service component); a
     REST endpoint of a LINEAR route serves ``expected_status_codes`` only when
-    its route DECLARES them (a fan-out never serves them on an endpoint: each
-    leg's declared codes are reported in ``composition_summaries`` under
-    ``fanout_legs``); and a stub endpoint is a bare labelled placeholder with no binding
+    its route DECLARES them (a fan-out never serves them on an endpoint); and a
+    stub endpoint is a bare labelled placeholder with no binding
     and no ``executable`` key at all — so ``binding_mode`` is required on every
     type EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.
     """
