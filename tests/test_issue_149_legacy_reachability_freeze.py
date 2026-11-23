@@ -226,9 +226,11 @@ def test_the_scan_universe_is_complete_and_non_vacuous(derived):
     # #159 S3: the serving cutover EMPTIED two families on purpose — no production
     # caller of the legacy semantic bridge is left (`_process_ir_semantic_error`
     # retired), and every shipped example authors canonical units (no
-    # `example_producer`). Their detectors stay proven by the synthetic witnesses
-    # (`test_a_legacy_semantic_validation_caller_is_reported`, the example arm of the
-    # #159 zero-caller census), so only the still-populated families are required here.
+    # `example_producer`). Their detectors stay proven by in-memory synthetic
+    # witnesses run through the inventory's own scanners
+    # (`test_a_legacy_semantic_validation_caller_is_reported`,
+    # `test_a_synthetic_example_producer_is_reported`), so only the still-populated
+    # families are required here.
     for required in ("registry_lookup", "renderer_call", "legacy_emitter",
                      "component_xml_write",
                      "raw_api_invoker", "process_kind_producer",
@@ -1762,6 +1764,32 @@ def test_a_legacy_semantic_validation_caller_is_reported(census_only):
         "    return validate_legacy_process_config(kind, config)\n"
     ))
     assert "legacy_semantic_validation" in {r.split(" | ")[0] for r in diff.added}
+
+
+def test_a_synthetic_example_producer_is_reported(census_only):
+    """#159 S3 emptied `example_producer` on purpose (every shipped example authors
+    canonical units), so HEAD alone cannot show its detector works. Overlay one
+    in-memory example carrying the legacy selectors through the SAME `scan_examples`
+    the inventory runs, and require the family to light up — while a canonical-unit
+    example (no selector) adds nothing."""
+    path = "examples/_m12_12_synthetic/legacy_process.integration.json"
+    legacy = {"integration_spec": {"components": [{
+        "key": "p", "type": "process", "action": "create",
+        "config": {"process_kind": "sync_pipeline", "process_type": "x"}}]}}
+    current = inv.build_inventory(
+        examples=dict(inv.example_documents(), **{path: legacy}), include_served=False)
+    diff = inv.compare(current, census_only)
+    added = [r for r in diff.added if r.split(" | ")[0] == "example_producer"]
+    assert len(added) == 2 and all(path in r for r in added), diff.added
+    assert diff.removed == []
+
+    canonical = {"integration_spec": {"processes": [{"envelope": {"key": "p"},
+                                                     "process_ir": {"kind": "sequence"}}]}}
+    quiet = inv.compare(inv.build_inventory(
+        examples=dict(inv.example_documents(), **{path: canonical}), include_served=False),
+        census_only)
+    # (The document count itself moves — a scalar change — but no census row does.)
+    assert (quiet.added, quiet.removed, quiet.count_changes) == ([], [], []), quiet.report()
 
 
 def test_a_bulk_component_caller_is_reported_as_a_write_sink(census_only):
