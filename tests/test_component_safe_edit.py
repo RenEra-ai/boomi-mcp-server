@@ -751,11 +751,37 @@ def test_canonical_update_admission_refuses_before_any_write(variant):
             )
         assert res["_success"] is False, (variant, action, res)
         assert res["boomi_mutation"] is False
-        assert res["error_code"] in (
-            "PROCESS_COMPONENT_SCHEMA_INVALID", "PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY",
-        ), (variant, action, res)
+        # #159 S3 (S3-D2): each admission refusal serves its dedicated code.
+        assert res["error_code"] == {
+            "mixed_config": "COMPONENT_EDIT_AUTHORING_REQUEST_INVALID",
+            "mixed_map_context": "COMPONENT_EDIT_AUTHORING_REQUEST_INVALID",
+            "two_units": "COMPONENT_EDIT_AUTHORING_REQUEST_INVALID",
+            "create_action": "COMPONENT_EDIT_AUTHORING_REQUEST_INVALID",
+            "other_component": "COMPONENT_EDIT_TARGET_MISMATCH",
+            "written_supporting_row": "COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED",
+            # A create row with no id would be CREATED by apply: a write.
+            "unbound_supporting_row": "COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED",
+        }[variant], (variant, action, res)
         if expected_field:
             assert res["field"] == expected_field
+    assert client.component.pushed == []
+
+
+def test_canonical_update_refuses_a_dependency_the_account_holds_as_another_type():
+    """#159 S3 (S3-D2): dependency verification serves its dedicated code. The captured
+    request with one bound profile row declared as an XML profile: the account holds a
+    JSON profile at that id, so prepare refuses COMPONENT_EDIT_DEPENDENCY_UNVERIFIED at
+    that row and nothing is written."""
+    client = CanonicalAccount(captured_bound_profiles_store())
+    patch = captured_bound_profiles_patch()
+    rows = patch["authoring_request"]["intent"]["components"]
+    index = next(i for i, row in enumerate(rows) if row["key"] == "PREAD")
+    rows[index]["type"] = "profile.xml"
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch)
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+    assert res["field"] == f"authoring_request.intent.components.{index}"
     assert client.component.pushed == []
 
 
@@ -777,7 +803,7 @@ def test_canonical_update_refuses_a_declared_verb_the_bound_operation_does_not_s
     assert res["_success"] is False, res
     assert res["boomi_mutation"] is False
     if spelling == "reference_only":
-        assert res["error_code"] == "PROCESS_COMPONENT_SCHEMA_INVALID"
+        assert res["error_code"] == "COMPONENT_EDIT_BINDING_REQUIRED"
         assert res["field"] == "authoring_request.intent.components.3.component_id"
     else:
         codes = {d.get("code") for d in res.get("authoring_diagnostics") or ()}

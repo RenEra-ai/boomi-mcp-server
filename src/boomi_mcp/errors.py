@@ -68,6 +68,12 @@ COMPONENT_EDIT_TOKEN_INVALID = "COMPONENT_EDIT_TOKEN_INVALID"
 COMPONENT_EDIT_PATCH_MISMATCH = "COMPONENT_EDIT_PATCH_MISMATCH"
 COMPONENT_EDIT_DRIFT_DETECTED = "COMPONENT_EDIT_DRIFT_DETECTED"
 COMPONENT_EDIT_TYPE_MISMATCH = "COMPONENT_EDIT_TYPE_MISMATCH"
+# #159 S3 (S3-D2): the canonical process update arm (patch.authoring_request).
+COMPONENT_EDIT_AUTHORING_REQUEST_INVALID = "COMPONENT_EDIT_AUTHORING_REQUEST_INVALID"
+COMPONENT_EDIT_TARGET_MISMATCH = "COMPONENT_EDIT_TARGET_MISMATCH"
+COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED = "COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED"
+COMPONENT_EDIT_BINDING_REQUIRED = "COMPONENT_EDIT_BINDING_REQUIRED"
+COMPONENT_EDIT_DEPENDENCY_UNVERIFIED = "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED"
 
 # --- ProcessIRV1 model/codec boundary (M12.1 / issue #136; ADR-001 §7) --------
 # First codes of the PROCESS_IR_SCHEMA_* / PROCESS_IR_REFERENCE_* /
@@ -1061,6 +1067,59 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="patch.component_type does not match the live component type.",
             owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
+            category="component_edit",
+            retryable=False,
+            summary=(
+                "patch.authoring_request is not one direct process_ir unit with "
+                "action='update', or it is combined with patch.config or "
+                "patch.map_context; the canonical arm carries the whole body alone."
+            ),
+            owner="#159",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_TARGET_MISMATCH,
+            category="component_edit",
+            retryable=False,
+            summary=(
+                "The canonical update names, binds, or compiles to a process other "
+                "than the component being edited."
+            ),
+            owner="#159",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED,
+            category="component_edit",
+            retryable=False,
+            summary=(
+                "A supporting component of the canonical update would be written; "
+                "safe edit writes only the process being edited."
+            ),
+            owner="#159",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_BINDING_REQUIRED,
+            category="component_edit",
+            retryable=False,
+            summary=(
+                "A supporting component of the canonical update does not bind an "
+                "existing component by explicit id (a connector, by its row's "
+                "top-level component_id); safe edit resolves nothing by name."
+            ),
+            owner="#159",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
+            category="component_edit",
+            retryable=False,
+            summary=(
+                "A supporting component of the canonical update could not be read "
+                "from the account, has another type there, or was resolved by the "
+                "compile to a different component; nothing was written."
+            ),
+            owner="#159",
         ),
         ErrorCodeSpec(
             code=PROCESS_IR_SCHEMA_UNKNOWN_NODE,

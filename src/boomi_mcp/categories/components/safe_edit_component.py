@@ -72,9 +72,12 @@ from ...errors import (
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     COMPONENT_EDIT_DRIFT_DETECTED,
     COMPONENT_EDIT_TOKEN_INVALID,
+    COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
+    COMPONENT_EDIT_BINDING_REQUIRED,
+    COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
+    COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED,
+    COMPONENT_EDIT_TARGET_MISMATCH,
     COMPONENT_EDIT_TYPE_MISMATCH,
-    PROCESS_COMPONENT_SCHEMA_INVALID,
-    PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
 )
 
@@ -250,7 +253,7 @@ def _validate_patch_shape(patch: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(patch.get(_CANONICAL_PATCH_KEY), dict):
             return {
                 "_success": False,
-                "error_code": PROCESS_COMPONENT_SCHEMA_INVALID,
+                "error_code": COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
                 "error": "patch.authoring_request must be a JSON object (an AuthoringRequestV1).",
                 "field": _CANONICAL_PATCH_KEY,
             }
@@ -261,7 +264,7 @@ def _validate_patch_shape(patch: Any) -> Optional[Dict[str, Any]]:
         if mixed:
             return {
                 "_success": False,
-                "error_code": PROCESS_COMPONENT_SCHEMA_INVALID,
+                "error_code": COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
                 "error": (
                     "patch.authoring_request cannot be combined with "
                     + " or ".join("patch." + key for key in mixed)
@@ -501,7 +504,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
     intent = request.intent
     if getattr(intent, "intent_kind", None) != "process_ir":
         return _canonical_refusal(
-            PROCESS_COMPONENT_SCHEMA_INVALID,
+            COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
             "patch.authoring_request must carry a direct process_ir intent; "
             f"{getattr(intent, 'intent_kind', None)!r} is not one.",
             "authoring_request.intent.intent_kind",
@@ -511,7 +514,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
     units = tuple(intent.units or ())
     if len(units) != 1:
         return _canonical_refusal(
-            PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+            COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
             f"patch.authoring_request must carry exactly one unit, not {len(units)}: "
             "safe edit updates one existing process and writes no other root.",
             "authoring_request.intent.units",
@@ -519,14 +522,14 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
     envelope = units[0].envelope
     if envelope.action != "update":
         return _canonical_refusal(
-            PROCESS_COMPONENT_SCHEMA_INVALID,
+            COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
             "The unit's envelope must declare action='update': safe edit never creates.",
             "authoring_request.intent.units.0.envelope.action",
         )
     declared_id = canonical_component_id(envelope.component_id)
     if not declared_id or declared_id != canonical_component_id(component_id):
         return _canonical_refusal(
-            PROCESS_COMPONENT_SCHEMA_INVALID,
+            COMPONENT_EDIT_TARGET_MISMATCH,
             "The unit's envelope.component_id must name the component being edited "
             f"({component_id!r}).",
             "authoring_request.intent.units.0.envelope.component_id",
@@ -539,7 +542,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
         pointer = f"authoring_request.intent.components.{index}"
         if apply_writes_component_config(comp, policy):
             return _canonical_refusal(
-                PROCESS_COMPONENT_SCHEMA_INVALID,
+                COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED,
                 f"Supporting component {comp.key!r} would be WRITTEN by this request; "
                 "safe edit writes only the process being edited.",
                 pointer,
@@ -551,7 +554,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
         bound = bindings.get(comp.key)
         if not bound:
             return _canonical_refusal(
-                PROCESS_COMPONENT_SCHEMA_INVALID,
+                COMPONENT_EDIT_BINDING_REQUIRED,
                 f"Supporting component {comp.key!r} does not bind an existing component "
                 "by explicit id; safe edit resolves nothing by name.",
                 pointer,
@@ -563,7 +566,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
             # contradicts. A connector bound only through `config.component_id` would
             # carry its declaration to the emitted shape unchecked (measured).
             return _canonical_refusal(
-                PROCESS_COMPONENT_SCHEMA_INVALID,
+                COMPONENT_EDIT_BINDING_REQUIRED,
                 f"Connector {comp.key!r} must bind its existing component through the "
                 "row's top-level component_id, so its stored identity is read and "
                 "compared with what the row declares.",
@@ -573,7 +576,7 @@ def _admit_canonical_request(request, component_id: str) -> Optional[Dict[str, A
             )
         if canonical_component_id(bound) == declared_id:
             return _canonical_refusal(
-                PROCESS_COMPONENT_SCHEMA_INVALID,
+                COMPONENT_EDIT_TARGET_MISMATCH,
                 f"Supporting component {comp.key!r} names the process being edited.",
                 pointer,
             )
@@ -610,7 +613,7 @@ def _verified_dependencies(boomi_client: Boomi, request, reads=None) -> Dict[str
         fetched = reads.fetch(bound)
         if not isinstance(fetched, dict) or fetched.get("unparseable"):
             return _canonical_refusal(
-                PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
+                COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
                 f"Supporting component {comp.key!r} ({bound!r}) could not be read from "
                 "the account (the read failed, timed out, did not parse, or the request's "
                 "read budget was spent).",
@@ -620,7 +623,7 @@ def _verified_dependencies(boomi_client: Boomi, request, reads=None) -> Dict[str
         live_type = (fetched.get("type") or "").strip()
         if live_type != str(comp.type).strip():
             return _canonical_refusal(
-                PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
+                COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
                 f"Supporting component {comp.key!r} declares type {comp.type!r}, but "
                 f"{bound!r} is a {live_type or 'component of unknown type'!r} in the account.",
                 pointer,
@@ -720,7 +723,7 @@ def _compute_canonical_xml(
         mismatched.append(root_key)
     if mismatched:
         return _canonical_refusal(
-            PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID,
+            COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
             "The compile resolved these keys to a component other than the one the "
             f"request names: {', '.join(mismatched)}.",
             "authoring_request.intent.components",
