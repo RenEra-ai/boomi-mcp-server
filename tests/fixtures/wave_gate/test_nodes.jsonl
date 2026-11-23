@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 14996, "minimum_collected": 14996, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15000, "minimum_collected": 15000, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -15977,3 +15977,7 @@
 {"kind": "test", "id": "pytest-015976", "node_id": "tests/test_wave_gate_goldens.py::test_a_migrated_recipe_golden_plans_the_frozen_spec_it_was_captured_against[compose_stream]", "state": "active"}
 {"kind": "test", "id": "pytest-015977", "node_id": "tests/test_wrapper_subprocess_extensions_hoist.py::test_a_typed_process_call_wrapper_declares_its_child_edge_and_extensions_explicitly", "state": "active"}
 {"kind": "test", "id": "pytest-015978", "node_id": "tests/test_issue_149_legacy_reachability_freeze.py::test_a_synthetic_example_producer_is_reported", "state": "active"}
+{"kind": "test", "id": "pytest-015979", "node_id": "tests/test_integration_builder.py::test_a_raw_process_body_behind_a_normalization_alias_is_refused_value_free", "state": "active"}
+{"kind": "test", "id": "pytest-015980", "node_id": "tests/test_issue_184_component_identity.py::test_an_unknown_response_profile_does_not_make_a_call_s_input_unknown", "state": "active"}
+{"kind": "test", "id": "pytest-015981", "node_id": "tests/test_issue_184_component_identity.py::test_a_bound_component_whose_stored_envelope_names_another_id_is_unknown[map]", "state": "active"}
+{"kind": "test", "id": "pytest-015982", "node_id": "tests/test_issue_184_component_identity.py::test_a_bound_component_whose_stored_envelope_names_another_id_is_unknown[operation]", "state": "active"}
