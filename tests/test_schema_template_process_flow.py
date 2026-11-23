@@ -310,12 +310,15 @@ def test_sync_pipeline_protocol_documented():
 
 
 def test_sync_pipeline_in_valid_protocols_and_removal_guidance():
-    # The retired protocols stay addressable (unknown-protocol errors list them)
-    # and every one answers with the removal envelope (#159 S3).
+    # #159 S3 (QA-159-S3-r1-02): no process protocol is VALID any more. The retired
+    # names stay addressable — an unknown-protocol error lists them under
+    # `retired_process_protocols`, never as `valid_protocols` — and every one
+    # answers with the removal envelope.
     bad = get_schema_template_action(
         resource_type="process", operation="create", protocol="nope",
     )
-    assert "sync_pipeline" in bad["valid_protocols"]
+    assert "valid_protocols" not in bad
+    assert "sync_pipeline" in bad["retired_process_protocols"]
     _assert_retired(_protocol_template("sync_pipeline"), "pipeline")
     removed = get_schema_template_action(resource_type="process", operation="create")
     assert "sync_pipeline" in removed["retired_process_protocols"]
@@ -328,9 +331,17 @@ def test_unknown_protocol_returns_error():
         operation="create",
         protocol="not_a_real_protocol",
     )
+    # Value-free (QA-159-S3-r1-02): the caller's string is not echoed, and the
+    # retired names are not presented as valid.
     assert result["_success"] is False
-    assert "not_a_real_protocol" in result["error"]
-    assert "database_to_api_sync" in result["valid_protocols"]
+    assert "not_a_real_protocol" not in json.dumps(result)
+    assert result["field"] == "protocol"
+    assert "valid_protocols" not in result
+    assert list(result["retired_process_protocols"]) == [
+        "database_to_api_sync", "wrapper_subprocess", "sync_pipeline"]
+    assert "authoring_request" in result["hint"]
+    for retired in result["retired_process_protocols"]:
+        _assert_retired(_protocol_template(retired), None)
 
 
 def test_protocol_overrides_operation_overview():

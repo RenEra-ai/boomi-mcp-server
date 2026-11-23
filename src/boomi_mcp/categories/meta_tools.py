@@ -7668,13 +7668,31 @@ _PROCESS_PROTOCOL_REMOVED = {
 }
 
 
+#: An unknown process protocol (QA-159-S3-r1-02). Value-free — the caller's string is
+#: never echoed — and no protocol is presented as VALID: every process protocol is
+#: retired, so the names are listed only as retired (each still answers with the
+#: removal envelope above).
+_PROCESS_PROTOCOL_UNKNOWN = {
+    "_success": False,
+    "error": (
+        "Unknown process protocol. No process protocol template is served: the "
+        "legacy process_kind protocols are retired."
+    ),
+    "field": "protocol",
+    "hint": (
+        "Author processes with build_integration(config={'authoring_request': ...}); "
+        "the request schema is get_schema_template(schema_name='AuthoringRequestV1'). "
+        "Omit protocol for the process overview."
+    ),
+}
+
+
 def _get_process_template(operation=None, protocol=None, **_):
     if protocol:
         if protocol not in _RETIRED_PROCESS_PROTOCOLS:
             return {
-                "_success": False,
-                "error": f"Unknown process protocol: {protocol}",
-                "valid_protocols": list(_RETIRED_PROCESS_PROTOCOLS),
+                **_PROCESS_PROTOCOL_UNKNOWN,
+                "retired_process_protocols": list(_RETIRED_PROCESS_PROTOCOLS),
             }
         # Value-free: the same removal envelope for every retired protocol.
         return {"_success": True, **_PROCESS_PROTOCOL_REMOVED}

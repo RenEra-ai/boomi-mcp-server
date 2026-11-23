@@ -1257,9 +1257,14 @@ def _specialized_surfaces():
         for operation in (None, "create"):
             base = {"resource_type": resource_type, "operation": operation}
 
-            # resource-level protocols (e.g. process/create + a process_kind)
+            # resource-level protocols (e.g. a trading-partner protocol). A RETIRED
+            # protocol's removal envelope is served text too: #159 S3 lists the
+            # retired process protocols under `retired_process_protocols`, never as
+            # valid (QA-159-S3-r1-02), so both keys are walked.
             for protocol in _probe_vocabulary(
                 "valid_protocols", **base, protocol="__not_a_protocol__"
+            ) + _probe_vocabulary(
+                "retired_process_protocols", **base, protocol="__not_a_protocol__"
             ):
                 surfaces.append(
                     meta_tools.get_schema_template_action(**base, protocol=protocol)
@@ -2296,7 +2301,9 @@ def test_the_specialization_vocabularies_are_asked_of_the_runtime():
 
     The wrapper's `protocol` line names only the trading-partner values, while
     the real set depends on the component_type — `connector-settings` admits
-    `database.sqlserver`, and `process` admits `database_to_api_sync`.
+    `database.sqlserver`. #159 S3 (QA-159-S3-r1-02): `process` admits NO protocol;
+    its retired names are reported under `retired_process_protocols` only, and the
+    sweep still reaches each one's removal envelope through that key.
     """
     documented = set(_documented_vocabulary("protocol"))
     component_protocols = set(
@@ -2308,17 +2315,17 @@ def test_the_specialization_vocabularies_are_asked_of_the_runtime():
             protocol="__not_a_protocol__",
         )
     )
-    process_protocols = set(
-        _probe_vocabulary(
-            "valid_protocols",
-            resource_type="process",
-            operation="create",
-            protocol="__not_a_protocol__",
-        )
-    )
-    assert component_protocols and process_protocols
+    probe = dict(resource_type="process", operation="create", protocol="__not_a_protocol__")
+    assert _probe_vocabulary("valid_protocols", **probe) == ()
+    retired = set(_probe_vocabulary("retired_process_protocols", **probe))
+    assert component_protocols and retired
     assert not (component_protocols & documented)
-    assert not (process_protocols & documented)
+    assert not (retired & documented)
+    swept = json.dumps(_specialized_surfaces(), default=str)
+    removal = meta_tools.get_schema_template_action(
+        resource_type="process", operation="create", protocol=sorted(retired)[0])
+    assert removal.get("removed") is True
+    assert json.dumps(removal, default=str)[:200] in swept
     assert _component_types()
 
 
