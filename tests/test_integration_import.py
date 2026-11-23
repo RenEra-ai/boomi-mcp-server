@@ -21,7 +21,8 @@ from boomi_mcp.categories.integration_import import (
     MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM,
     import_integration_draft_action as act,
 )
-from boomi_mcp.models.integration_models import IntegrationSpecV1
+from boomi_mcp.models.authoring_workflow import parse_authoring_request_v1
+from boomi_mcp.models.integration_models import IntegrationSpecV1  # noqa: F401
 from boomi_mcp.patterns import PatternKind, PatternRegistry
 
 
@@ -103,8 +104,13 @@ def test_rest_to_rest_full_draft():
     stages = [s["kind"] for s in r["pipeline_draft"]["stages"]]
     assert stages == ["fetch", "map", "send"]
     assert r["preset_parameters"]["naming"]["integration_name"] == "CRM Contact Sync"
-    # The draft re-validates as a real IntegrationSpecV1 — never a broken input.
-    IntegrationSpecV1.model_validate(r["integration_spec_draft"])
+    # #159 S3: the draft re-validates as a canonical AuthoringRequestV1 with ONE
+    # direct ProcessIR unit (REST -> REST has no executable recipe).
+    request = parse_authoring_request_v1(r["authoring_request_draft"])
+    assert request.intent.intent_kind == "process_ir"
+    assert [unit.envelope.component_key for unit in request.intent.units] == ["main_process"]
+    assert "integration_spec_draft" not in r
+    assert r["selected_recipe_ref"] is None
     assert (
         "build_integration(action='plan'" in r["next_steps"][0]
     ), "build-ready draft must point at the normal build workflow"
@@ -133,11 +139,12 @@ def test_db_to_rest_selects_database_preset():
     assert r["_success"] is True
     assert r["selected_preset"] == "database_to_api_sync"
     assert [s["kind"] for s in r["pipeline_draft"]["stages"]] == ["read", "map", "send"]
-    # DB source lacks binding/read_operation → honest per-field blocking gaps,
-    # never a spec draft.
+    # DB source lacks binding/read material → honest blocking gaps naming the
+    # canonical draft field, never a draft (#159 S3).
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
-    assert any(g["field"].startswith("preset_parameters.") for g in r["gaps"])
+    assert "authoring_request_draft" not in r
+    assert any(g["field"].startswith("authoring_request_draft.") for g in r["gaps"])
+    assert r["selected_recipe_ref"]["recipe_id"] == "boomi.archetype.database_to_api_sync"
 
 
 def test_listener_flow_selects_listener_preset():
@@ -163,7 +170,10 @@ def test_no_matching_preset_points_at_compose():
     assert r["preset_parameters"] is None
     assert r["pipeline_draft"] is None
     assert r["ready_for_build"] is False
-    assert any("compose_archetypes" in step for step in r["next_steps"])
+    # #159 S3: no retired composition tool is named; the step points at a
+    # hand-authored canonical authoring request.
+    assert not any("compose_archetypes" in step for step in r["next_steps"])
+    assert any("AuthoringRequestV1" in step for step in r["next_steps"])
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +200,7 @@ def test_export_summary_same_draft_as_generic_and_provenance_only():
     assert summary["selected_preset"] == generic["selected_preset"]
     assert summary["pipeline_draft"] == generic["pipeline_draft"]
     assert summary["preset_parameters"] == generic["preset_parameters"]
-    assert summary["integration_spec_draft"] == generic["integration_spec_draft"]
+    assert summary["authoring_request_draft"] == generic["authoring_request_draft"]
     # ... and the product/version tokens appear ONLY under input_provenance.
     scrubbed = {k: v for k, v in summary.items() if k != "input_provenance"}
     assert "LegacyESB" not in json.dumps(scrubbed)
@@ -216,7 +226,7 @@ def test_missing_credential_gap():
     assert r["_success"] is True
     assert MIGRATION_IMPORT_MISSING_CREDENTIAL in _gap_codes(r)
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
 
 
 def test_plaintext_secret_in_auth_is_gapped_and_never_forwarded():
@@ -238,7 +248,7 @@ def test_unknown_protocol_gap():
     assert MIGRATION_IMPORT_UNKNOWN_PROTOCOL in _gap_codes(r)
     assert r["selected_preset"] is None
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
 
 
 def test_unsupported_transform_gap_keeps_map_stage():
@@ -247,7 +257,7 @@ def test_unsupported_transform_gap_keeps_map_stage():
     r = act("generic_integration_description", artifact)
     assert MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM in _gap_codes(r)
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
     # The draft still shows a transform happens; its specifics live in gaps[].
     assert "map" in [s["kind"] for s in r["pipeline_draft"]["stages"]]
 
@@ -287,7 +297,7 @@ def test_ambiguous_mapping_gap_lists_candidates():
     assert len(gaps) == 1
     assert gaps[0]["details"]["candidates"] == ["Root/a/id", "Root/b/id"]
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
 
 
 def test_profile_uuid_without_index_gap():
@@ -298,7 +308,7 @@ def test_profile_uuid_without_index_gap():
     r = act("generic_integration_description", artifact)
     assert MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED in _gap_codes(r)
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
 
 
 def test_profile_uuid_with_95_index_accepted():
@@ -339,7 +349,7 @@ def test_inferred_schema_confirmation_required_blocks_build():
     assert r["_success"] is True
     assert "PROFILE_INFERENCE_CONFIRMATION_REQUIRED" in _gap_codes(r)
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
 
 
 def test_inferred_schema_clean_sample_is_build_ready():
@@ -366,7 +376,7 @@ def test_non_get_rest_source_blocks_instead_of_silent_get():
     gap = next(g for g in r["gaps"] if g["code"] == MIGRATION_IMPORT_UNKNOWN_PROTOCOL)
     assert gap["field"] == "source.method"
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
     # Explicit GET stays build-ready.
     artifact["source"]["method"] = "GET"
     r = act("generic_integration_description", artifact)
@@ -383,19 +393,31 @@ def test_non_get_source_unrecognized_method_value_not_echoed():
 
 def test_target_query_and_headers_propagate_into_draft():
     # Codex review r1: declared request metadata must reach the draft, not be
-    # silently dropped while ready_for_build stays true.
+    # silently dropped while ready_for_build stays true. #159 S3: the canonical
+    # REST material carries NO request headers, so declared headers are a
+    # blocking unsupported-construct gap per side (never dropped); the literal
+    # query value still reaches the derived parameters.
     artifact = _rest_to_rest_artifact()
     artifact["source"]["request_headers"] = {"Accept": "application/json"}
     artifact["target"]["query_parameters"] = {"mode": "upsert"}
     artifact["target"]["request_headers"] = {"X-Api-Version": "2"}
     r = act("generic_integration_description", artifact)
-    assert r["ready_for_build"] is True
+    assert r["ready_for_build"] is False
+    assert "authoring_request_draft" not in r
     fetch = r["preset_parameters"]["source"]["fetch_request"]
     send = r["preset_parameters"]["target"]["send_request"]
     assert fetch["request_headers"] == {"Accept": "application/json"}
     assert send["query_parameters"] == {"mode": "upsert"}
     assert send["request_headers"] == {"X-Api-Version": "2"}
-    assert "upsert" in json.dumps(r["integration_spec_draft"])
+    assert {(g["code"], g["field"]) for g in r["gaps"]} >= {
+        (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "source.request_headers"),
+        (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "target.request_headers"),
+    }
+    # Without the headers the same draft is ready and carries the query value.
+    del artifact["source"]["request_headers"], artifact["target"]["request_headers"]
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is True, r["gaps"]
+    assert "upsert" in json.dumps(r["authoring_request_draft"])
 
 
 def test_db_preset_target_query_params_use_literal_list_form():
@@ -468,7 +490,7 @@ def test_secret_shaped_header_rejected_not_echoed():
     assert "sk-live-xyz" not in json.dumps(r)
     assert "Bearer" not in json.dumps(r)
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
     # The safe payload_profile still made it through; only the header is dropped.
     send = r["preset_parameters"]["target"]["send_request"]
     assert "request_headers" not in send
@@ -488,11 +510,16 @@ def test_secret_shaped_query_param_rejected_not_echoed():
 
 
 def test_non_secret_headers_and_query_still_propagate():
+    # #159 S3: non-secret metadata still propagates into the derived
+    # parameters; the canonical draft gaps the headers it cannot carry.
     artifact = _rest_to_rest_artifact()
     artifact["source"]["request_headers"] = {"Accept": "application/json"}
     artifact["target"]["query_parameters"] = {"mode": "upsert"}
     r = act("generic_integration_description", artifact)
-    assert r["ready_for_build"] is True
+    assert r["ready_for_build"] is False
+    assert [(g["code"], g["field"]) for g in r["gaps"]] == [
+        (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "source.request_headers"),
+    ]
     assert (
         r["preset_parameters"]["source"]["fetch_request"]["request_headers"]
         == {"Accept": "application/json"}
@@ -547,7 +574,7 @@ def test_declared_retry_dlq_schedule_block_not_silently_dropped():
     assert (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "error_handling") in fields
     assert (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "trigger") in fields
     assert r["ready_for_build"] is False
-    assert "integration_spec_draft" not in r
+    assert "authoring_request_draft" not in r
     # Never recorded as a confirmed fact implying it was honored.
     assert not any("retry" in f["source"] for f in r["confirmed_facts"])
     assert not any(f["source"] == "artifact:trigger" for f in r["confirmed_facts"])
@@ -778,10 +805,11 @@ def test_param_validation_gap_hints_do_not_dangle():
             },
         },
     )
-    param_gaps = [g for g in r["gaps"] if g["code"] == "PARAM_VALIDATION_FAILED"]
+    # #159 S3: the canonical draft's validation gaps name the draft field.
+    param_gaps = [g for g in r["gaps"] if g["field"].startswith("authoring_request_draft.")]
     assert param_gaps, "expected per-field validation gaps for the bare DB source"
     for gap in param_gaps:
-        assert "field_errors" not in gap.get("hint", "")
+        assert "field_errors" not in (gap.get("hint") or "")
 
 
 # ---------------------------------------------------------------------------
@@ -839,3 +867,87 @@ def test_repeat_calls_identical(artifact_factory):
     a = act("generic_integration_description", artifact_factory())
     b = act("generic_integration_description", artifact_factory())
     assert a == b
+
+
+# ---------------------------------------------------------------------------
+# #159 S3: the canonical draft reaches plan and compile
+# ---------------------------------------------------------------------------
+
+
+def _listener_to_rest_artifact():
+    return {
+        "name": "Order Hook",
+        "source": {"protocol": "webhook", "object_name": "orders",
+                   "schema": {"profile": _SOURCE_PROFILE}},
+        "target": {"protocol": "rest", "base_url": "https://t.example.com", "path": "/x",
+                   "method": "POST", "auth": {"mode": "none"},
+                   "schema": {"profile": _TARGET_PROFILE}},
+        "trigger": {"kind": "listener"},
+        "mappings": [{"from": "id", "to": "customer_id"}, {"from": "email", "to": "contact_email"}],
+    }
+
+
+def _reused_connections_artifact():
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["connection"] = {"component_id": "11111111-1111-4111-8111-111111111111"}
+    artifact["target"]["connection"] = {"component_name": "Existing Target REST"}
+    artifact["target"]["query_parameters"] = {"mode": "upsert"}
+    return artifact
+
+
+@pytest.mark.parametrize("factory, preset", [
+    (_rest_to_rest_artifact, "api_to_api_sync"),
+    (_listener_to_rest_artifact, "http_listener_to_rest"),
+])
+def test_a_ready_draft_reaches_plan_and_compile(factory, preset):
+    """Every shape whose draft was build-ready before the cutover (REST -> REST via
+    the retired API->API archetype; listener -> REST) is ready now, and its served
+    draft, passed VERBATIM, plans and compiles through ``build_integration`` with
+    only the account listing stubbed. (A draft that REUSES connections is planned
+    below; its compile reads the reused connection's stored identity from the
+    account, which an offline stub cannot answer.)"""
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories import integration_builder as ib
+
+    r = act("generic_integration_description", factory())
+    assert r["selected_preset"] == preset
+    assert r["ready_for_build"] is True, r["gaps"]
+    draft = r["authoring_request_draft"]
+    with patch.object(ib, "paginate_metadata", return_value=[]):
+        planned = ib.build_integration_action(
+            MagicMock(), "p", "plan", config={"authoring_request": draft})
+        assert planned["_success"] is True, planned
+        compiled = ib.build_integration_action(
+            MagicMock(), "p", "compile", config={"authoring_request": draft})
+    assert compiled["_success"] is True, compiled
+    assert compiled["authoring_result"]["revision_binding"]["compile_hash"]
+
+
+def test_a_ready_draft_reusing_connections_plans():
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.categories import integration_builder as ib
+
+    r = act("generic_integration_description", _reused_connections_artifact())
+    assert r["ready_for_build"] is True, r["gaps"]
+    rows = {c["key"]: c for c in r["authoring_request_draft"]["intent"]["components"]}
+    assert "source_rest_source_connection" in rows and "target_rest_connection" in rows
+    with patch.object(ib, "paginate_metadata", return_value=[]):
+        planned = ib.build_integration_action(
+            MagicMock(), "p", "plan", config={"authoring_request": r["authoring_request_draft"]})
+    assert planned["_success"] is True, planned
+
+
+def test_every_pinned_preset_recipe_is_a_production_executable():
+    """The table the draft pins from names only production executables, so a
+    registration retirement cannot orphan a served draft."""
+    from boomi_mcp.categories.integration_import import _PRESET_RECIPES, _selected_recipe_ref
+    from boomi_mcp.recipes import production_registry
+
+    registry = production_registry()
+    for preset, (recipe_id, version) in _PRESET_RECIPES.items():
+        descriptor = registry.resolve(recipe_id, version)
+        assert descriptor.entry_kind == "executable_recipe", preset
+        assert _selected_recipe_ref(preset) == {
+            "recipe_id": recipe_id, "recipe_version": version, "entry_kind": "executable_recipe"}

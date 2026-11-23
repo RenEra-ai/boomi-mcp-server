@@ -1,4 +1,4 @@
-"""Existing-integration import → pipeline / preset / IntegrationSpecV1 drafts (M7.2, issue #48).
+"""Existing-integration import → pipeline / preset / canonical authoring-request drafts (M7.2, issue #48).
 
 Read-only migration discovery: converts a STRUCTURED migration description
 (``generic_integration_description``) or a source-tool export summary
@@ -7,9 +7,12 @@ Read-only migration discovery: converts a STRUCTURED migration description
 - a semantic ``pipeline_draft`` (a validated :class:`PipelineSpec` dump),
 - the closest EXISTING archetype preset (``selected_preset``) with derived
   ``preset_parameters``, and
-- an ``integration_spec_draft`` — emitted through the existing
-  ``build_from_archetype_action`` ONLY when zero blocking gaps remain, so the
-  tool never produces a broken build input.
+- an ``authoring_request_draft`` (#159 S3) — a canonical ``AuthoringRequestV1``
+  payload: one pinned typed-recipe invocation for the recipe-backed presets, or
+  one direct ProcessIR unit for REST -> REST — emitted ONLY when zero blocking
+  gaps remain and the shared component-material authorities and the
+  account-free authoring normalization accept it, so the tool never produces a
+  broken build input.
 
 Never calls Boomi, constructs an SDK client, or reads credentials. Every
 response carries ``read_only=True`` / ``boomi_mutation=False`` /
@@ -19,8 +22,8 @@ normalization or preset selection (no product-specific preset forks).
 
 Gap codes: the six ``MIGRATION_IMPORT_*`` constants below are the import's own
 surface; gaps produced by delegated layers pass through their existing codes
-(``PROFILE_INFERENCE_*`` from profile inference, ``PARAM_VALIDATION_FAILED`` /
-builder codes from archetype validation) plus the delegated
+(``PROFILE_INFERENCE_*`` from profile inference, the recipe / authoring
+diagnostic codes from canonical draft validation) plus the delegated
 ``PROFILE_INFERENCE_CONFIRMATION_REQUIRED`` marker for schemas inferred from
 samples that still need field confirmation.
 
@@ -55,10 +58,7 @@ from ..patterns.archetype_parameters import (
     _flatten_payload_profile_leaves,
     _scan_for_secret_shaped_keys,
 )
-from .integration_authoring import (
-    build_from_archetype_action,
-    infer_profile_fields_action,
-)
+from .integration_authoring import infer_profile_fields_action
 
 # ---------------------------------------------------------------------------
 # Contract constants
@@ -138,46 +138,22 @@ _PRESET_TABLE: Dict[Tuple[str, str], Tuple[str, List[Tuple[str, str]]]] = {
 }
 
 def _selected_recipe_ref(preset: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The EXACT recipe reference for a migrated preset, else ``None``.
+    """The EXACT executable recipe the draft pins for ``preset``, else ``None``.
 
-    Two entries, because the preset routes through two: the ADAPTER the preset
-    selects (``boomi.adapter.*``, entry kind ``compatibility_adapter``) and the
-    EXECUTABLE recipe that adapter targets (``boomi.archetype.*``), which is what
-    actually runs. Returning only the adapter made the docstring's word "exact"
-    false in the way that matters — the payload named the entry point and left
-    out the code, so a reader pinning a version from it pinned the wrong one.
-    ``get_integration_archetype`` already publishes both under
-    ``recipe_executable_descriptor``; this is the same fact in the same shape
-    (issue #145, §6 architect review).
-
-    Additive metadata only: preset SELECTION, gap analysis and the draft are
-    untouched. ``None`` for the three presets not yet migrated — an honest
-    absence rather than a plausible-looking reference to code they do not use.
+    #159 S3: read from the same table the draft is built from
+    (``_PRESET_RECIPES``), so the served reference and the invocation can never
+    disagree. ``None`` for REST -> REST (drafted as a direct ProcessIR unit; no
+    executable recipe exists) and when no preset matched. Additive metadata:
+    preset SELECTION and gap analysis are untouched.
     """
-    if preset is None:
+    if preset is None or preset not in _PRESET_RECIPES:
         return None
-    try:
-        from ..categories.integration_authoring import _ARCHETYPE_ADAPTERS
-        from ..recipes import production_registry
-
-        adapter_id = _ARCHETYPE_ADAPTERS.get(preset)
-        if adapter_id is None:
-            return None
-        descriptor = production_registry().resolve(adapter_id)
-    except Exception:  # noqa: BLE001 — advisory metadata, never load-bearing
-        return None
-    ref: Dict[str, Any] = {
-        "recipe_id": descriptor.recipe_id,
-        "recipe_version": descriptor.recipe_version,
-        "entry_kind": descriptor.entry_kind,
+    recipe_id, recipe_version = _PRESET_RECIPES[preset]
+    return {
+        "recipe_id": recipe_id,
+        "recipe_version": recipe_version,
+        "entry_kind": "executable_recipe",
     }
-    target = descriptor.adapter_target
-    if target is not None:
-        ref["adapter_target"] = {
-            "recipe_id": target.recipe_id,
-            "recipe_version": target.recipe_version,
-        }
-    return ref
 
 
 # Transform kinds the import can express as archetype transform operations.
@@ -561,8 +537,9 @@ def _analyze_endpoint(
                     + ", ".join(
                         sorted(_REST_PROTOCOLS | _DB_PROTOCOLS | _LISTENER_PROTOCOLS)
                     )
-                    + ". Unsupported transports need a hand-authored "
-                    "IntegrationSpecV1 (get_schema_template)."
+                    + ". Unsupported transports need a hand-authored canonical "
+                    "authoring request (get_schema_template(schema_name="
+                    "'AuthoringRequestV1'))."
                 ),
             )
         )
@@ -719,8 +696,8 @@ def _analyze_transforms(
                         f"({', '.join(sorted(_SUPPORTED_TRANSFORM_KINDS))})",
                         hint=(
                             "Re-express the transform as field mappings, or "
-                            "hand-author the map (map_script is available via "
-                            "build_from_archetype transform operations, XSLT is "
+                            "hand-author the map (a map_script reference is "
+                            "available as a recipe transform operation, XSLT is "
                             "not — see issue #42)."
                         ),
                     )
@@ -920,9 +897,10 @@ def _derive_preset_parameters(
 ) -> Dict[str, Any]:
     """Best-effort semantic mapping onto the selected archetype's contract.
 
-    Slots the import cannot derive are OMITTED — build_from_archetype's own
-    validation then reports them as per-field gaps, so missing required values
-    always surface as blocking gaps naming the parameter field. Declared
+    Slots the import cannot derive are OMITTED — the canonical draft's own
+    validation (recipe models, shared authorities, normalization) then reports
+    them as per-field gaps, so missing required values always surface as
+    blocking gaps naming the draft field. Declared
     request metadata (query params / headers) is secret-scanned before it is
     copied into the draft, and metadata the selected preset cannot faithfully
     emit is gapped rather than silently dropped.
@@ -1037,14 +1015,13 @@ def _derive_preset_parameters(
                         MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
                         "target.request_headers",
                         "the database_to_api_sync preset cannot emit target "
-                        "request headers (the REST connection default_headers "
-                        "are metadata-deferred and dropped by the archetype); "
-                        "these headers would be silently lost",
+                        "request headers (its REST target material carries "
+                        "none); these headers would be silently lost",
                         hint=(
                             "Reuse an existing REST connection that already "
-                            "carries the headers, or hand-author the integration "
-                            "via get_schema_template(schema_name="
-                            "'IntegrationSpecV1')."
+                            "carries the headers, or hand-author the process "
+                            "as a ProcessIR unit (get_schema_template("
+                            "schema_name='AuthoringRequestV1'))."
                         ),
                     )
                 )
@@ -1087,39 +1064,473 @@ def _derive_preset_parameters(
     return params
 
 
-def _convert_build_failure_to_gaps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
-    code = str(result.get("error_code") or "ARCHETYPE_BUILD_VALIDATION_FAILED")
-    field_errors = result.get("field_errors")
-    if isinstance(field_errors, list) and field_errors:
-        # Each per-field error becomes its own gap, so the delegated envelope's
-        # "Inspect field_errors[]" suggestion would dangle here — this response
-        # carries gaps[], not field_errors[]. Use a hint that stands alone.
-        return [
+# ---------------------------------------------------------------------------
+# Canonical authoring-request draft (#159 S3)
+# ---------------------------------------------------------------------------
+#
+# The draft the import serves is a canonical ``AuthoringRequestV1`` payload —
+# what ``build_integration(action='plan'|'compile'|'apply',
+# config={'authoring_request': ...})`` takes. Four presets are typed recipe
+# presets and are drafted as ONE pinned recipe invocation (raw_input plus the
+# closed component material); REST -> REST has no executable recipe and is
+# drafted as one DIRECT ProcessIR unit whose supporting components come from the
+# shared component-material authorities and emitters. Readiness is decided by
+# those authorities and by the account-free workflow normalization, never by a
+# hand list of required fields: every refusal becomes a value-free gap naming
+# the draft field.
+
+#: The exact executable recipe each recipe-backed preset is drafted against.
+#: ``api_to_api_sync`` is absent: it is drafted as a direct process unit.
+_PRESET_RECIPES: Dict[str, Tuple[str, str]] = {
+    "database_to_api_sync": ("boomi.archetype.database_to_api_sync", "1.0.0"),
+    "api_to_database_sync": ("boomi.archetype.api_to_database_sync", "1.0.0"),
+    "http_listener_to_rest": ("boomi.archetype.http_listener_to_rest", "1.0.0"),
+    "http_listener_to_db": ("boomi.archetype.http_listener_to_db", "1.0.0"),
+}
+_DIRECT_UNIT_PRESETS = frozenset({"api_to_api_sync"})
+_DRAFT_FIELD = "authoring_request_draft"
+_PROCESS_KEY = "main_process"
+_API_TO_API_PROCESS_SUFFIX = "API to API Sync"
+_API_TO_API_MAP_LABEL = "Map source response to target payload"
+
+
+class _DraftBlocked(Exception):
+    """The canonical draft cannot be completed; the gaps are already recorded."""
+
+
+def _pointer_field(pointer: str, prefix: str = _DRAFT_FIELD) -> str:
+    parts = [part for part in str(pointer or "").split("/") if part]
+    return ".".join([prefix, *parts]) if parts else prefix
+
+
+def _recipe_error_gaps(exc: Any, prefix: str) -> List[Dict[str, Any]]:
+    """Value-free gaps from a ``RecipeError``: its codes, causes and pointers only."""
+    gaps = []
+    for diagnostic in getattr(exc, "diagnostics", ()) or ():
+        causes = tuple(getattr(diagnostic, "cause_codes", ()) or ())
+        gaps.append(
             _gap(
-                code,
-                f"preset_parameters.{fe.get('field_path', '?')}",
-                str(fe.get("message", "invalid value")),
+                str(diagnostic.code),
+                _pointer_field(getattr(diagnostic, "path", "") or "", prefix),
+                "the canonical draft refuses this value"
+                + (f" ({', '.join(causes)})" if causes else ""),
                 hint=(
-                    "Supply the missing/corrected value at this "
-                    "preset_parameters path, then re-run "
-                    "import_integration_draft or call build_from_archetype "
-                    "directly."
+                    "Correct the migration description at this draft field (see "
+                    "get_schema_template for the recipe or component material), "
+                    "then re-run import_integration_draft."
                 ),
             )
-            for fe in field_errors
-        ]
-    context = result.get("context")
-    field = "preset_parameters"
-    if isinstance(context, dict) and isinstance(context.get("field"), str):
-        field = f"preset_parameters.{context['field']}"
+        )
+    return gaps
+
+
+def _validation_error_gaps(exc: ValidationError, prefix: str) -> List[Dict[str, Any]]:
+    """Value-free gaps from a pydantic error: location and error TYPE only, never
+    the rendered message (it can quote the input)."""
     return [
         _gap(
-            code,
-            field,
-            str(result.get("error", "archetype build validation failed")),
-            hint=result.get("suggestion"),
+            "MIGRATION_IMPORT_DRAFT_INVALID",
+            ".".join([prefix, *(str(part) for part in error.get("loc", ()))]),
+            f"the canonical draft refuses this field ({error.get('type', 'invalid')})",
+            hint="Supply or correct this value, then re-run import_integration_draft.",
         )
+        for error in exc.errors()
     ]
+
+
+def _authoring_error_gaps(exc: Any) -> List[Dict[str, Any]]:
+    """Value-free gaps from an ``AuthoringWorkflowError``'s ordered diagnostics."""
+    gaps = []
+    for diagnostic in getattr(exc, "diagnostics", ()) or ():
+        if getattr(diagnostic, "severity", "error") != "error":
+            continue
+        causes = tuple(getattr(diagnostic, "cause_codes", ()) or ())
+        gaps.append(
+            _gap(
+                str(diagnostic.code),
+                _pointer_field(getattr(diagnostic, "path", "") or ""),
+                str(getattr(diagnostic, "message", "") or "the canonical draft is refused")
+                + (f" ({', '.join(causes)})" if causes else ""),
+                hint=str(getattr(diagnostic, "remediation", "") or "") or None,
+            )
+        )
+    return gaps or [
+        _gap(str(getattr(exc, "code", "AUTHORING_REQUEST_INVALID")), _DRAFT_FIELD,
+             "the canonical draft is refused")
+    ]
+
+
+def _unsupported_material(field: str, message: str, hint: str) -> Dict[str, Any]:
+    return _gap(MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, field, message, hint=hint)
+
+
+def _rest_connection_material(
+    binding: Optional[Dict[str, Any]], role: str, gaps: List[Dict[str, Any]]
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """``(binding_mode, connection material)`` for a REST endpoint binding."""
+    if not isinstance(binding, dict):
+        return None, None
+    if binding.get("mode") == "reuse":
+        selector = {
+            name: binding[name] for name in ("component_id", "component_name") if binding.get(name)
+        }
+        return "reuse", {"mode": "reuse", **selector}
+    settings = binding.get("settings") or {}
+    if settings.get("auth_mode") not in (None, "none"):
+        gaps.append(
+            _unsupported_material(
+                f"{role}.auth",
+                f"the canonical draft creates only an UNAUTHENTICATED {role} REST "
+                "connection; an authenticated one must be an existing connection",
+                "Reuse an existing REST connection that carries the credentials "
+                f"({role}.connection.component_id or component_name), then re-run "
+                "import_integration_draft.",
+            )
+        )
+        return "create", None
+    return "create", {"mode": "create", "base_url": settings.get("base_url")}
+
+
+def _rest_request_material(
+    request: Optional[Dict[str, Any]], role: str, gaps: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    request = dict(request or {})
+    if request.get("request_headers"):
+        gaps.append(
+            _unsupported_material(
+                f"{role}.request_headers",
+                f"the canonical REST {role} material carries no request headers; "
+                "these headers would be silently lost",
+                "Reuse an existing REST connection that already carries the "
+                "headers, or hand-author the process as a ProcessIR unit "
+                "(get_schema_template(schema_name='AuthoringRequestV1')).",
+            )
+        )
+    material: Dict[str, Any] = {}
+    if isinstance(request.get("path"), str):
+        material["path"] = request["path"]
+    query = request.get("query_parameters")
+    if isinstance(query, dict) and query:
+        material["query_parameters"] = [
+            {"name": name, "value_source": "literal", "literal_value": value}
+            for name, value in query.items()
+        ]
+    elif isinstance(query, list) and query:
+        material["query_parameters"] = list(query)
+    return material
+
+
+def _transform_material(params: Dict[str, Any], *, by_field_name: bool) -> Optional[Dict[str, Any]]:
+    operations = (params.get("transform") or {}).get("operations")
+    if not operations:
+        return None
+    return {
+        "operations": [
+            {
+                "operation_type": "direct",
+                "source_field": (
+                    op.get("source_field")
+                    if by_field_name
+                    else op.get("source_path") or op.get("source_field")
+                ),
+                "target_path": op.get("target_path"),
+            }
+            for op in operations
+        ]
+    }
+
+
+def _recipe_invocation_draft(
+    preset: str, params: Dict[str, Any], integration_name: str, gaps: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """One pinned recipe invocation for a recipe-backed preset. Slots the import
+    cannot derive are OMITTED, so the recipe's own models name them as gaps."""
+    recipe_id, recipe_version = _PRESET_RECIPES[preset]
+    naming = params.get("naming") or {}
+    raw: Dict[str, Any] = {
+        "version": "1",
+        "process_key": _PROCESS_KEY,
+        "naming": {"component_prefix": naming.get("component_prefix")},
+    }
+    material: Dict[str, Any] = {"version": "1"}
+    source = params.get("source") or {}
+    target = params.get("target") or {}
+    if preset in ("http_listener_to_rest", "http_listener_to_db"):
+        listener = params.get("listener") or {}
+        listener_material: Dict[str, Any] = {}
+        if listener.get("object_name"):
+            listener_material["object_name"] = listener["object_name"]
+        if listener.get("payload_profile") is not None:
+            listener_material["request_profile"] = listener["payload_profile"]
+        material["listener"] = listener_material
+    if preset == "database_to_api_sync":
+        binding = source.get("binding") or {}
+        raw["source"] = {"binding_mode": binding.get("mode") or "create"}
+        source_material: Dict[str, Any] = {}
+        if binding.get("mode") == "reuse":
+            source_material["connection"] = {
+                "mode": "reuse",
+                **{k: binding[k] for k in ("component_id", "component_name") if binding.get(k)},
+            }
+        material["source"] = source_material
+    if preset == "api_to_database_sync":
+        mode, connection = _rest_connection_material(source.get("binding"), "source", gaps)
+        raw["source"] = {"binding_mode": mode or "create"}
+        source_material = {
+            "request": _rest_request_material(source.get("fetch_request"), "source", gaps),
+        }
+        if connection is not None:
+            source_material["connection"] = connection
+        if source.get("response_profile") is not None:
+            source_material["response_profile"] = source["response_profile"]
+        material["source"] = source_material
+    if preset in ("database_to_api_sync", "http_listener_to_rest"):
+        mode, connection = _rest_connection_material(target.get("binding"), "target", gaps)
+        send = target.get("send_request") or {}
+        raw["target"] = {"binding_mode": mode or "create", "method": send.get("method", "POST")}
+        target_material: Dict[str, Any] = {
+            "operation": _rest_request_material(send, "target", gaps),
+        }
+        if connection is not None:
+            target_material["connection"] = connection
+        if preset == "database_to_api_sync":
+            if target.get("payload_profile") is not None:
+                material["payload_profile"] = target["payload_profile"]
+        elif target.get("payload_profile") is not None:
+            target_material["payload_profile"] = target["payload_profile"]
+        material["target"] = target_material
+    transform = _transform_material(params, by_field_name=preset == "database_to_api_sync")
+    if transform is not None:
+        material["transform"] = transform
+    return {
+        "contract_version": "2",
+        "intent": {
+            "intent_kind": "recipe",
+            "integration_name": integration_name,
+            "invocations": [
+                {
+                    "recipe_id": recipe_id,
+                    "recipe_version": recipe_version,
+                    "invocation_id": preset,
+                    "raw_input": raw,
+                    "component_material": material,
+                }
+            ],
+        },
+    }
+
+
+def _api_to_api_unit_draft(
+    params: Dict[str, Any], integration_name: str, gaps: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """REST -> REST as ONE direct ProcessIR unit (no executable recipe exists).
+
+    Supporting components come from the shared component-material authorities
+    and emitters: the API->DB preset's REST fetch half
+    (``assemble_rest_fetch_source_v1``), the shared transform group, and the
+    shared REST send group; the root is ``source -> map_ref -> target -> stop``.
+    """
+    from pydantic import TypeAdapter
+
+    from ..patterns.base import PrimitiveBuildContext
+    from ..recipes.builtins.sync import assemble_rest_fetch_source_v1
+    from ..recipes.component_material import (
+        FanoutRestConnectionMaterialV2,
+        FanoutRestOperationMaterialV2,
+        FanoutTransformOperationV2,
+        _DEFAULT_STATUS_CODES_V2,
+        _rt,
+        authorize_rest_connection,
+        authorize_rest_request,
+        authorize_transform_operations,
+        emit_rest_send_components,
+        emit_transform_components,
+    )
+    from ..recipes.errors import RecipeError
+
+    naming = params.get("naming") or {}
+    prefix = naming.get("component_prefix")
+    source = params.get("source") or {}
+    target = params.get("target") or {}
+    _, source_connection = _rest_connection_material(source.get("binding"), "source", gaps)
+    source_request = _rest_request_material(source.get("fetch_request"), "source", gaps)
+    target_mode, target_connection = _rest_connection_material(target.get("binding"), "target", gaps)
+    send = target.get("send_request") or {}
+    target_request = _rest_request_material(send, "target", gaps)
+    transform = _transform_material(params, by_field_name=False)
+    missing = [
+        field
+        for field, value in (
+            ("source.connection", source_connection),
+            ("source.response_profile", source.get("response_profile")),
+            ("target.connection", target_connection),
+            ("target.payload_profile", target.get("payload_profile")),
+            ("transform.operations", transform),
+        )
+        if value is None
+    ]
+    if any(g["severity"] == "blocking" for g in gaps):
+        raise _DraftBlocked()
+    if missing:
+        for field in missing:
+            gaps.append(
+                _gap(
+                    "MIGRATION_IMPORT_DRAFT_INVALID",
+                    f"{_DRAFT_FIELD}.material.{field}",
+                    "the import could not derive this part of the REST -> REST draft",
+                    hint="Describe it in the migration artifact, then re-run "
+                    "import_integration_draft.",
+                )
+            )
+        raise _DraftBlocked()
+    prefix_field = f"{_DRAFT_FIELD}.material"
+    try:
+        source_conn = TypeAdapter(FanoutRestConnectionMaterialV2).validate_python(source_connection)
+        source_req = FanoutRestOperationMaterialV2.model_validate(source_request)
+        target_conn = TypeAdapter(FanoutRestConnectionMaterialV2).validate_python(target_connection)
+        target_req = FanoutRestOperationMaterialV2.model_validate(target_request)
+        operations = tuple(
+            TypeAdapter(FanoutTransformOperationV2).validate_python(op)
+            for op in transform["operations"]
+        )
+        response_profile = JSONPayloadProfile.model_validate(source["response_profile"])
+        payload_profile = JSONPayloadProfile.model_validate(target["payload_profile"])
+    except ValidationError as exc:
+        gaps.extend(_validation_error_gaps(exc, prefix_field))
+        raise _DraftBlocked() from None
+    rt = _rt()
+    try:
+        fetched = assemble_rest_fetch_source_v1(
+            source_conn,
+            source_req,
+            response_profile,
+            component_prefix=prefix,
+            pointer="/source",
+        )
+        authorized_target = authorize_rest_connection(target_conn, pointer="/target/connection")
+        authorized_request = authorize_rest_request(
+            target_req,
+            pointer="/target/operation",
+            method=send.get("method", "POST"),
+            expected_status_codes=_DEFAULT_STATUS_CODES_V2,
+        )
+        authorized_operations = authorize_transform_operations(
+            operations, base_catalog={}, pointer="/transform/operations"
+        )
+        context = PrimitiveBuildContext(
+            integration_name=prefix, component_prefix=prefix, folder_path=None
+        )
+        target_profile_key = rt.primitive_component_key(rt.TRANSFORM_PREFIX, rt.ROLE_TARGET_PROFILE)
+        transform_components = emit_transform_components(
+            authorized_operations,
+            context=context,
+            key_prefix=rt.TRANSFORM_PREFIX,
+            pointer="/transform",
+            source={
+                "source_profile_id": f"$ref:{fetched.profile_key}",
+                "source_profile_type": "profile.json",
+                "source_field_index": dict(fetched.field_index),
+            },
+            target_payload_profile=payload_profile.model_dump(),
+        )
+        send_components = emit_rest_send_components(
+            authorized_target,
+            authorized_request,
+            context=context,
+            key_prefix=rt.TARGET_PREFIX,
+            pointer="/target",
+            request_profile_key=target_profile_key,
+        )
+    except RecipeError as exc:
+        gaps.extend(_recipe_error_gaps(exc, prefix_field))
+        raise _DraftBlocked() from None
+    components = [*fetched.components, *transform_components, *send_components]
+    by_type = {}
+    for component in components:
+        by_type.setdefault(component.type, []).append(component.key)
+    map_key = by_type["transform.map"][0]
+    target_connection_key = rt.primitive_component_key(rt.TARGET_PREFIX, rt.ROLE_REST_CONNECTION)
+    target_operation_key = rt.primitive_component_key(rt.TARGET_PREFIX, rt.ROLE_REST_OPERATION)
+    depends_on = sorted(
+        {fetched.connection_key, fetched.operation_key, map_key, target_connection_key,
+         target_operation_key}
+    )
+    unit = {
+        "envelope": {
+            "component_key": _PROCESS_KEY,
+            "name": f"{prefix} {_API_TO_API_PROCESS_SUFFIX}",
+            "action": "create",
+            "depends_on": depends_on,
+        },
+        "process_ir": {
+            "version": "1",
+            "body": {
+                "kind": "sequence",
+                "steps": [
+                    {
+                        "kind": "source",
+                        "connection_ref": f"$ref:{fetched.connection_key}",
+                        "operation_ref": f"$ref:{fetched.operation_key}",
+                    },
+                    {"kind": "map_ref", "map_ref": f"$ref:{map_key}", "label": _API_TO_API_MAP_LABEL},
+                    {
+                        "kind": "target",
+                        "connection_ref": f"$ref:{target_connection_key}",
+                        "operation_ref": f"$ref:{target_operation_key}",
+                    },
+                    {"kind": "stop"},
+                ],
+            },
+        },
+    }
+    return {
+        "contract_version": "2",
+        "intent": {
+            "intent_kind": "process_ir",
+            "integration_name": integration_name,
+            "units": [unit],
+            "components": [
+                component.model_dump(mode="json", exclude_none=True) for component in components
+            ],
+        },
+    }
+
+
+def _canonical_draft(
+    preset: str, params: Dict[str, Any], gaps: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """The canonical authoring-request draft, or ``None`` with its gaps recorded.
+
+    The draft is accepted only when the account-free workflow normalization
+    (``authoring.workflow._normalize_intent``) accepts it: the request parser,
+    the recipe input and material models, the trusted preparer and governance.
+    """
+    from ..authoring.workflow import AuthoringWorkflowError, _normalize_intent
+    from ..models.authoring_workflow import parse_authoring_request_v1
+    from ..recipes.errors import RecipeError
+
+    integration_name = (params.get("naming") or {}).get("integration_name") or "Imported Integration"
+    try:
+        if preset in _DIRECT_UNIT_PRESETS:
+            draft = _api_to_api_unit_draft(params, integration_name, gaps)
+        else:
+            draft = _recipe_invocation_draft(preset, params, integration_name, gaps)
+    except _DraftBlocked:
+        return None
+    if any(g["severity"] == "blocking" for g in gaps):
+        return None
+    try:
+        _normalize_intent(parse_authoring_request_v1(json.loads(json.dumps(draft))))
+    except AuthoringWorkflowError as exc:
+        gaps.extend(_authoring_error_gaps(exc))
+        return None
+    except RecipeError as exc:
+        gaps.extend(_recipe_error_gaps(exc, _DRAFT_FIELD))
+        return None
+    except ValidationError as exc:
+        gaps.extend(_validation_error_gaps(exc, _DRAFT_FIELD))
+        return None
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -1300,7 +1711,7 @@ def import_integration_draft_action(
         )
     if isinstance(flow.get("deployment"), dict) and flow["deployment"]:
         # Deployment / runtime placement is a SEPARATE lifecycle step
-        # (orchestrate_deploy), not part of the IntegrationSpecV1 draft this
+        # (orchestrate_deploy), not part of the authoring-request draft this
         # tool emits — recorded as an informational assumption, not a blocking
         # gap that would wrongly hold back an otherwise-valid draft.
         assumptions.append(
@@ -1377,8 +1788,8 @@ def import_integration_draft_action(
                     "unsupported source construct in the preset vocabulary",
                     hint=(
                         "Use a GET-readable source endpoint, or hand-author the "
-                        "integration via get_schema_template("
-                        "schema_name='IntegrationSpecV1')."
+                        "process as a ProcessIR unit (get_schema_template("
+                        "schema_name='AuthoringRequestV1'))."
                     ),
                 )
             )
@@ -1470,38 +1881,36 @@ def import_integration_draft_action(
     gaps.sort(key=lambda g: (g["severity"], g["code"], g["field"]))
     blocking = [g for g in gaps if g["severity"] == "blocking"]
 
-    integration_spec_draft: Optional[Dict[str, Any]] = None
+    authoring_request_draft: Optional[Dict[str, Any]] = None
     ready_for_build = False
     if selected_preset is not None and preset_parameters is not None and not blocking:
-        build = build_from_archetype_action(selected_preset, preset_parameters)
-        if build.get("_success"):
-            integration_spec_draft = build["integration_spec"]
-            ready_for_build = True
-        else:
-            gaps.extend(_convert_build_failure_to_gaps(build))
-            gaps.sort(key=lambda g: (g["severity"], g["code"], g["field"]))
-            blocking = [g for g in gaps if g["severity"] == "blocking"]
+        # #159 S3: the draft is a canonical authoring request (a pinned recipe
+        # invocation, or a direct ProcessIR unit for REST -> REST), accepted only
+        # when the shared authorities and the account-free normalization accept it.
+        authoring_request_draft = _canonical_draft(selected_preset, preset_parameters, gaps)
+        ready_for_build = authoring_request_draft is not None
+        gaps.sort(key=lambda g: (g["severity"], g["code"], g["field"]))
+        blocking = [g for g in gaps if g["severity"] == "blocking"]
 
     # ---- next steps -----------------------------------------------------------
     if ready_for_build:
         next_steps.append(
-            "Review the drafts, then pass integration_spec_draft to "
-            "build_integration(action='plan', config=...) to preview build "
-            "steps before applying."
+            "Review the drafts, then pass authoring_request_draft to "
+            "build_integration(action='plan', config={'authoring_request': "
+            "authoring_request_draft}) to preview build steps, then 'compile' "
+            "and 'apply'."
         )
     elif selected_preset is not None:
         next_steps.append(
-            f"Resolve the {len(blocking)} blocking gap(s), then re-run "
-            "import_integration_draft or call build_from_archetype("
-            f"name='{selected_preset}', parameters=preset_parameters) with the "
-            "completed values."
+            f"Resolve the {len(blocking)} blocking gap(s) in the migration "
+            "description, then re-run import_integration_draft."
         )
     else:
         next_steps.append(
-            "No existing archetype preset matches this source/trigger/target "
-            "shape. Compose the flow from parts via compose_archetypes, or "
-            "hand-author an IntegrationSpecV1 "
-            "(get_schema_template(schema_name='IntegrationSpecV1'))."
+            "No preset matches this source/trigger/target shape. Hand-author a "
+            "canonical authoring request with a ProcessIR unit "
+            "(get_schema_template(schema_name='AuthoringRequestV1')) and pass it "
+            "to build_integration(config={'authoring_request': ...})."
         )
     if "by_reference" in (source.schema_status, target.schema_status):
         next_steps.append(
@@ -1525,6 +1934,6 @@ def import_integration_draft_action(
         "preset_parameters": preset_parameters,
         "next_steps": next_steps,
     }
-    if integration_spec_draft is not None:
-        response["integration_spec_draft"] = integration_spec_draft
+    if authoring_request_draft is not None:
+        response["authoring_request_draft"] = authoring_request_draft
     return response

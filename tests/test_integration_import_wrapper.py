@@ -152,7 +152,7 @@ def test_import_call_tool_success_and_flags():
     assert isinstance(p["gaps"], list) and p["gaps"] == []
     assert p["selected_preset"] == "api_to_api_sync"
     assert [s["kind"] for s in p["pipeline_draft"]["stages"]] == ["fetch", "map", "send"]
-    assert "integration_spec_draft" in p
+    assert "authoring_request_draft" in p
 
 
 def test_import_call_tool_blocked_analysis_keeps_flags_and_suppresses_draft():
@@ -168,7 +168,7 @@ def test_import_call_tool_blocked_analysis_keeps_flags_and_suppresses_draft():
     assert p["read_only"] is True and p["boomi_mutation"] is False
     assert p["ready_for_build"] is False
     assert "MIGRATION_IMPORT_MISSING_CREDENTIAL" in [g["code"] for g in p["gaps"]]
-    assert "integration_spec_draft" not in p
+    assert "authoring_request_draft" not in p
 
 
 def test_import_call_tool_malformed_input_error_keeps_flags():

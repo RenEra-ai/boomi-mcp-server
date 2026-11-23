@@ -422,8 +422,10 @@ def _build_context(config: Mapping[str, Any]) -> _Context:
             "config.integration_spec is required",
             field="integration_spec",
             hint=(
-                "Pass the IntegrationSpecV1 produced by build_from_archetype "
-                "or build_integration."
+                "Pass an IntegrationSpecV1; for a canonical authoring request "
+                "pass the authoring_result.integration_spec_preview that "
+                "build_integration(action='plan', config={'authoring_request': "
+                "...}) returns."
             ),
         )
     spec = _as_dict(spec_raw, "integration_spec")

@@ -2765,9 +2765,12 @@ if review_transformation_action:
 
         Read-only. Does NOT call Boomi, mutate anything, or expose raw
         SQL/XML/credentials/script bodies. Operates on an IntegrationSpecV1
-        produced by build_from_archetype / build_integration (either a
-        database_to_api_sync transform flow or in-spec transform.map +
-        generated profile components).
+        (either a database_to_api_sync transform flow or in-spec transform.map +
+        generated profile components). For a canonical authoring request (for
+        example import_integration_draft's authoring_request_draft), pass the
+        authoring_result.integration_spec_preview that
+        build_integration(action='plan', config={'authoring_request': ...})
+        returns.
 
         Args:
             action: One of: list_fields | validate_unmapped | mapping_diff |
@@ -2970,11 +2973,15 @@ if import_integration_draft_action:
         Read-only MIGRATION DISCOVERY. Does NOT call Boomi, mutate anything,
         construct an SDK client, or read credentials. Turns a STRUCTURED
         migration description into a semantic pipeline_draft (PipelineSpec
-        vocabulary), the closest EXISTING archetype preset with derived
-        preset_parameters, and — only when zero blocking gaps remain — an
-        IntegrationSpecV1 integration_spec_draft ready for
-        build_integration(action='plan'). Blocking gaps suppress the spec
-        draft, so the tool never emits a broken build input. Product/version
+        vocabulary), the closest EXISTING preset with derived
+        preset_parameters, and — only when zero blocking gaps remain — a
+        canonical authoring_request_draft (an AuthoringRequestV1: one pinned
+        typed-recipe invocation, or one direct ProcessIR unit for REST -> REST)
+        ready for build_integration(action='plan'|'compile'|'apply',
+        config={'authoring_request': ...}). Blocking gaps suppress the
+        draft, so the tool never emits a broken build input; metadata the
+        canonical draft cannot carry (request headers, an authenticated
+        created REST connection) is a blocking gap, never dropped. Product/version
         identifiers from export summaries are preserved as input_provenance
         only — they never fork presets or templates.
 
@@ -3002,7 +3009,8 @@ if import_integration_draft_action:
             source_type, input_provenance, ready_for_build, confirmed_facts[],
             inferred_assumptions[], gaps[] ({code, severity, field, message,
             hint, details}), pipeline_draft, selected_preset,
-            preset_parameters, integration_spec_draft (only when build-ready),
+            selected_recipe_ref, preset_parameters, authoring_request_draft (only
+            when build-ready),
             next_steps[]; or a MIGRATION_IMPORT_INVALID_INPUT error envelope
             (still carrying the safety flags) for malformed tool input.
         """

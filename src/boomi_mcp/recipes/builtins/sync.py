@@ -924,9 +924,90 @@ def emit_api_to_database_sync_v1(inp: ApiToDatabaseSyncInputV1) -> Tuple[object,
     return tuple(contributions)
 
 
+@_dataclass(frozen=True)
+class RestFetchSourceV1:
+    """One REST fetch source, assembled by :func:`assemble_rest_fetch_source_v1`."""
+
+    components: Tuple[IntegrationComponentSpec, ...]
+    #: The generated JSON response profile's field index (the map's source index).
+    field_index: _Mapping[str, _Any]
+    profile_key: str
+    connection_key: str
+    operation_key: str
+
+
+def assemble_rest_fetch_source_v1(
+    connection: _Any,
+    request: FanoutRestOperationMaterialV2,
+    response_profile: JSONPayloadProfile,
+    *,
+    component_prefix: str,
+    folder_name: Optional[str] = None,
+    pointer: str = "/component_material/source",
+) -> RestFetchSourceV1:
+    """#159 S3: the API->DB 1.0.0 preset's REST fetch half, for a caller that
+    assembles a REST source WITHOUT that preset (the migration importer's direct
+    API->API unit). The same authorities and emitters the preparer runs, in its
+    order — the source connection and the GET request through the shared
+    authorities and the legacy fetch rules, then the JSON response profile and
+    the ``rest_fetch`` group — with no base-component binding (``connection`` is
+    a create or reuse material block). Refusals are value-free ``RecipeError``s
+    under ``pointer``. ``prepare_api_to_database_sync_v1`` is unchanged."""
+    from types import SimpleNamespace
+
+    authorized = authorize_rest_connection(connection, pointer=pointer + "/connection")
+    authorized_request = authorize_rest_request(
+        request,
+        pointer=pointer + "/request",
+        method="GET",
+        expected_status_codes=_default_status_codes(),
+    )
+    for qp_index, parameter in enumerate(authorized_request.query_parameters):
+        if parameter.value_source == "watermark":
+            raise _refusal(
+                _WATERMARK_INCONSISTENT,
+                f"{pointer}/request/query_parameters/{qp_index}",
+                phase="input",
+            )
+    _check_fetch_request_v1(authorized_request, pointer=pointer + "/request")
+    naming = ApiDbNamingV1(component_prefix=component_prefix, folder_name=folder_name)
+    inp = SimpleNamespace(source=SimpleNamespace(connection_key=None))
+    rt = _rt()
+    from ...patterns import archetype_assembly
+    from ...patterns.primitives import _helpers
+
+    keys = SimpleNamespace(
+        source_profile=archetype_assembly._SOURCE_RESPONSE_PROFILE_KEY,
+        source_connection=rt.primitive_component_key(
+            rt.SOURCE_PREFIX, _helpers.ROLE_REST_SOURCE_CONNECTION
+        ),
+        source_operation=rt.primitive_component_key(
+            rt.SOURCE_PREFIX, _helpers.ROLE_REST_SOURCE_OPERATION
+        ),
+    )
+    profile, field_index = _source_profile_component_v1(
+        SimpleNamespace(source=SimpleNamespace(response_profile=response_profile)), keys, naming
+    )
+    context = PrimitiveBuildContext(
+        integration_name=component_prefix,
+        component_prefix=component_prefix,
+        folder_path=folder_name,
+    )
+    fetch = _fetch_components_v1(inp, authorized, authorized_request, keys, context, field_index)
+    return RestFetchSourceV1(
+        components=(profile, *fetch),
+        field_index=field_index,
+        profile_key=keys.source_profile,
+        connection_key=keys.source_connection,
+        operation_key=keys.source_operation,
+    )
+
+
 __all__ = [
     *__all__,
     "ApiToDatabaseSyncInputV1",
+    "RestFetchSourceV1",
+    "assemble_rest_fetch_source_v1",
     "ApiToDatabaseSyncMaterialV1",
     "emit_api_to_database_sync_v1",
     "prepare_api_to_database_sync_v1",
