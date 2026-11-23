@@ -2,9 +2,10 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "M11 (#125): cross-branch handoff via a typed Document Cache \u2014 branch leg 1 stages documents with cache_put, leg 2 consumes them with cache_get (sequential leg order satisfies the #123 lineage contract), and a map declares a DocumentCacheJoins entry against the same cache (live-captured #119 wire shape).",
+  "purpose": "M11 (#125): cross-branch handoff via a typed Document Cache \u2014 a canonical ProcessIR process unit (integration_spec.processes) whose branch leg 1 stages documents with cache_put, leg 2 consumes them with cache_get (sequential leg order satisfies the #123 lineage contract), and a map declares a DocumentCacheJoins entry against the same cache (live-captured #119 wire shape).",
   "do_not_reuse": "Concrete values below are demo-grade so the spec plans clean in tests; model real cache indexes/keys on your actual profile elements.",
   "integration_spec": {
+    "name": "M11 Cache Join Demo",
     "naming": {
       "integration_name": "M11 Cache Join Demo"
     },

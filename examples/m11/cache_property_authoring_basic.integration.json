@@ -2,9 +2,10 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "M11 (#125): composed DDP/DPP authoring \u2014 a flow_sequence that sets a per-document DDP from profile+static sources, sets a persisted run-flag DPP from the current document, and routes on the DDP with a Decision. Demonstrates 1:1 same-branch carry-forward and the trunk-write-then-read lineage contract.",
+  "purpose": "M11 (#125): composed DDP/DPP authoring \u2014 a canonical ProcessIR process unit (integration_spec.processes) whose sequence sets a per-document DDP from profile+static sources (set_ddp), sets a persisted run-flag DPP from the current document (set_dpp), and routes on the DDP with a Decision. Demonstrates 1:1 same-branch carry-forward and the trunk-write-then-read lineage contract.",
   "do_not_reuse": "Concrete values below are demo-grade (example.invalid endpoints, fixed UUIDs) so the spec plans clean in tests; author real bindings from actual requirements.",
   "integration_spec": {
+    "name": "M11 Basic Cache Property Demo",
     "naming": {
       "integration_name": "M11 Basic Cache Property Demo"
     },

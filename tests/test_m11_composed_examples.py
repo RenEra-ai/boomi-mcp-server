@@ -65,6 +65,21 @@ def test_every_example_plans_clean():
         for step in plan["steps"]:
             assert "validation_error" not in step, (name, step["key"], step.get("validation_error"))
             assert step["planned_action"] in ("create", "reuse"), (name, step["key"])
+    # The process-bearing examples also enter the CANONICAL typed intake the S3 docs
+    # steer to (QA-159-S3-r1-03): wrapped as an ``integration_spec`` intent they must
+    # validate as IntegrationSpecV1 — the raw route above never required ``name``.
+    from src.boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    for name in (
+        "cache_property_authoring_basic.integration.json",
+        "cache_property_authoring_join.integration.json",
+    ):
+        spec = _load_example(name)
+        request = AuthoringRequestV1.model_validate({
+            "contract_version": "2",
+            "intent": {"intent_kind": "integration_spec", "integration_spec": spec},
+        })
+        assert request.intent.integration_spec.name == spec["naming"]["integration_name"], name
 
 
 def test_every_example_applies_clean_in_dry_run():
