@@ -4215,6 +4215,20 @@ def test_a_bound_component_whose_stored_envelope_names_another_id_is_unknown(bou
     assert (readings[key].input.state, readings[key].output.state) == ("unknown", "unknown"), readings[key]
 
 
+def test_a_mismatched_rest_operation_known_only_by_its_bytes_is_still_unknown():
+    """CDX-159-S3-r2-01: the reused PATCH operation omits ``connector_type``, so only its stored
+    bytes say it is REST; those bytes name another id. It must still be recorded UNKNOWN (fail
+    closed), never dropped — a dropped reading leaves its input undeclared and unchecked."""
+    cap, rows, store = _s3b_captured()
+    rows = [dict(row, config={k: v for k, v in row["config"].items() if k != "connector_type"})
+            if row["key"] == "OP" else row for row in rows]
+    assert "connector_type" not in next(row for row in rows if row["key"] == "OP")["config"]
+    store[cap.CAPTURED_PATCH_OP] = store[cap.CAPTURED_GET_OP]
+    readings, _reads = _s3b_read(rows, store)
+    assert "OP" in readings, readings
+    assert (readings["OP"].input.state, readings["OP"].output.state) == ("unknown", "unknown")
+
+
 def test_an_unjudged_name_binding_leaves_a_created_map_or_rest_operation_its_own_facts():
     """Pins a deliberate DIFFERENCE from caches (ARCH-186-e1-02): on a route that holds an account
     whose component plan could not bind the request's names, a map or REST operation the request

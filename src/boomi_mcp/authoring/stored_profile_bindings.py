@@ -165,6 +165,15 @@ def _declares_rest(component) -> bool:
     return isinstance(config, dict) and connector_family_of(config.get("connector_type")) == "rest"
 
 
+def _reads_as_rest(key, stored_xml) -> bool:
+    """Whether stored bytes read as a REST operation by the one family reader, whatever their
+    envelope id says."""
+    if not isinstance(stored_xml, str) or not stored_xml:
+        return False
+    identity = live_identity_from_component_xml(key, stored_xml)
+    return identity is not None and bool(identity.readable) and identity.family == "rest"
+
+
 def stored_profile_bindings_for_unwritten_components(
     boomi_client,
     components,
@@ -236,7 +245,11 @@ def stored_profile_bindings_for_unwritten_components(
         # same envelope check ``verified_profile_side`` makes for every linked profile.
         envelope = stored_profile_envelope(stored_xml)
         if envelope is None or canonical_component_id(envelope[0]) != component_id:
-            if component_type == _MAP_TYPE or _declares_rest(component):
+            # Fail closed for every component this reader scopes: a map, or an operation REST by
+            # its request OR by the answered bytes — the shared connector resolver may still read
+            # them as REST, and recording nothing would leave its input undeclared, not unknown
+            # (CDX-159-S3-r2-01).
+            if component_type == _MAP_TYPE or _declares_rest(component) or _reads_as_rest(key, stored_xml):
                 readings.append(unknown_reading)
             continue
         if component_type == _MAP_TYPE:
