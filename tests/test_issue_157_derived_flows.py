@@ -709,7 +709,10 @@ def test_hand_built_linear_facts_reproduce_every_frozen_linear_case(cases):
         flows, endpoints = _dumped(_linear_project(components, root, facts, watermark_field=watermark))
         if [acct_digest(r) for r in flows] != [r["payload_sha256"] for r in case.flow_rows]:
             failures.append((case_id, "flows", [r.get("key") for r in flows]))
-        if [acct_digest(r) for r in endpoints] != [r["payload_sha256"] for r in case.endpoint_rows]:
+        # The owed endpoint payloads: the frozen ones, with a field-scoped
+        # retirement's one field removed (CDX-159-S2-r1-02: the API->API target
+        # declares no status expectation).
+        if endpoints != acct_owed_endpoints(case):
             failures.append((case_id, "endpoints", endpoints))
         kinds |= {r["operation"] for r in flows}
     assert failures == []
@@ -721,6 +724,12 @@ def acct_digest(row):
     import _issue_157_flows_accounting as acct
 
     return acct._digest(row)
+
+
+def acct_owed_endpoints(case):
+    import _issue_157_flows_accounting as acct
+
+    return acct.owed_endpoint_payloads(case)
 
 
 def test_the_schema_summary_form_omits_the_generation_keys_and_reads_the_write_profile(cases):
@@ -812,7 +821,8 @@ def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
 
     facts = infer("api_to_api_sync/create")
     assert facts.source.operation_key == "source_rest_source_operation"
-    assert facts.target.expected_status_codes == (200, 201, 202)
+    # CDX-159-S2-r1-02: topology declares no success-status expectation
+    assert facts.target.expected_status_codes is None
     assert facts.source.expected_status_codes is None and facts.reliability is None
     db_cases = sorted(c for c in cases if c.startswith("database_to_api_sync/"))
     assert db_cases
@@ -831,10 +841,11 @@ def test_only_an_exact_direct_rest_map_rest_root_infers_linear_facts(cases):
                                        "component_name": "Existing DB"}
 
     assert infer("api_to_api_sync/create", database_target) is None
-    from boomi_mcp.authoring.derived_flows import rest_success_status_default
-    from boomi_mcp.recipes.builtins.fanout import _DEFAULT_STATUS_CODES_V2
+    # The retired default helper is gone from the projector: nothing there can
+    # assert a status policy no component declares.
+    import boomi_mcp.authoring.derived_flows as projector
 
-    assert rest_success_status_default() == _DEFAULT_STATUS_CODES_V2
+    assert not hasattr(projector, "rest_success_status_default")
 
 
 def test_only_an_exact_unreferencing_passthrough_stop_root_infers_stub_facts():

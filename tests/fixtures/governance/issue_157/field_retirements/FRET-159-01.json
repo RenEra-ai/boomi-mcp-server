@@ -1,0 +1,29 @@
+{
+  "baseline_sha": "ba1be9f34317d720d3b012484622ab7e2742143b",
+  "classification": "RETIRE",
+  "decided_by": "#159 S2 architect consultation 'architect-status-codes' (option a)",
+  "field_pointer": "/expected_status_codes",
+  "finding": "CDX-159-S2-r1-02",
+  "historical_value": [200, 201, 202],
+  "id": "FRET-159-01",
+  "kind": "endpoint_field_retirement",
+  "reason": "The retired API->API producer served its REST success-status default on the target endpoint. The canonical direct unit that replays these cases declares no status expectation on any component or trusted route fact, and a route's topology does not establish one, so the canonical projection serves no such key. The frozen rows keep their bytes; this record names the one field of each that the replay no longer owes.",
+  "replacement": "none: expected_status_codes is served only when a trusted route fact declares it",
+  "rows": [
+    {
+      "case_id": "api_to_api_sync/create",
+      "key": "rest_target",
+      "kind": "endpoint",
+      "ordinal": 1,
+      "payload_sha256": "25789ed1120f1c69d6912e4d78a3a49c0eb3b8715c238b625922cdfdefe137b6"
+    },
+    {
+      "case_id": "api_to_api_sync/reuse_with_function",
+      "key": "rest_target",
+      "kind": "endpoint",
+      "ordinal": 1,
+      "payload_sha256": "4bdf08d418190f19cd7b17dd4f1e45701f0949dad407d7fac1fac4f3cc5c8847"
+    }
+  ],
+  "side": "endpoints"
+}

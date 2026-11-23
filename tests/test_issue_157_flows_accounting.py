@@ -152,8 +152,18 @@ def test_frozen_row_counts_are_pinned(cases, manifest, replay):
     counts = acct._status_counts(acct.CORPUS_DIR)
     total = manifest["frozen_flow_rows"] + manifest["frozen_endpoint_rows"]
     assert counts["retired"] == 0
-    assert len(floor_flows) + len(floor_endpoints) <= counts["discharged"] <= len(owed_flows) + len(owed_endpoints)
-    assert counts["pending"] == total - counts["discharged"] - counts["retired"]
+    # #159 S2 (CDX-159-S2-r1-02): the two API->API target endpoints are owed
+    # with one field retired — still in the census, counted on their own.
+    assert counts["field_retired"] == sum(
+        1
+        for case in cases.values()
+        for side in ("flows", "endpoints")
+        for status in case.discharges[side].values()
+        if status.startswith(acct.FIELD_RETIRED_PREFIX)
+    ) == 2
+    claimed = counts["discharged"] + counts["field_retired"]
+    assert len(floor_flows) + len(floor_endpoints) <= claimed <= len(owed_flows) + len(owed_endpoints)
+    assert counts["pending"] == total - claimed - counts["retired"]
     if acct.FINAL_REPLAY:
         assert counts["pending"] == 0
     assert manifest["status_counts"] == counts
@@ -164,7 +174,12 @@ def test_every_frozen_row_has_exactly_one_status(cases):
         assert set(case.discharges["flows"]) == {str(r["ordinal"]) for r in case.flow_rows}, case.case_id
         assert set(case.discharges["endpoints"]) == {str(r["ordinal"]) for r in case.endpoint_rows}, case.case_id
         for status in list(case.discharges["flows"].values()) + list(case.discharges["endpoints"].values()):
-            assert status == DISCHARGED or status == PENDING or status.startswith("retired:"), status
+            assert (
+                status == DISCHARGED
+                or status == PENDING
+                or status.startswith("retired:")
+                or status.startswith(acct.FIELD_RETIRED_PREFIX)
+            ), status
 
 
 def test_row_identities_are_unique_within_a_case_and_keep_their_ordinal(cases):
@@ -332,9 +347,20 @@ def test_the_remaining_rows_are_explicitly_pending_for_159_not_labelled_covered(
     completed = _completed(replay)
     if acct.FINAL_REPLAY:
         assert completed == set(cases), sorted(set(cases) - completed)
+        records = acct.field_retirement_records()
+        frozen = {"flows": "flow_rows", "endpoints": "endpoint_rows"}
         for case in cases.values():
             for side in ("flows", "endpoints"):
-                assert set(case.discharges[side].values()) == {DISCHARGED}, (case.case_id, side)
+                for row in getattr(case, frozen[side]):
+                    status = case.status(row["ordinal"], side=side)
+                    if status.startswith(acct.FIELD_RETIRED_PREFIX):
+                        # owed with one field removed: only under a record that
+                        # names THIS row (CDX-159-S2-r1-02)
+                        assert acct._field_retirement_problem(
+                            "row", status[len(acct.FIELD_RETIRED_PREFIX):], records, case, side, row
+                        ) is None, (case.case_id, side, row["ordinal"])
+                    else:
+                        assert status == DISCHARGED, (case.case_id, side, status)
         return
     floor_flows, floor_endpoints = _owed_discharges(cases)
     owed_flows, owed_endpoints = _owed_discharges(cases, completed)
@@ -834,6 +860,111 @@ def test_mutant_endpoint_corruptions_fail_on_the_final_path(cases):
         assert _refused(discharge_endpoints(case, mutant, {}, final=True), needle), needle
     case.discharges["endpoints"]["0"] = PENDING
     assert _refused(discharge_endpoints(case, clean, {}, final=True), "still pending")
+
+
+_STATUS_FIELD_CASES = ("api_to_api_sync/create", "api_to_api_sync/reuse_with_function")
+_STATUS_FIELD = "expected_status_codes"
+
+
+def test_the_status_code_field_retirement_is_absent_scoped_and_pinned(cases):
+    """CDX-159-S2-r1-02: a direct REST -> map -> REST root declares no
+    success-status expectation, so its target endpoint serves NO
+    ``expected_status_codes`` key. The frozen rows keep their bytes and stay in
+    the census; one field-scoped record, pinned to both frozen digests and the
+    historical value, names the one field the replay no longer owes.
+
+    The actual output is never edited: the full ordered endpoint sequence is
+    compared against the frozen one with only that field removed from the two
+    expected payloads, so a reintroduced array or an explicit null fails."""
+    records = acct.field_retirement_records()
+    assert set(records) == {"FRET-159-01"}
+    record = records["FRET-159-01"]
+    assert record["field_pointer"] == "/" + _STATUS_FIELD
+    assert record["historical_value"] == [200, 201, 202]
+    assert {row["case_id"] for row in record["rows"]} == set(_STATUS_FIELD_CASES)
+    retirements = retirement_ids()
+    # The two paths are exclusive: no whole-row record carries this id, and no
+    # whole-row record is a field-scoped record.
+    assert "FRET-159-01" not in retirements and not set(retirements) & set(records)
+
+    for case_id in _STATUS_FIELD_CASES:
+        case = cases[case_id]
+        with patch(_PAGINATE, lambda *a, **k: []):
+            served = derive_case_endpoints(case)  # the PUBLIC planning entry
+        (target,) = [row for row in served if row.get("direction") == "target"]
+        assert target["key"] == "rest_target" and _STATUS_FIELD not in target, case_id
+        # Independent expectation: the frozen payloads, the one field popped
+        # from the rest_target row at ordinal 1 — and nothing else.
+        expected = [copy.deepcopy(row["payload"]) for row in case.endpoint_rows]
+        assert expected[1]["key"] == "rest_target"
+        assert expected[1].pop(_STATUS_FIELD) == [200, 201, 202]
+        assert served == expected, case_id
+        assert acct.owed_endpoint_payloads(case) == expected, case_id
+        assert discharge_endpoints(case, served, retirements, final=True).ok, case_id
+        report = discharge_endpoints(case, served, retirements, final=True)
+        assert report.field_retired == 1 and report.completed, case_id
+
+        # -- controls: each must fail ------------------------------------
+        def refused(output, case_in=case, records_in=None):
+            return not discharge_endpoints(
+                case_in, output, retirements, final=True, field_retirements=records_in
+            ).ok
+
+        reintroduced = copy.deepcopy(served)
+        reintroduced[1][_STATUS_FIELD] = [200, 201, 202]
+        nulled = copy.deepcopy(served)
+        nulled[1][_STATUS_FIELD] = None
+        other_field = copy.deepcopy(served)
+        other_field[1]["method"] = "PATCH"
+        assert refused(reintroduced), case_id
+        assert refused(nulled), case_id
+        assert refused(other_field), case_id
+        assert refused(served[:1]), case_id  # the endpoint dropped
+        # A record that no longer pins THIS row's frozen digest, or whose
+        # historical value is not the frozen one, retires nothing.
+        for tamper in (
+            lambda r: r["rows"].__setitem__(
+                slice(None), [dict(x, payload_sha256="0" * 64) for x in r["rows"]]
+            ),
+            lambda r: r.__setitem__("historical_value", [200]),
+            lambda r: r.__setitem__("field_pointer", "/method"),
+            lambda r: r.__setitem__("kind", "row_retirement"),
+            lambda r: r.__setitem__("side", "flows"),
+        ):
+            tampered = copy.deepcopy(records)
+            tamper(tampered["FRET-159-01"])
+            assert refused(served, records_in=tampered), case_id
+        # Cross-citation: the whole-row path cannot cite the field record (the
+        # row would be dropped), and the field path cannot cite a whole-row one.
+        cross = _clone(case)
+        cross.discharges["endpoints"]["1"] = "retired:FRET-159-01"
+        assert refused(served[:1], case_in=cross), case_id
+        whole_row = sorted(k for k, v in retirements.items() if v.get("classification") == "RETIRE")[0]
+        cross = _clone(case)
+        cross.discharges["endpoints"]["1"] = acct.FIELD_RETIRED_PREFIX + whole_row
+        assert refused(served, case_in=cross), case_id
+
+    # Applying the record to ANOTHER case fails: the same key, kind and ordinal
+    # on a case the record does not name (the DB->API target endpoint).
+    other = "database_to_api_sync/wm_off_dlq_off_create"
+    case = _clone(cases[other])
+    (target_row,) = [row for row in case.endpoint_rows if row["payload"].get("direction") == "target"]
+    with patch(_PAGINATE, lambda *a, **k: []):
+        clean = derive_case_endpoints(case)
+    assert discharge_endpoints(case, clean, retirements, final=True).ok
+    case.discharges["endpoints"][str(target_row["ordinal"])] = acct.FIELD_RETIRED_PREFIX + "FRET-159-01"
+    report = discharge_endpoints(case, clean, retirements, final=True)
+    assert _refused(report, "does not name this row"), report.problems
+    # ...and a record re-pointed at that case's row still has to find the
+    # field, with its historical value, in that row's frozen payload.
+    moved = copy.deepcopy(records)
+    moved["FRET-159-01"]["rows"].append(
+        {key: target_row[key] for key in ("key", "kind", "ordinal", "payload_sha256")}
+        | {"case_id": other}
+    )
+    report = discharge_endpoints(case, clean, retirements, final=True, field_retirements=moved)
+    assert _STATUS_FIELD not in target_row["payload"]
+    assert _refused(report, "does not carry"), report.problems
 
 
 def test_the_completed_cases_complete_both_oracles(cases, replay):

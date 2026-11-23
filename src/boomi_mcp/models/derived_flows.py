@@ -561,9 +561,8 @@ class LinearConnectorFactV1(_DerivedFlowModel):
     ``expected_status_codes`` is the route's DECLARED success-status
     expectation for a REST target. Set means served on the endpoint row; None
     means the key is absent. The DB→REST and listener→REST presets froze no
-    such key and MUST leave it None; only the direct API→API inference sets it
-    (to the existing REST success-status default both frozen API→API cases
-    carry).
+    such key and MUST leave it None, and the direct API→API inference leaves it
+    None too: a route's topology declares no success-status expectation.
     """
 
     connection_key: Optional[NonEmptyString] = None
