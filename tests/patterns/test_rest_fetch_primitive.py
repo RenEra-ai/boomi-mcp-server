@@ -305,9 +305,42 @@ def _profile_source(**overrides):
     return src
 
 
+def _assert_fetch_runtime_bindings_retired(params):
+    """#159 S3 (SELF-155-r5-03, measured retirement — lane L9: no production caller
+    ever supplied ``runtime_bindings``). The closed parameter model now REFUSES the
+    key (the only refusal is that key), and the same parameters without it lower
+    nothing: no ``dynamic_path`` on the fragment, no bindings metadata, and the
+    operation keeps its authored path with no synthesized ``path_replacements``."""
+    with pytest.raises(ValidationError) as excinfo:
+        RestFetchPrimitive.validate_parameters(params)
+    assert [tuple(e["loc"]) for e in excinfo.value.errors()] == [("runtime_bindings",)]
+    assert {e["type"] for e in excinfo.value.errors()} == {"extra_forbidden"}
+    rest = {k: v for k, v in params.items() if k != "runtime_bindings"}
+    try:
+        RestFetchPrimitive.validate_parameters(rest)
+    except ValidationError:
+        # The binding-free remainder is refused by an INDEPENDENT slot check (a
+        # slot that names no '{token}', a secret-shaped slot name): those checks
+        # stay active after the retirement.
+        return
+    frag = _fragment(rest)
+    assert "dynamic_path" not in frag["process_config"]["source"]
+    assert "runtime_bindings" not in repr(frag.get("metadata", {}))
+    op = next(spec for spec in _emit(rest) if spec.type == "connector-action")
+    if rest["operation"].get("path_replacements"):
+        # path_replacements (#100 G2) stays the send-side dynamic-path surface.
+        assert op.config["path"] == ""
+    else:
+        assert op.config["path"] == rest["operation"]["path"]
+        assert "path_replacements" not in op.config
+
+
 class TestRuntimeBindings:
     def test_path_binding_lowers_to_dynamic_path(self):
-        frag = _fragment(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -316,18 +349,12 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        dyn = frag["process_config"]["source"]["dynamic_path"]
-        assert dyn["request_profile_id"] == "$ref:cust_resp_profile"
-        assert dyn["profile_type"] == "profile.json"
-        assert dyn["segments"] == [
-            {"type": "static", "value": "/v1/items/"},
-            {"type": "profile", "element_id": "3", "element_name": "id (Root/id)"},
-        ]
-        # The full validated set is echoed in metadata.
-        assert frag["metadata"]["rest_fetch"]["runtime_bindings"][0]["location"] == "path"
 
     def test_path_binding_blanks_operation_path(self):
-        specs = _emit(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -336,17 +363,12 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        op = next(s for s in specs if s.type == "connector-action")
-        assert op.config["path"] == ""
 
     def test_path_binding_operation_is_buildable(self):
-        # The emitted operation spec must be re-buildable (build() revalidates):
-        # a blank path is only accepted with a usable path_replacements marker, which
-        # the primitive synthesizes from the path bindings (#96 review).
-        from boomi_mcp.categories.components.builders.connector_builder import (
-            RestClientOperationBuilder,
-        )
-        specs = _emit(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -355,14 +377,12 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        op = next(s for s in specs if s.type == "connector-action")
-        xml = RestClientOperationBuilder().build(**op.config)
-        assert '<field id="path" type="string" value=""/>' in xml
 
     def test_path_binding_profile_ref_in_fragment_depends_on(self):
-        # A profile_field path source carries an in-spec profile $ref; it must be a
-        # process dependency so $ref-reachability resolves it (#96 review).
-        frag = _fragment(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -372,53 +392,52 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        assert "req_profile" in frag["depends_on"]
 
     def test_query_header_bindings_rejected(self):
-        # REST Client query parameters / request headers are STATIC operation
-        # customProperties (Boomi UI verified — only 'Path' is a dynamic operation
-        # property), so a query_parameter / request_header runtime binding is rejected.
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
         for location, slot in (("query_parameter", "since"), ("request_header", "X-Tenant")):
-            with pytest.raises(ValidationError):
-                RestFetchPrimitive.validate_parameters(
-                    _params(
-                        operation={"path": "/v1/items"},
-                        query_parameter_slots=[{"name": "since"}],
-                        request_header_slots=[{"name": "X-Tenant"}],
-                        runtime_bindings=[
-                            {"location": location, "slot": slot,
-                             "source": {"kind": "static", "value": "x"}}
-                        ],
-                    )
+            _assert_fetch_runtime_bindings_retired(
+                _params(
+                    operation={"path": "/v1/items"},
+                    query_parameter_slots=[{"name": "since"}],
+                    request_header_slots=[{"name": "X-Tenant"}],
+                    runtime_bindings=[
+                        {"location": location, "slot": slot,
+                         "source": {"kind": "static", "value": "x"}}
+                    ],
                 )
+            )
 
     def test_missing_path_slot_rejected(self):
-        # A path binding to a token with no declared path slot fails at plan time.
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items/{id}"},
-                    # no path_slots declared
-                    runtime_bindings=[
-                        {"location": "path", "slot": "id", "source": _profile_source()}
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                # no path_slots declared
+                runtime_bindings=[
+                    {"location": "path", "slot": "id", "source": _profile_source()}
+                ],
             )
+        )
 
     def test_required_path_slot_unbound_rejected_when_binding(self):
-        # Plan: "missing required slots". With runtime_bindings present, a declared
-        # required PATH slot that has no binding fails at plan time.
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/{a}/{b}"},
-                    path_slots=[{"name": "a"}, {"name": "b"}],
-                    runtime_bindings=[
-                        {"location": "path", "slot": "a", "source": _profile_source()}
-                        # 'b' (required by default) is left unbound -> error.
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/{a}/{b}"},
+                path_slots=[{"name": "a"}, {"name": "b"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "a", "source": _profile_source()}
+                    # 'b' (required by default) is left unbound -> error.
+                ],
             )
+        )
 
     def test_required_slots_exempt_without_bindings(self):
         # A #72-style caller that declares slots WITHOUT runtime_bindings is exempt —
@@ -432,63 +451,71 @@ class TestRuntimeBindings:
         assert params.query_parameter_slots is not None
 
     def test_mismatched_path_key_rejected(self):
-        # slot declared but not a '{token}' in the path.
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items/{id}"},
-                    path_slots=[{"name": "id"}, {"name": "other"}],
-                    runtime_bindings=[
-                        {"location": "path", "slot": "other", "source": _profile_source()}
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}, {"name": "other"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "other", "source": _profile_source()}
+                ],
             )
+        )
 
     def test_duplicate_binding_rejected(self):
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items"},
-                    query_parameter_slots=[{"name": "since"}],
-                    runtime_bindings=[
-                        {"location": "query_parameter", "slot": "since",
-                         "source": {"kind": "static", "value": "a"}},
-                        {"location": "query_parameter", "slot": "since",
-                         "source": {"kind": "static", "value": "b"}},
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items"},
+                query_parameter_slots=[{"name": "since"}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "since",
+                     "source": {"kind": "static", "value": "a"}},
+                    {"location": "query_parameter", "slot": "since",
+                     "source": {"kind": "static", "value": "b"}},
+                ],
             )
+        )
 
     def test_secret_shaped_static_value_rejected(self):
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items"},
-                    request_header_slots=[{"name": "X-Token"}],
-                    runtime_bindings=[
-                        {"location": "request_header", "slot": "X-Token",
-                         "source": {"kind": "static", "value": "Bearer abc.def.ghi"}}
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items"},
+                request_header_slots=[{"name": "X-Token"}],
+                runtime_bindings=[
+                    {"location": "request_header", "slot": "X-Token",
+                     "source": {"kind": "static", "value": "Bearer abc.def.ghi"}}
+                ],
             )
+        )
 
     def test_malformed_source_kind_rejected(self):
-        with pytest.raises(ValidationError):
-            RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items"},
-                    query_parameter_slots=[{"name": "since"}],
-                    runtime_bindings=[
-                        {"location": "query_parameter", "slot": "since",
-                         "source": {"kind": "nope", "value": "x"}}
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items"},
+                query_parameter_slots=[{"name": "since"}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "since",
+                     "source": {"kind": "nope", "value": "x"}}
+                ],
             )
+        )
 
     def test_dpp_path_source_lowers_to_dynamic_path(self):
-        # A dpp path source lowers into a dynamic_path with a dpp segment (#96 §H
-        # live capture). No profile segment -> request_profile_id is None.
-        frag = _fragment(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -498,16 +525,12 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        dyn = frag["process_config"]["source"]["dynamic_path"]
-        assert dyn["request_profile_id"] is None
-        assert dyn["segments"] == [
-            {"type": "static", "value": "/v1/items/"},
-            {"type": "dpp", "property_name": "last_id"},
-        ]
 
     def test_ddp_path_source_lowers_to_dynamic_path(self):
-        # A ddp path source lowers into a dynamic_path with a ddp segment (#96 §H).
-        frag = _fragment(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -517,17 +540,12 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        dyn = frag["process_config"]["source"]["dynamic_path"]
-        assert dyn["request_profile_id"] is None
-        assert dyn["segments"] == [
-            {"type": "static", "value": "/v1/items/"},
-            {"type": "ddp", "property_name": "client_id"},
-        ]
 
     def test_ddp_dpp_path_source_has_no_profile_dependency(self):
-        # A ddp/dpp path source carries no profile $ref, so depends_on stays the
-        # connection + operation only (the profile_field case adds the profile ref).
-        frag = _fragment(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -537,37 +555,27 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        assert set(frag["depends_on"]) == {
-            "cust_rest_source_connection",
-            "cust_rest_source_operation",
-        }
 
     def test_all_static_path_resolves_into_operation_path(self):
-        # An all-static path is a constant — folded into the operation path (not a
-        # dynamic_path, which the #100 builder rejects as not-dynamic). Supports the
-        # static source kind without emitting an all-static "dynamic" path (#96 review).
-        params = _params(
-            operation={"path": "/v1/items/{id}"},
-            path_slots=[{"name": "id"}],
-            runtime_bindings=[
-                {"location": "path", "slot": "id",
-                 "source": {"kind": "static", "value": "42"}}
-            ],
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+            "source": {"kind": "static", "value": "42"}}
+                ],
+            )
         )
-        frag = _fragment(params)
-        assert "dynamic_path" not in frag["process_config"]["source"]
-        op = next(s for s in _emit(params) if s.type == "connector-action")
-        assert op.config["path"] == "/v1/items/42"
-        assert "path_replacements" not in op.config
 
     def test_dpp_path_source_operation_is_buildable(self):
-        # A dpp path source blanks the operation path and synthesizes a usable
-        # path_replacements marker, so the emitted operation re-builds (build()
-        # revalidates) — same blank-path mechanism as the profile_field case.
-        from boomi_mcp.categories.components.builders.connector_builder import (
-            RestClientOperationBuilder,
-        )
-        specs = _emit(
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_fetch_runtime_bindings_retired(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -577,10 +585,6 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        op = next(s for s in specs if s.type == "connector-action")
-        assert op.config["path"] == ""
-        xml = RestClientOperationBuilder().build(**op.config)
-        assert '<field id="path" type="string" value=""/>' in xml
 
 
 # ---------------------------------------------------------------------------

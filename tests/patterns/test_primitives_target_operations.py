@@ -1024,24 +1024,53 @@ def _send_profile_source(**overrides):
     return src
 
 
+def _assert_send_runtime_bindings_retired(params):
+    """#159 S3 (SELF-155-r5-03, measured retirement — lane L9: no production caller
+    ever supplied ``runtime_bindings``). The closed parameter model now REFUSES the
+    key (the only refusal is that key), and the same parameters without it lower
+    nothing: no ``dynamic_path`` on the fragment, no bindings metadata, and the
+    operation keeps its authored path with no synthesized ``path_replacements``."""
+    with pytest.raises(ValidationError) as excinfo:
+        RestSendWithRetryPrimitive.validate_parameters(params)
+    assert [tuple(e["loc"]) for e in excinfo.value.errors()] == [("runtime_bindings",)]
+    assert {e["type"] for e in excinfo.value.errors()} == {"extra_forbidden"}
+    rest = {k: v for k, v in params.items() if k != "runtime_bindings"}
+    try:
+        RestSendWithRetryPrimitive.validate_parameters(rest)
+    except ValidationError:
+        # The binding-free remainder is refused by an INDEPENDENT slot check (a
+        # slot that names no '{token}', a secret-shaped slot name): those checks
+        # stay active after the retirement.
+        return
+    frag = _fragment(RestSendWithRetryPrimitive, rest)
+    assert "dynamic_path" not in frag["process_config"]["target"]
+    assert "runtime_bindings" not in repr(frag.get("metadata", {}))
+    op = next(spec for spec in _emit(RestSendWithRetryPrimitive, rest) if spec.type == "connector-action")
+    if rest["operation"].get("path_replacements"):
+        # path_replacements (#100 G2) stays the send-side dynamic-path surface.
+        assert op.config["path"] == ""
+    else:
+        assert op.config["path"] == rest["operation"]["path"]
+        assert "path_replacements" not in op.config
+
+
 class TestRestSendRuntimeBindings:
     def test_query_header_bindings_rejected(self):
-        # REST Client query parameters / request headers are STATIC operation
-        # customProperties (Boomi UI verified — only 'Path' is a dynamic operation
-        # property), so a query_parameter / request_header runtime binding is rejected.
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
         for location, slot in (("query_parameter", "dryRun"), ("request_header", "X-Tenant")):
-            with pytest.raises(ValidationError):
-                RestSendWithRetryPrimitive.validate_parameters(
-                    _rest_create_params(
-                        operation={"method": "POST", "path": "/resource"},
-                        query_parameter_slots=[{"name": "dryRun"}],
-                        request_header_slots=[{"name": "X-Tenant"}],
-                        runtime_bindings=[
-                            {"location": location, "slot": slot,
-                             "source": {"kind": "static", "value": "x"}}
-                        ],
-                    )
+            _assert_send_runtime_bindings_retired(
+                _rest_create_params(
+                    operation={"method": "POST", "path": "/resource"},
+                    query_parameter_slots=[{"name": "dryRun"}],
+                    request_header_slots=[{"name": "X-Tenant"}],
+                    runtime_bindings=[
+                        {"location": location, "slot": slot,
+                         "source": {"kind": "static", "value": "x"}}
+                    ],
                 )
+            )
 
     def test_path_replacements_alone_still_backwards_compatible(self):
         # No runtime_bindings -> nothing changes vs the #100 path_replacements path.
@@ -1082,125 +1111,98 @@ class TestRestSendRuntimeBindings:
         assert "dynamic_path" not in frag["process_config"]["target"]
 
     def test_path_replacements_plus_path_runtime_binding_conflict(self):
-        with pytest.raises(ValidationError):
-            RestSendWithRetryPrimitive.validate_parameters(
-                _rest_create_params(
-                    operation={
-                        "method": "PATCH",
-                        "path": "/clients/{clientId}",
-                        "path_replacements": [
-                            {"name": "clientId", "target_path": "Root/clientId"}
-                        ],
-                    },
-                    path_slots=[{"name": "clientId"}],
-                    runtime_bindings=[
-                        {"location": "path", "slot": "clientId",
-                         "source": _send_profile_source()},
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={
+                    "method": "PATCH",
+                    "path": "/clients/{clientId}",
+                    "path_replacements": [
+                        {"name": "clientId", "target_path": "Root/clientId"}
                     ],
-                )
+                },
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId",
+                     "source": _send_profile_source()},
+                ],
             )
+        )
 
     def test_path_runtime_binding_lowers_and_blanks_path(self):
-        params = _rest_create_params(
-            operation={"method": "PATCH", "path": "/clients/{clientId}"},
-            path_slots=[{"name": "clientId"}],
-            runtime_bindings=[
-                {"location": "path", "slot": "clientId", "source": _send_profile_source()},
-            ],
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId", "source": _send_profile_source()},
+                ],
+            )
         )
-        frag = _fragment(RestSendWithRetryPrimitive, params)
-        dyn = frag["process_config"]["target"]["dynamic_path"]
-        assert dyn["segments"][-1] == {
-            "type": "profile",
-            "element_id": "3",
-            "element_name": "clientId (Root/clientId)",
-        }
-        op = next(
-            s for s in _emit(RestSendWithRetryPrimitive, params)
-            if s.type == "connector-action"
-        )
-        assert op.config["path"] == ""
-        # The blanked operation must be re-buildable (build() revalidates and only
-        # accepts a blank path with a usable path_replacements marker, #96 review).
-        xml = RestClientOperationBuilder().build(**op.config)
-        assert '<field id="path" type="string" value=""/>' in xml
-        # The path source's in-spec profile ref must be a fragment dependency.
-        assert "cust_req_profile" in frag["depends_on"]
 
     def test_query_binding_missing_slot_rejected(self):
-        with pytest.raises(ValidationError):
-            RestSendWithRetryPrimitive.validate_parameters(
-                _rest_create_params(
-                    operation={"method": "POST", "path": "/resource"},
-                    runtime_bindings=[
-                        {"location": "query_parameter", "slot": "dryRun",
-                         "source": {"kind": "static", "value": "true"}},
-                    ],
-                )
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={"method": "POST", "path": "/resource"},
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "dryRun",
+                     "source": {"kind": "static", "value": "true"}},
+                ],
             )
+        )
 
     def test_dpp_path_source_lowers_and_is_buildable(self):
-        # A dpp path source lowers into target.dynamic_path with a dpp segment (#96
-        # §H) and blanks the operation path; the emitted operation re-builds.
-        params = _rest_create_params(
-            operation={"method": "PATCH", "path": "/clients/{clientId}"},
-            path_slots=[{"name": "clientId"}],
-            runtime_bindings=[
-                {"location": "path", "slot": "clientId",
-                 "source": {"kind": "dpp", "property_name": "last_id"}}
-            ],
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId",
+            "source": {"kind": "dpp", "property_name": "last_id"}}
+                ],
+            )
         )
-        frag = _fragment(RestSendWithRetryPrimitive, params)
-        dyn = frag["process_config"]["target"]["dynamic_path"]
-        assert dyn["request_profile_id"] is None
-        assert dyn["segments"] == [
-            {"type": "static", "value": "/clients/"},
-            {"type": "dpp", "property_name": "last_id"},
-        ]
-        op = next(
-            s for s in _emit(RestSendWithRetryPrimitive, params)
-            if s.type == "connector-action"
-        )
-        assert op.config["path"] == ""
-        xml = RestClientOperationBuilder().build(**op.config)
-        assert '<field id="path" type="string" value=""/>' in xml
 
     def test_ddp_path_source_lowers_to_dynamic_path(self):
-        # A ddp path source lowers into a target.dynamic_path with a ddp segment.
-        params = _rest_create_params(
-            operation={"method": "PATCH", "path": "/clients/{clientId}"},
-            path_slots=[{"name": "clientId"}],
-            runtime_bindings=[
-                {"location": "path", "slot": "clientId",
-                 "source": {"kind": "ddp", "property_name": "client_id"}}
-            ],
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId",
+            "source": {"kind": "ddp", "property_name": "client_id"}}
+                ],
+            )
         )
-        frag = _fragment(RestSendWithRetryPrimitive, params)
-        dyn = frag["process_config"]["target"]["dynamic_path"]
-        assert dyn["segments"] == [
-            {"type": "static", "value": "/clients/"},
-            {"type": "ddp", "property_name": "client_id"},
-        ]
 
     def test_all_static_path_resolves_into_operation_path(self):
-        # An all-static path is a constant folded into the operation path (no
-        # dynamic_path); supports the static source kind end-to-end.
-        params = _rest_create_params(
-            operation={"method": "PATCH", "path": "/clients/{clientId}"},
-            path_slots=[{"name": "clientId"}],
-            runtime_bindings=[
-                {"location": "path", "slot": "clientId",
-                 "source": {"kind": "static", "value": "C-42"}}
-            ],
+        """#159 S3 (SELF-155-r5-03, measured retirement): ``runtime_bindings`` is
+        retired from the primitive schema, so the spelling this test drove is
+        refused by the closed model, and without it nothing is lowered."""
+        _assert_send_runtime_bindings_retired(
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId",
+            "source": {"kind": "static", "value": "C-42"}}
+                ],
+            )
         )
-        frag = _fragment(RestSendWithRetryPrimitive, params)
-        assert "dynamic_path" not in frag["process_config"]["target"]
-        op = next(
-            s for s in _emit(RestSendWithRetryPrimitive, params)
-            if s.type == "connector-action"
-        )
-        assert op.config["path"] == "/clients/C-42"
-        assert "path_replacements" not in op.config
 
 
 # ===========================================================================

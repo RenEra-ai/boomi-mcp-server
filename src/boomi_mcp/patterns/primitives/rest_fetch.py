@@ -14,19 +14,13 @@ It also emits a process *fragment* (``emit_fragment``) describing the REST sourc
 binding plus the explicit output shape, pagination/conditional-request metadata,
 and the operation slot declarations.
 
-Scope (M5.4, #72): #72 declares the param/header/path slots. Issue #96 (M5.4a)
-adds the ``runtime_bindings`` that fill them. Per the live Boomi UI investigation
-(see ``.codex/plans/issue-96-live-captures.md`` §G), the REST Client connector step
-exposes exactly ONE dynamic operation property — **"Path"** — so only a path
-binding can be dynamic: it lowers into the live-proven ``dynamic_path`` block (Set
-Properties DDP + connector-step "Path" property) the process-flow builder emits as
-non-empty ``dynamicProperties`` (static + profile_field sources today; ddp/dpp
-sources are confirmed-valid Path value sources whose Set Properties segment XML is a
-narrow capture follow-up). Query parameters and request headers are STATIC operation
-``customProperties`` with no dynamic-binding mechanism, so a query/header runtime
-binding is REJECTED at plan time (vary a query param via the path/full-URL; headers
-are static). Pagination and conditional-request behavior are carried as validated
-config/metadata, never canned request templates or process loops.
+Scope (M5.4, #72): #72 declares the param/header/path slots as operation
+metadata. Issue #96 (M5.4a) once added ``runtime_bindings`` to fill them; #159 S3
+retired that field (SELF-155-r5-03, measured inertness: no production caller ever
+supplied one), so the closed parameter model refuses it. A per-document REST path is
+authored as the ``path_binding`` of a ProcessIR ``connector_call`` or ``target`` step. Pagination and
+conditional-request behavior are carried as validated config/metadata, never canned
+request templates or process loops.
 
 Like the other source/transform primitives, this emits JSON
 ``IntegrationComponentSpec`` objects only — every byte of XML and all structured
@@ -74,16 +68,9 @@ from ._helpers import (
     primitive_component_key,
     raise_for_builder_error,
     ref_key,
-    slugify,
     value_looks_secret,
 )
-from .rest_runtime import (
-    OperationSlot,
-    RuntimeBinding,
-    lower_path_bindings,
-    synth_path_replacements,
-    validate_runtime_bindings,
-)
+from .rest_runtime import OperationSlot
 from .rest_send import RestConnection, RestSendComponentNames
 
 # Primitive-layer error code for an invalid operation-slot declaration (no
@@ -387,12 +374,10 @@ class RestFetchParameters(BaseModel):
     path_slots: Optional[List[OperationSlot]] = Field(default=None)
     query_parameter_slots: Optional[List[OperationSlot]] = Field(default=None)
     request_header_slots: Optional[List[OperationSlot]] = Field(default=None)
-    # Issue #96 (M5.4a): runtime values bound into the declared slots above. Only a
-    # PATH binding is dynamically bindable on REST Client (Boomi UI verified — the
-    # connector step exposes only the "Path" dynamic operation property); it lowers
-    # into the live-proven dynamic_path block. A query_parameter/request_header
-    # binding is rejected at validation (REST Client query/header are static).
-    runtime_bindings: Optional[List[RuntimeBinding]] = Field(default=None)
+    # #159 S3 (SELF-155-r5-03, measured retirement): the #96 ``runtime_bindings``
+    # field is RETIRED from this schema — no production caller ever supplied one
+    # (lane L9's census), so the closed model now refuses the key. A per-document
+    # REST path is authored as a ProcessIR connector_call/target ``path_binding``.
     pagination: PaginationMeta = Field(default_factory=PaginationMeta)
     conditional_request: ConditionalRequestMeta = Field(
         default_factory=ConditionalRequestMeta
@@ -416,14 +401,6 @@ class RestFetchParameters(BaseModel):
             self.request_header_slots,
             path_tokens=None,
             static_keys=set((self.operation.request_headers or {}).keys()),
-        )
-        # Issue #96: validate each runtime binding against the declared slots.
-        validate_runtime_bindings(
-            self.runtime_bindings,
-            path_slots=self.path_slots,
-            query_parameter_slots=self.query_parameter_slots,
-            request_header_slots=self.request_header_slots,
-            path_tokens=path_tokens,
         )
         return self
 
@@ -483,11 +460,8 @@ class RestFetchPrimitive(PrimitivePattern):
             "Materialize the REST fetch source group (connection, execute GET "
             "operation) from caller config and emit a process source fragment "
             "with an explicit output shape. Declares operation param/header/path "
-            "slots (#72); #96 binds the PATH via runtime_bindings — the only "
-            "dynamically bindable REST Client location (Boomi UI verified) — "
-            "lowering into the live-proven dynamic_path block the builder emits as "
-            "dynamicProperties (static + profile_field today). Query/header runtime "
-            "bindings are rejected (REST Client query/header are static). Emits JSON "
+            "slots (#72) as metadata; a per-document path is authored on the "
+            "path_binding of a ProcessIR connector_call or target step, not here. Emits JSON "
             "component specs for the existing REST Client builders; never authors "
             "paths or calls a live API."
         ),
@@ -495,7 +469,6 @@ class RestFetchPrimitive(PrimitivePattern):
         use_cases=[
             "Read records from a REST API source via a created connection",
             "Reuse an existing REST connection as a fetch source",
-            "Bind a per-document REST path via a profile-field runtime binding (#96)",
         ],
         not_for=[
             "Database or file sources (use db_extract)",
@@ -568,26 +541,7 @@ class RestFetchPrimitive(PrimitivePattern):
             "action_type": "GET",
             "label": f"{context.component_prefix} REST Fetch",
         }
-        # Issue #96: lower path runtime bindings (the only dynamically bindable REST
-        # Client location). A profile_field/ddp/dpp path lowers into the live-proven
-        # dynamic_path block (Set Properties DDP + connector-step "Path" property — all
-        # four value-source segment shapes live-captured, §C2/§H); an all-static path is
-        # a constant folded into the operation path (no dynamic_path here). Query/header
-        # bindings were already rejected at validation (REST Client static).
-        path_mode, path_value = lower_path_bindings(
-            params.runtime_bindings,
-            path_template=params.operation.path,
-            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
-        )
         depends_on = [conn_key, op_key]
-        if path_mode == "dynamic":
-            source["dynamic_path"] = path_value
-            # The dynamic_path may reference an in-spec profile ($ref:KEY) for a
-            # profile_field path source; that ref must be a process dependency so
-            # ProcessFlowBuilder's $ref-reachability check resolves it (#96 review).
-            dyn_profile_ref = ref_key(path_value.get("request_profile_id"))
-            if dyn_profile_ref and dyn_profile_ref not in depends_on:
-                depends_on.append(dyn_profile_ref)
         rest_fetch_meta: Dict[str, Any] = {
             "output_shape": {
                 "profile_id": params.response.profile_id,
@@ -605,13 +559,6 @@ class RestFetchPrimitive(PrimitivePattern):
             # Connector responses generate NEW documents (replace, not merge).
             "response_replaces_document": True,
         }
-        if params.runtime_bindings:
-            # Only path bindings reach here — query/header bindings are rejected at
-            # validation (REST Client static; not dynamically bindable). Record the
-            # (path) bindings as metadata.
-            rest_fetch_meta["runtime_bindings"] = [
-                b.model_dump(exclude_none=True) for b in params.runtime_bindings
-            ]
         fragment: Dict[str, Any] = {
             "process_config": {"source": source},
             "depends_on": depends_on,
@@ -737,29 +684,10 @@ class RestFetchPrimitive(PrimitivePattern):
         if folder:
             config["folder_name"] = folder
 
-        # Issue #96: lower the path runtime bindings (same dispatch emit_fragment uses).
-        #   - "dynamic" (profile_field/ddp/dpp): the operation carries a BLANK path
-        #     (supplied at the process step). The REST operation builder permits a blank
-        #     path only with a usable path_replacements marker, so reuse the #100 marker
-        #     synthesized from the path bindings (build-only, not emitted into XML).
-        #   - "static": the path is a constant — fold it into the operation path.
-        path_mode, path_value = lower_path_bindings(
-            params.runtime_bindings,
-            path_template=op.path,
-            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
-        )
-        if path_mode == "dynamic":
-            config["path_replacements"] = synth_path_replacements(params.runtime_bindings)
-        elif path_mode == "static":
-            config["path"] = path_value
-
         # No request_profile_id / request_profile_type: the GET request body is
         # empty (the #72 empty-request guarantee), so under #50 conditional
         # emission the builder emits no request-profile attrs at all.
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
-
-        if path_mode == "dynamic":
-            config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so
         # build_integration orders the profile before the operation and resolves
