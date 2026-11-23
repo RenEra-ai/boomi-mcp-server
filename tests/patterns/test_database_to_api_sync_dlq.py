@@ -38,12 +38,14 @@ _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 _CACHE_ID = _corpus.ARCH_CACHE_ID
 _HANDLER_ID = "77777777-7777-7777-7777-777777777777"
 
-_GOLDEN = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "golden_xml"
-    / "try_catch_dlq_document_cache_archetype.xml"
-)
+# #159 S3: golden-000056 (``try_catch_dlq_document_cache_archetype.xml``) and
+# golden-000088 (``issue184_cache_notify_archetype_terminal.xml``) retire with the
+# archetype route that rendered them, and their files are removed. The DLQ byte
+# behaviour is re-homed onto the L1 preset (``boomi.archetype.database_to_api_sync``
+# 1.0.0), whose materialized XML equalled both files byte for byte (S2-D7): the
+# frozen files' SHA-256 digests, taken from the committed bytes before removal,
+# are the oracle. Never regenerate them from either route.
+_GOLDEN_SHA256 = "3a872dc87065c625ea044d4b6334300d1a880079f26bfba1e5679d3bcda7a5c4"
 
 # #184 amendment 3: golden-000060 (`try_catch_notify_dlq_document_cache_archetype.xml`)
 # is retired. Each connector's catch leg ran notify -> doccacheload -> Stop, and Add
@@ -51,12 +53,13 @@ _GOLDEN = (
 # golden-000088 was frozen independently of this builder, as a byte transform of the
 # retired golden (tests/fixtures/process_ir/issue184/PROVENANCE.md). Never
 # regenerate it here.
-_NOTIFY_GOLDEN = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "golden_xml"
-    / "issue184_cache_notify_archetype_terminal.xml"
-)
+_NOTIFY_GOLDEN_SHA256 = "4845f0319ac55e93cdaa03b91a72d135d914594d262786b1ba2b40c52a133cab"
+
+
+def _sha256(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 _CATCH_NOTIFY = _corpus.ARCH_CATCH_NOTIFY
 
@@ -353,9 +356,9 @@ _build_archetype_process_xml = _corpus.arch_build_archetype_process_xml
 
 
 def test_archetype_document_cache_ref_matches_golden():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    emitted = _build_archetype_process_xml(spec)
-    assert emitted == _GOLDEN.read_text()
+    """#159 S3: re-homed onto the L1 preset — its materialized DLQ process is the
+    retired golden-000056's frozen bytes (digest oracle above)."""
+    assert _sha256(_l1_canonical_process_xml(dlq=_WIRED_DC)) == _GOLDEN_SHA256
 
 
 def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
@@ -460,9 +463,11 @@ def test_catch_notify_operational_intent_records_no_echo():
 
 
 def test_archetype_notify_matches_golden():
-    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
-    emitted = _build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden")
-    assert emitted == _NOTIFY_GOLDEN.read_text()
+    """#159 S3: re-homed onto the L1 preset — its materialized notify DLQ process
+    is the retired golden-000088's frozen bytes (digest oracle above)."""
+    assert _sha256(_l1_canonical_process_xml(
+        dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
+    )) == _NOTIFY_GOLDEN_SHA256
 
 
 def test_archetype_notify_shape_sequence():
@@ -748,10 +753,10 @@ def test_l1_process_xml_equals_the_archetype_goldens_and_the_legacy_builder():
     notify DLQ: golden-000088 ``issue184_cache_notify_archetype_terminal.xml``,
     frozen independently of both builders) and, without a DLQ, the legacy
     builder's own rendering of the same input."""
-    assert _l1_canonical_process_xml(dlq=_WIRED_DC) == _GOLDEN.read_text()
-    assert _l1_canonical_process_xml(
+    assert _sha256(_l1_canonical_process_xml(dlq=_WIRED_DC)) == _GOLDEN_SHA256
+    assert _sha256(_l1_canonical_process_xml(
         dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
-    ) == _NOTIFY_GOLDEN.read_text()
+    )) == _NOTIFY_GOLDEN_SHA256
     assert _l1_canonical_process_xml(name="Archetype DLQ Golden") == _build_archetype_process_xml(_emit())
 
 
