@@ -3911,20 +3911,30 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     {
         "surface_id": "SS-BUILDER-DIAGNOSTICS",
         "source_modules": ("src/boomi_mcp/categories/integration_builder.py",
-                            "src/boomi_mcp/categories/components/processes.py"),
+                            "src/boomi_mcp/categories/components/processes.py",
+                            "src/boomi_mcp/authoring/process_admission.py"),
         "surface_class": "Builder error texts and hints",
-        "producer": "integration_builder plan preflight envelopes",
+        "producer": "integration_builder plan admission refusal envelopes",
         "anchors": ("src/boomi_mcp/categories/components/processes.py:224-241 "
                     "(ACTION_UNSUPPORTED)",
-                    "src/boomi_mcp/categories/integration_builder.py:3148",
-                    "src/boomi_mcp/categories/integration_builder.py:3162",
-                    "src/boomi_mcp/categories/integration_builder.py:3544",
-                    "src/boomi_mcp/categories/integration_builder.py:3610",
-                    "src/boomi_mcp/categories/integration_builder.py:5318",
-                    "src/boomi_mcp/categories/integration_builder.py:5403-5430"),
-        "legacy_guidance": "PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and "
-                           "PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto "
-                           "manage_component(type=\"component\", config.xml)",
+                    "src/boomi_mcp/categories/integration_builder.py:5248 "
+                    "(_build_plan: raw_process_refusal)",
+                    "src/boomi_mcp/categories/integration_builder.py:5291-5296 "
+                    "(_build_plan: first_flat_process_refusal)",
+                    "src/boomi_mcp/authoring/process_admission.py:37-49 "
+                    "(UNIT_REQUIRED_MESSAGE / UNIT_REQUIRED_HINT)",
+                    "src/boomi_mcp/authoring/process_admission.py:156-164 "
+                    "(unit_required_envelope)"),
+        "legacy_guidance": "#159 S3 retired the PROCESS_KIND_* diagnostics (their hints "
+                           "enumerated sorted(PROCESS_FLOW_BUILDERS), and "
+                           "PROCESS_KIND_XML_CONFLICT steered raw process XML onto "
+                           "manage_component). Every raw process body is now refused at "
+                           "plan admission, before any step, with the one value-free "
+                           "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED envelope (static "
+                           "field pointer; hint names authoring_request process_ir units "
+                           "and the explicit-id bind). manage_process(action='create') "
+                           "still answers ACTION_UNSUPPORTED, whose hint names "
+                           "manage_component as the raw XML escape hatch",
         "owning_issue": "#160",
         "post_retraction_assertion": "no served builder envelope names a legacy process_kind "
                                      "value or routes raw process XML to another tool.",
