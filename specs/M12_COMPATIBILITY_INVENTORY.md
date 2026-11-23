@@ -2455,6 +2455,7 @@ value either way.
 | **Mutation:** a `setdefault` process_kind producer is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_setdefault_producer_is_reported` |
 | **Mutation:** a hand-rolled transport POST is a write sink | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_hand_rolled_transport_post_is_reported_as_a_write_sink` |
 | **Mutation:** a legacy semantic-validation caller is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_legacy_semantic_validation_caller_is_reported` |
+| **Mutation:** a synthetic example producer is reported (the emptied `example_producer` family stays live) | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_synthetic_example_producer_is_reported` |
 | **Mutation:** a module-qualified wrapper is reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_module_qualified_wrapper_is_reported` |
 | **Precision:** an unrelated function sharing a bearing name is not reported | `tests/test_issue_149_legacy_reachability_freeze.py::test_an_unrelated_function_sharing_a_bearing_name_is_not_reported` |
 | **Mutation:** a one-argument `setdefault` is still a producer | `tests/test_issue_149_legacy_reachability_freeze.py::test_a_one_argument_setdefault_is_still_a_producer` |
