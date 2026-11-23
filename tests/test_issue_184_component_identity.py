@@ -1673,6 +1673,7 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
       whatever the binding.
     - The declared-only planner binding is read for its id by `_bound_existing_id` alone.
     - `apply_writes_component_config` reads only its `reference_only` flag.
+    - Canonical safe-edit admission reads declared ids only and holds no account, so it passes no bindings.
     - Both account-holding routes build the map from their component plan."""
     import ast
 
@@ -1683,6 +1684,10 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
                 "component_writes_existing", "component_write_conflicts", "apply_writes_component_config",
                 "build_symbol_table"}
     exempt = {"recipes/engine.py", "authoring/contract.py", "authoring/process_ir_effects.py"}
+    # Canonical safe-edit admission is account-less and resolves nothing by name: it reads only
+    # DECLARED ids (a name binding is refused as COMPONENT_EDIT_BINDING_REQUIRED), so it holds no
+    # route bindings to pass. Exempt by (module, function), not by module.
+    declared_only_owners = {("categories/components/safe_edit_component.py", "_admit_canonical_request")}
 
     def calls(path):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -1704,7 +1709,7 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
                 seen += 1
                 passes = any(keyword.arg == "existing_ids" for keyword in call.keywords) or (
                     called == "_bound_existing_id" and len(call.args) >= 2)
-                if not passes and rel not in exempt:
+                if not passes and rel not in exempt and (rel, owner) not in declared_only_owners:
                     unbound.append("{0}:{1}:{2}".format(rel, owner, called))
             if called == "resolve_planner_binding" and any(k.arg == "declared_only" for k in call.keywords):
                 declared.add((owner, parent.attr if isinstance(parent, ast.Attribute) else None))
