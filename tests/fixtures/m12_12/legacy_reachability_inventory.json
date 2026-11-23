@@ -199,7 +199,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 7838,
+      "evidence_line": 7852,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -1144,7 +1144,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9461,
+      "evidence_line": 9475,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1153,7 +1153,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9830,
+      "evidence_line": 9844,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1162,7 +1162,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7763,
+      "evidence_line": 7777,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1171,7 +1171,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7838,
+      "evidence_line": 7852,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1225,7 +1225,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11477,
+      "evidence_line": 11491,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -2098,7 +2098,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 9979,
+      "evidence_line": 9993,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -3371,7 +3371,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 7838,
+      "evidence_line": 7852,
       "forms": [
         "create_component(...)"
       ],
@@ -4004,7 +4004,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9461,
+      "evidence_line": 9475,
       "forms": [
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
@@ -4018,7 +4018,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 7763,
+      "evidence_line": 7777,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -4049,7 +4049,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11477,
+      "evidence_line": 11491,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -4842,7 +4842,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 9979,
+      "evidence_line": 9993,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -38183,12 +38183,10 @@
     {
       "anchors": [
         "src/boomi_mcp/categories/components/processes.py:224-241 (ACTION_UNSUPPORTED)",
-        "src/boomi_mcp/categories/integration_builder.py:3148",
-        "src/boomi_mcp/categories/integration_builder.py:3162",
-        "src/boomi_mcp/categories/integration_builder.py:3544",
-        "src/boomi_mcp/categories/integration_builder.py:3610",
-        "src/boomi_mcp/categories/integration_builder.py:5318",
-        "src/boomi_mcp/categories/integration_builder.py:5403-5430"
+        "src/boomi_mcp/categories/integration_builder.py:5248 (_build_plan: raw_process_refusal)",
+        "src/boomi_mcp/categories/integration_builder.py:5291-5296 (_build_plan: first_flat_process_refusal)",
+        "src/boomi_mcp/authoring/process_admission.py:37-49 (UNIT_REQUIRED_MESSAGE / UNIT_REQUIRED_HINT)",
+        "src/boomi_mcp/authoring/process_admission.py:156-164 (unit_required_envelope)"
       ],
       "artifact_ids": [
         "SS-BUILDER-DIAGNOSTICS:ACTION_UNSUPPORTED",
@@ -38196,7 +38194,7 @@
         "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_UNSUPPORTED",
         "SS-BUILDER-DIAGNOSTICS:PROCESS_KIND_XML_CONFLICT"
       ],
-      "legacy_guidance": "PROCESS_KIND_* hints enumerate sorted(PROCESS_FLOW_BUILDERS) and PROCESS_KIND_XML_CONFLICT actively steers raw process XML onto manage_component(type=\"component\", config.xml)",
+      "legacy_guidance": "#159 S3 retired the PROCESS_KIND_* diagnostics (their hints enumerated sorted(PROCESS_FLOW_BUILDERS), and PROCESS_KIND_XML_CONFLICT steered raw process XML onto manage_component). Every raw process body is now refused at plan admission, before any step, with the one value-free PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED envelope (static field pointer; hint names authoring_request process_ir units and the explicit-id bind). manage_process(action='create') still answers ACTION_UNSUPPORTED, whose hint names manage_component as the raw XML escape hatch",
       "owning_issue": "#160",
       "post_retraction_assertion": "no served builder envelope names a legacy process_kind value or routes raw process XML to another tool.",
       "producers": [
@@ -38205,7 +38203,8 @@
       ],
       "source_modules": [
         "src/boomi_mcp/categories/integration_builder.py",
-        "src/boomi_mcp/categories/components/processes.py"
+        "src/boomi_mcp/categories/components/processes.py",
+        "src/boomi_mcp/authoring/process_admission.py"
       ],
       "surface_class": "Builder error texts and hints",
       "surface_id": "SS-BUILDER-DIAGNOSTICS"
