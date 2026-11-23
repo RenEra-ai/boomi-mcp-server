@@ -2007,8 +2007,12 @@ if prepare_component_edit_action:
                   type-checked; the result is merged with the process preservation
                   policy (overrides, encrypted values, unknown XML, folder kept).
                   update_mode="canonical_process_update". Refusals (nothing written):
-                  PROCESS_COMPONENT_SCHEMA_INVALID, PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
-                  PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID, AUTHORING_* compile codes.
+                  COMPONENT_EDIT_AUTHORING_REQUEST_INVALID (not one process_ir update unit,
+                  or combined with config/map_context), COMPONENT_EDIT_TARGET_MISMATCH,
+                  COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED, COMPONENT_EDIT_BINDING_REQUIRED,
+                  COMPONENT_EDIT_DEPENDENCY_UNVERIFIED (unreadable, mistyped or re-resolved
+                  dependency), PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID, AUTHORING_*
+                  compile codes.
             max_diff_lines: Cap the returned unified diff (default 200).
 
         Process layout (#188):
