@@ -233,7 +233,8 @@ class DbToApiCatchNotifyV1(RecipeInputBase):
             + CAUGHT_ERROR_PROPERTY_ID
             + " (the caught-error property, bound once per occurrence), must not "
             "contain a brace, and must not read as a JSON object or array; "
-            "otherwise the input is refused with db_to_api_catch_notify_invalid."
+            "otherwise the request is refused with cause RECIPE_INPUT_INVALID at "
+            "this field."
         ),
     )
 

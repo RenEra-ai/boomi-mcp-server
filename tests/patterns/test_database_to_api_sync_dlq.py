@@ -584,6 +584,10 @@ def test_l1_catch_notify_served_schema_states_the_validator_rules():
         accepted.append(level)
     assert accepted and set(notify["level"]["enum"]) == set(accepted)
     assert "meta.base.catcherrorsmessage" in notify["message_template"]["description"]
+    # QA-159-S2-r2-01: the served text names the cause a caller actually receives at the
+    # authoring boundary, never the model-internal error type, which is not served.
+    assert "RECIPE_INPUT_INVALID" in notify["message_template"]["description"]
+    assert "db_to_api_catch_notify_invalid" not in notify["message_template"]["description"]
 
     for case_id, catch_notify in (
         ("wm_off_dlq_on_create", {"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]}),
