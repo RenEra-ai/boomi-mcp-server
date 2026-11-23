@@ -5606,6 +5606,9 @@ def test_a_discovery_caller_cannot_mutate_the_served_examples():
 
     # Mutate every mutable example mapping each exit hands out.
     (example,) = registry.resolve(*key).examples
+    # A NESTED mapping too: a shallow copy would still share it.
+    nested = next(v for v in example.component_material.values() if isinstance(v, dict))
+    nested["mutated"] = True
     example.raw_input["process_key"] = "mutated"
     example.component_material["version"] = "mutated"
     for descriptor in registry.descriptors():
