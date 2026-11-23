@@ -862,6 +862,24 @@ def _authority_revision(payload: Any) -> str:
     return implementation_digest((_canonical(payload),))
 
 
+def _detached(descriptor: RecipeDescriptorV1) -> RecipeDescriptorV1:
+    """The descriptor as handed to a caller: its examples DEEP-copied.
+
+    The descriptor model is frozen, but an example's ``raw_input`` and
+    ``component_material`` are JSON mappings, the only mutable values a
+    descriptor holds. Handing out the stored objects let an in-process caller
+    edit an example in place and change what every later lookup and discovery
+    listing served, while ``descriptor_sha256`` and ``registry_revision`` kept
+    describing the original (CDX-159-S2-r1-03). Every exit returns a copy, so
+    the stored descriptor stays exactly what was hashed.
+    """
+    if not descriptor.examples:
+        return descriptor
+    return descriptor.model_copy(
+        update={"examples": tuple(example.model_copy(deep=True) for example in descriptor.examples)}
+    )
+
+
 class RecipeRegistry:
     """An immutable set of registered recipe versions."""
 
@@ -1717,7 +1735,8 @@ class RecipeRegistry:
         # ``registry_revision`` — would fall to dict insertion order
         # (issue #145, live QA). The raw string breaks the tie deterministically.
         return tuple(
-            sorted(
+            _detached(descriptor)
+            for descriptor in sorted(
                 self._descriptors.values(),
                 key=lambda d: (
                     d.recipe_id,
@@ -1765,7 +1784,7 @@ class RecipeRegistry:
                     recipe_ids=(recipe_id,),
                     available_versions=available,
                 )
-            return self._descriptors[(recipe_id, default)]
+            return _detached(self._descriptors[(recipe_id, default)])
         descriptor = self._descriptors.get((recipe_id, recipe_version))
         if descriptor is None:
             raise recipe_error(
@@ -1775,7 +1794,7 @@ class RecipeRegistry:
                 recipe_versions=(recipe_version,),
                 available_versions=available,
             )
-        return descriptor
+        return _detached(descriptor)
 
     def executor_for(self, descriptor: RecipeDescriptorV1) -> RecipeExecutorV1:
         key = (descriptor.recipe_id, descriptor.recipe_version)

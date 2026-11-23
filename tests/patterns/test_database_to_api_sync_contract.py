@@ -2007,18 +2007,14 @@ L1_INVOCATION_ID = "db_to_api"
 _L1_PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 _CREDENTIAL_SCHEME = "credential://"
 
-#: The DLQ cache's ComponentGet answer for the offline replay. NO live capture
-#: of an unprofiled Document Cache exists in the repository, so this is the
-#: recorded byte transform of a live platform capture (the m11 Document Cache,
-#: ``tests/fixtures/live_xml/m11/documentcache_profile_key_component.xml``): its
-#: one ``DocumentCache`` element's ``profile``/``profileType`` attributes are
-#: rewritten to the platform's unprofiled spelling — the exact transform the
-#: architect's retry probe (``probe_b_cache_states.py``) applied. Everything
-#: else is the capture's own bytes.
+#: The DLQ cache's ComponentGet answer for the offline replay is the independent
+#: live capture ``replay_identity/cap159-s2-dlq-cache`` (an unprofiled Document
+#: Cache a green platform execution exercised; see its PROVENANCE.md). The m11
+#: PROFILED Document Cache capture below stays as the negative control: the
+#: production classifier must read it as a profiled cache.
 L1_DLQ_CAPTURE_SOURCE = _TESTS_DIR / "fixtures" / "live_xml" / "m11" / "documentcache_profile_key_component.xml"
 L1_DLQ_CAPTURE_SHA256 = "9a4bab3ed6516874ea785caff8e1d1b4168287b9c556e07b846da9b90417f394"
-_PROFILED_ATTRS = 'profile="a8471eb5-adc7-4311-95c8-f27c2ea31808" profileType="profile.json"'
-_UNPROFILED_ATTRS = 'profile="" profileType="profile.none"'
+L1_DLQ_CACHE_DIR = _TESTS_DIR / "fixtures" / "boomi" / "replay_identity" / "cap159-s2-dlq-cache"
 
 
 def l1_profiled_cache_xml() -> str:
@@ -2028,9 +2024,7 @@ def l1_profiled_cache_xml() -> str:
 
 
 def l1_unprofiled_cache_xml() -> str:
-    profiled = l1_profiled_cache_xml()
-    assert profiled.count(_PROFILED_ATTRS) == 1
-    return profiled.replace(_PROFILED_ATTRS, _UNPROFILED_ATTRS)
+    return (L1_DLQ_CACHE_DIR / "dlq-cache-unprofiled.xml").read_bytes().decode("utf-8")
 
 
 def l1_cache_answers(legacy_cache_id: str, xml: "str | None"):
@@ -2639,17 +2633,25 @@ def test_l1_watermark_refusals():
 
 def test_l1_replay_identity_dlq_capture_is_the_recorded_transform():
     """The replay transport's DLQ cache answer (``replay_identity/cap159-s2-dlq-cache``)
-    is byte-for-byte the recorded unprofiled transform of the live capture,
-    bound to the frozen cases' placeholder, and the production classifier reads
-    it as an unprofiled cache (and the untransformed capture as profiled)."""
+    is an independent live capture of an unprofiled Document Cache that a green
+    platform execution exercised (not a byte transform of another capture), bound
+    to the frozen cases' placeholder; the production classifier reads it as an
+    unprofiled cache (and the m11 profiled capture as profiled)."""
     from boomi_mcp.authoring.connector_resolution_snapshot import stored_document_cache_profile
 
-    directory = _TESTS_DIR / "fixtures" / "boomi" / "replay_identity" / "cap159-s2-dlq-cache"
+    directory = L1_DLQ_CACHE_DIR
     (record,) = json.loads((directory / "records.json").read_text())
     data = (directory / (record["capture"] + ".xml")).read_bytes()
     assert data == l1_unprofiled_cache_xml().encode("utf-8")
     assert record["sha256_archived_bytes"] == _hashlib.sha256(data).hexdigest()
-    assert record["derived_from"]["sha256"] == L1_DLQ_CAPTURE_SHA256
+    assert record["byte_length"] == len(data)
+    assert "live platform ComponentGet" in record["source"]
+    assert "NOT authored by the #159 S2 implementation" in record["authored_by"]
+    assert "derived_from" not in record and "byte_transform" not in record
+    # Operable, not merely stored: a COMPLETE execution ran a DLQ shape bound to it.
+    evidence = record["operable_evidence"]
+    assert evidence and all(row["status"] == "COMPLETE" for row in evidence)
+    assert any("executed successfully" in row["what"] for row in evidence)
     assert record["binds_placeholder_ids"] == ["<<dlq document cache component id>>"]
     assert stored_document_cache_profile("c", data.decode("utf-8")).profile_state == "absent"
     assert stored_document_cache_profile("c", l1_profiled_cache_xml()).profile_state == "known"

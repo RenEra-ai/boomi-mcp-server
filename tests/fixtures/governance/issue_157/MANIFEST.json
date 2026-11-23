@@ -236,13 +236,13 @@
   },
   "extraction": "git archive <baseline_sha> | tar -x, producers executed with PYTHONPATH=<extraction>/src",
   "files": {
-    "cases/api_to_api_sync/create/discharges.json": "da6c6fbd9bf1dc2960dd03a72c437fdc729254f5b3defb2447fcf09fc15ff161",
+    "cases/api_to_api_sync/create/discharges.json": "4e313c6e7657c659154c71a93d1c2b75b9ad3b85c5623fdbb018d4c888568b49",
     "cases/api_to_api_sync/create/endpoints.baseline.jsonl": "fafb870d594b73b317ad020c1b4977b6f861caa7cdd662715a8cf193e37c6347",
     "cases/api_to_api_sync/create/flows.baseline.jsonl": "ddfdc2e676e1ef9b6c0999c73aa38f1086d45d51ca1ed00ec804e9f0b458b8b4",
     "cases/api_to_api_sync/create/input.canonical.json": "27d9a3773f86975d77f767f74c6b1dec77022f352311f3ededf14a253207f82b",
     "cases/api_to_api_sync/create/input.legacy.json": "4ccc31eb79276f51b5b78619823dff9230dc5748860b0b2cfcee27673e58103a",
     "cases/api_to_api_sync/create/provenance.json": "c8265399225fe6472258301a0f35ee79febd075f91e4b319d47b343fe707834d",
-    "cases/api_to_api_sync/reuse_with_function/discharges.json": "66efac7635d7f53db0a4275f920e59d77ca82781542f89b50185837e346e153f",
+    "cases/api_to_api_sync/reuse_with_function/discharges.json": "c8dade2d705f18cb3b2f6feaebd05aa7415cb049e89687189b73c793c98589a0",
     "cases/api_to_api_sync/reuse_with_function/endpoints.baseline.jsonl": "8e29eb25ff8613de5d23eb403a068cbfe0ed7eebd3eb27f8459d362e1c226de5",
     "cases/api_to_api_sync/reuse_with_function/flows.baseline.jsonl": "abcb3c865d7ccf6da0983ddb2b3f40ecbec09942efdbcc9e61f252007ad4e289",
     "cases/api_to_api_sync/reuse_with_function/input.canonical.json": "67fab99c5e863cb97a0bdae7ceb54bc057b35b1162e3b95ca56614da14908602",
@@ -362,6 +362,7 @@
     "cases/stub_minimal/default/input.canonical.json": "4084d8f5b0333f19339d8af4fb6f430f75d4d70107844fa9a6fe7e422f6844e9",
     "cases/stub_minimal/default/input.legacy.json": "ba0a7ed4167b05f68f9537979b92a1a87b63651c8251d2a6513fcd69ec41621b",
     "cases/stub_minimal/default/provenance.json": "30c7cdf6142f3bc122e5f1b9e0de0ab891a28292b36488293691eb0254ccc722",
+    "field_retirements/FRET-159-01.json": "3ba355a00dd6c1c428313d0e811e9d9b89c8984167f8f34549d5d4c537475239",
     "retirements/INDEX.json": "0c72b06a6394cf86e9df2b07670b6da9f17f677a20486973ce579d5ae88e63ee",
     "retirements/RET-157-01.json": "f85255468379f82d554bf6599dac721920faf2eeaea927362ff785df4283e6ca",
     "retirements/RET-157-02.json": "19967abeda53b95e1109bd54ec29fe64b858c689218b46a15cd35c9d3758bf80",
@@ -388,7 +389,8 @@
   },
   "schema_version": 1,
   "status_counts": {
-    "discharged": 141,
+    "discharged": 139,
+    "field_retired": 2,
     "pending": 0,
     "retired": 0
   }

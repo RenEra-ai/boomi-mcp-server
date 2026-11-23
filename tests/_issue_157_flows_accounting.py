@@ -30,8 +30,11 @@ arbitrary variant. The case axis is what makes the accounting honest.
 exactly ONE status in the case's ``discharges.json``: ``discharged`` (the
 canonical projection of the case's ``input.canonical.json`` reproduces the
 normalized payload EXACTLY), ``retired:<id>`` (a typed retirement record under
-``retirements/`` proves the row inert), or ``pending:#159`` (owed by the
-migration that discharges it). The derived sequence must then EQUAL, in order,
+``retirements/`` proves the row inert), ``field_retired:<id>`` (a typed
+FIELD-scoped record under ``field_retirements/`` names one field of THIS row,
+pinned to its frozen digest and historical value, that the canonical replay no
+longer serves: the row stays in the census and is owed with only that field
+removed), or ``pending:#159`` (owed by the migration that discharges it). The derived sequence must then EQUAL, in order,
 the frozen sequence filtered to discharged rows: an unexpected row, a
 duplicate, or a reordering fails the case even when every discharged row is
 matched. The pending count is pinned in the manifest so #159 cannot shrink the
@@ -62,6 +65,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "tests" / "fixtures" / "governance" / "issue_157"
 CASES_DIR = CORPUS_DIR / "cases"
 RETIREMENTS_DIR = CORPUS_DIR / "retirements"
+#: Field-scoped endpoint retirements (#159 S2, CDX-159-S2-r1-02). A separate
+#: directory and id prefix from the whole-row ``retirements/`` (which the #157
+#: intent-retirement corpus owns), so neither path can cite the other's record.
+FIELD_RETIREMENTS_DIR = CORPUS_DIR / "field_retirements"
+FIELD_RETIREMENT_KIND = "endpoint_field_retirement"
 MANIFEST_PATH = CORPUS_DIR / "MANIFEST.json"
 
 #: The step-0 baseline the corpus was frozen from. A re-freeze against another
@@ -188,6 +196,7 @@ CASES: Mapping[str, Mapping[str, Any]] = {
 PENDING = "pending:#159"
 DISCHARGED = "discharged"
 RETIRED_PREFIX = "retired:"
+FIELD_RETIRED_PREFIX = "field_retired:"
 
 #: THE ONE-LINE SWITCH (#159 S2 -> the integrator's final replay). While False
 #: the lanes land one by one: a case whose canonical replay reproduces its
@@ -515,7 +524,7 @@ def _build_manifest(out_dir: Path, baseline_sha: str, tree_sha: str, case_summar
 
 
 def _status_counts(out_dir: Path) -> Dict[str, int]:
-    counts = {"discharged": 0, "retired": 0, "pending": 0}
+    counts = {"discharged": 0, "field_retired": 0, "retired": 0, "pending": 0}
     for path in sorted((out_dir / "cases").rglob("discharges.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
         for status in list((data.get("flows") or {}).values()) + list((data.get("endpoints") or {}).values()):
@@ -523,6 +532,8 @@ def _status_counts(out_dir: Path) -> Dict[str, int]:
                 counts["discharged"] += 1
             elif status.startswith(RETIRED_PREFIX):
                 counts["retired"] += 1
+            elif status.startswith(FIELD_RETIRED_PREFIX):
+                counts["field_retired"] += 1
             else:
                 counts["pending"] += 1
     return counts
@@ -627,6 +638,118 @@ def retirement_ids() -> Dict[str, Dict[str, Any]]:
             if key in record
         })
     return merged
+
+
+def field_retirement_records() -> Dict[str, Dict[str, Any]]:
+    """Every field-scoped retirement record, keyed by its id (= file stem)."""
+    if not FIELD_RETIREMENTS_DIR.is_dir():
+        return {}
+    records = {}
+    for path in sorted(FIELD_RETIREMENTS_DIR.glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        records[path.stem] = record
+    return records
+
+
+def _pointer_segments(pointer: Any) -> Optional[List[str]]:
+    if not isinstance(pointer, str) or not pointer.startswith("/") or pointer == "/":
+        return None
+    return [part.replace("~1", "/").replace("~0", "~") for part in pointer[1:].split("/")]
+
+
+def without_field(payload: Mapping[str, Any], pointer: str) -> Dict[str, Any]:
+    """A deep copy of ``payload`` with the object member at ``pointer`` removed."""
+    out = json.loads(json.dumps(payload))
+    segments = _pointer_segments(pointer) or []
+    node = out
+    for part in segments[:-1]:
+        node = node[part]
+    del node[segments[-1]]
+    return out
+
+
+def _field_retirement_problem(
+    row_label: str,
+    record_id: str,
+    records: Mapping[str, Any],
+    case: "Case",
+    side: str,
+    row: Mapping[str, Any],
+) -> Optional[str]:
+    """Does this record retire exactly one field of THIS frozen row?
+
+    The record must be a field-scoped RETIRE record for this side, must list
+    this row by case, ordinal, key, kind AND frozen payload digest (so it cannot
+    be carried to another case or a re-frozen row), and the frozen payload must
+    hold the field at its pointer with exactly the recorded historical value.
+    """
+    record = records.get(record_id)
+    if record is None or record.get("id") != record_id:
+        return "{0} names an unknown field retirement record".format(row_label)
+    if record.get("kind") != FIELD_RETIREMENT_KIND or record.get("classification") != "RETIRE":
+        return "{0} cites {1}, which is not a field-scoped RETIRE record".format(row_label, record_id)
+    if record.get("side") != side:
+        return "{0} cites {1}, which retires a field on the {2} side".format(
+            row_label, record_id, record.get("side")
+        )
+    identity = {
+        "case_id": case.case_id,
+        "ordinal": row["ordinal"],
+        "key": row["key"],
+        "kind": row["kind"],
+        "payload_sha256": row["payload_sha256"],
+    }
+    if identity not in (record.get("rows") or []):
+        return "{0} cites {1}, which does not name this row of {2}".format(
+            row_label, record_id, case.case_id
+        )
+    segments = _pointer_segments(record.get("field_pointer"))
+    if segments is None:
+        return "{0} cites {1}, whose field pointer is malformed".format(row_label, record_id)
+    node: Any = row["payload"]
+    for part in segments:
+        if not isinstance(node, dict) or part not in node:
+            return "{0} cites {1}, whose field {2!r} the frozen payload does not carry".format(
+                row_label, record_id, record.get("field_pointer")
+            )
+        node = node[part]
+    if "historical_value" not in record or node != record["historical_value"]:
+        return "{0} cites {1}, whose historical value is not the frozen payload's".format(
+            row_label, record_id
+        )
+    return None
+
+
+def owed_payload(
+    case: "Case",
+    side: str,
+    row: Mapping[str, Any],
+    field_retirements: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """The payload the replay owes for one frozen row: the frozen payload, with
+    the field a VALID field retirement names removed. A row whose citation is
+    invalid owes its full frozen payload (and the accounting reports why)."""
+    status = (case.discharges.get(side) or {}).get(str(row["ordinal"]), "")
+    if not status.startswith(FIELD_RETIRED_PREFIX):
+        return dict(row["payload"])
+    records = field_retirement_records() if field_retirements is None else field_retirements
+    record_id = status[len(FIELD_RETIRED_PREFIX):]
+    if _field_retirement_problem("row", record_id, records, case, side, row) is not None:
+        return dict(row["payload"])
+    return without_field(row["payload"], records[record_id]["field_pointer"])
+
+
+def owed_endpoint_payloads(
+    case: "Case", field_retirements: Optional[Mapping[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """The case's owed endpoint sequence (whole-row retirements removed, field
+    retirements applied), for callers that compare served rows directly."""
+    statuses = case.discharges.get("endpoints") or {}
+    return [
+        owed_payload(case, "endpoints", row, field_retirements)
+        for row in case.endpoint_rows
+        if not statuses.get(str(row["ordinal"]), "").startswith(RETIRED_PREFIX)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -890,6 +1013,8 @@ class DischargeReport:
         self.discharged: int = 0
         self.pending: int = 0
         self.retired: int = 0
+        #: Rows owed with one field removed by a field-scoped retirement.
+        self.field_retired: int = 0
         #: Rows the canonical replay reproduces exactly, in order, whose
         #: disposition is still ``pending:#159`` (legal only while not
         #: ``FINAL_REPLAY``).
@@ -1028,6 +1153,7 @@ def _account_sequence(
     retirements: Mapping[str, Any],
     *,
     final: Optional[bool] = None,
+    field_retirements: Optional[Mapping[str, Any]] = None,
 ) -> DischargeReport:
     """THE comparison path — flows and endpoints, partial and final replay alike.
 
@@ -1036,7 +1162,10 @@ def _account_sequence(
     a record that retires a row of THIS producer. Then ordered full-sequence
     equality, by full normalized payload digest (nested payload, null versus
     absent and ordinal all included), against the FULL frozen sequence with only
-    individually retired rows removed. Equal means the case is COMPLETED. While
+    individually retired rows removed and each field-retired row owed with its
+    one retired field removed (the actual output is never edited, so a
+    reintroduced value or an explicit null still differs). Equal means the case
+    is COMPLETED. While
     not ``final`` a completed case's still-pending rows are counted as
     reproduced-pending, and a case that does not reproduce its full sequence is
     held to its discharged rows alone (the #157/S1 partial rule). ``final``
@@ -1044,6 +1173,7 @@ def _account_sequence(
     pending.
     """
     final = FINAL_REPLAY if final is None else final
+    field_records = field_retirement_records() if field_retirements is None else field_retirements
     report = DischargeReport()
     label = "row" if side == "flows" else "endpoint row"
     frozen = case.flow_rows if side == "flows" else case.endpoint_rows
@@ -1062,9 +1192,14 @@ def _account_sequence(
         report.problems.append("frozen {0} identities are not unique within the case".format(label))
 
     status_of: Dict[int, str] = {}
+    #: The digest each owed row must reproduce: its frozen digest, or — for a
+    #: valid field retirement — the digest of the frozen payload without that
+    #: one field.
+    owed_digest: Dict[int, str] = {}
     for row in frozen:
         status = statuses[str(row["ordinal"])]
         status_of[row["ordinal"]] = status
+        owed_digest[row["ordinal"]] = row["payload_sha256"]
         if _digest(row["payload"]) != row["payload_sha256"]:
             report.problems.append(
                 "frozen {0} {1} payload does not match its own digest".format(label, row["ordinal"])
@@ -1085,6 +1220,22 @@ def _account_sequence(
             )
             if problem:
                 report.problems.append(problem)
+        elif status.startswith(FIELD_RETIRED_PREFIX):
+            report.field_retired += 1
+            record_id = status[len(FIELD_RETIRED_PREFIX):]
+            problem = _field_retirement_problem(
+                "{0} {1}".format(label, row["ordinal"]), record_id, field_records, case, side, row
+            )
+            if case.input_canonical is None:
+                problem = problem or "{0} {1} field-retired with no canonical fixture".format(
+                    label, row["ordinal"]
+                )
+            if problem:
+                report.problems.append(problem)
+            else:
+                owed_digest[row["ordinal"]] = _digest(
+                    without_field(row["payload"], field_records[record_id]["field_pointer"])
+                )
         elif status == PENDING:
             report.pending += 1
         else:
@@ -1094,7 +1245,7 @@ def _account_sequence(
 
     owed = [row for row in frozen if not status_of[row["ordinal"]].startswith(RETIRED_PREFIX)]
     derived_digests = [_digest(row) for row in derived]
-    if derived_digests == [row["payload_sha256"] for row in owed]:
+    if derived_digests == [owed_digest[row["ordinal"]] for row in owed]:
         report.completed = True
         report.reproduced_pending = sum(1 for row in owed if status_of[row["ordinal"]] == PENDING)
         if final and report.reproduced_pending:
@@ -1106,25 +1257,27 @@ def _account_sequence(
         return report
 
     # NOT completed. The diagnostics name the exact failure shape.
-    target = owed if final else [row for row in owed if status_of[row["ordinal"]] == DISCHARGED]
+    claimed = lambda status: status == DISCHARGED or status.startswith(FIELD_RETIRED_PREFIX)  # noqa: E731
+    target = owed if final else [row for row in owed if claimed(status_of[row["ordinal"]])]
     if final:
         report.problems.append(
             "case is not completed: the derived {0} sequence is not the full frozen sequence".format(side)
         )
     for row in target:
-        if row["payload_sha256"] not in derived_digests:
+        if owed_digest[row["ordinal"]] not in derived_digests:
             report.problems.append(
                 "{0} {1} {2} ({3}/{4}) has no full-payload match in the derived output".format(
-                    "discharged" if status_of[row["ordinal"]] == DISCHARGED else "owed",
+                    "discharged" if claimed(status_of[row["ordinal"]]) else "owed",
                     label, row["ordinal"], row["key"], row["kind"],
                 )
             )
-    target_digests = [row["payload_sha256"] for row in target]
+    target_digests = [owed_digest[row["ordinal"]] for row in target]
     if derived_digests != target_digests:
         not_owed = {
-            row["payload_sha256"]: status_of[row["ordinal"]]
+            digest: status_of[row["ordinal"]]
             for row in frozen
-            if row["payload_sha256"] not in target_digests
+            for digest in {row["payload_sha256"], owed_digest[row["ordinal"]]}
+            if digest not in target_digests
         }
         for digest in derived_digests:
             if digest in not_owed:
@@ -1159,13 +1312,16 @@ def discharge_case(
     served: Optional[Sequence[Mapping[str, Any]]] = None,
     *,
     final: Optional[bool] = None,
+    field_retirements: Optional[Mapping[str, Any]] = None,
 ) -> DischargeReport:
     """Two-sided, ordered accounting of one case's flows sequence.
 
     :func:`_account_sequence` plus the names R3 removes from the DIGEST, checked
     against the SERVED rows instead (the frozen payloads carry none).
     """
-    report = _account_sequence(case, "flows", derived, retirements, final=final)
+    report = _account_sequence(
+        case, "flows", derived, retirements, final=final, field_retirements=field_retirements
+    )
     report.problems.extend(_profile_name_problems(case, served if served is not None else ()))
     return report
 
@@ -1176,10 +1332,13 @@ def discharge_endpoints(
     retirements: Mapping[str, Any],
     *,
     final: Optional[bool] = None,
+    field_retirements: Optional[Mapping[str, Any]] = None,
 ) -> DischargeReport:
     """The SAME ordered two-sided accounting over the endpoint/provenance oracle
     (binding mode, ids/keys and ordinal all inside the compared payload)."""
-    return _account_sequence(case, "endpoints", derived, retirements, final=final)
+    return _account_sequence(
+        case, "endpoints", derived, retirements, final=final, field_retirements=field_retirements
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1284,9 +1443,8 @@ registry_module._PRODUCTION_REGISTRY = None
 
 # #159 S2 (L4): the projector's LAZILY imported authorities, imported here under
 # the blocker so a forbidden transitive import surfaces even before a case
-# that reaches them (a listener, a DB write target, the API->API default) exists.
-from boomi_mcp.authoring import derived_flows as _projector
-_projector.rest_success_status_default()
+# that reaches them (a listener, a DB write target) exists.
+from boomi_mcp.authoring import derived_flows as _projector  # noqa: F401
 from boomi_mcp.patterns.primitives.wss_listen import compute_wss_endpoint  # noqa: F401
 from boomi_mcp.categories.components.builders._api_service_paths import (  # noqa: F401
     effective_api_service_route, wss_http_method,

@@ -72,6 +72,10 @@ from ...patterns.archetype_parameters import (
     JSONPayloadProfile,
     _flatten_payload_profile_leaves,
 )
+from ...categories.components.wss_route_methods import (
+    ASC_GET_WITH_INPUT_RULE,
+    ASC_METHOD_RULE,
+)
 from ...patterns.base import PrimitiveBuildContext
 from ..component_material import (
     DbWriteMaterialV1,
@@ -122,6 +126,7 @@ def _listener_rt():
 
     from ...categories.components.builders._api_service_paths import (
         api_service_http_method,
+        effective_api_service_route,
         route_refuses_its_input,
     )
     from ...categories.components.builders.json_profile_builder import (
@@ -131,6 +136,7 @@ def _listener_rt():
 
     return SimpleNamespace(
         api_service_http_method=api_service_http_method,
+        effective_api_service_route=effective_api_service_route,
         route_refuses_its_input=route_refuses_its_input,
         JSONGeneratedProfileBuilder=JSONGeneratedProfileBuilder,
         WssListenParameters=wss_listen.WssListenParameters,
@@ -235,8 +241,15 @@ class ListenerOperationMaterialV1(_FanoutMaterialModel):
         min_length=1,
         description=(
             "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | "
-            "EXECUTE. Not an HTTP verb; behind an API Service route it decides "
-            "the inherited method."
+            "EXECUTE. Not an HTTP verb. Behind an API Service route whose "
+            "api_service.http_method is omitted, "
+            + ASC_METHOD_RULE
+            + "; an explicit api_service.http_method overrides it. Every input "
+            "this preset accepts is a request body, so a GET route is refused "
+            "with LISTENER_ASC_ROUTE_UNCALLABLE and a GET or QUERY operation "
+            "needs an explicit non-GET http_method: "
+            + ASC_GET_WITH_INPUT_RULE
+            + "."
         ),
     )
     input_type: Literal["singlejson", "multijson"] = Field(
@@ -278,7 +291,14 @@ class ApiServiceMaterialV1(_FanoutMaterialModel):
     )
     http_method: Optional[Literal["GET", "POST", "PUT", "DELETE", "PATCH"]] = Field(
         default=None,
-        description="Route method override; default inherits it from the operation type.",
+        description=(
+            "Route method override; default (None) inherits it from the operation: "
+            + ASC_METHOD_RULE
+            + ". This preset's input is always a request body, so a GET route is "
+            "refused with LISTENER_ASC_ROUTE_UNCALLABLE: "
+            + ASC_GET_WITH_INPUT_RULE
+            + "."
+        ),
     )
     title: Optional[str] = Field(default=None, min_length=1, description="Display title.")
     version: str = Field(default="1.0.0", min_length=1, description="Display version.")
@@ -472,6 +492,35 @@ def check_api_service_route(inp: Any, material: Any) -> None:
         # it (imported only on this refusal path).
         from ...categories.deployment.orchestration import LISTENER_ASC_ROUTE_UNCALLABLE
 
+        raise _refusal(LISTENER_ASC_ROUTE_UNCALLABLE, pointer, phase="input")
+    # A route the platform never serves (CDX-159-S2-r1-01): the shared path
+    # authority marks it ``served=False`` — an effective objectName carrying a
+    # slash returns 404 (#158 QA-158-s2r1-01, measured) — so creating it would
+    # publish a path nothing can reach. The authority decides; nothing here
+    # restates its rule.
+    route = lrt.effective_api_service_route(
+        service.base_url_path,
+        {
+            "http_method": service.http_method or "",
+            "url_path": service.route_url_path or "",
+            "object_name": service.object_name or "",
+        },
+        {
+            "object_name": material.listener.object_name,
+            "operation_type": material.listener.operation_type,
+            "input_type": material.listener.input_type,
+        },
+    )
+    if not route["served"]:
+        from ...categories.deployment.orchestration import LISTENER_ASC_ROUTE_UNCALLABLE
+
+        # The field the effective name came from: the helper inherits the
+        # Listen operation's name when the override is blank after stripping.
+        pointer = (
+            "/component_material/api_service/object_name"
+            if (service.object_name or "").strip()
+            else "/component_material/listener/object_name"
+        )
         raise _refusal(LISTENER_ASC_ROUTE_UNCALLABLE, pointer, phase="input")
 
 

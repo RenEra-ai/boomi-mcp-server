@@ -2,22 +2,29 @@
   {
     "scenario": "cap159-s2-dlq-cache",
     "capture": "dlq-cache-unprofiled",
-    "component_id": "4f436363-d5d5-4e93-8ac0-cce6f3245449",
+    "component_id": "b20b23f9-e70a-487d-8996-d277ff1a1986",
     "version_marker": "1",
-    "component_name": "New Document Cache",
-    "sha256_archived_bytes": "955ed46aed3a386332d02201c2baabda122fd4b56c12e27af076abf1f7c24111",
-    "byte_length": 1223,
-    "derived_from": {
-      "path": "tests/fixtures/live_xml/m11/documentcache_profile_key_component.xml",
-      "sha256": "9a4bab3ed6516874ea785caff8e1d1b4168287b9c556e07b846da9b90417f394",
-      "kind": "live platform ComponentGet capture of a Document Cache (profiled, profile.json)"
-    },
-    "byte_transform": "the one DocumentCache element's attributes profile=\"a8471eb5-adc7-4311-95c8-f27c2ea31808\" profileType=\"profile.json\" rewritten to profile=\"\" profileType=\"profile.none\"; every other byte is the capture's own (the transform the architect retry probe probe_b_cache_states.py applied; reproduced by tests/patterns/test_database_to_api_sync_contract.py::l1_unprofiled_cache_xml)",
+    "component_name": "_TEST_QA159S2R1 DLQ cache",
+    "sha256_archived_bytes": "cff0b4f78294de2ee31c8a54eea057ea2c9048cc52642eec09392e55c84e0c08",
+    "byte_length": 759,
+    "source": "live platform ComponentGet (query_components get .component.xml), the renera QA account (suffix JAACKR), 2026-11-22",
+    "authored_by": "QA (boomi-qa-tester) via manage_component create with a minimal hand-written DocumentCache body (profileType profile.none, no index); NOT authored by the #159 S2 implementation",
+    "scrub": "createdBy/modifiedBy attribute values replaced with qa@example.invalid and the account-named root folder (folderFullPath, folderName) replaced with acct-root; every other byte as served",
+    "document_cache_element": "<DocumentCache xmlns=\"\" enforceSingleLucene=\"true\" profile=\"\" profileType=\"profile.none\"/>",
     "binds_placeholder_ids": [
       "<<dlq document cache component id>>"
     ],
-    "binding_rule": "#159 S2 (architect retry decision): the frozen #157 DB-to-API DLQ cases name their dead-letter Document Cache by a PLACEHOLDER id; the offline replay answers the account read for that placeholder with an UNPROFILED cache, the only kind the connector-scoped double guard (DB-profile and JSON-profile documents) can route into. The case inputs are not changed.",
-    "operable_evidence": [],
-    "open_evidence": "No live capture of an unprofiled Document Cache exists in the repository; live QA should capture one (profileType=\"profile.none\") and replace this transform."
+    "operable_evidence": [
+      {
+        "execution_id": "execution-9d608398-4202-4d32-93a9-ae4095221346-2026.11.23",
+        "status": "COMPLETE",
+        "what": "database_to_api_sync@1.0.0 DLQ process (reused DB+REST, failing SQL) - DB-read Try/Catch sent 1 doc down the error path; Notify logged the caught error; 'Route caught errors to DLQ cache' shape executed successfully (the platform runtime wrote the caught document into this cache)"
+      },
+      {
+        "execution_id": "execution-3e36a8b1-2f2c-40f2-a133-96b5f4670b46-2026.11.23",
+        "status": "COMPLETE",
+        "what": "same preset green path with this cache bound as DLQ; 2 rows POSTed 201 to cds-mock"
+      }
+    ]
   }
 ]

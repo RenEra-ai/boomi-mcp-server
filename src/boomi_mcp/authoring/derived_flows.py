@@ -1438,14 +1438,6 @@ def _stub_route_projection(unit, transform_rows):
     return rows, endpoints
 
 
-def rest_success_status_default() -> Tuple[int, ...]:
-    """The existing REST success-status default (the neutral send-request model's
-    own default — the authority fan-out 2.0.0 reads too)."""
-    from ..patterns.archetype_parameters import RestSendRequest
-
-    return tuple(RestSendRequest.model_fields["expected_status_codes"].default_factory())
-
-
 def infer_direct_linear_facts(
     unit: Any,
     components: Sequence[IntegrationComponentSpec],
@@ -1456,10 +1448,12 @@ def infer_direct_linear_facts(
 
     The retired API→API producer has no preparer, so its two frozen cases are
     replayed as direct canonical units and their facts are read off the root
-    itself: the two connector nodes name the components, the target serves the
-    existing REST success-status default both frozen cases carry, and the
-    transform keeps the rich form. Every other root shape — a DB source, a
-    Branch, a second map — infers nothing and projects exactly as before.
+    itself: the two connector nodes name the components and the transform keeps
+    the rich form. No success-status expectation is inferred: a route's topology
+    does not establish one and no component declares it, so the target endpoint
+    serves ``expected_status_codes`` only when a trusted route fact declares it
+    (CDX-159-S2-r1-02). Every other root shape — a DB source, a Branch, a
+    second map — infers nothing and projects exactly as before.
     """
     from ..models.derived_flows import (
         LinearConnectorFactV1,
@@ -1486,7 +1480,6 @@ def infer_direct_linear_facts(
         facts[role] = LinearConnectorFactV1(
             connection_key=connection_key,
             operation_key=operation_key,
-            expected_status_codes=rest_success_status_default() if role == "target" else None,
         )
     return LinearRouteProjectionFactsV1(
         process_key=unit.envelope.component_key,
@@ -1698,7 +1691,6 @@ __all__ = [
     "normalize_operation_summary",
     "qualified_route_key",
     "recipe_leg_ordinals",
-    "rest_success_status_default",
     "typed_row_from_legacy",
     "write_profile_summary",
 ]

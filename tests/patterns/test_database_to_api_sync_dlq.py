@@ -568,6 +568,46 @@ def test_l1_catch_notify_refusals():
         assert "ops@example.invalid" not in str(caught.value.errors(include_input=False))
 
 
+def test_l1_catch_notify_served_schema_states_the_validator_rules():
+    """QA-159-S2-r1-01: the served ``catch_notify`` schema enumerates exactly the
+    levels the ProcessIR Notify authority accepts and carries the caught-error
+    token rule; the refusal for a violation is the value-free code at the
+    field's pointer."""
+    from pydantic import ValidationError
+
+    from boomi_mcp.models.process_ir import NotifyNodeV1
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    schema = preset.DatabaseToApiSyncInputV1.model_json_schema()
+    notify = schema["$defs"]["DbToApiCatchNotifyV1"]["properties"]
+    accepted = []
+    for level in ("INFO", "WARNING", "ERROR", "SEVERE", "DEBUG", "FATAL"):
+        try:
+            NotifyNodeV1(kind="notify", level=level, message_template="x meta.base.catcherrorsmessage")
+        except ValidationError:
+            continue
+        accepted.append(level)
+    assert accepted and set(notify["level"]["enum"]) == set(accepted)
+    assert "meta.base.catcherrorsmessage" in notify["message_template"]["description"]
+    # QA-159-S2-r2-01: the served text names the cause a caller actually receives at the
+    # authoring boundary, never the model-internal error type, which is not served.
+    assert "RECIPE_INPUT_INVALID" in notify["message_template"]["description"]
+    assert "db_to_api_catch_notify_invalid" not in notify["message_template"]["description"]
+
+    for case_id, catch_notify in (
+        ("wm_off_dlq_on_create", {"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]}),
+        ("wm_off_dlq_on_create", {"level": "ERROR", "message_template": "static text, no token"}),
+    ):
+        _intent, raw, _material = _l1_inputs(case_id)
+        raw["reliability"]["catch_notify"] = catch_notify
+        with _pytest.raises(ValidationError) as caught:
+            preset.DatabaseToApiSyncInputV1.model_validate(raw)
+        (error,) = caught.value.errors(include_input=False)
+        assert error["type"] == "db_to_api_catch_notify_invalid"
+        assert error["loc"][:3] == ("reliability", "catch_notify")
+        assert "SEVERE" not in str(error) and "static text" not in str(error)
+
+
 # --- retry evidence (architect decision) ------------------------------------
 
 

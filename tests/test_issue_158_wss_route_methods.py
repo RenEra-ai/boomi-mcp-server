@@ -284,11 +284,13 @@ def test_every_served_statement_of_a_listener_method_is_the_authoritys():
     # NON-VACUITY on the REAL collection: the sweep reached the surfaces QA
     # measured, and found sanctioned statements there.
     paths = {path for path, _sentence, _ok in claims}
+    # #159 S2: the listener presets are served as typed recipes now; their
+    # component-material schemas carry the operation type and route method.
     for surface in (
-        "schema:archetype:http_listener_to_rest/parameter_schema/$defs/ListenerSource/"
-        "properties/operation_type/description",
-        "schema:archetype:http_listener_to_db/parameter_schema/$defs/AscWrapperConfig/"
-        "properties/http_method/description",
+        "schema:recipe:boomi.archetype.http_listener_to_rest@1.0.0/component_material_schema/"
+        "$defs/ListenerOperationMaterialV1/properties/operation_type/description",
+        "schema:recipe:boomi.archetype.http_listener_to_db@1.0.0/component_material_schema/"
+        "$defs/ApiServiceMaterialV1/properties/http_method/description",
         "meta_tools._COMPONENT_CREATE_API_SERVICE/template/routes[0]/http_method",
     ):
         assert surface in paths, surface

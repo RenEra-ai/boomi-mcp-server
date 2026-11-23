@@ -867,6 +867,49 @@ class TestTypedListenerPresets:
             "/component_material/api_service/http_method",
             "LISTENER_ASC_ROUTE_UNCALLABLE",
         ),
+        # CDX-159-S2-r1-01: an effective objectName carrying '/' is never
+        # served (#158 QA-158-s2r1-01, measured), on either listener preset;
+        # the pointer names the field the effective name came from.
+        "db_api_service_route_unserved_by_override": (
+            "http_listener_to_db/advanced_runtime",
+            lambda raw, mat: mat["api_service"].update(object_name="orders/5ecret-7a1c"),
+            "/component_material/api_service/object_name",
+            "LISTENER_ASC_ROUTE_UNCALLABLE",
+        ),
+        "db_api_service_route_unserved_by_listener_name": (
+            "http_listener_to_db/advanced_runtime",
+            lambda raw, mat: mat["listener"].update(object_name="orders/5ecret-7a1c"),
+            "/component_material/listener/object_name",
+            "LISTENER_ASC_ROUTE_UNCALLABLE",
+        ),
+        "db_api_service_route_unserved_behind_a_blank_override": (
+            "http_listener_to_db/advanced_runtime",
+            lambda raw, mat: (
+                mat["api_service"].update(object_name=" "),
+                mat["listener"].update(object_name="orders/5ecret-7a1c"),
+            ),
+            "/component_material/listener/object_name",
+            "LISTENER_ASC_ROUTE_UNCALLABLE",
+        ),
+        "rest_api_service_route_unserved_by_override": (
+            "http_listener_to_rest/plain",
+            lambda raw, mat: (
+                raw["listener"].update(publish_mode="api_service"),
+                mat.update(api_service={"object_name": "events/5ecret-7a1c"}),
+            ),
+            "/component_material/api_service/object_name",
+            "LISTENER_ASC_ROUTE_UNCALLABLE",
+        ),
+        "rest_api_service_route_unserved_by_listener_name": (
+            "http_listener_to_rest/plain",
+            lambda raw, mat: (
+                raw["listener"].update(publish_mode="api_service"),
+                mat.update(api_service={}),
+                mat["listener"].update(object_name="events/5ecret-7a1c"),
+            ),
+            "/component_material/listener/object_name",
+            "LISTENER_ASC_ROUTE_UNCALLABLE",
+        ),
         "db_unknown_source_leaf": (
             "http_listener_to_db/plain",
             lambda raw, mat: mat["transform"]["operations"][0].update(source_field="Root/nope"),
@@ -967,6 +1010,34 @@ class TestTypedListenerPresets:
             del built[:]
             _prepare(_invocation(case_id))
             assert built, case_id
+        # Control (CDX-159-S2-r1-01): a SERVED API Service route still
+        # assembles on both presets — an explicit slash-free override, and the
+        # REST preset published with an all-inherit route.
+        for case_id, mutate in (
+            (
+                "http_listener_to_db/advanced_runtime",
+                lambda raw, mat: mat["api_service"].update(object_name="orderIntakeV2"),
+            ),
+            (
+                "http_listener_to_rest/plain",
+                lambda raw, mat: (
+                    raw["listener"].update(publish_mode="api_service"),
+                    mat.update(api_service={}),
+                ),
+            ),
+            (
+                "http_listener_to_rest/plain",
+                lambda raw, mat: (
+                    raw["listener"].update(publish_mode="api_service"),
+                    mat.update(api_service={"object_name": "eventRelayV2"}),
+                ),
+            ),
+        ):
+            invocation = _copy.deepcopy(_invocation(case_id))
+            mutate(invocation["raw_input"], invocation["component_material"])
+            del built[:]
+            _prepare(invocation)
+            assert built, case_id
         for name, (case_id, mutate, pointer, cause) in sorted(self._REFUSALS.items()):
             invocation = _copy.deepcopy(_invocation(case_id))
             mutate(invocation["raw_input"], invocation["component_material"])
@@ -976,7 +1047,10 @@ class TestTypedListenerPresets:
             (diagnostic,) = caught.value.diagnostics
             assert diagnostic.path == pointer, name
             assert cause in diagnostic.cause_codes, name
-            assert "plaintext-5ecret-7a1c" not in repr(caught.value), name
+            # Value-free: no mutated value (the credential, an object name)
+            # reaches the refusal; every such value carries this token.
+            assert "5ecret-7a1c" not in repr(caught.value), name
+            assert "5ecret-7a1c" not in str(caught.value), name
             assert built == [], name
 
     def test_the_root_is_a_listener_entry_and_publishing_requires_the_api_service(self):
@@ -1018,3 +1092,25 @@ class TestTypedListenerPresets:
             assert not {
                 name for name in imported if "archetypes" in name.split(".") or name.endswith("recipe_bridge")
             }, module.__name__
+
+
+def test_l2_served_method_text_states_the_get_with_input_refusal():
+    """QA-159-S2-r4-01: every input these presets accept is a request body, so a
+    GET-derived route is always refused; the served method text says so, in the
+    method authority's own words, beside the code the refusal carries (the
+    refusal itself is witnessed by the ``*_route_uncallable_*`` cases)."""
+    from boomi_mcp.categories.components.wss_route_methods import (
+        ASC_GET_WITH_INPUT_RULE,
+    )
+    from boomi_mcp.recipes.builtins.http_listener_to_db import HttpListenerToDbMaterialV1
+    from boomi_mcp.recipes.builtins.http_listener_to_rest import HttpListenerToRestMaterialV1
+
+    for model in (HttpListenerToDbMaterialV1, HttpListenerToRestMaterialV1):
+        defs = model.model_json_schema()["$defs"]
+        for owner, field in (
+            ("ListenerOperationMaterialV1", "operation_type"),
+            ("ApiServiceMaterialV1", "http_method"),
+        ):
+            text = defs[owner]["properties"][field]["description"]
+            assert ASC_GET_WITH_INPUT_RULE in text, (model.__name__, owner)
+            assert "LISTENER_ASC_ROUTE_UNCALLABLE" in text, (model.__name__, owner)

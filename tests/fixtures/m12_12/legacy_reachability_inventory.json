@@ -7744,7 +7744,7 @@
       },
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "authoring_contract",
-      "sha256": "6f83448a03da6a9558ee359e828338e516663d064e4b5675931c27eddeae2564",
+      "sha256": "a5ee03f4779d565a1591b3575f38adc5657938c0ad06fba3c97b66bbbf19ea76",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "actions": [
@@ -7881,10 +7881,10 @@
           }
         ],
         "capability_comparison": {
-          "actual_capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+          "actual_capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
           "status": "not_requested"
         },
-        "capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+        "capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
         "compiler_revision": "sha256:97a7c2570ee71cce52c2cdf3836300f9ca4689e71c54fd7a86f609efbab8ecac",
         "contract_version": "2",
         "intent_kinds": [
@@ -8130,11 +8130,11 @@
             "constraint_only",
             "executable_recipe"
           ],
-          "registry_revision": "3fdd354a5012038156776a1b16e519ffebd53722733710ec05be655e526b5591",
+          "registry_revision": "38e918b662a7162e0163b544275e95a7e603cd70b87ff7854568b3616aa401a6",
           "schema_version": "1",
           "source_version": "0.1.0"
         },
-        "schema_revision": "sha256:3012c3c5ec1868e5147cd62d29b405a10880e32fea36f1cc3228f74bd4f654f2",
+        "schema_revision": "sha256:894c5bca4913834f51502c50c5fdb87dad61bde6afc147dcd321303f9ac5672a",
         "schemas": [
           {
             "owned_by_authoring_contract": true,
@@ -8146,14 +8146,14 @@
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:a30f81a3f04e6fe180c024361abeb022da62b28c36b227ed2d65b383bf7fa9a8",
+            "schema_hash": "sha256:83425f991389dc6fe8210cf5b73c190a29c7ef71f1351c9f55807ac7743a7271",
             "schema_version": "2",
             "selector": "AuthoringCompileResultV1"
           },
           {
             "owned_by_authoring_contract": true,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:e96dd9b7f26926d31b8e71190f9ac847c3111e80eb183747944d6826f8ab63eb",
+            "schema_hash": "sha256:a784632b73ef573358e43bf5ac746b86336968c397ec658ad29bbf969b111993",
             "schema_version": "2",
             "selector": "AuthoringPlanResultV1"
           },
@@ -8251,7 +8251,7 @@
           {
             "owned_by_authoring_contract": false,
             "provenance": "runtime_schema_registry",
-            "schema_hash": "sha256:8e4e228e5918685ea770c0bfc3d0182905e1a7c96e44e00c17e5a6bd9a521cf2",
+            "schema_hash": "sha256:bbcbb31385cd0cbdb7331b87602aa6fe48cb9b33a88fa7172971185c6601d1a2",
             "selector": "authoring_workflow"
           },
           {
@@ -8554,7 +8554,7 @@
       "canonical_length": 6266,
       "producer": "meta_tools.list_capabilities_action()",
       "selector": "recipe_registry",
-      "sha256": "542267fe15bdd6f3b2120a3fc46c6ddb40e6f81d8006c8fabffa88adde721cfe",
+      "sha256": "bb204f4a0dda490daadc787f09219161f56c91b173063a817e39eb98278c6c3e",
       "surface_class": "SS-CAPABILITY-CATALOG",
       "value": {
         "capability_revisions": {
@@ -8571,9 +8571,9 @@
               "recipe_id": "boomi.archetype.api_to_api_sync",
               "recipe_version": "0.1.0"
             },
-            "descriptor_sha256": "28b215cdba827ca028e3a3aa5ebfc903e171aad90c3dcfe990658f7b005f0fb9",
+            "descriptor_sha256": "669fbbf67afe05f32dc41868f7662d3faae8e1374a65bc03371e3f5cbae12946",
             "entry_kind": "compatibility_adapter",
-            "implementation_sha256": "7dd3a453256a78a760e652803e1b5e38bae65b5fbe7e50f564e76d48cd6002d0",
+            "implementation_sha256": "efedd9dbafeb6cd9badeea62430fc3e9bd054c915b05b63949a2a6459e7d0bec",
             "is_default": true,
             "output_types": [],
             "recipe_id": "boomi.adapter.api_to_api_sync",
@@ -8584,9 +8584,9 @@
               "recipe_id": "boomi.archetype.api_to_database_sync",
               "recipe_version": "0.1.0"
             },
-            "descriptor_sha256": "1a0156cff9a2350b9b195dba2a78152435db7672610544efca047e794e27106a",
+            "descriptor_sha256": "44358a15b1459fe04ff4ad48c523e805cbfc2e2c6ba0de7e1bc9c38c2d415a0a",
             "entry_kind": "compatibility_adapter",
-            "implementation_sha256": "2fb51ea622bad7f9c9233240566e9b90ea07745096a0822e793ca804dbe64cee",
+            "implementation_sha256": "d37bd4239ad366ab2ae23818d788f694faf42d790993e666a5b913133a6b5ee1",
             "is_default": true,
             "output_types": [],
             "recipe_id": "boomi.adapter.api_to_database_sync",
@@ -8597,9 +8597,9 @@
               "recipe_id": "boomi.compose.db_rest_fanout",
               "recipe_version": "1.0.0"
             },
-            "descriptor_sha256": "b265d9d0ca7537ae59455b076dbf2f2276b28326ba63df9f6312eaf24e232096",
+            "descriptor_sha256": "c702e94310085f0be31b546e1e0f273c651cacb482449b2e7a4c74b5005e671e",
             "entry_kind": "compatibility_adapter",
-            "implementation_sha256": "3afd1c026b389a22afe22403d94c99004be5a59a179249909d4106496a1a51ee",
+            "implementation_sha256": "560788d7093eb04106227f39cb9b374d1f29df43cdc33a91f9368e3255a7baa8",
             "is_default": true,
             "output_types": [],
             "recipe_id": "boomi.adapter.compose_archetypes",
@@ -8607,9 +8607,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "9e02437fdcf98de236d6d3ca24770d230f72110babfff2d5b047351a45110e30",
+            "descriptor_sha256": "cbc7ee0709627d5b90dfe74b2d6835273b7866242a88f0cc557e17a3b5359828",
             "entry_kind": "advisory",
-            "implementation_sha256": "b822b4445fce1fac900f3985056fd12d8bd6a01e58eb4cbc348e62aea1dfe62c",
+            "implementation_sha256": "c80cb1280de610b385c8c9cfa38266e2e92da240ba9ffbbe88d6ca2b390e6040",
             "is_default": true,
             "output_types": [],
             "recipe_id": "boomi.advisory.integration_design",
@@ -8617,7 +8617,7 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "0b04dc6f21785664d76a1091c857d201871227589a27959a9df9d56194d5f896",
+            "descriptor_sha256": "3c9d5f7fdfeea505d849a34848bd954c8f35b10105769b18cf86273d6f2f36a3",
             "entry_kind": "executable_recipe",
             "implementation_sha256": "e28135ab1e47dd6eeda167508370741215f92f3ed3061214c9366c388ebd8347",
             "is_default": true,
@@ -8631,7 +8631,7 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "4ebf4907d43a3e0db6bc929c28afc8eed7cc3a30f2661552315c1d654c88a015",
+            "descriptor_sha256": "635e074f2d81274c0880c5b9b13132cb4bbb5ad08b7c16681274378137278989",
             "entry_kind": "executable_recipe",
             "implementation_sha256": "2fb97665542767ae8993c6d0409905c3280ca39975e9bcd4490d7627cc9536fb",
             "is_default": true,
@@ -8645,9 +8645,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "e6897b441657fec59339b9b7c9b1b48bdff0161f6b5644ca2a1144d789c039eb",
+            "descriptor_sha256": "649e686780ccefdb692c0055e0e243b4c1ec24242a0bd2eb791a179999ccc378",
             "entry_kind": "executable_recipe",
-            "implementation_sha256": "21cb904111c70120b2f6aef984989721dd5c1ceeb8997b024e8122325e18ec9c",
+            "implementation_sha256": "d8765de97c86eac41d0e7c0d860aaa7086a5757653bf989523212508eb6c5237",
             "is_default": false,
             "output_types": [
               "constraint_requirement",
@@ -8658,9 +8658,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "b28da0eff632214123a4b4d1313efaa563664b2317bfaf4706fba707974d0128",
+            "descriptor_sha256": "d6135186fa8c9b1ad3c1164a2c18c285522dffc828512ed0771d1e8cb80d3650",
             "entry_kind": "executable_recipe",
-            "implementation_sha256": "fb1aae000b5dc8513a6a02c501b573783b80fbcb28bd887b73710dc90afe4632",
+            "implementation_sha256": "2689b0b6d485fb4cd180c9eda004a0e8e3bc5a7d4c8934be9df463db641bd880",
             "is_default": true,
             "output_types": [
               "constraint_requirement",
@@ -8672,9 +8672,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "71bbe27a65c5942aaff885a2612bc4a8a99b8a7faede42a68d58ac6aaebf3be8",
+            "descriptor_sha256": "c373250288b943841c1cd0ca5226af31d15377ec8385d1289bdfd5a72252e38e",
             "entry_kind": "executable_recipe",
-            "implementation_sha256": "33e019f01530b4d83d2aa308450377dbf8173841f734cbabf8255b59e9dc0e65",
+            "implementation_sha256": "799631b0d8248ce300eda3c56f9c9661564c908272d57642aef66da4fbae18f7",
             "is_default": true,
             "output_types": [
               "constraint_requirement",
@@ -8685,9 +8685,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "db3645f5ab995c0a923fcf21caf6e2317484f4c97aa5abd17b6c871a216f550c",
+            "descriptor_sha256": "ebdc221c1c286c6925feb2f90fa107cd8115d22cccefcb69c1314b36c042a821",
             "entry_kind": "executable_recipe",
-            "implementation_sha256": "6aa9419668791bcffff7f047bbc026442b3cda6200f4fa854b24e1f5dfb767b4",
+            "implementation_sha256": "ca32fff9ed9c85f1f13b9d3f230e8c846eabba0b5ec0fc4345220549d68fed27",
             "is_default": true,
             "output_types": [
               "constraint_requirement",
@@ -8698,7 +8698,7 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "2e776045de3564742963e197f313077d540c33093f3515b3938f232aeed488a2",
+            "descriptor_sha256": "0a576241449b8f6cf1109b8a0b65a349a96e230faac7c29d54066faa313852da",
             "entry_kind": "executable_recipe",
             "implementation_sha256": "d940c4fffbc340f35db98ba0110b76664a8096aec1cfef90625130686478bd09",
             "is_default": true,
@@ -8711,7 +8711,7 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "ed1ecc9f0006fca7288bbfc0b60439c43f1b3b37fd3549f7b2b6a68580120ea0",
+            "descriptor_sha256": "1419571137ce0b10da656dfc8c88137f916d5104b4c8fa57c311eecebf3ea3a6",
             "entry_kind": "executable_recipe",
             "implementation_sha256": "e46054189a118b1449019f12f1741b8017ec6503c7cb1d09084531225ea19d5d",
             "is_default": true,
@@ -8725,9 +8725,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "4e5a6c90d368cbd5f412be82386819868db89ddfc497118ad1398aa1aaa0e32f",
+            "descriptor_sha256": "99e6012377ce3d2302458b0b7c154bc9cefd605aca08685091fa83c3ddbf9089",
             "entry_kind": "executable_recipe",
-            "implementation_sha256": "759fd866650a2ad1f018e325040e24cd06fdd182b946c054ed02620173e6ca63",
+            "implementation_sha256": "1982a0a0700acf5b8b4c28e67ec821d3eee02f07d9000084bfd846a5ff7b4a37",
             "is_default": false,
             "output_types": [
               "constraint_requirement",
@@ -8739,9 +8739,9 @@
           },
           {
             "adapter_target": null,
-            "descriptor_sha256": "ef61f9c7e71973f676d76b68475fb3530049aeec1f4bca9215af76828c97e97b",
+            "descriptor_sha256": "fa5cc7f19001cd91264d0dc291a98b7e9c77c6b641588068647624a4678dff31",
             "entry_kind": "constraint_only",
-            "implementation_sha256": "9443a234d4de5f42f6df09f24e54aa1e4098e3cef7f886df68b202bf6d266cd0",
+            "implementation_sha256": "2302ad8a8dd038a4c0db6d4e5b44f0ea334a7a132aa559a66660a935f4794bf1",
             "is_default": true,
             "output_types": [
               "constraint_requirement"
@@ -8750,9 +8750,9 @@
             "recipe_version": "1.0.0"
           }
         ],
-        "registry_revision": "3fdd354a5012038156776a1b16e519ffebd53722733710ec05be655e526b5591",
+        "registry_revision": "38e918b662a7162e0163b544275e95a7e603cd70b87ff7854568b3616aa401a6",
         "schema_version": "1",
-        "source_revision": "source-sha256:50d5b9ac1ebb5abbeadbb0812db3fe18475707d6418c4deb3638762eb998ee59",
+        "source_revision": "source-sha256:880cdb61991919011c95ce2e8dbb4ef963cadcb775bec361fb4b310af701de32",
         "source_revision_kind": "source_digest",
         "source_version": "0.1.0"
       },
@@ -14595,7 +14595,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringCompileResultV1",
-      "canonical_length": 130641,
+      "canonical_length": 130910,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -14603,7 +14603,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringCompileResultV1",
-      "sha256": "3d91e6f9496cd1a01840ff04d0faeb451ef8a082c068717bdc0f1d99fffca7c8",
+      "sha256": "6e08f5da525fe3e429723cd4c0cfe0c324121761e400e32920c9712313b68815",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -16172,7 +16172,7 @@
             },
             "DerivedEndpointRowV1": {
               "additionalProperties": false,
-              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves the selector\nit binds by. Never a host, URL, credential or SQL.\n\n#159 S2 widens it for the linear presets, every key still read off a\ncomponent: a database WRITE target also serves its operation and the write\nprofile's ``statement_type``; a WSS listener serves its computed\n``endpoint_path`` (and ``publish_mode`` behind an API Service component); a\nREST endpoint serves ``expected_status_codes`` only when its route DECLARES\nthem; and a stub endpoint is a bare labelled placeholder with no binding\nand no ``executable`` key at all — so ``binding_mode`` is required on every\ntype EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.",
+              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves ``component_id``\nwhen it is bound by id or planning resolved its name to an id, and\n``component_name`` when it is named — a row may carry both. A REST endpoint\nserves its operation's ``method``; a database endpoint serves none. Never a\nhost, URL, credential or SQL.\n\n#159 S2 widens it for the linear presets, every key still read off a\ncomponent: a database WRITE target also serves its operation and the write\nprofile's ``statement_type``; a WSS listener serves its computed\n``endpoint_path`` (and ``publish_mode`` behind an API Service component); a\nREST endpoint of a LINEAR route serves ``expected_status_codes`` only when\nits route DECLARES them (a fan-out never serves them on an endpoint); and a\nstub endpoint is a bare labelled placeholder with no binding\nand no ``executable`` key at all — so ``binding_mode`` is required on every\ntype EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.",
               "properties": {
                 "auth_mode": {
                   "anyOf": [
@@ -20097,12 +20097,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+          "capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
           "compiler_revision": "sha256:97a7c2570ee71cce52c2cdf3836300f9ca4689e71c54fd7a86f609efbab8ecac",
           "contract_version": "2",
-          "schema_revision": "sha256:3012c3c5ec1868e5147cd62d29b405a10880e32fea36f1cc3228f74bd4f654f2"
+          "schema_revision": "sha256:894c5bca4913834f51502c50c5fdb87dad61bde6afc147dcd321303f9ac5672a"
         },
-        "schema_hash": "sha256:a30f81a3f04e6fe180c024361abeb022da62b28c36b227ed2d65b383bf7fa9a8",
+        "schema_hash": "sha256:83425f991389dc6fe8210cf5b73c190a29c7ef71f1351c9f55807ac7743a7271",
         "schema_name": "AuthoringCompileResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -20111,7 +20111,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=AuthoringPlanResultV1",
-      "canonical_length": 129315,
+      "canonical_length": 129584,
       "legacy_excerpt": {
         "json_schema.$defs.CanonicalIntegrationPreviewV1.properties.processes.description": "Issue #153 M12.15 — canonical process roots authored as ProcessIR. Each entry is one ProcessAuthoringUnitV1: exactly one ProcessComponentEnvelopeV1 plus exactly one ProcessIRV1 root. These are compiled by the canonical chain and materialized by the neutral ProcessComponentMaterializer — they resolve NO legacy process_kind. 'components' remains the home of supporting components and of reference-only existing processes. 'components' and 'processes' share ONE key namespace: a key used by a component and by a process envelope is a duplicate, and all four depends_on directions (component->component, component->process, process->component, process->process) enter one topological order with one cycle check. A TUPLE, per the plan's field type: pydantic coerces list input, so the wire shape is an ordinary JSON array and no caller sends anything different — but unlike this model's legacy List siblings, mutating the collection itself is unrepresentable. Per-element immutability lives on the frozen ProcessAuthoringUnitV1 entries.",
         "json_schema.$defs.IntegrationComponentSpec.properties.config.description": "Type-specific configuration payload. For type='process', config.process_kind selects a structured process-flow builder (e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) and is REQUIRED for any authoring action that emits or rebuilds process XML (create / create_clone / update): such a process without process_kind is rejected at plan time with PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process authoring has been removed). A reference-only reuse of an existing process (no XML emitted) may omit it. Use manage_component for an explicit raw process XML escape hatch.",
@@ -20119,7 +20119,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringPlanResultV1",
-      "sha256": "6fa7c96f6fe4a93d74696685e11684e193a325065f3653cb4e667084b8c24237",
+      "sha256": "102faa672b372bc357d2135f88d9f8e9b8f997293102e6a01e9d538192c079d4",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -21639,7 +21639,7 @@
             },
             "DerivedEndpointRowV1": {
               "additionalProperties": false,
-              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves the selector\nit binds by. Never a host, URL, credential or SQL.\n\n#159 S2 widens it for the linear presets, every key still read off a\ncomponent: a database WRITE target also serves its operation and the write\nprofile's ``statement_type``; a WSS listener serves its computed\n``endpoint_path`` (and ``publish_mode`` behind an API Service component); a\nREST endpoint serves ``expected_status_codes`` only when its route DECLARES\nthem; and a stub endpoint is a bare labelled placeholder with no binding\nand no ``executable`` key at all — so ``binding_mode`` is required on every\ntype EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.",
+              "description": "One endpoint of a recipe-assembled route, read off its connection component.\n\nA created connection serves its classification (``driver`` and ``auth_mode``\nfor a database, ``auth_mode`` for REST); a reused one serves ``component_id``\nwhen it is bound by id or planning resolved its name to an id, and\n``component_name`` when it is named — a row may carry both. A REST endpoint\nserves its operation's ``method``; a database endpoint serves none. Never a\nhost, URL, credential or SQL.\n\n#159 S2 widens it for the linear presets, every key still read off a\ncomponent: a database WRITE target also serves its operation and the write\nprofile's ``statement_type``; a WSS listener serves its computed\n``endpoint_path`` (and ``publish_mode`` behind an API Service component); a\nREST endpoint of a LINEAR route serves ``expected_status_codes`` only when\nits route DECLARES them (a fan-out never serves them on an endpoint); and a\nstub endpoint is a bare labelled placeholder with no binding\nand no ``executable`` key at all — so ``binding_mode`` is required on every\ntype EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.",
               "properties": {
                 "auth_mode": {
                   "anyOf": [
@@ -25543,12 +25543,12 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+          "capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
           "compiler_revision": "sha256:97a7c2570ee71cce52c2cdf3836300f9ca4689e71c54fd7a86f609efbab8ecac",
           "contract_version": "2",
-          "schema_revision": "sha256:3012c3c5ec1868e5147cd62d29b405a10880e32fea36f1cc3228f74bd4f654f2"
+          "schema_revision": "sha256:894c5bca4913834f51502c50c5fdb87dad61bde6afc147dcd321303f9ac5672a"
         },
-        "schema_hash": "sha256:e96dd9b7f26926d31b8e71190f9ac847c3111e80eb183747944d6826f8ab63eb",
+        "schema_hash": "sha256:a784632b73ef573358e43bf5ac746b86336968c397ec658ad29bbf969b111993",
         "schema_name": "AuthoringPlanResultV1",
         "schema_version": "2",
         "surface": "MCP authoring contract (issue #146 M12.11)"
@@ -25565,7 +25565,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=AuthoringRequestV1",
-      "sha256": "4e92de2eeabbd880c3988eb0b7ad23ac718f88d6993acc0b459703650d08d7e1",
+      "sha256": "3afd3b5a3ba6f935e66eaa44726d10d958fa897de11e4a7b7c805861aeecc5aa",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -29830,10 +29830,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+          "capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
           "compiler_revision": "sha256:97a7c2570ee71cce52c2cdf3836300f9ca4689e71c54fd7a86f609efbab8ecac",
           "contract_version": "2",
-          "schema_revision": "sha256:3012c3c5ec1868e5147cd62d29b405a10880e32fea36f1cc3228f74bd4f654f2"
+          "schema_revision": "sha256:894c5bca4913834f51502c50c5fdb87dad61bde6afc147dcd321303f9ac5672a"
         },
         "schema_hash": "sha256:c34f525daa9c3b65fbb65438b96c1a227a543a510cf7f97195462c48c52126f2",
         "schema_name": "AuthoringRequestV1",
@@ -38833,14 +38833,14 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=authoring_workflow",
-      "canonical_length": 14312,
+      "canonical_length": 14328,
       "legacy_excerpt": {
         "terminology.component_material": "RecipeInvocationRequestV1.component_material — the CLOSED companion of raw_input for a recipe registration that declares the component-material channel (boomi.compose.db_rest_fanout 2.0.0 and the typed presets boomi.archetype.database_to_api_sync, boomi.archetype.api_to_database_sync 1.0.0, boomi.archetype.http_listener_to_db and boomi.archetype.http_listener_to_rest; its schema is published as component_material_schema on get_schema_template('recipe:<id>@<version>')). Validated against that registration's strict model; refused with RECIPE_INPUT_INVALID at /component_material by any registration that declares none. A trusted server-side preparer turns it into the supporting component specs; it never reaches the recipe executor, a contribution, recipe_provenance or a diagnostic, and a refusal names the cause code and the pointer, never a value. Component material requires opaque `credential://` references in credential fields, rejects URL userinfo and JDBC property injection in checked fields, and limits literal REST queries to the published names (filter, limit, mode, offset) and the REST builder’s value rules. Usernames, SQL, map constants, URL path text, and values under permitted query names are caller-authored data that may be persisted in component configuration or XML, so supply only non-secret data in those fields. The effective request target (base_url followed by path, judged as joined) may carry only RFC 3986 characters, with no whitespace, control character or '#', at most one '?', and '%' only as a two-hex-digit escape whose escaped bytes decode as strict UTF-8; userinfo is refused in a leading authority; its query must be name=value pairs separated by '&', each name (after percent-decoding) a published name and each value only unreserved characters (A-Z a-z 0-9 -._~), %XX escapes and ! $ ' ( ) * , : @ / =. A path may not carry a raw '&' or ';' before its query (a stored connection URL may already end in a query); escaped they are data. The stored base_url and the stored path are each judged on their own as well as joined. A structured literal value follows the same value rule. The two are SENT differently: an inline query value (in base_url or path) is sent as written, so the server decodes its escapes (%26 arrives as '&'); a structured literal value is percent-encoded by the platform, '%' included, so a %XX in a structured value is sent as those literal characters, not as the character it encodes; a structured value is still limited to the value alphabet above. A path sent through a REUSED connection is judged against the base URL that connection stores in the account: a stored base carrying '?' or '#' is refused for reuse (the path would be appended inside it); a stored base that cannot be read, is blank, is an unresolved extension placeholder, or is not an absolute http(s) URL is UNKNOWN, and then the path must start with '/' and carry no '=' before any '?'. A base component a recipe input selects by key meets the SAME rules when apply would write it: a create-mode base must be one apply writes under every conflict policy and carry only keys the material can express (credential_ref, host, dbname/database and base_url judged as in the material); a reuse-mode base must be reference-only (the boolean true) and written under no policy. A credential field, userinfo or JDBC property, or a value the REST builder refuses is refused with PLAINTEXT_SECRET_REJECTED; a literal query name outside the published names, or query syntax outside that grammar, with FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED.",
         "terminology.derived_flows": "CanonicalIntegrationPreviewV1.flows — on the process_ir and recipe intents a TYPED, generator-derived, OUTPUT-ONLY projection (DerivedFlowRowV1). Never authored, never merged with caller rows, never an input to compilation, fingerprinting or mutation; a caller-supplied 'flows' is refused with GOVERNANCE_FLOWS_OUTPUT_ONLY. Every unit serves its transform rows; a unit whose ROUTE has trusted projection facts also serves the route's rows around them, discriminated on 'operation'. Facts are supplied by a typed recipe preset (boomi.compose.db_rest_fanout 2.0.0, boomi.archetype.database_to_api_sync, boomi.archetype.api_to_database_sync 1.0.0, boomi.archetype.http_listener_to_db and boomi.archetype.http_listener_to_rest), or inferred from the root alone for a direct root that is exactly REST source -> map -> REST target, and for a passthrough -> stop root that references nothing (the stub). A fan-out route serves its extract, send, reliability, conditional watermark and fan-out rows; a linear route serves its source row (extract, fetch or listen), the send or database-write row and, when declared, reliability and watermark rows; the stub serves one noop row. When a preview carries such a route AND more than one process root (any root, with or without a route), every root's row keys, endpoint keys and every in-row source/target naming one of them are qualified as '<process_key>/<key>', so no two rows share a key and a recipe route's in-row references resolve inside its own process. A root WITHOUT a route (a v1 root, or a direct root no inference applies to) serves only its transform rows, and each such row keeps its own source token, which may name no served row. A preview with one root keeps the unqualified keys, and a preview with no route is unchanged."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=authoring_workflow",
-      "sha256": "60b6791ffa2dfd72327a4ea6d745dada52c2f7977071b73b91a241b6f39d030c",
+      "sha256": "31027712f43cd24a5e6526bfb9273e06307a43c3eff5572648dba0e101afdf5e",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -38910,10 +38910,10 @@
         "raw_xml_exposed": false,
         "read_only": true,
         "revision_binding": {
-          "capability_revision": "sha256:2610c63f5da9157788feb94154783a4dc2a0057f953a6e7223a2dca4ec8f5650",
+          "capability_revision": "sha256:c87a67602cbe2d240238809fbe3d79b7119cb485afbeb4b8d28b1a3c1f8d4b7e",
           "compiler_revision": "sha256:97a7c2570ee71cce52c2cdf3836300f9ca4689e71c54fd7a86f609efbab8ecac",
           "contract_version": "2",
-          "schema_revision": "sha256:3012c3c5ec1868e5147cd62d29b405a10880e32fea36f1cc3228f74bd4f654f2"
+          "schema_revision": "sha256:894c5bca4913834f51502c50c5fdb87dad61bde6afc147dcd321303f9ac5672a"
         },
         "schema_name": "authoring_workflow",
         "surface": "MCP authoring workflow (issue #146 M12.11)",
@@ -38921,7 +38921,7 @@
           "component_dependencies": "ComponentPlan materialization edges.",
           "component_material": "RecipeInvocationRequestV1.component_material — the CLOSED companion of raw_input for a recipe registration that declares the component-material channel (boomi.compose.db_rest_fanout 2.0.0 and the typed presets boomi.archetype.database_to_api_sync, boomi.archetype.api_to_database_sync 1.0.0, boomi.archetype.http_listener_to_db and boomi.archetype.http_listener_to_rest; its schema is published as component_material_schema on get_schema_template('recipe:<id>@<version>')). Validated against that registration's strict model; refused with RECIPE_INPUT_INVALID at /component_material by any registration that declares none. A trusted server-side preparer turns it into the supporting component specs; it never reaches the recipe executor, a contribution, recipe_provenance or a diagnostic, and a refusal names the cause code and the pointer, never a value. Component material requires opaque `credential://` references in credential fields, rejects URL userinfo and JDBC property injection in checked fields, and limits literal REST queries to the published names (filter, limit, mode, offset) and the REST builder’s value rules. Usernames, SQL, map constants, URL path text, and values under permitted query names are caller-authored data that may be persisted in component configuration or XML, so supply only non-secret data in those fields. The effective request target (base_url followed by path, judged as joined) may carry only RFC 3986 characters, with no whitespace, control character or '#', at most one '?', and '%' only as a two-hex-digit escape whose escaped bytes decode as strict UTF-8; userinfo is refused in a leading authority; its query must be name=value pairs separated by '&', each name (after percent-decoding) a published name and each value only unreserved characters (A-Z a-z 0-9 -._~), %XX escapes and ! $ ' ( ) * , : @ / =. A path may not carry a raw '&' or ';' before its query (a stored connection URL may already end in a query); escaped they are data. The stored base_url and the stored path are each judged on their own as well as joined. A structured literal value follows the same value rule. The two are SENT differently: an inline query value (in base_url or path) is sent as written, so the server decodes its escapes (%26 arrives as '&'); a structured literal value is percent-encoded by the platform, '%' included, so a %XX in a structured value is sent as those literal characters, not as the character it encodes; a structured value is still limited to the value alphabet above. A path sent through a REUSED connection is judged against the base URL that connection stores in the account: a stored base carrying '?' or '#' is refused for reuse (the path would be appended inside it); a stored base that cannot be read, is blank, is an unresolved extension placeholder, or is not an absolute http(s) URL is UNKNOWN, and then the path must start with '/' and carry no '=' before any '?'. A base component a recipe input selects by key meets the SAME rules when apply would write it: a create-mode base must be one apply writes under every conflict policy and carry only keys the material can express (credential_ref, host, dbname/database and base_url judged as in the material); a reuse-mode base must be reference-only (the boolean true) and written under no policy. A credential field, userinfo or JDBC property, or a value the REST builder refuses is refused with PLAINTEXT_SECRET_REJECTED; a literal query name outside the published names, or query syntax outside that grammar, with FANOUT_LITERAL_QUERY_NAME_UNSUPPORTED.",
           "connection_binding_contract": "On the typed intents a connection is reused OR created, never both: a reference_only connection may carry only its binding keys; a secured REST connection must be reused, not created inline; connection default headers and operation headers may not collide (compared case-insensitively).",
-          "derived_endpoints": "CanonicalIntegrationPreviewV1.endpoints and composition_summaries — OUTPUT-ONLY, served only for units whose route has trusted projection facts (supplied or inferred, as in derived_flows). Endpoints (DerivedEndpointRowV1) are read off each route connection component: binding mode, method, and either the created connection's classification (driver, auth_mode) or the reused one's selector — never a host, URL, credential or SQL. A listener (type 'wss') source has no connection: its endpoint is read off the listen operation — the HTTP method and endpoint_path — or, when an API Service routes to the process, off that service's route, served with publish_mode 'api_service'. The stub serves two labelled endpoints of type 'stub' that bind nothing. composition_summaries (fan-out routes only) is keyed by process key and derived from the composed root (leg positions including a staging leg, handoff modes, cache key). Neither is hashed, compiled or applied; composition_summaries is omitted when empty.",
+          "derived_endpoints": "CanonicalIntegrationPreviewV1.endpoints and composition_summaries — OUTPUT-ONLY, served only for units whose route has trusted projection facts (supplied or inferred, as in derived_flows). Endpoints (DerivedEndpointRowV1) are read off each route connection component; which keys a row carries, and when, is stated by DerivedEndpointRowV1 itself (its schema is the authority — this text does not restate it). Never a host, URL, credential or SQL. A listener (type 'wss') source has no connection: its endpoint is read off the listen operation — the HTTP method and endpoint_path — or, when an API Service routes to the process, off that service's route, served with publish_mode 'api_service'. The stub serves two labelled endpoints of type 'stub' that bind nothing. composition_summaries (fan-out routes only) is keyed by process key and derived from the composed root (leg positions including a staging leg, handoff modes, cache key). Neither is hashed, compiled or applied; composition_summaries is omitted when empty.",
           "derived_flows": "CanonicalIntegrationPreviewV1.flows — on the process_ir and recipe intents a TYPED, generator-derived, OUTPUT-ONLY projection (DerivedFlowRowV1). Never authored, never merged with caller rows, never an input to compilation, fingerprinting or mutation; a caller-supplied 'flows' is refused with GOVERNANCE_FLOWS_OUTPUT_ONLY. Every unit serves its transform rows; a unit whose ROUTE has trusted projection facts also serves the route's rows around them, discriminated on 'operation'. Facts are supplied by a typed recipe preset (boomi.compose.db_rest_fanout 2.0.0, boomi.archetype.database_to_api_sync, boomi.archetype.api_to_database_sync 1.0.0, boomi.archetype.http_listener_to_db and boomi.archetype.http_listener_to_rest), or inferred from the root alone for a direct root that is exactly REST source -> map -> REST target, and for a passthrough -> stop root that references nothing (the stub). A fan-out route serves its extract, send, reliability, conditional watermark and fan-out rows; a linear route serves its source row (extract, fetch or listen), the send or database-write row and, when declared, reliability and watermark rows; the stub serves one noop row. When a preview carries such a route AND more than one process root (any root, with or without a route), every root's row keys, endpoint keys and every in-row source/target naming one of them are qualified as '<process_key>/<key>', so no two rows share a key and a recipe route's in-row references resolve inside its own process. A root WITHOUT a route (a v1 root, or a direct root no inference applies to) serves only its transform rows, and each such row keeps its own source token, which may name no served row. A preview with one root keeps the unqualified keys, and a preview with no route is unchanged.",
           "governance": "Per-root envelope data: name (explicit, or derived as '<component_prefix> <component_key>' when omitted), description, folder_name (ONE knob: it also places every supporting component the root owns that has no folder of its own), process_extensions, and the recorded-not-wired declarations. A derived name and an inherited folder are claimed ONLY for what this request CREATES: a component bound for reuse or by action='update' keeps the name and the folder the account already holds. Placement is resolved against the live account at apply time and submitted as a folder id, and the apply result reports, per component, whether the read-back confirms it. Resolved server-side BEFORE fingerprinting, so every hash covers final governance; never on ProcessIRV1.",
           "late_binding": "Placeholder component ids in that plan are replaced with real ids at apply time, from components written earlier in the same apply — the plan itself is never string-patched.",
@@ -40059,13 +40059,13 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe:boomi.archetype.api_to_database_sync@1.0.0",
-      "canonical_length": 27249,
+      "canonical_length": 27413,
       "legacy_excerpt": {
         "descriptor.not_for[0]": "Database sources: use boomi.archetype.database_to_api_sync."
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe:boomi.archetype.api_to_database_sync@1.0.0",
-      "sha256": "9fccc16634e64057c53cda0788488965c6cc28818707d86597c97df4650a0f4e",
+      "sha256": "84068715ce8ff776170dd694b462073dc52e76d38197e4bd9c2b3cb284829683",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -40705,7 +40705,7 @@
             },
             "FanoutScriptReferenceOperationV2": {
               "additionalProperties": false,
-              "description": "A map-script operation that REFERENCES a script component by key.\n\nThe script is authored as a canonical supporting component — an intent\n``base_components`` entry of type ``script.mapping`` — never inline here.",
+              "description": "A map-script operation that names a script component by key.\n\nThe script is a ``base_components`` entry of type ``script.mapping`` created\nin the same request from an inline create spec with a script body, never\ninline here. A ``reference_only`` account script is refused.",
               "properties": {
                 "documentation_hint": {
                   "anyOf": [
@@ -41003,7 +41003,7 @@
             "One static REST GET source and one database Send target.",
             "Pagination, retry, dead-letter, watermark and schedule activation are out of scope.",
             "The write statement_type is one of the five confirmed variants.",
-            "Transform operations are direct, side-effect-free map_function, or map_script by reference to an existing script.mapping base component."
+            "Transform operations are direct, side-effect-free map_function, or map_script by key to a script.mapping base component created in the same request from an inline create spec with a script body; a reference_only account script is refused."
           ],
           "not_for": [
             "Database sources: use boomi.archetype.database_to_api_sync.",
@@ -41017,12 +41017,12 @@
           ],
           "prerequisites": [],
           "provenance": {
-            "descriptor_sha256": "e6897b441657fec59339b9b7c9b1b48bdff0161f6b5644ca2a1144d789c039eb",
-            "implementation_sha256": "21cb904111c70120b2f6aef984989721dd5c1ceeb8997b024e8122325e18ec9c",
+            "descriptor_sha256": "649e686780ccefdb692c0055e0e243b4c1ec24242a0bd2eb791a179999ccc378",
+            "implementation_sha256": "d8765de97c86eac41d0e7c0d860aaa7086a5757653bf989523212508eb6c5237",
             "module": "boomi_mcp.recipes.builtins.sync",
             "package_name": "boomi_mcp",
             "package_version": "0.1.0",
-            "source_revision": "source-sha256:50d5b9ac1ebb5abbeadbb0812db3fe18475707d6418c4deb3638762eb998ee59",
+            "source_revision": "source-sha256:880cdb61991919011c95ce2e8dbb4ef963cadcb775bec361fb4b310af701de32",
             "symbol": "emit_api_to_database_sync_v1"
           },
           "recipe_id": "boomi.archetype.api_to_database_sync",
@@ -41219,7 +41219,7 @@
     },
     {
       "artifact_id": "SS-SCHEMA-TEMPLATES:schema_name=recipe:boomi.archetype.database_to_api_sync@1.0.0",
-      "canonical_length": 29470,
+      "canonical_length": 30109,
       "legacy_excerpt": {
         "descriptor.input_schema_id": "boomi_mcp.recipes.builtins.database_to_api_sync.DatabaseToApiSyncInputV1",
         "descriptor.provenance.module": "boomi_mcp.recipes.builtins.database_to_api_sync",
@@ -41229,7 +41229,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe:boomi.archetype.database_to_api_sync@1.0.0",
-      "sha256": "4f9cb30ede91e91dcde7a47533a99fd2065283a96128dd3a9510b14540d0bad7",
+      "sha256": "b783ed0d427402bfa6e23c94e61433e3db7bfc0b82fd124b0410606449587266",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -41804,7 +41804,7 @@
             },
             "FanoutScriptReferenceOperationV2": {
               "additionalProperties": false,
-              "description": "A map-script operation that REFERENCES a script component by key.\n\nThe script is authored as a canonical supporting component — an intent\n``base_components`` entry of type ``script.mapping`` — never inline here.",
+              "description": "A map-script operation that names a script component by key.\n\nThe script is a ``base_components`` entry of type ``script.mapping`` created\nin the same request from an inline create spec with a script body, never\ninline here. A ``reference_only`` account script is refused.",
               "properties": {
                 "documentation_hint": {
                   "anyOf": [
@@ -42094,13 +42094,13 @@
             }
           ],
           "input_schema_id": "boomi_mcp.recipes.builtins.database_to_api_sync.DatabaseToApiSyncInputV1",
-          "input_schema_sha256": "46980fbfa7f093c5d470f3d178591e9d83363920cad277e54cf7b1e58516e681",
+          "input_schema_sha256": "72a9044ddc4fd053b3036138f5a47b3897f5340bf7d0d5011d8452b3e08ee543",
           "is_default": true,
           "limitations": [
             "A created REST connection is unauthenticated; secured REST auth requires a reused connection. A created database connection takes credentials only as an opaque credential:// reference.",
+            "A map script is a script.mapping base component created in the same request from an inline create spec with a script body and named by key; a reference_only account script is refused.",
             "Dead-letter routing takes only an existing, reference-only, unprofiled Document Cache (profileType profile.none) selected by base-component key (reliability.dlq.cache_key); a profiled or unreadable cache is refused at plan and compile (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH), and the cache is never created.",
             "Literal REST query parameter names are limited to filter, limit, mode and offset.",
-            "Map scripts are references to an existing script.mapping base component only.",
             "Watermark-sourced query parameters are recorded on the watermark declaration and never emitted; the watermark is recorded intent and no watermark update is wired.",
             "With a dead-letter cache the process is two connector-scoped Try/Catch guards (database read, then REST send) with retry count 0; catch_notify is a log-only Notify on both catch legs and requires a dead-letter cache.",
             "reliability.retry.max_attempts accepts only 1; 2 to 6 are refused with DB_TO_API_RETRY_UNAVAILABLE, because a retried REST send needs an attested operation grant the public path does not have yet (issue #199). No idempotency field is accepted."
@@ -42119,12 +42119,12 @@
           ],
           "prerequisites": [],
           "provenance": {
-            "descriptor_sha256": "b28da0eff632214123a4b4d1313efaa563664b2317bfaf4706fba707974d0128",
-            "implementation_sha256": "fb1aae000b5dc8513a6a02c501b573783b80fbcb28bd887b73710dc90afe4632",
+            "descriptor_sha256": "d6135186fa8c9b1ad3c1164a2c18c285522dffc828512ed0771d1e8cb80d3650",
+            "implementation_sha256": "2689b0b6d485fb4cd180c9eda004a0e8e3bc5a7d4c8934be9df463db641bd880",
             "module": "boomi_mcp.recipes.builtins.database_to_api_sync",
             "package_name": "boomi_mcp",
             "package_version": "0.1.0",
-            "source_revision": "source-sha256:50d5b9ac1ebb5abbeadbb0812db3fe18475707d6418c4deb3638762eb998ee59",
+            "source_revision": "source-sha256:880cdb61991919011c95ce2e8dbb4ef963cadcb775bec361fb4b310af701de32",
             "symbol": "emit_database_to_api_sync"
           },
           "recipe_id": "boomi.archetype.database_to_api_sync",
@@ -42138,10 +42138,17 @@
               "description": "A log-only Notify at the head of each catch leg (requires a DLQ).",
               "properties": {
                 "level": {
+                  "description": "Platform log level for the Notify at the head of each catch leg. Case-insensitive; one of INFO, WARNING, ERROR.",
+                  "enum": [
+                    "INFO",
+                    "WARNING",
+                    "ERROR"
+                  ],
                   "title": "Level",
                   "type": "string"
                 },
                 "message_template": {
+                  "description": "Plain-text log message. It must contain the literal text meta.base.catcherrorsmessage (the caught-error property, bound once per occurrence), must not contain a brace, and must not read as a JSON object or array; otherwise the request is refused with cause RECIPE_INPUT_INVALID at this field.",
                   "minLength": 1,
                   "title": "Message Template",
                   "type": "string"
@@ -46454,7 +46461,7 @@
       },
       "producer": "meta_tools.get_schema_template_action(...)",
       "selector": "schema_name=recipe_registry",
-      "sha256": "7e57b28112b95d796044c71a1eab1dba3927e0f678e640c4a887b4644f1660eb",
+      "sha256": "3db09843aa854df736e61a78214ee17f26989b4dae7ea588675e0978c5a857ca",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "_success": true,
@@ -46571,9 +46578,9 @@
                 "recipe_id": "boomi.archetype.api_to_api_sync",
                 "recipe_version": "0.1.0"
               },
-              "descriptor_sha256": "28b215cdba827ca028e3a3aa5ebfc903e171aad90c3dcfe990658f7b005f0fb9",
+              "descriptor_sha256": "669fbbf67afe05f32dc41868f7662d3faae8e1374a65bc03371e3f5cbae12946",
               "entry_kind": "compatibility_adapter",
-              "implementation_sha256": "7dd3a453256a78a760e652803e1b5e38bae65b5fbe7e50f564e76d48cd6002d0",
+              "implementation_sha256": "efedd9dbafeb6cd9badeea62430fc3e9bd054c915b05b63949a2a6459e7d0bec",
               "is_default": true,
               "output_types": [],
               "recipe_id": "boomi.adapter.api_to_api_sync",
@@ -46584,9 +46591,9 @@
                 "recipe_id": "boomi.archetype.api_to_database_sync",
                 "recipe_version": "0.1.0"
               },
-              "descriptor_sha256": "1a0156cff9a2350b9b195dba2a78152435db7672610544efca047e794e27106a",
+              "descriptor_sha256": "44358a15b1459fe04ff4ad48c523e805cbfc2e2c6ba0de7e1bc9c38c2d415a0a",
               "entry_kind": "compatibility_adapter",
-              "implementation_sha256": "2fb51ea622bad7f9c9233240566e9b90ea07745096a0822e793ca804dbe64cee",
+              "implementation_sha256": "d37bd4239ad366ab2ae23818d788f694faf42d790993e666a5b913133a6b5ee1",
               "is_default": true,
               "output_types": [],
               "recipe_id": "boomi.adapter.api_to_database_sync",
@@ -46597,9 +46604,9 @@
                 "recipe_id": "boomi.compose.db_rest_fanout",
                 "recipe_version": "1.0.0"
               },
-              "descriptor_sha256": "b265d9d0ca7537ae59455b076dbf2f2276b28326ba63df9f6312eaf24e232096",
+              "descriptor_sha256": "c702e94310085f0be31b546e1e0f273c651cacb482449b2e7a4c74b5005e671e",
               "entry_kind": "compatibility_adapter",
-              "implementation_sha256": "3afd1c026b389a22afe22403d94c99004be5a59a179249909d4106496a1a51ee",
+              "implementation_sha256": "560788d7093eb04106227f39cb9b374d1f29df43cdc33a91f9368e3255a7baa8",
               "is_default": true,
               "output_types": [],
               "recipe_id": "boomi.adapter.compose_archetypes",
@@ -46607,9 +46614,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "9e02437fdcf98de236d6d3ca24770d230f72110babfff2d5b047351a45110e30",
+              "descriptor_sha256": "cbc7ee0709627d5b90dfe74b2d6835273b7866242a88f0cc557e17a3b5359828",
               "entry_kind": "advisory",
-              "implementation_sha256": "b822b4445fce1fac900f3985056fd12d8bd6a01e58eb4cbc348e62aea1dfe62c",
+              "implementation_sha256": "c80cb1280de610b385c8c9cfa38266e2e92da240ba9ffbbe88d6ca2b390e6040",
               "is_default": true,
               "output_types": [],
               "recipe_id": "boomi.advisory.integration_design",
@@ -46617,7 +46624,7 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "0b04dc6f21785664d76a1091c857d201871227589a27959a9df9d56194d5f896",
+              "descriptor_sha256": "3c9d5f7fdfeea505d849a34848bd954c8f35b10105769b18cf86273d6f2f36a3",
               "entry_kind": "executable_recipe",
               "implementation_sha256": "e28135ab1e47dd6eeda167508370741215f92f3ed3061214c9366c388ebd8347",
               "is_default": true,
@@ -46631,7 +46638,7 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "4ebf4907d43a3e0db6bc929c28afc8eed7cc3a30f2661552315c1d654c88a015",
+              "descriptor_sha256": "635e074f2d81274c0880c5b9b13132cb4bbb5ad08b7c16681274378137278989",
               "entry_kind": "executable_recipe",
               "implementation_sha256": "2fb97665542767ae8993c6d0409905c3280ca39975e9bcd4490d7627cc9536fb",
               "is_default": true,
@@ -46645,9 +46652,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "e6897b441657fec59339b9b7c9b1b48bdff0161f6b5644ca2a1144d789c039eb",
+              "descriptor_sha256": "649e686780ccefdb692c0055e0e243b4c1ec24242a0bd2eb791a179999ccc378",
               "entry_kind": "executable_recipe",
-              "implementation_sha256": "21cb904111c70120b2f6aef984989721dd5c1ceeb8997b024e8122325e18ec9c",
+              "implementation_sha256": "d8765de97c86eac41d0e7c0d860aaa7086a5757653bf989523212508eb6c5237",
               "is_default": false,
               "output_types": [
                 "constraint_requirement",
@@ -46658,9 +46665,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "b28da0eff632214123a4b4d1313efaa563664b2317bfaf4706fba707974d0128",
+              "descriptor_sha256": "d6135186fa8c9b1ad3c1164a2c18c285522dffc828512ed0771d1e8cb80d3650",
               "entry_kind": "executable_recipe",
-              "implementation_sha256": "fb1aae000b5dc8513a6a02c501b573783b80fbcb28bd887b73710dc90afe4632",
+              "implementation_sha256": "2689b0b6d485fb4cd180c9eda004a0e8e3bc5a7d4c8934be9df463db641bd880",
               "is_default": true,
               "output_types": [
                 "constraint_requirement",
@@ -46672,9 +46679,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "71bbe27a65c5942aaff885a2612bc4a8a99b8a7faede42a68d58ac6aaebf3be8",
+              "descriptor_sha256": "c373250288b943841c1cd0ca5226af31d15377ec8385d1289bdfd5a72252e38e",
               "entry_kind": "executable_recipe",
-              "implementation_sha256": "33e019f01530b4d83d2aa308450377dbf8173841f734cbabf8255b59e9dc0e65",
+              "implementation_sha256": "799631b0d8248ce300eda3c56f9c9661564c908272d57642aef66da4fbae18f7",
               "is_default": true,
               "output_types": [
                 "constraint_requirement",
@@ -46685,9 +46692,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "db3645f5ab995c0a923fcf21caf6e2317484f4c97aa5abd17b6c871a216f550c",
+              "descriptor_sha256": "ebdc221c1c286c6925feb2f90fa107cd8115d22cccefcb69c1314b36c042a821",
               "entry_kind": "executable_recipe",
-              "implementation_sha256": "6aa9419668791bcffff7f047bbc026442b3cda6200f4fa854b24e1f5dfb767b4",
+              "implementation_sha256": "ca32fff9ed9c85f1f13b9d3f230e8c846eabba0b5ec0fc4345220549d68fed27",
               "is_default": true,
               "output_types": [
                 "constraint_requirement",
@@ -46698,7 +46705,7 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "2e776045de3564742963e197f313077d540c33093f3515b3938f232aeed488a2",
+              "descriptor_sha256": "0a576241449b8f6cf1109b8a0b65a349a96e230faac7c29d54066faa313852da",
               "entry_kind": "executable_recipe",
               "implementation_sha256": "d940c4fffbc340f35db98ba0110b76664a8096aec1cfef90625130686478bd09",
               "is_default": true,
@@ -46711,7 +46718,7 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "ed1ecc9f0006fca7288bbfc0b60439c43f1b3b37fd3549f7b2b6a68580120ea0",
+              "descriptor_sha256": "1419571137ce0b10da656dfc8c88137f916d5104b4c8fa57c311eecebf3ea3a6",
               "entry_kind": "executable_recipe",
               "implementation_sha256": "e46054189a118b1449019f12f1741b8017ec6503c7cb1d09084531225ea19d5d",
               "is_default": true,
@@ -46725,9 +46732,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "4e5a6c90d368cbd5f412be82386819868db89ddfc497118ad1398aa1aaa0e32f",
+              "descriptor_sha256": "99e6012377ce3d2302458b0b7c154bc9cefd605aca08685091fa83c3ddbf9089",
               "entry_kind": "executable_recipe",
-              "implementation_sha256": "759fd866650a2ad1f018e325040e24cd06fdd182b946c054ed02620173e6ca63",
+              "implementation_sha256": "1982a0a0700acf5b8b4c28e67ec821d3eee02f07d9000084bfd846a5ff7b4a37",
               "is_default": false,
               "output_types": [
                 "constraint_requirement",
@@ -46739,9 +46746,9 @@
             },
             {
               "adapter_target": null,
-              "descriptor_sha256": "ef61f9c7e71973f676d76b68475fb3530049aeec1f4bca9215af76828c97e97b",
+              "descriptor_sha256": "fa5cc7f19001cd91264d0dc291a98b7e9c77c6b641588068647624a4678dff31",
               "entry_kind": "constraint_only",
-              "implementation_sha256": "9443a234d4de5f42f6df09f24e54aa1e4098e3cef7f886df68b202bf6d266cd0",
+              "implementation_sha256": "2302ad8a8dd038a4c0db6d4e5b44f0ea334a7a132aa559a66660a935f4794bf1",
               "is_default": true,
               "output_types": [
                 "constraint_requirement"
@@ -46750,9 +46757,9 @@
               "recipe_version": "1.0.0"
             }
           ],
-          "registry_revision": "3fdd354a5012038156776a1b16e519ffebd53722733710ec05be655e526b5591",
+          "registry_revision": "38e918b662a7162e0163b544275e95a7e603cd70b87ff7854568b3616aa401a6",
           "schema_version": "1",
-          "source_revision": "source-sha256:50d5b9ac1ebb5abbeadbb0812db3fe18475707d6418c4deb3638762eb998ee59",
+          "source_revision": "source-sha256:880cdb61991919011c95ce2e8dbb4ef963cadcb775bec361fb4b310af701de32",
           "source_revision_kind": "source_digest",
           "source_version": "0.1.0"
         },
@@ -47024,7 +47031,7 @@
       "legacy_excerpt": {},
       "producer": "meta_tools.get_schema_template_action(...) [all axes]",
       "selector": "walked_surface_digest",
-      "sha256": "6e1fbb390c5e8231e41727f978dd8a16150f2341f11fee3b2d80049ac0782f74",
+      "sha256": "2cb40ba208b3a3065f7145ffe596cb2d2b0c785e86958f6807f9c4a9ad988140",
       "surface_class": "SS-SCHEMA-TEMPLATES",
       "value": {
         "resource_type=component": "55ba0a46f10742a5bfa269767c7ba040532f5d7900c7e56953f8e57469ceecf3",
@@ -47306,17 +47313,17 @@
         "resource_type=trading_partner|operation=update|standard=rosettanet": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=tradacoms": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
         "resource_type=trading_partner|operation=update|standard=x12": "83537ac74be6088a4607997d0e200d76ec7c6367c900aa9923e823d610dd27e1",
-        "schema_name=AuthoringBuildProvenanceV1": "7c66dd1ccdce7b93e71268f9366e5ad0e656bdc8335486fcdd88f72f6f4b279b",
-        "schema_name=AuthoringCompileResultV1": "3d91e6f9496cd1a01840ff04d0faeb451ef8a082c068717bdc0f1d99fffca7c8",
-        "schema_name=AuthoringPlanResultV1": "6fa7c96f6fe4a93d74696685e11684e193a325065f3653cb4e667084b8c24237",
-        "schema_name=AuthoringRequestV1": "4e92de2eeabbd880c3988eb0b7ad23ac718f88d6993acc0b459703650d08d7e1",
-        "schema_name=AuthoringRevisionBindingV1": "484fbfd03e5493c1da33c110dbb253dabd5dd25310a057c49a50aa8707b95516",
-        "schema_name=DerivedFlowRowV1": "d0e284152c4b513ae7219ec0b472ca1618679df36ac06a2ea125bb89bcd2669a",
+        "schema_name=AuthoringBuildProvenanceV1": "a3d2e1dcdc94881937f3d002ed92417bcc89f0ecc51730592f71a376418f9458",
+        "schema_name=AuthoringCompileResultV1": "6e08f5da525fe3e429723cd4c0cfe0c324121761e400e32920c9712313b68815",
+        "schema_name=AuthoringPlanResultV1": "102faa672b372bc357d2135f88d9f8e9b8f997293102e6a01e9d538192c079d4",
+        "schema_name=AuthoringRequestV1": "3afd3b5a3ba6f935e66eaa44726d10d958fa897de11e4a7b7c805861aeecc5aa",
+        "schema_name=AuthoringRevisionBindingV1": "0ab42ea1f8d5549b765bc80743dc50d11350ab0af99b827c4cc6f1733d3cb7e1",
+        "schema_name=DerivedFlowRowV1": "ca0cbe3d596e95d8a6e42b3c5162a5fe9e59f4533c56d9366c7faede19d03948",
         "schema_name=IntegrationSpecV1": "82b9209bfeb9f1df7252621a644024f969b16921b92e2299e47fe11273770c45",
-        "schema_name=ProcessIRV1": "0b6cf1c7a0cfa6629eeedabce60fbf5fd4f6ddb3d181e54b02b140184546ade9",
-        "schema_name=RecordedIntentV1": "b7d353a2728fbe96b56e2dc401431ed862e86dd71c5e44f0a4a58d4858306ed7",
-        "schema_name=SystemTopologySpecV1": "6729ce8733e97b05f8c6f1a3849ed07a27f0cd4526006d9f6a791d597a13479d",
-        "schema_name=WatermarkDeclarationV1": "9f38e1cb6f7219b81aea114a0e4be7e63446663b6e16c80483f51299ad08ca05",
+        "schema_name=ProcessIRV1": "53027e833864d53acc99aad9a6fe8404cd03215ed49ee0f4e8ea16b630b49ac7",
+        "schema_name=RecordedIntentV1": "e29d5009278700204a8df315abd8be45d44ce80d5f3bb30d4f2af237b9b3cb66",
+        "schema_name=SystemTopologySpecV1": "91a7fb768d3589f95de4d3615f66603c22057fec32d0d6c552d00af34c0bd970",
+        "schema_name=WatermarkDeclarationV1": "063fc0c54fa2b7d9fd98bbb6bc09c7e203ae722e8c2dffb3c6751cd9c66ce0db",
         "schema_name=account_governance": "d0773b315a5b59bad4bbb0021a2468e5cb4d3a85c4dbac216a887f0194a2ecdc",
         "schema_name=api_service": "c7be12ec5b2c503bd54088bd2c7b00adfa435e3f3fc9610bae0b91117657911b",
         "schema_name=archetype:api_to_api_sync": "7e4653429bdfc56d53ecb1c07fb7f477e11c2180c3afdfad94566cab1ca716e7",
@@ -47325,7 +47332,7 @@
         "schema_name=archetype:http_listener_to_db": "89fba5aa6120b1ad51fb0a08eef875365775893a2cbc3572098f04a1ef8b194f",
         "schema_name=archetype:http_listener_to_rest": "31ae8b8ce1479adddbd480d2dc69e07aa9289959bb683002e02628a88ad02e25",
         "schema_name=archetype:stub_minimal_integration": "28f1d13a8568cea1df47bb1b361708d17e490204c7425787999e80df63f4b0fc",
-        "schema_name=authoring_workflow": "60b6791ffa2dfd72327a4ea6d745dada52c2f7977071b73b91a241b6f39d030c",
+        "schema_name=authoring_workflow": "31027712f43cd24a5e6526bfb9273e06307a43c3eff5572648dba0e101afdf5e",
         "schema_name=cache_property_authoring": "484017df545d247be99c71ef4be4edf8d47013e565a6e05119c357699229ed6f",
         "schema_name=compose_archetypes": "ec23808a15913ec8ce1d6e510ff941952be25b006a42128216b891d05f1a9d7f",
         "schema_name=design_doctrine": "458e7385ec9ad21c5d8f1d319a1db3252c9c1e017640967bfdc9714c38bb38b5",
@@ -47388,27 +47395,27 @@
         "schema_name=governance_pattern:support_folder_isolation_and_privacy": "4f0b206e14ad2f2272b03dfc8c9575dbcc3d454d28894a42602a9cca546de2ed",
         "schema_name=governance_pattern:tools_utilities_folder_non_integration": "50ddcf761e63e68f305271b4f079d8a7effd9b750726a8be784c2c52993c2cbc",
         "schema_name=governance_pattern:tracked_field_naming_generic_and_unique": "42ae3917d1ddb0f23a9dd0e9083a9106a3ed6c18bc06e740a1c07014830204d1",
-        "schema_name=process_ir_authoring": "39fb4e70ba8613086fd14d97a60207b9d6fa119b873492ee54f2b772ebe8ba92",
+        "schema_name=process_ir_authoring": "f6963dae5008fae8a475f898c915254f1bf837fe4116ce185c235c47f942837e",
         "schema_name=process_property": "43c9cf66e73fb39b6f1625d00a9a01f876005bfa94b34fb99cb14e0deebe699b",
-        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "ab3563828cca0dee4f259ddcd9463ac1958b469b3682a0fd901672f8e00945dd",
-        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "b4cbe97c47e143632d3c745be75b46a988a458ef1b40537741049bdb0ce8aaa1",
-        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "d82f770cb6c78067f2eddaa7935eeea8c0fd366430b3c54d54b1dda05589be40",
-        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "6f6dc0face44a68a05607ae9eb86cec5b246d34dd7f86d2d1f4bf9ea2294f101",
-        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "f32465bd3417b7c735d380da484560c789a790e910464639b909ec0169618c5a",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "0dbdb77143575217307dad2a5b27691f126f8208c58712aec9e8d34ca69a3345",
-        "schema_name=recipe:boomi.archetype.api_to_database_sync@1.0.0": "9fccc16634e64057c53cda0788488965c6cc28818707d86597c97df4650a0f4e",
-        "schema_name=recipe:boomi.archetype.database_to_api_sync@1.0.0": "4f9cb30ede91e91dcde7a47533a99fd2065283a96128dd3a9510b14540d0bad7",
-        "schema_name=recipe:boomi.archetype.http_listener_to_db@1.0.0": "b9248bd91a7fefe97d5f71703af95f62a71fe2a662dea6185b9715a4a0eeff48",
-        "schema_name=recipe:boomi.archetype.http_listener_to_rest@1.0.0": "d962da7e72265548cb88dcb17d079fcf734af97d02da5d9f456670e6777ed9bb",
-        "schema_name=recipe:boomi.archetype.stub_minimal@1.0.0": "021590d612f9fb8ea901836be5734f7fc290e0a5c7fa8517160f30478cbb27fd",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "8d3fc19f01ea2407ce0316145aa74d5d16012619b622cab31062996abb53644c",
-        "schema_name=recipe:boomi.compose.db_rest_fanout@2.0.0": "9421b2cb1887db93bbf976ed9d2a81c3b9c617784d020a7e4ba72d10a59f2728",
-        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "7ad0133e39f06057e29a40cdf1e3edfa0418001b1d32ded822b06d7a697e43d0",
+        "schema_name=recipe:boomi.adapter.api_to_api_sync@1.0.0": "ee721bf45a6db1bf4137ab41f860c32f27beffc172e169939e855ae550c58258",
+        "schema_name=recipe:boomi.adapter.api_to_database_sync@1.0.0": "dbc07bb56e5f6f072377ff0f44ec498926fc21cdb5ed737934e9dda88c4085c3",
+        "schema_name=recipe:boomi.adapter.compose_archetypes@1.0.0": "1d61fb4a8654fc3669c5c0dc12a63a3a7ac314fd85780886b3e09549ef96e170",
+        "schema_name=recipe:boomi.advisory.integration_design@1.0.0": "c8453a39478afbad31583ce15e0bfaabe5aa1272d84f7e9d92ab6e98d9260b93",
+        "schema_name=recipe:boomi.archetype.api_to_api_sync@0.1.0": "5ae273babb8d116ef1f45176a07d9f8247f0c11bcfc339d11e5f462f42e6a7b3",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@0.1.0": "103bf1c793b5ceb5503f5f7213737c5960cf2870e53f395c9a67b7c967770e1c",
+        "schema_name=recipe:boomi.archetype.api_to_database_sync@1.0.0": "84068715ce8ff776170dd694b462073dc52e76d38197e4bd9c2b3cb284829683",
+        "schema_name=recipe:boomi.archetype.database_to_api_sync@1.0.0": "b783ed0d427402bfa6e23c94e61433e3db7bfc0b82fd124b0410606449587266",
+        "schema_name=recipe:boomi.archetype.http_listener_to_db@1.0.0": "d27ba8e11c7dfefdf436bee896fc665486b407d6e4b830aad540e2c412654f78",
+        "schema_name=recipe:boomi.archetype.http_listener_to_rest@1.0.0": "c7856d6a35654baa59fff01a8caf996b2ab2365021178ac22a23d939641f0a53",
+        "schema_name=recipe:boomi.archetype.stub_minimal@1.0.0": "50d9a99f9c75ada31984eb9b41e527267e4e9a96cc76d9034b4e3f5c4d9c91f3",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@1.0.0": "66af4c3c2829520f886e8fba5e08f601ae99644fc57b876db7665a227422039b",
+        "schema_name=recipe:boomi.compose.db_rest_fanout@2.0.0": "9681a0377b4237680503cd39876b217383c4517912e5e20442bcbe18b9153f86",
+        "schema_name=recipe:boomi.constraint.inbound_validate@1.0.0": "c117912aac43a58a695538c31e7c6403c91704513b90f4f84956228fc2eaa7d3",
         "schema_name=recipe_contributions": "c4fcb681577d9ecaf9f86e1ecc9ff8b7c4a93de4196034f3049f5ab3308d0496",
-        "schema_name=recipe_registry": "7e57b28112b95d796044c71a1eab1dba3927e0f678e640c4a887b4644f1660eb",
+        "schema_name=recipe_registry": "3db09843aa854df736e61a78214ee17f26989b4dae7ea588675e0978c5a857ca",
         "schema_name=script_dataprocess": "86d6cac0e593188c5c6a253e684097dadda0a6c3c331a1d71672c827133af143",
         "schema_name=script_mapping": "165e78ea08d24f54221f6da5973cbe20c7747d1a37f9fde496a42876b594e029",
-        "schema_name=validation_report": "a0b7a5bb801e68c6b1d2a5bc56c85f0257a5e07f520ed5851a9a4d22741a642d",
+        "schema_name=validation_report": "f5684207b4dc309512a99e64e54df12ab16626991a6048c9a2fe43f950fdcb41",
         "schema_name=workflow:build_and_verify_http_listener": "bf6ab2e405f375735cd6aaed29da0dbc6b717909dc1c184ba8dbe341f2b95800",
         "schema_name=workflow:build_integration_from_description": "72a20b29bbaf7a0ce39e06fb8514e13831968332bc5d0373d7f100bd7a943be0",
         "schema_name=workflow:compose_multi_target_integration": "6b04f2d192bcaf817a983a1aefda2f2f7b9674ce1c996737137c7ce8d6b932e0",

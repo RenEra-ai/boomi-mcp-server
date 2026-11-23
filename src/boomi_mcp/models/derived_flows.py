@@ -409,15 +409,19 @@ class DerivedEndpointRowV1(_OmitUnsetModel):
     """One endpoint of a recipe-assembled route, read off its connection component.
 
     A created connection serves its classification (``driver`` and ``auth_mode``
-    for a database, ``auth_mode`` for REST); a reused one serves the selector
-    it binds by. Never a host, URL, credential or SQL.
+    for a database, ``auth_mode`` for REST); a reused one serves ``component_id``
+    when it is bound by id or planning resolved its name to an id, and
+    ``component_name`` when it is named — a row may carry both. A REST endpoint
+    serves its operation's ``method``; a database endpoint serves none. Never a
+    host, URL, credential or SQL.
 
     #159 S2 widens it for the linear presets, every key still read off a
     component: a database WRITE target also serves its operation and the write
     profile's ``statement_type``; a WSS listener serves its computed
     ``endpoint_path`` (and ``publish_mode`` behind an API Service component); a
-    REST endpoint serves ``expected_status_codes`` only when its route DECLARES
-    them; and a stub endpoint is a bare labelled placeholder with no binding
+    REST endpoint of a LINEAR route serves ``expected_status_codes`` only when
+    its route DECLARES them (a fan-out never serves them on an endpoint); and a
+    stub endpoint is a bare labelled placeholder with no binding
     and no ``executable`` key at all — so ``binding_mode`` is required on every
     type EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.
     """
@@ -561,9 +565,8 @@ class LinearConnectorFactV1(_DerivedFlowModel):
     ``expected_status_codes`` is the route's DECLARED success-status
     expectation for a REST target. Set means served on the endpoint row; None
     means the key is absent. The DB→REST and listener→REST presets froze no
-    such key and MUST leave it None; only the direct API→API inference sets it
-    (to the existing REST success-status default both frozen API→API cases
-    carry).
+    such key and MUST leave it None, and the direct API→API inference leaves it
+    None too: a route's topology declares no success-status expectation.
     """
 
     connection_key: Optional[NonEmptyString] = None

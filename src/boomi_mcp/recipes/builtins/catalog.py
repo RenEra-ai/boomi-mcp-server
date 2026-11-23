@@ -470,7 +470,9 @@ _API_TO_DB_V1_GUIDANCE = dict(
         "and runtime-bound {token} path segments are refused.",
         "The write statement_type is one of the five confirmed variants.",
         "Transform operations are direct, side-effect-free map_function, or map_script "
-        "by reference to an existing script.mapping base component.",
+        "by key to a script.mapping base component created in the same request from an "
+        "inline create spec with a script body; a reference_only account script is "
+        "refused.",
         "Every mandatory column and condition is mapped, each at most once.",
         "Pagination, retry, dead-letter, watermark and schedule activation are out of "
         "scope.",
@@ -563,7 +565,9 @@ _DB_TO_API_GUIDANCE = dict(
         "Watermark-sourced query parameters are recorded on the watermark declaration "
         "and never emitted; the watermark is recorded intent and no watermark update is "
         "wired.",
-        "Map scripts are references to an existing script.mapping base component only.",
+        "A map script is a script.mapping base component created in the same request from "
+        "an inline create spec with a script body and named by key; a reference_only "
+        "account script is refused.",
     ),
     not_for=(
         "Error-subprocess dead-letter routing, or folder, topic or queue dead-letter "
@@ -656,7 +660,9 @@ _LISTENER_COMMON_LIMITATIONS = (
     "needs publish_mode api_service, and the API Service and the process deploy "
     "separately.",
     "Inbound validation is a build-time contract, not runtime payload validation.",
-    "Map scripts only by reference to an existing script.mapping base component; map "
+    "A map script must be a script.mapping base component created in the same request "
+    "from an inline create spec with a script body and named by key (a reference_only "
+    "account script is refused); map "
     "functions are limited to side-effect-free families.",
 )
 _LISTENER_COMMON_NOT_FOR = (

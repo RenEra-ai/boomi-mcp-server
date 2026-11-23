@@ -5575,6 +5575,66 @@ def test_the_registry_does_not_share_example_mappings_with_its_registration():
     assert served["raw_input"]["process_key"] == "main_process"
 
 
+def test_a_discovery_caller_cannot_mutate_the_served_examples():
+    """CDX-159-S2-r1-03: ``resolve()`` and ``descriptors()`` hand out DETACHED
+    descriptors. An in-process caller that edits a returned example's
+    ``raw_input`` or ``component_material`` in place cannot change what the next
+    lookup, discovery listing or pinned discovery payload serves — the digest
+    and the registry revision keep describing exactly what is served."""
+    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
+
+    material = _material_registration(examples=(_flagship_material_example(),))
+    key = (material.recipe_id, material.recipe_version)
+    registry = build_test_registry(
+        (
+            material,
+            _guided(recipe_id="t.target", recipe_version="0.1.0"),
+            RecipeRegistrationV1(
+                recipe_id="t.adapter",
+                recipe_version="1.0.0",
+                entry_kind="compatibility_adapter",
+                is_default=True,
+                adapter_target=RecipeReferenceV1(recipe_id="t.target", recipe_version="0.1.0"),
+            ),
+        )
+    )
+    before_material = registry.resolve(*key).public_payload()
+    before_listing = [d.public_payload() for d in registry.descriptors()]
+    before_pinned = _resolve_pinned_target("t.adapter", "0.1.0", registry)
+    revision = registry.registry_revision
+    assert before_material["examples"][0]["component_material"]  # non-vacuous
+
+    # Mutate every mutable example mapping each exit hands out.
+    (example,) = registry.resolve(*key).examples
+    # A NESTED mapping too: a shallow copy would still share it.
+    nested = next(v for v in example.component_material.values() if isinstance(v, dict))
+    nested["mutated"] = True
+    example.raw_input["process_key"] = "mutated"
+    example.component_material["version"] = "mutated"
+    for descriptor in registry.descriptors():
+        for listed in descriptor.examples:
+            listed.raw_input.clear()
+            if listed.component_material is not None:
+                listed.component_material.clear()
+    registry.resolve("t.target", "0.1.0").examples[0].raw_input["process_key"] = "mutated"
+
+    assert registry.resolve(*key).public_payload() == before_material
+    assert [d.public_payload() for d in registry.descriptors()] == before_listing
+    assert _resolve_pinned_target("t.adapter", "0.1.0", registry) == before_pinned
+    assert registry.registry_revision == revision
+    # ...and the digest still covers the example: the same registration
+    # rebuilt hashes identically, a different example does not.
+    fresh = build_test_registry((material,)).resolve(*key)
+    assert fresh.provenance.descriptor_sha256 == before_material["provenance"]["descriptor_sha256"]
+    other = _material_registration(
+        examples=(_flagship_material_example(summary="Another validated invocation."),)
+    )
+    assert (
+        build_test_registry((other,)).resolve(*key).provenance.descriptor_sha256
+        != fresh.provenance.descriptor_sha256
+    )
+
+
 def test_a_material_example_validates_against_the_material_model():
     registry = build_test_registry(
         (_material_registration(examples=(_flagship_material_example(),)),)

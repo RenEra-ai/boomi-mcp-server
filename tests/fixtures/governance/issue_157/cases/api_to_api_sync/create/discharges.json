@@ -2,7 +2,7 @@
   "case_id": "api_to_api_sync/create",
   "endpoints": {
     "0": "discharged",
-    "1": "discharged"
+    "1": "field_retired:FRET-159-01"
   },
   "flows": {
     "0": "discharged",
