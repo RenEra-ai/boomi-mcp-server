@@ -384,8 +384,9 @@ def test_bracketed_process_name_flagged_when_active():
     plan = _plan([_process("p1", "Sync Customers")], naming={"convention": "bracketed"})
     assert plan["_success"] is True
     assert _has_warn(plan, "NAMING_CONVENTION_BRACKETED")
-    # Warning only — never an error action.
-    assert _step(plan, "p1")["planned_action"] in ("create", "create_clone")
+    # Warning only — never an error action. The row is an explicit-id bind apply
+    # reuses, so it plans as ``reuse`` (QA-159-S3-r1-01).
+    assert _step(plan, "p1")["planned_action"] == "reuse"
 
 
 def test_bracketed_conformant_subprocess_clean():

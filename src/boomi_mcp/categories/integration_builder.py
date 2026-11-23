@@ -5549,7 +5549,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         # #159 S3: a flat process row reaching this loop was admitted before it
         # (``first_flat_process_refusal``) as an explicit-id bind apply reuses; it
-        # carries no body, so it has nothing to validate here.
+        # carries no body, so it has nothing to validate here. Its LABEL is asked of
+        # the same predicate admission and apply use (QA-159-S3-r1-01): a top-level
+        # ``component_id`` create under ``conflict_policy="reuse"`` skips candidate
+        # resolution and kept ``planned_action="create"`` here while apply reused it
+        # with zero writes, so the two spellings of one bind planned differently.
+        # Process rows only — the same corner on other types is left as it was. The
+        # predicate reads THIS route's resolved binding, as every identity reading must.
+        if (
+            comp.type == "process"
+            and planned_action == "create"
+            and not apply_writes_component_config(
+                comp, conflict_policy, existing_ids={comp.key: existing_id}
+            )
+        ):
+            planned_action = "reuse"
         route = (
             "process_flow_xml"
             if comp.type == "process"

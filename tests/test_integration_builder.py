@@ -6907,22 +6907,38 @@ def test_the_apply_loop_uses_that_derivation_not_the_requested_action():
 @patch("src.boomi_mcp.categories.integration_builder._execute_component")
 @patch(_PATCH_TARGET)
 def test_an_explicit_id_process_bind_is_admitted_and_writes_nothing(mock_pag, mock_exec):
-    """Both explicit forms bind with ZERO process writes and apply records the bound
-    id as reused: the reference_only ``config.component_id`` form, and a top-level
-    ``component_id`` create under ``conflict_policy="reuse"`` (which apply reuses
-    although the plan labels it ``create``). A sibling the plan authors is written,
-    so the executor tripwire is live."""
+    """Both explicit forms bind with ZERO process writes, PLAN as ``reuse`` on the
+    plan and on the dry-run apply steps, and apply records the bound id as reused:
+    the reference_only ``config.component_id`` form, and a top-level
+    ``component_id`` create under ``conflict_policy="reuse"`` (QA-159-S3-r1-01: that
+    spelling planned ``create`` while apply reused it). A sibling the plan authors is
+    written, so the executor tripwire is live. The relabel is process-only: a
+    non-process top-level-id create under ``reuse`` keeps its pre-existing ``create``
+    label (shared plan code is not widened)."""
+    _OTHER_ID = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
     mock_pag.return_value = []
     mock_exec.side_effect = lambda **kw: {"_success": True, "component_id": "new-" + kw["comp"].key}
     for row in (
         _process_row(reference_only=True, component_id=_BOUND_PROCESS_ID),
         _process_row(component_id=_BOUND_PROCESS_ID),
     ):
-        config = _build_config([_db_comp(key="db_first"), row], conflict_policy="reuse")
+        bound_db = dict(_db_comp(key="db_bound", name="Bound SQL Server",
+                                 component_name="Bound SQL Server").model_dump(),
+                        component_id=_OTHER_ID)
+        config = _build_config([_db_comp(key="db_first"), bound_db, row],
+                               conflict_policy="reuse")
         plan = _build_plan(MagicMock(), config)
         assert plan["_success"] is True, plan
-        step = next(s for s in plan["steps"] if s["key"] == "main_process")
-        assert step["existing_component_id"] == _BOUND_PROCESS_ID
+        steps = {s["key"]: s for s in plan["steps"]}
+        assert steps["main_process"]["existing_component_id"] == _BOUND_PROCESS_ID
+        assert steps["main_process"]["planned_action"] == "reuse", (row, steps["main_process"])
+        assert steps["db_bound"]["planned_action"] == "create", steps["db_bound"]
+
+        config["dry_run"] = True
+        dry = _apply_plan(MagicMock(), "dev", config)
+        assert dry["dry_run"] is True, dry
+        dry_steps = {s["key"]: s for s in dry["steps"]}
+        assert dry_steps["main_process"]["planned_action"] == "reuse", dry_steps["main_process"]
 
         mock_exec.reset_mock()
         config["dry_run"] = False
@@ -6932,6 +6948,7 @@ def test_an_explicit_id_process_bind_is_admitted_and_writes_nothing(mock_pag, mo
         assert executed == ["db_first"], executed  # the process is never written
         assert result["results"]["main_process"]["status"] == "reused"
         assert result["results"]["main_process"]["component_id"] == _BOUND_PROCESS_ID
+        assert result["results"]["db_bound"]["status"] == "reused"
 
 
 @patch(_PATCH_TARGET)
