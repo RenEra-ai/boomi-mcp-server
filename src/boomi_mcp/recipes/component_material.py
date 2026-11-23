@@ -328,10 +328,11 @@ SCRIPT_PORT_SENTENCE = (
 
 
 class FanoutScriptReferenceOperationV2(_FanoutMaterialModel):
-    """A map-script operation that REFERENCES a script component by key.
+    """A map-script operation that names a script component by key.
 
-    The script is authored as a canonical supporting component — an intent
-    ``base_components`` entry of type ``script.mapping`` — never inline here.
+    The script is a ``base_components`` entry of type ``script.mapping`` created
+    in the same request from an inline create spec with a script body, never
+    inline here. A ``reference_only`` account script is refused.
     """
 
     operation_type: _Literal["map_script"]
