@@ -72,7 +72,10 @@ from ...patterns.archetype_parameters import (
     JSONPayloadProfile,
     _flatten_payload_profile_leaves,
 )
-from ...categories.components.wss_route_methods import ASC_METHOD_RULE
+from ...categories.components.wss_route_methods import (
+    ASC_GET_WITH_INPUT_RULE,
+    ASC_METHOD_RULE,
+)
 from ...patterns.base import PrimitiveBuildContext
 from ..component_material import (
     DbWriteMaterialV1,
@@ -241,7 +244,12 @@ class ListenerOperationMaterialV1(_FanoutMaterialModel):
             "EXECUTE. Not an HTTP verb. Behind an API Service route whose "
             "api_service.http_method is omitted, "
             + ASC_METHOD_RULE
-            + "; an explicit api_service.http_method overrides it."
+            + "; an explicit api_service.http_method overrides it. Every input "
+            "this preset accepts is a request body, so a GET route is refused "
+            "with LISTENER_ASC_ROUTE_UNCALLABLE and a GET or QUERY operation "
+            "needs an explicit non-GET http_method: "
+            + ASC_GET_WITH_INPUT_RULE
+            + "."
         ),
     )
     input_type: Literal["singlejson", "multijson"] = Field(
@@ -286,6 +294,9 @@ class ApiServiceMaterialV1(_FanoutMaterialModel):
         description=(
             "Route method override; default (None) inherits it from the operation: "
             + ASC_METHOD_RULE
+            + ". This preset's input is always a request body, so a GET route is "
+            "refused with LISTENER_ASC_ROUTE_UNCALLABLE: "
+            + ASC_GET_WITH_INPUT_RULE
             + "."
         ),
     )

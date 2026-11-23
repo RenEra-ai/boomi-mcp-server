@@ -1092,3 +1092,25 @@ class TestTypedListenerPresets:
             assert not {
                 name for name in imported if "archetypes" in name.split(".") or name.endswith("recipe_bridge")
             }, module.__name__
+
+
+def test_l2_served_method_text_states_the_get_with_input_refusal():
+    """QA-159-S2-r4-01: every input these presets accept is a request body, so a
+    GET-derived route is always refused; the served method text says so, in the
+    method authority's own words, beside the code the refusal carries (the
+    refusal itself is witnessed by the ``*_route_uncallable_*`` cases)."""
+    from boomi_mcp.categories.components.wss_route_methods import (
+        ASC_GET_WITH_INPUT_RULE,
+    )
+    from boomi_mcp.recipes.builtins.http_listener_to_db import HttpListenerToDbMaterialV1
+    from boomi_mcp.recipes.builtins.http_listener_to_rest import HttpListenerToRestMaterialV1
+
+    for model in (HttpListenerToDbMaterialV1, HttpListenerToRestMaterialV1):
+        defs = model.model_json_schema()["$defs"]
+        for owner, field in (
+            ("ListenerOperationMaterialV1", "operation_type"),
+            ("ApiServiceMaterialV1", "http_method"),
+        ):
+            text = defs[owner]["properties"][field]["description"]
+            assert ASC_GET_WITH_INPUT_RULE in text, (model.__name__, owner)
+            assert "LISTENER_ASC_ROUTE_UNCALLABLE" in text, (model.__name__, owner)
