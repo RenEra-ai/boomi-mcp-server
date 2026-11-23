@@ -65,8 +65,9 @@ CONTRACT
   CONSEQUENCE (rendering every case leaves module state unchanged). The
   consequence alone was green with the copies removed, which is why the
   antecedent exists. The antecedent's bound, measured rather than assumed: it
-  sees the corpus's own function boundary, so every case but three is covered
-  (the three ``recipe:*`` cases call no corpus function), and state reaching
+  sees the corpus's own function boundary (since #159 S2 the three ``recipe:*``
+  cases cross it too: their typed requests are built by corpus functions from
+  copied module constants), and state reaching
   production without crossing that boundary — or becoming module state during a
   render — is out of its reach. That is an accepted limitation, not tracked work:
   no such leak exists today, and every in-tree protective copy is individually pinned.
@@ -2116,58 +2117,258 @@ def _error_case(anchor):
 
 
 # ---------------------------------------------------------------------------
-# I. Typed recipe arms (definitions live in tests/fixtures/recipe_parity/*.json —
-#    the baseline-captured IntegrationSpec dumps the owning test module pins
+# I. Recipe goldens (#159 S2: pinned fan-out 2.0.0 and a direct canonical unit;
+#    their frozen values come from tests/fixtures/recipe_parity/*.json — the
+#    baseline-captured IntegrationSpec dumps the owning test module pins
 #    byte-identically with its L1 oracle)
 # ---------------------------------------------------------------------------
 
-#: Which recipe arm renders each golden case, and with which recipe id.
-#: Dispatch below is TOTAL — an unknown arm raises rather than falling through
-#: to a default. An `if arm == "fanout": … else: …` shape was the first cut and
-#: it made only the "fanout" spelling load-bearing: mutating `"sync_preset"` to
-#: any other string left every golden byte-identical, so a third arm typed in
-#: here would have rendered silently through the sync-preset recipe.
+#: Which canonical route renders each ``recipe:*`` golden. Dispatch below is TOTAL —
+#: an unknown arm raises rather than falling through to a default. An
+#: `if arm == "fanout": … else: …` shape was the first cut and it made only one
+#: spelling load-bearing: mutating the other to any string left every golden
+#: byte-identical.
+#:
+#: #159 S2: none of these routes through the legacy recipe bridge any more. The
+#: case keys, golden ids, ``process-xml-v1`` artifact kind and frozen bytes are
+#: unchanged; only the producer moved:
+#:
+#: * the two fan-out cases are PINNED ``boomi.compose.db_rest_fanout@2.0.0``
+#:   invocations (secret-free recipe input + closed component material);
+#: * ``api_to_api_sync_0`` is a DIRECT canonical unit (source -> map -> target ->
+#:   stop), since the API->API preset's executable registration retires in S3.
 RECIPE_GOLDEN_ARMS = {
-    "compose_stream": "fanout",
-    "compose_all_cache": "fanout",
-    "api_to_api_sync_0": "sync_preset",
+    "compose_stream": "fanout_v2",
+    "compose_all_cache": "fanout_v2",
+    "api_to_api_sync_0": "direct_unit",
 }
+
+FANOUT_V2_RECIPE_ID = "boomi.compose.db_rest_fanout"
+FANOUT_V2_RECIPE_VERSION = "2.0.0"
+
+
+def _recipe_parity_spec(name):
+    """The frozen ``recipe_parity`` spec dump a ``recipe:*`` case was captured
+    against (060dabad), read fresh on every call."""
+    return json.loads(
+        (_HERE / "fixtures" / "recipe_parity" / (name + ".json")).read_text(encoding="utf-8")
+    )
+
+
+#: The fan-out 2.0.0 invocation for golden-000004 (``recipe:compose_stream``).
+#:
+#: PROVENANCE: the values are the frozen ``recipe_parity/compose_stream.json``
+#: spec's own (component prefix ``DEMO``; DB driver, host, database, username and
+#: credential reference; the read statement and its single ``source_a`` field; the
+#: one direct mapping to ``Root/target_a``; the ``target_a`` payload profile; the
+#: Orders and Billing base URLs and paths), re-expressed in the v2 split exactly as
+#: ``tests/_fanout_v2_support.py::v2_from_compose_request`` re-expresses a legacy
+#: compose request. The one re-spelling is the credential reference under the
+#: opaque ``credential://`` scheme fan-out 2.0.0 requires. A test in
+#: ``test_wave_gate_goldens.py`` pins the components this invocation prepares to
+#: the frozen spec's, so the provenance is checked, not asserted.
+FANOUT_V2_GOLDEN_RAW_INPUT = {
+    "version": "2",
+    "process_key": "main_process",
+    "naming": {"component_prefix": "DEMO"},
+    "source": {"part_key": "db", "binding_mode": "create", "auth_mode": "username_password"},
+    "transform": {"part_key": "shape"},
+    "targets": [
+        {"part_key": "orders", "label": "Orders", "binding_mode": "create", "method": "POST"},
+        {"part_key": "billing", "label": "Billing", "binding_mode": "create", "method": "POST"},
+    ],
+}
+
+FANOUT_V2_GOLDEN_MATERIAL = {
+    "version": "2",
+    "source": {
+        "connection": {
+            "mode": "create",
+            "driver": "microsoft_jdbc",
+            "host": "db.example.invalid",
+            "database": "AppDB",
+            "username": "<<db user>>",
+            "credential_ref": "credential://<<opaque credential reference>>",
+        },
+        "read": {
+            "sql": "<<user-authored DB read statement>>",
+            "result_fields": [{"name": "source_a", "data_type": "character"}],
+        },
+    },
+    "transform": {
+        "operations": [
+            {"operation_type": "direct", "source_field": "source_a",
+             "target_path": "Root/target_a"},
+        ]
+    },
+    "payload_profile": {
+        "format": "json",
+        "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [{"name": "target_a", "kind": "simple", "data_type": "character"}],
+        },
+    },
+    "targets": [
+        {"part_key": "orders",
+         "connection": {"mode": "create", "base_url": "https://orders.example.invalid"},
+         "operation": {"path": "/v1/orders", "query_parameters": []}},
+        {"part_key": "billing",
+         "connection": {"mode": "create", "base_url": "https://billing.example.invalid"},
+         "operation": {"path": "/v1/billing", "query_parameters": []}},
+    ],
+}
+
+#: golden-000003 (``recipe:compose_all_cache``): the same invocation with BOTH
+#: targets on a ``document_cache`` handoff — the explicit star the frozen spec was
+#: composed with, which yields the target-less staging leg and one cache read per
+#: target over the one ``handoff_document_cache``.
+FANOUT_V2_ALL_CACHE_LINKS = [
+    {"from_part": "db", "to_part": "shape"},
+    {"from_part": "shape", "to_part": "orders", "handoff": {"mode": "document_cache"}},
+    {"from_part": "shape", "to_part": "billing", "handoff": {"mode": "document_cache"}},
+]
+
+FANOUT_V2_GOLDEN_LINKS = {
+    "compose_stream": None,
+    "compose_all_cache": FANOUT_V2_ALL_CACHE_LINKS,
+}
+
+
+def fanout_v2_golden_request(name):
+    """The typed ``AuthoringRequestV1`` carrying one PINNED fan-out 2.0.0
+    invocation for a ``recipe:compose_*`` case. Deep copies throughout."""
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    raw_input = copy.deepcopy(FANOUT_V2_GOLDEN_RAW_INPUT)
+    links = FANOUT_V2_GOLDEN_LINKS[name]
+    if links is not None:
+        raw_input["links"] = copy.deepcopy(links)
+    return AuthoringRequestV1.model_validate(
+        {
+            "intent": {
+                "intent_kind": "recipe",
+                "integration_name": "demo-composed-fanout",
+                "invocations": [
+                    {
+                        "recipe_id": FANOUT_V2_RECIPE_ID,
+                        "recipe_version": FANOUT_V2_RECIPE_VERSION,
+                        "invocation_id": "fanout",
+                        "raw_input": raw_input,
+                        "component_material": copy.deepcopy(FANOUT_V2_GOLDEN_MATERIAL),
+                    }
+                ],
+            }
+        }
+    )
+
+
+#: golden-000001 (``recipe:api_to_api_sync_0``): the DIRECT canonical root the
+#: retired sync-preset arm produced — source -> map -> target -> stop, no labels
+#: (the sync dialect authored none, so every ``userlabel`` in the frozen file is
+#: empty). PROVENANCE: the references are the frozen
+#: ``recipe_parity/api_to_api_sync_0.json`` process's own ``$ref`` symbols, and
+#: the supporting components and envelope are read from that same spec below,
+#: never re-typed. The shape order is the frozen file's.
+API_TO_API_SYNC_GOLDEN_PROCESS_IR = {
+    "version": "1",
+    "body": {
+        "kind": "sequence",
+        "steps": [
+            {"kind": "source", "connection_ref": "$ref:source_rest_source_connection",
+             "operation_ref": "$ref:source_rest_source_operation"},
+            {"kind": "map_ref", "map_ref": "$ref:transform_transform_map"},
+            {"kind": "target", "connection_ref": "$ref:target_rest_connection",
+             "operation_ref": "$ref:target_rest_operation"},
+            {"kind": "stop"},
+        ],
+    },
+}
+
+
+def api_to_api_sync_golden_request():
+    """The typed direct ``process_ir`` request for golden-000001: the frozen
+    spec's supporting components and process envelope (name, action, dependency
+    set) with ``API_TO_API_SYNC_GOLDEN_PROCESS_IR`` as the unit."""
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    spec = _recipe_parity_spec("api_to_api_sync_0")
+    process = spec["components"][-1]
+    if process["type"] != "process":
+        raise AssertionError("the frozen api_to_api_sync_0 spec no longer ends in its process")
+    return AuthoringRequestV1.model_validate(
+        {
+            "intent": {
+                "intent_kind": "process_ir",
+                "integration_name": spec["name"],
+                "components": [c for c in spec["components"] if c["type"] != "process"],
+                "units": [
+                    {
+                        "envelope": {
+                            "component_key": process["key"],
+                            "name": process["name"],
+                            "action": process["action"],
+                            "depends_on": process["depends_on"],
+                        },
+                        "process_ir": copy.deepcopy(API_TO_API_SYNC_GOLDEN_PROCESS_IR),
+                    }
+                ],
+            }
+        }
+    )
+
+
+def plan_recipe_golden_request(request):
+    """``(unit, placeholder-backed symbols, internals)`` from the PUBLIC typed plan.
+
+    Offline. Any plan ERROR is refused exactly as the public compile refuses it;
+    warnings (the offline "lint did not run" advisory, recipe leg provenance) are
+    not part of the ``process-xml-v1`` artifact and are not pinned here.
+    The symbols are rebound to ``placeholder_component_id`` — the ``id-<key>``
+    spellings the frozen ``process-xml-v1`` files carry — by the same helper the
+    materialization plan compiles with.
+    """
+    from boomi_mcp.authoring.process_materialization import placeholder_backed_symbols
+    from boomi_mcp.authoring.workflow import AuthoringWorkflowError, plan_authoring_request_v1
+    from boomi_mcp.errors import AUTHORING_COMPILE_BLOCKED
+
+    plan_result, internals = plan_authoring_request_v1(
+        request, profile="golden", account_id="golden"
+    )
+    if plan_result.errors:
+        raise AuthoringWorkflowError(AUTHORING_COMPILE_BLOCKED, plan_result.errors)
+    (unit,) = internals.normalized.integration_spec.processes
+    return unit, placeholder_backed_symbols(internals.symbols), internals
+
+
+def render_recipe_golden_process_xml(request):
+    """Plan -> compile -> emit: the ``process-xml-v1`` bytes, placeholder ids."""
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+
+    unit, symbols, _internals = plan_recipe_golden_request(request)
+    _cfg, plan = compile_process_ir_v1(unit.process_ir, symbols)
+    return emit_process(plan, symbols).process_xml
+
+
+def recipe_golden_request(name):
+    arms = {
+        "fanout_v2": fanout_v2_golden_request,
+        "direct_unit": lambda _name: api_to_api_sync_golden_request(),
+    }
+    arm = RECIPE_GOLDEN_ARMS[name]
+    if arm not in arms:
+        raise KeyError(
+            "case {0!r} names recipe arm {1!r}, which is not one of {2}".format(
+                name, arm, sorted(arms)
+            )
+        )
+    return arms[arm](name)
 
 
 def _recipe_case(name):
     def render():
-        from boomi_mcp.models.integration_models import IntegrationSpecV1
-        from boomi_mcp.patterns.recipe_bridge import (
-            run_fanout_recipe,
-            run_sync_preset_recipe,
-        )
-        from boomi_mcp.recipes.builtins.catalog import (
-            RECIPE_API_TO_API_SYNC,
-            RECIPE_DB_REST_FANOUT,
-        )
-
-        payload = json.loads(
-            (_HERE / "fixtures" / "recipe_parity" / (name + ".json"))
-            .read_text(encoding="utf-8")
-        )
-        spec = IntegrationSpecV1.model_validate(payload)
-        process = spec.components[-1]
-        arms = {
-            "fanout": (run_fanout_recipe, RECIPE_DB_REST_FANOUT),
-            "sync_preset": (run_sync_preset_recipe, RECIPE_API_TO_API_SYNC),
-        }
-        arm = RECIPE_GOLDEN_ARMS[name]
-        if arm not in arms:
-            raise KeyError(
-                "case {0!r} names recipe arm {1!r}, which is not one of {2}".format(
-                    name, arm, sorted(arms)
-                )
-            )
-        runner, recipe_id = arms[arm]
-        result = runner(
-            recipe_id=recipe_id, components=spec.components, process=process
-        )
-        return result.artifact_for(process.key).process_xml
+        return render_recipe_golden_process_xml(recipe_golden_request(name))
     return render
 
 
@@ -2548,7 +2749,7 @@ def _build_registry():
         "issue180:map_declared_effect": ("process-component-v1", _issue180_effect_case("map_declared_effect")),
         "issue180:subprocess_declared_effect": ("process-component-v1", _issue180_effect_case("subprocess_declared_effect")),
         "issue180:external_writer_declared_effect": ("process-component-v1", _issue180_effect_case("external_writer_declared_effect")),
-        # I — typed recipe arms
+        # I — recipe goldens: pinned fan-out 2.0.0 and a direct canonical unit (#159 S2)
         "recipe:compose_stream": ("process-xml-v1", _recipe_case("compose_stream")),
         "recipe:compose_all_cache": ("process-xml-v1", _recipe_case("compose_all_cache")),
         "recipe:api_to_api_sync_0": ("process-xml-v1", _recipe_case("api_to_api_sync_0")),

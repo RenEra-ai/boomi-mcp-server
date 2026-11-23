@@ -68,3 +68,37 @@ out = base.replace(slot, block)
 assert out.count(block) == 1
 open(OUT, "wb").write(out)
 ```
+
+## `recipe:*` renderer migrations — golden-000001, golden-000003, golden-000004 (S2)
+
+The three renderers no longer route through `patterns/recipe_bridge.py`. Their case keys, golden
+ids, `process-xml-v1` artifact kind and frozen expected bytes are unchanged. No expected file
+was touched, and the frozen bytes are what the new renderers are compared against. Each one
+renders through the public typed plan (`plan_authoring_request_v1`, offline, errors refused). The
+symbol table is rebound to `placeholder_component_id` (the `id-<key>` spellings the frozen files
+carry) by `placeholder_backed_symbols`. Then `compile_process_ir_v1` → `emit_process(...).process_xml`.
+
+| Golden | Case | New route | Frozen inputs and their source |
+| --- | --- | --- | --- |
+| golden-000004 | `recipe:compose_stream` | pinned `boomi.compose.db_rest_fanout@2.0.0` | `FANOUT_V2_GOLDEN_RAW_INPUT` + `FANOUT_V2_GOLDEN_MATERIAL` in the corpus. Values come from the frozen spec dump `tests/fixtures/recipe_parity/compose_stream.json` (captured at `060dabad64e028d83d192e5820d8f37df64d54d3`): prefix `DEMO`; DB driver, host, database, username and credential reference; read statement and `source_a`; the one direct mapping; the `target_a` payload profile; Orders and Billing base URLs and paths; target labels. They are re-expressed in the v2 split the same way as `tests/_fanout_v2_support.py::v2_from_compose_request`. |
+| golden-000003 | `recipe:compose_all_cache` | the same pinned invocation | the same inputs plus `FANOUT_V2_ALL_CACHE_LINKS`, the explicit star with both targets on `document_cache`. This is the composition `compose_all_cache.json` was captured with. |
+| golden-000001 | `recipe:api_to_api_sync_0` | direct canonical `process_ir` unit | `API_TO_API_SYNC_GOLDEN_PROCESS_IR`: source → map → target → stop over the frozen `recipe_parity/api_to_api_sync_0.json` process's own `$ref` symbols. It has no labels, because the sync dialect authored none and every `userlabel` in the frozen file is empty. The supporting components and the envelope (key, name, action, dependency set) are read from that spec at render time and never retyped. |
+
+**The one re-spelling.** Fan-out 2.0.0 admits a credential reference only in the opaque
+`credential://` form. So the DB connection's `<<opaque credential reference>>` is carried as
+`credential://<<opaque credential reference>>`, the rule `v2_credential_ref` applies to the #159 S1
+flagship oracle. No other value is changed.
+
+**Checked, not asserted.** `process-xml-v1` bytes carry only references and labels, so byte parity
+alone would accept almost any material.
+`test_wave_gate_goldens.py::test_a_migrated_recipe_golden_plans_the_frozen_spec_it_was_captured_against`
+pins every supporting component the request plans, field by field, to the frozen spec, with the
+re-spelling applied to the expected side. It also pins the process envelope.
+`test_every_active_golden_renders_with_all_test_modules_unimportable` renders the three cases and
+the `ConnectionOverride` survivor to their frozen bytes before anything else, in a child process
+where every `test_*` module is unimportable. While they render, it traces execution. No function
+defined in `patterns.archetypes`, `patterns.composition`, `patterns.recipe_bridge` or
+`compiler.process_ir.legacy_adapters` may run, and a control call proves the tracer sees one. An
+import block is not used, because it cannot pass before the S3 cutover. The production recipe
+registry imports the first three to hash their source (`recipes/registry.py::RECIPE_LAYER_MODULES`),
+so every public-workflow route loads them without running them.
