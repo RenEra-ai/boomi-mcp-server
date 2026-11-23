@@ -72,6 +72,7 @@ from ...patterns.archetype_parameters import (
     JSONPayloadProfile,
     _flatten_payload_profile_leaves,
 )
+from ...categories.components.wss_route_methods import ASC_METHOD_RULE
 from ...patterns.base import PrimitiveBuildContext
 from ..component_material import (
     DbWriteMaterialV1,
@@ -237,8 +238,9 @@ class ListenerOperationMaterialV1(_FanoutMaterialModel):
         min_length=1,
         description=(
             "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | "
-            "EXECUTE. Not an HTTP verb; behind an API Service route it decides "
-            "the inherited method."
+            "EXECUTE. Not an HTTP verb; behind an API Service route "
+            + ASC_METHOD_RULE
+            + "."
         ),
     )
     input_type: Literal["singlejson", "multijson"] = Field(
@@ -280,7 +282,11 @@ class ApiServiceMaterialV1(_FanoutMaterialModel):
     )
     http_method: Optional[Literal["GET", "POST", "PUT", "DELETE", "PATCH"]] = Field(
         default=None,
-        description="Route method override; default inherits it from the operation type.",
+        description=(
+            "Route method override; default (None) inherits it from the operation: "
+            + ASC_METHOD_RULE
+            + "."
+        ),
     )
     title: Optional[str] = Field(default=None, min_length=1, description="Display title.")
     version: str = Field(default="1.0.0", min_length=1, description="Display version.")
