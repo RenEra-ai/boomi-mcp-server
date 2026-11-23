@@ -4167,14 +4167,52 @@ def test_stored_profile_links_project_to_the_identity_of_the_bound_plan_profile(
 
 
 def test_an_unknown_stored_profile_link_marks_the_symbols_profiles_unknown():
+    """Only an unknown INPUT side marks ``profiles_unknown`` — it is read as what the component
+    accepts (CDX-159-S3-r1-02). An unknown OUTPUT side states no profile and fails closed without
+    it (the map's absent target: ``test_component_safe_edit``'s ``unreadable_profile`` control)."""
     cap, rows, store = _s3b_captured()
     del store[cap.CAPTURED_PATCH_REQUEST_PROFILE]
     readings, _reads = _s3b_read(rows, store)
     symbols, _table = _s3b_symbols(rows, tuple(readings.values()))
-    assert symbols["$ref:MAP"].output_profile_ref is None and symbols["$ref:MAP"].profiles_unknown is True
+    # The map's TARGET (output) is unknown: no profile, and its input still verified.
+    assert symbols["$ref:MAP"].output_profile_ref is None and symbols["$ref:MAP"].input_profile_ref
+    assert symbols["$ref:MAP"].profiles_unknown is None
     assert symbols["$ref:OP"].input_profile_ref is None and symbols["$ref:OP"].profiles_unknown is True
     # The GET operation's links all verified: untouched.
     assert symbols["$ref:ROP"].profiles_unknown is None and symbols["$ref:ROP"].output_profile_ref
+
+
+def test_an_unknown_response_profile_does_not_make_a_call_s_input_unknown():
+    """CDX-159-S3-r1-02: the GET operation declares NO request profile; its response profile cannot
+    be read. Its input stays absent — not unknown — so a call fed by a document cache is not refused
+    for a response it never consumes; the map that reads that response still sees an unknown source."""
+    cap, rows, store = _s3b_captured()
+    del store[cap.CAPTURED_GET_RESPONSE_PROFILE]
+    readings, _reads = _s3b_read(rows, store)
+    assert _s3b_sides(readings["ROP"]) == (("absent", None, None), ("unknown", None, None))
+    symbols, _table = _s3b_symbols(rows, tuple(readings.values()))
+    assert (symbols["$ref:ROP"].input_profile_ref, symbols["$ref:ROP"].output_profile_ref,
+            symbols["$ref:ROP"].profiles_unknown) == (None, None, None)
+    assert symbols["$ref:MAP"].input_profile_ref is None and symbols["$ref:MAP"].profiles_unknown is True
+
+
+@pytest.mark.parametrize("bound", ["map", "operation"])
+def test_a_bound_component_whose_stored_envelope_names_another_id_is_unknown(bound):
+    """CDX-159-S3-r1-01: the bytes the account answered must be the BOUND component's own. A map or
+    REST operation whose envelope names another id (same type) proves no link: every side unknown."""
+    cap, rows, store = _s3b_captured()
+    if bound == "map":
+        stored = store[cap.CAPTURED_MAP]
+        assert f'componentId="{cap.CAPTURED_MAP}"' in stored
+        store[cap.CAPTURED_MAP] = stored.replace(
+            f'componentId="{cap.CAPTURED_MAP}"', f'componentId="{cap.CAPTURED_GET_OP}"', 1)
+        key = "MAP"
+    else:
+        # The PATCH operation's id answers with the GET operation's bytes: same type, other id.
+        store[cap.CAPTURED_PATCH_OP] = store[cap.CAPTURED_GET_OP]
+        key = "OP"
+    readings, _reads = _s3b_read(rows, store)
+    assert (readings[key].input.state, readings[key].output.state) == ("unknown", "unknown"), readings[key]
 
 
 def test_an_unjudged_name_binding_leaves_a_created_map_or_rest_operation_its_own_facts():

@@ -15,7 +15,8 @@ This reads, at the id apply binds:
   (``connector_resolution_snapshot.live_identity_from_component_xml``, the same reader and — through
   the phase's one ``BudgetedComponentReads``, which reads each id once — the same bytes);
 
-and verifies each linked profile from its own ComponentGet envelope: the envelope must state the
+after checking that the stored envelope names the bound id itself, and verifies each linked profile
+from its own ComponentGet envelope: the envelope must state the
 same component id and a real profile type. The compiler needs only that identity and type, so no
 profile body is read. The result rides on the resolution snapshot
 (``TrustedConnectorResolutionSnapshotV1.profile_bindings``) and is projected into the existing
@@ -230,6 +231,14 @@ def stored_profile_bindings_for_unwritten_components(
             continue
         unknown_reading = unknown_reading.model_copy(update={"component_id": component_id})
         stored_xml = _fetch_xml(component_id)
+        # CDX-159-S3-r1-01: the stored bytes must be the BOUND component's own — apply references
+        # ``component_id``, so links read from another component's envelope prove nothing. The
+        # same envelope check ``verified_profile_side`` makes for every linked profile.
+        envelope = stored_profile_envelope(stored_xml)
+        if envelope is None or canonical_component_id(envelope[0]) != component_id:
+            if component_type == _MAP_TYPE or _declares_rest(component):
+                readings.append(unknown_reading)
+            continue
         if component_type == _MAP_TYPE:
             links = stored_map_profile_links(stored_xml)
             if links is None:

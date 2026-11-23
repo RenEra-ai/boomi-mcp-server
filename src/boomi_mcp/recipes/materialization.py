@@ -357,8 +357,8 @@ def _stored_binding_profile_facts(component, snapshot, facts):
     that holds the account (`StoredProfileBindingV1`). Per side: KNOWN — an internal symbol whose
     identity is the stored profile component and its type, so a plan profile bound to the same
     component is the same profile and any other is not; ABSENT — no profile; UNKNOWN — no profile,
-    and the symbol's profiles are unknown (``profiles_unknown``), which every profile consumer
-    treats as matching nothing. A route that read nothing, or a component it did not record (a
+    and, on the INPUT side, the symbol's profiles are unknown (``profiles_unknown``), which every
+    profile consumer treats as matching nothing. A route that read nothing, or a component it did not record (a
     connector action of another family), keeps the facts it had: none.
     """
     if str(component.type or "").strip() not in _STORED_BINDING_TYPES:
@@ -370,7 +370,6 @@ def _stored_binding_profile_facts(component, snapshot, facts):
         return facts, ()
     stored = []
     refs = []
-    unknown = False
     for side in (reading.input, reading.output):
         if side.state == "known":
             symbol = _stored_profile_symbol(side.profile_component_id, side.profile_component_type)
@@ -378,7 +377,11 @@ def _stored_binding_profile_facts(component, snapshot, facts):
             refs.append(symbol.ref)
             continue
         refs.append(None)
-        unknown = unknown or side.state == "unknown"
+    # CDX-159-S3-r1-02: ``profiles_unknown`` is read as what the component ACCEPTS (a call's
+    # ``input_unknown``), so only the INPUT side sets it. An unknown OUTPUT side already fails
+    # closed without it: it states no profile, so a call's output flows on as an undeclared
+    # stream and a map's absent target is a mismatch at the map.
+    unknown = reading.input.state == "unknown"
     # Built, not copied: a map or operation states no cache profile.
     return _ProfileFacts(refs[0], refs[1], None, unknown=unknown), tuple(stored)
 
