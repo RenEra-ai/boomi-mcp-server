@@ -474,3 +474,52 @@ def test_literal_process_extensions_ref_passes_validate_config():
     # A literal (non-$ref) connection id needs no depends_on edge.
     from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
     assert WrapperSubprocessBuilder.validate_config(_wrapper_pe_cfg("literal-conn-id-1234"), depends_on=[]) is None
+
+
+# ---------------------------------------------------------------------------
+# #159 S3: the same outcome on a TYPED unit, with nothing synthesized
+# ---------------------------------------------------------------------------
+
+
+def test_a_typed_process_call_wrapper_declares_its_child_edge_and_extensions_explicitly():
+    """Wrapper synthesis leaves planning at the #159 cutover (decision 4): a migrated
+    wrapper is a typed ProcessIR unit whose lone ``process_call`` names the child,
+    whose envelope DECLARES the child edge and the connection dependency, and whose
+    typed ``process_extensions`` carry the override the hoist used to copy from the
+    child. Plan and compile keep all three exactly as authored (nothing is inferred
+    or hoisted), order the child before the wrapper, and fingerprint both roots."""
+    from unittest.mock import MagicMock, patch
+
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+    from boomi_mcp.models.process_component import (
+        ProcessAuthoringUnitAuthoredV1,
+        ProcessComponentEnvelopeAuthoredV1,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
+
+    import test_issue_157_governance as gov
+
+    conn, op = gov._conn(key="conn_b"), gov._op(key="op_b", conn="conn_b")
+    child = gov._unit(key="child", conn="conn_b", op="op_b", component_prefix="C")
+    extensions = {"connections": [{"connection_id": "$ref:conn_b", "connector_type": "rest",
+                                   "fields": [{"id": "url", "label": "Base URL"}]}]}
+    wrapper = ProcessAuthoringUnitAuthoredV1(
+        envelope=ProcessComponentEnvelopeAuthoredV1(
+            component_key="wrapper", action="create", name="Wrapper",
+            depends_on=("child", "conn_b"), process_extensions=extensions,
+        ),
+        process_ir=parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": [
+            {"kind": "process_call", "process_ref": "$ref:child", "wait": True, "abort_on_error": True}]}}),
+    )
+    request = gov._request([wrapper, child], [conn, op])
+    with patch(gov._PAGINATE, lambda *a, **k: []):
+        compiled, internals = compile_authoring_request_v1(request, boomi_client=MagicMock(), profile="p")
+    roots = {u.envelope.component_key: u.envelope for u in internals.normalized.integration_spec.processes}
+    assert roots["wrapper"].depends_on == ("child", "conn_b")
+    connections = roots["wrapper"].process_extensions.connections
+    assert [(c.connection_id, [f.id for f in c.fields]) for c in connections] == [("$ref:conn_b", ["url"])]
+    # The child keeps no extension it did not author (nothing was hoisted either way).
+    assert roots["child"].process_extensions.connections == ()
+    kinds = {(f.component_key, f.artifact_kind) for f in compiled.artifact_fingerprints}
+    assert {("wrapper", "process_component_materialization_plan"),
+            ("child", "process_component_materialization_plan")} <= kinds
