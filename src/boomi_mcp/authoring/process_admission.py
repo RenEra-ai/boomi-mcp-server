@@ -121,11 +121,14 @@ def row_refusal_field(row: Any, pointer: str) -> Optional[str]:
     row is bind-shaped. Runs before normalization, so it reads the raw dict; the
     explicit-id rule (:func:`flat_process_refusal_field`) runs on the normalized
     row, still before any account lookup."""
+    from ..categories.integration_builder import raw_component_config, raw_component_type
+
     if not isinstance(row, Mapping):
         return None
-    if not _is_process_type(row.get("type") if row.get("type") is not None else row.get("component_type")):
+    # Normalization's own alias precedence, asked — not copied (CDX-159-S3-r1-03).
+    if not _is_process_type(raw_component_type(row)):
         return None
-    config = row.get("config") if "config" in row else row.get("spec", {})
+    config = raw_component_config(row)
     if config is None:
         config = {}
     if not isinstance(config, Mapping):

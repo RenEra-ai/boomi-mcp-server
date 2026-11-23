@@ -325,12 +325,30 @@ def _normalize_component_type(value: str) -> str:
     return _TYPE_ALIASES.get(key, key)
 
 
+def raw_component_type(raw: Mapping[str, Any]) -> Any:
+    """A raw component row's type, with its alias: ``type``, else ``component_type``.
+
+    The ONE alias precedence normalization uses; a check that reads a raw row before
+    normalization (``process_admission.row_refusal_field``) asks this, never a copy.
+    """
+    return raw.get("type") or raw.get("component_type")
+
+
+def raw_component_config(raw: Mapping[str, Any]) -> Any:
+    """A raw component row's configuration, with its alias: ``config``, else ``spec``
+    (``{}`` when neither is given). Shared like :func:`raw_component_type`."""
+    config = raw.get("config")
+    if config is None:
+        config = raw.get("spec", {})
+    return config
+
+
 def _normalize_component(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"integration_spec.components[{index - 1}] must be a JSON object")
 
     key = raw.get("key") or raw.get("name") or f"component_{index}"
-    component_type = raw.get("type") or raw.get("component_type")
+    component_type = raw_component_type(raw)
     if not component_type:
         raise ValueError(f"Component '{key}' is missing required field: type")
 
@@ -339,9 +357,7 @@ def _normalize_component(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
     if action not in ("create", "update"):
         raise ValueError(f"Component '{key}' has invalid action '{action}'. Use create or update.")
 
-    config = raw.get("config")
-    if config is None:
-        config = raw.get("spec", {})
+    config = raw_component_config(raw)
     if not isinstance(config, dict):
         raise ValueError(f"Component '{key}' config must be a JSON object")
 

@@ -6991,6 +6991,28 @@ def test_a_legacy_body_on_an_otherwise_valid_reference_is_refused_value_free(moc
         )
 
 
+@patch(_PATCH_TARGET)
+def test_a_raw_process_body_behind_a_normalization_alias_is_refused_value_free(mock_pag):
+    """CDX-159-S3-r1-03: the early refusal reads a raw row with normalization's OWN alias
+    precedence — an empty ``type`` falls back to ``component_type``, a null ``config`` to
+    ``spec`` — so a body behind either alias is refused like one in the primary field, BEFORE
+    normalization: the rows also carry an action normalization rejects (echoing it), so a check
+    that missed the alias would answer with that error instead."""
+    mock_pag.return_value = []
+    for row in (
+        {"key": "main_process", "name": "Main", "action": "CANARY_A", "type": "",
+         "component_type": "process", "config": {"xml": "<CANARY_V/>"}},
+        {"key": "main_process", "name": "Main", "action": "CANARY_A", "type": "process",
+         "config": None, "spec": {"xml": "<CANARY_V/>"}},
+    ):
+        _assert_unit_required(
+            _build_plan(MagicMock(), _build_config([row])),
+            "integration_spec.components.0.config.xml",
+            "CANARY_V", "CANARY_A",
+        )
+    mock_pag.assert_not_called()
+
+
 def _typed_request(intent):
     from src.boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
