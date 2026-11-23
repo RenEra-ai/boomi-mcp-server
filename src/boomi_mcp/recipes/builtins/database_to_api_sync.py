@@ -74,6 +74,7 @@ from ...models.process_component import (
     ProcessOverrideFieldV1,
 )
 from ...models.process_ir import NotifyNodeV1, ProcessIRV1
+from ...models.process_ir_tokens import CAUGHT_ERROR_PROPERTY_ID, NOTIFY_LEVELS
 from ...models.recipe_contributions import (
     ConstraintRequirementV1,
     ProcessUnitContributionV1,
@@ -215,8 +216,26 @@ class DbToApiDlqV1(RecipeInputBase):
 class DbToApiCatchNotifyV1(RecipeInputBase):
     """A log-only Notify at the head of each catch leg (requires a DLQ)."""
 
-    level: str
-    message_template: str = Field(min_length=1)
+    # The served enumeration is derived from the SAME authority the validator
+    # below reaches through ``NotifyNodeV1`` (``NOTIFY_LEVELS``); the field stays a
+    # string so a case or whitespace variant is still normalized, not refused.
+    level: str = Field(
+        description=(
+            "Platform log level for the Notify at the head of each catch leg. "
+            "Case-insensitive; one of " + ", ".join(NOTIFY_LEVELS) + "."
+        ),
+        json_schema_extra={"enum": list(NOTIFY_LEVELS)},
+    )
+    message_template: str = Field(
+        min_length=1,
+        description=(
+            "Plain-text log message. It must contain the literal text "
+            + CAUGHT_ERROR_PROPERTY_ID
+            + " (the caught-error property, bound once per occurrence), must not "
+            "contain a brace, and must not read as a JSON object or array; "
+            "otherwise the input is refused with db_to_api_catch_notify_invalid."
+        ),
+    )
 
     @field_validator("level")
     @classmethod
