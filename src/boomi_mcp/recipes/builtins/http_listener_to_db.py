@@ -238,9 +238,10 @@ class ListenerOperationMaterialV1(_FanoutMaterialModel):
         min_length=1,
         description=(
             "WSS operationType: GET | QUERY | CREATE | UPDATE | UPSERT | DELETE | "
-            "EXECUTE. Not an HTTP verb; behind an API Service route "
+            "EXECUTE. Not an HTTP verb. Behind an API Service route whose "
+            "api_service.http_method is omitted, "
             + ASC_METHOD_RULE
-            + "."
+            + "; an explicit api_service.http_method overrides it."
         ),
     )
     input_type: Literal["singlejson", "multijson"] = Field(
