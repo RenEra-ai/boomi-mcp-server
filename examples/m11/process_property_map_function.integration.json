@@ -5,6 +5,7 @@
   "purpose": "M11 (#125): explicit processproperty component with a stable property key, referenced by a transform.map (map_type=function) through defined_process_property_get — the #131 green path (component $ref in depends_on + verbatim property key coupling).",
   "do_not_reuse": "Concrete values below are demo-grade so the spec plans clean in tests; generate your own stable property-key UUID once and keep it across updates.",
   "integration_spec": {
+    "name": "M11 Process Property Map Demo",
     "naming": {"integration_name": "M11 Process Property Map Demo"},
     "components": [
       {
