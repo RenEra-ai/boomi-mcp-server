@@ -1994,6 +1994,21 @@ if prepare_component_edit_action:
                   component_type=...) to see the full config a type needs.
                 Raw config.xml is rejected (use manage_component for full XML replace).
                 patch.layout (patch root, beside config): see Process layout below.
+                - CANONICAL PROCESS UPDATE (#159): {"authoring_request": {...}} — an
+                  AuthoringRequestV1 with intent_kind="process_ir" and exactly ONE unit
+                  whose envelope has action="update" and component_id equal to this
+                  component_id (a live process). Every intent.components row must BIND an
+                  existing component by explicit id (the row's component_id with
+                  action="create" under conflict_policy="reuse"; a map, profile or other
+                  non-connector may instead use config.reference_only=true with
+                  config.component_id); nothing but this process is written. Not
+                  combinable with config or map_context. Compiled like
+                  build_integration(action='compile'); every dependency id is read and
+                  type-checked; the result is merged with the process preservation
+                  policy (overrides, encrypted values, unknown XML, folder kept).
+                  update_mode="canonical_process_update". Refusals (nothing written):
+                  PROCESS_COMPONENT_SCHEMA_INVALID, PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
+                  PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID, AUTHORING_* compile codes.
             max_diff_lines: Cap the returned unified diff (default 200).
 
         Process layout (#188):
@@ -2079,6 +2094,12 @@ if apply_component_edit_action:
             the token binds patch.layout's effective mode and the previewed digest;
             a token from before #188, a changed mode, or different bytes is refused
             with no write (COMPONENT_EDIT_TOKEN_INVALID / COMPONENT_EDIT_DRIFT_DETECTED).
+
+        Canonical process update (#159, patch.authoring_request): the token also binds
+            the compile hash and every dependency's live identity. Apply recompiles,
+            re-reads every dependency, and re-reads the process immediately before its
+            single write; any change since prepare refuses with no write
+            (COMPONENT_EDIT_DRIFT_DETECTED).
 
         Returns:
             base_version, new_version, version_comparison, update_mode, and layout.

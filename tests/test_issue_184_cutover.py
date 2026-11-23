@@ -231,3 +231,58 @@ def test_the_safe_edit_route_builds_the_retained_oracle_input_into_the_oracles_s
     assert applied["_success"] is True and applied["boomi_mutation"] is True, applied
     pushed = client.component.update_component_raw.call_args.args[1]
     assert _shape_tree(pushed) == _shape_tree(_ORACLE.read_text(encoding="utf-8"))
+
+
+def test_the_public_safe_edit_applies_the_canonical_mapped_both_sides_update(monkeypatch):
+    """EVAL-155-02 / -02a: the one working mapped both-bound caller (safe edit), on the
+    canonical arm. The #184 canonical fixture (golden-000081's input) is submitted
+    through the REGISTERED prepare/apply tools with every reference BOUND to a
+    proven-operable capture (`replay_identity/cap159-s3-bound-profiles/`, executed green:
+    a GET storing `responseProfile`, a PATCH storing `requestProfile`, and the map between
+    them; provenance in `tests/test_component_safe_edit.py`, "#159 S3 (lane S3b)"). Only the
+    account transport is faked, and it serves the captured bytes verbatim.
+
+    The map's profile continuity is proved from the STORED bindings (#159 S3 lane S3b:
+    `authoring.stored_profile_bindings`). Expected values come from the frozen legacy
+    oracle golden-000079 only; the comparison substitutes the documented captured->oracle
+    ids (`ORACLE_IDS_BY_CAPTURED_ID`) and drops layout coordinates, nothing else."""
+    from test_component_safe_edit import (
+        CANONICAL_PROCESS_ID,
+        CAPTURED_GET_RESPONSE_PROFILE,
+        CAPTURED_MAP,
+        CAPTURED_PATCH_REQUEST_PROFILE,
+        CanonicalAccount,
+        assert_live_process_preserved,
+        captured_bound_profiles_patch,
+        captured_bound_profiles_store,
+        shapes_without_layout,
+        with_oracle_ids,
+    )
+    from test_component_safe_edit_wrapper import public_safe_edit
+
+    account = CanonicalAccount(captured_bound_profiles_store())
+    prepared, pushes_after_prepare, applied = public_safe_edit(
+        monkeypatch, account, captured_bound_profiles_patch(), CANONICAL_PROCESS_ID
+    )
+    assert prepared["_success"] is True, prepared
+    assert pushes_after_prepare == []
+    assert applied["_success"] is True, applied
+    # Exactly one write, of the named process — no supporting component is written.
+    assert [cid for cid, _ in account.component.pushed] == [CANONICAL_PROCESS_ID]
+    # The stored map and both of its linked profiles were read from the account.
+    assert {CAPTURED_MAP, CAPTURED_GET_RESPONSE_PROFILE, CAPTURED_PATCH_REQUEST_PROFILE} <= set(
+        account.component.reads)
+    pushed = account.component.pushed[0][1]
+    # The oracle's <shapes> tree, ignoring only layout coordinates and the documented ids.
+    assert shapes_without_layout(with_oracle_ids(pushed)) == shapes_without_layout(
+        _ORACLE.read_text(encoding="utf-8"))
+    # The target writer after the map reads the map's OUTPUT profile.
+    root = ET.fromstring(pushed)
+    shapes = [shape for shape in root.iter("shape")]
+    kinds = [shape.get("shapetype") for shape in shapes]
+    target_writer = shapes[len(kinds) - 1 - kinds[::-1].index("documentproperties")]
+    assert kinds.index("map") < shapes.index(target_writer)
+    assert {element.get("profileId") for element in target_writer.iter("profileelement")} == {
+        CAPTURED_PATCH_REQUEST_PROFILE
+    }
+    assert_live_process_preserved(pushed)

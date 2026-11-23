@@ -5288,6 +5288,20 @@ _COMPONENT_SAFE_EDIT = {
             "type discriminator or a required builder field is rejected (it is NOT "
             "a field-level delta — only metadata fields support partial edits)."
         ),
+        "canonical_process_update": (
+            "#159: patch.authoring_request (alone — never with config or map_context) "
+            "is an AuthoringRequestV1 with intent_kind='process_ir' and exactly one "
+            "unit whose envelope has action='update' and component_id equal to the "
+            "edited process. Every intent.components row binds an existing component "
+            "by explicit id (the row's component_id + action='create' under "
+            "conflict_policy='reuse'; a non-connector may instead use "
+            "config.reference_only=true + config.component_id) and is never written. The request is compiled like build_integration(action='compile'), "
+            "every dependency id is read and type-checked, and the materialized process "
+            "is merged with the process preservation policy (overrides, encrypted "
+            "values, unknown XML and folder kept). The token also binds the compile "
+            "hash and each dependency's live identity; apply recomputes them and "
+            "re-reads the process before its single write."
+        ),
     },
     # A copy-pasteable, structurally-valid patch (the simplest case: a partial
     # metadata edit; component_type is optional and defaults to the live type).
@@ -5327,6 +5341,11 @@ _COMPONENT_SAFE_EDIT = {
         "COMPONENT_EDIT_PATCH_MISMATCH",
         "COMPONENT_EDIT_DRIFT_DETECTED",
         "COMPONENT_EDIT_TYPE_MISMATCH",
+        # #159 canonical_process_update admission and binding refusals.
+        "PROCESS_COMPONENT_SCHEMA_INVALID",
+        "PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY",
+        "PROCESS_MATERIALIZATION_SYMBOL_BINDING_INVALID",
+        "AUTHORING_APPLY_VALIDATION_REQUIRED",
     ],
     "note": "Rollback / version restore stays deferred (not part of this surface).",
 }
@@ -10406,7 +10425,8 @@ def list_capabilities_action(
                 "profile": "str (required)",
                 "component_id": "str (required)",
                 "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?, \"layout\"?}; metadata config = partial edit, body config = full builder config; raw config.xml is rejected."
-                         " #188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; patch.layout = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write. The diff and token cover the arranged bytes; metadata patches never move shapes.",
+                         " #188: every process body written is laid out with Boomi's own Arrange (Auto Format) layout; patch.layout = 'arrange' (default) | 'preserve' (keep coordinates); results carry layout {applied, mode, reason, columns, rows, estimated_extent, warnings}; PROCESS_LAYOUT_* codes refuse before any write. The diff and token cover the arranged bytes; metadata patches never move shapes."
+                         " #159: {\"authoring_request\": {...}} (alone) is the canonical process update — one process_ir unit, action='update', envelope.component_id = component_id; supporting components bound by explicit id, never written (see get_schema_template(resource_type='component', operation='safe_edit')).",
                 "max_diff_lines": "int (optional, default 200)",
             },
             "examples": [
@@ -10424,7 +10444,7 @@ def list_capabilities_action(
             "parameters": {
                 "profile": "str (required)",
                 "component_id": "str (required)",
-                "patch": "JSON str (required) — the same patch previewed by prepare_component_edit (#188: apply writes exactly the previewed bytes; a pre-#188 token or a changed patch.layout is refused, COMPONENT_EDIT_TOKEN_INVALID)",
+                "patch": "JSON str (required) — the same patch previewed by prepare_component_edit (#188: apply writes exactly the previewed bytes; a pre-#188 token or a changed patch.layout is refused, COMPONENT_EDIT_TOKEN_INVALID; #159: a canonical patch.authoring_request is recompiled and its dependencies re-read, and any change since prepare refuses with COMPONENT_EDIT_DRIFT_DETECTED)",
                 "confirmation_token": "str (required) — from prepare_component_edit",
                 "confirm_apply": "bool (required to commit; defaults false)",
                 "max_diff_lines": "int (optional, default 200)",

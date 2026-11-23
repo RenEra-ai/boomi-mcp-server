@@ -2662,6 +2662,7 @@ def _validate_processes(
         assert_declared_matches_resolved,
         build_connector_resolution_snapshot,
     )
+    from .stored_profile_bindings import stored_profile_bindings_for_unwritten_components
 
     # THIS SURFACE REPORTS; it does not refuse. That is not a preference, it is
     # this function's stated contract one docstring above: planning hands a
@@ -2725,6 +2726,12 @@ def _validate_processes(
                 # binding is unjudged (ARCH-186-e1-02; the owner decision of 2026-09-14 keeps plan and
                 # compile degraded rather than refused, and typed apply refuses before any write).
                 binding_unjudged=boomi_client is not None and existing_ids is None),
+            # #159 S3: the stored profile links of every map and REST operation apply does not
+            # write, read the same way and through the same budget (each id once), and each linked
+            # profile verified from its own envelope.
+            profile_bindings=stored_profile_bindings_for_unwritten_components(
+                boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
+                existing_ids=existing_ids, reads=target_reads),
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the
@@ -3554,8 +3561,14 @@ def plan_authoring_request_v1(
     boomi_client: Any = None,
     profile: str,
     account_id: Optional[str] = None,
+    reads: Optional["BudgetedComponentReads"] = None,
 ) -> Tuple[AuthoringPlanResultV1, _PlanInternals]:
-    """Validate typed intent and preview its ComponentPlan. Mutates nothing."""
+    """Validate typed intent and preview its ComponentPlan. Mutates nothing.
+
+    ``reads`` (#159 S3): a caller's phase budget to share — canonical safe edit shares ONE
+    across its compile, its dependency verification and its final target check. ``None`` opens
+    a fresh one for this phase, as before.
+    """
     capability_diagnostics = _check_capability_revision(request)
     if capability_diagnostics:
         raise AuthoringWorkflowError(
@@ -3571,7 +3584,7 @@ def plan_authoring_request_v1(
     # profile discovery, typed validation's, the identity and target reads.
     from ..categories.components._shared import phase_reads
 
-    _target_reads = BudgetedComponentReads(boomi_client)
+    _target_reads = reads if reads is not None else BudgetedComponentReads(boomi_client)
     with phase_reads(_target_reads):
         component_plan = _legacy_plan_echo(normalized, request, boomi_client, raw=True)
         (
@@ -4247,10 +4260,13 @@ def compile_authoring_request_v1(
     boomi_client: Any = None,
     profile: str,
     account_id: Optional[str] = None,
+    reads: Optional["BudgetedComponentReads"] = None,
 ) -> Tuple[AuthoringCompileResultV1, _PlanInternals]:
-    """Canonically compile typed intent. Mutates nothing; returns no build id."""
+    """Canonically compile typed intent. Mutates nothing; returns no build id.
+
+    ``reads``: the phase budget to share (``plan_authoring_request_v1``)."""
     plan_result, internals = plan_authoring_request_v1(
-        request, boomi_client=boomi_client, profile=profile, account_id=account_id
+        request, boomi_client=boomi_client, profile=profile, account_id=account_id, reads=reads
     )
 
     # A fatal plan is a compile refusal, not a compile with errors attached. The
