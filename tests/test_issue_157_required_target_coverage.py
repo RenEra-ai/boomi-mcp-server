@@ -194,14 +194,17 @@ def test_the_archetype_contract_still_refuses_a_missing_required_leaf_through_th
 # ---------------------------------------------------------------------------
 
 
-_REPLAY_CASE = (
-    Path(__file__).resolve().parent / "fixtures" / "governance" / "issue_157" / "cases"
-    / "database_to_api_sync" / "wm_off_dlq_off_create" / "input.canonical.json"
+# The direct-unit request (explicit components + units) for the same case: the S1 canonical
+# fixture as committed before #159 S2 rewrote the replay input as a recipe invocation. See
+# tests/fixtures/issue_157_direct/PROVENANCE.md.
+_DIRECT_CASE = (
+    Path(__file__).resolve().parent / "fixtures" / "issue_157_direct"
+    / "database_to_api_sync.wm_off_dlq_off_create.direct.json"
 )
 
 
 def _components(missing_required=True):
-    """The committed canonical replay fixture's components — a plan that is clean.
+    """The committed direct-unit fixture's components — a plan that is clean.
 
     Causally independent of this slice's implementation (derived from the
     baseline archetype's own emitted components), so the gap below is the ONLY
@@ -210,7 +213,7 @@ def _components(missing_required=True):
     """
     import json
 
-    request = json.loads(_REPLAY_CASE.read_text(encoding="utf-8"))
+    request = json.loads(_DIRECT_CASE.read_text(encoding="utf-8"))
     components = copy.deepcopy(request["intent"]["components"])
     if missing_required:
         target = next(c for c in components if c["type"] == "profile.json")
@@ -223,7 +226,7 @@ def _components(missing_required=True):
 def _request(components):
     import json
 
-    request = json.loads(_REPLAY_CASE.read_text(encoding="utf-8"))
+    request = json.loads(_DIRECT_CASE.read_text(encoding="utf-8"))
     request["intent"]["components"] = components
     return AuthoringRequestV1.model_validate(request)
 
@@ -244,10 +247,10 @@ def test_plan_reports_the_gap_by_name_and_compile_refuses_it():
 
 
 def _components_missing(names):
-    """The replay fixture's components with N named required leaves unbound."""
+    """The direct-unit fixture's components with N named required leaves unbound."""
     import json
 
-    request = json.loads(_REPLAY_CASE.read_text(encoding="utf-8"))
+    request = json.loads(_DIRECT_CASE.read_text(encoding="utf-8"))
     components = copy.deepcopy(request["intent"]["components"])
     target = next(c for c in components if c["type"] == "profile.json")
     for name in names:
