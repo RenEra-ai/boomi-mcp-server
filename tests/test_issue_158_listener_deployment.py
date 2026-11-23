@@ -313,6 +313,16 @@ class _ApplyBoundary:
 
     @contextlib.contextmanager
     def installed(self, existing=None):
+        # Warm the per-process authoring revisions BEFORE patching: computing them the
+        # first time lazily imports modules that bind `component_get_xml` at import
+        # (`meta_tools` -> `query_components`, the corpus replay -> `safe_edit_component`,
+        # ...). Imported inside this window they would keep the patched reader for the
+        # rest of the process and break a later test that reads through them (measured
+        # in the #159 S3 corpus harvest: the public safe-edit witness then saw this
+        # boundary's `connector-settings` readback).
+        from boomi_mcp.authoring.contract import get_authoring_revisions
+
+        get_authoring_revisions()
         with contextlib.ExitStack() as stack:
             if existing is not None:
                 stack.enter_context(
@@ -756,13 +766,39 @@ def _two_canonical_roots():
     return applied, ["root_a", "root_b"]
 
 
+def _record_historical_component(build_id, component, result):
+    """Model a build RECORDED before the #159 S3 cutover.
+
+    A flat authored process body can no longer be applied (it is refused at
+    admission), but deployment still reads build records written before that —
+    so the historical row is placed in the recorded spec and results exactly as
+    apply recorded flat components (`spec.components` + `results[key]`)."""
+    entry = _BUILD_REGISTRY[build_id]
+    components = entry["spec"]["components"]
+    for index, row in enumerate(components):
+        if row.get("key") == component["key"]:
+            components[index] = copy.deepcopy(component)
+            break
+    else:
+        components.append(copy.deepcopy(component))
+    if result is not None:
+        entry["results"][component["key"]] = dict(result)
+
+
 def _canonical_root_and_authored_component():
+    # The canonical root is applied today; the authored legacy process is a
+    # HISTORICAL record beside it (#159 S3: no request can author it any more).
     applied, _ = _legacy_build(
         {
             "name": "E158 Mixed",
-            "components": [APPLIABLE_CONN, APPLIABLE_OP, _LEGACY_AUTHORED_PROCESS],
+            "components": [APPLIABLE_CONN, APPLIABLE_OP],
             "processes": [_scheduled_unit().model_dump(mode="json")],
         }
+    )
+    _record_historical_component(
+        applied["build_id"],
+        dict(_LEGACY_AUTHORED_PROCESS, depends_on=[]),
+        {"status": "created", "component_id": "applied-legacy_proc"},
     )
     return applied, ["legacy_proc", "root"]
 
@@ -866,12 +902,19 @@ def _scheduled_with_wss_operation():
 
 
 def _scheduled_with_listener_shaped_child():
+    # #159 S3: a bind row may carry no body, so a reference child whose config also
+    # names a listener-shaped `source` can no longer be SUBMITTED (typed admission
+    # refuses it). It survives only in a build recorded before the cutover: apply the
+    # admitted reference child, then record the historical listener-shaped config the
+    # deployment reader must still classify.
+    applied = _typed_build(
+        _request([_scheduled_unit()], list(_SCHEDULED_COMPONENTS) + [_WSS_LISTEN_OP, _reference_child()])
+    )[0]
     child = _reference_child(
         source={"connector_type": "wss", "action_type": "Listen", "operation_id": "$ref:" + _WSS_OP_KEY}
     )
-    return _typed_build(
-        _request([_scheduled_unit()], list(_SCHEDULED_COMPONENTS) + [_WSS_LISTEN_OP, child])
-    )[0], child
+    _record_historical_component(applied["build_id"], child, None)
+    return applied, child
 
 
 @pytest.mark.parametrize(

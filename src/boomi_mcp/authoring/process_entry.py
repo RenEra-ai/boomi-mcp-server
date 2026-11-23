@@ -74,13 +74,26 @@ def _clean_ref(value: Any) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+#: The config key each RETIRED legacy process dialect emitted its start from, as the
+#: builders declared it (``ENTRY_CONFIG_KEY``) when #159 S3 retired their dispatch:
+#: ``database_to_api_sync`` -> ``source``, ``sync_pipeline`` -> ``pipeline``,
+#: ``wrapper_subprocess`` -> none (it synthesised a no-action start). Pinned, because
+#: the records it reads are historical: no request can author a new one.
+_HISTORICAL_ENTRY_KEYS = {
+    "database_to_api_sync": ("source",),
+    "sync_pipeline": ("pipeline",),
+    "wrapper_subprocess": (),
+}
+
+
 def legacy_config_entry(process_config: Any) -> ProcessEntryV1:
     """The entry of a LEGACY process config, normalized.
 
     Two recognized shapes, as before #158 — a ``sync_pipeline`` ``listener``
     stage, and a lowered or hand-authored ``source`` binding with a Web Services
-    Server family and the Listen action — now read through the WSS builder's own
+    Server family and the Listen action — read through the WSS builder's own
     alias resolver instead of two private alias sets. Anything else is scheduled.
+    Since #159 S3 this reads HISTORICAL deployment records only.
     """
     from ..categories.components.builders.connector_builder import (
         _resolve_wss_connector_type,
@@ -90,23 +103,22 @@ def legacy_config_entry(process_config: Any) -> ProcessEntryV1:
         return _SCHEDULED_ENTRY
     # #158 ARCH-158-r1-02, completed at ARCH-158-r2-02: the entry is what the
     # process ENTERS on, so a config key belongs to the entry only for the
-    # builder that emits its start from that key — and each builder DECLARES
-    # which key that is. Reading a key the builder ignores reported a listener
-    # entry for a process that has none: a `database_to_api_sync` carrying a
-    # stray listener stage (it emits its source start), and a
-    # `wrapper_subprocess` carrying a stray WSS `source` (it synthesises a
-    # no-action start). A config naming no kind, or an unregistered one, keeps
-    # the permissive reading the abbreviated recognizer fixtures rely on.
-    from ..categories.components.builders.process_flow_builder import (
-        PROCESS_FLOW_BUILDERS,
-    )
-
+    # dialect that emitted its start from that key. Reading a key the dialect
+    # ignored reported a listener entry for a process that has none: a
+    # `database_to_api_sync` carrying a stray listener stage (it emitted its
+    # source start), and a `wrapper_subprocess` carrying a stray WSS `source`
+    # (it synthesised a no-action start). A config naming no kind, or an
+    # unrecognized one, keeps the permissive reading the abbreviated recognizer
+    # fixtures rely on.
+    #
+    # #159 S3 (cutover decision 4): no process builder is looked up any more. A
+    # recorded legacy build is HISTORICAL — nothing authors one now — so the
+    # field each retired dialect entered on is a pinned table, not a registry
+    # read (`_HISTORICAL_ENTRY_KEYS`).
     kind = str(
         process_config.get("process_kind") or process_config.get("process_type") or ""
     ).strip().lower()
-    builder = PROCESS_FLOW_BUILDERS.get(kind)
-    entry_key = getattr(builder, "ENTRY_CONFIG_KEY", None) if builder is not None else None
-    reads = (entry_key,) if builder is not None else ("pipeline", "source")
+    reads = _HISTORICAL_ENTRY_KEYS.get(kind, ("pipeline", "source"))
     pipeline = process_config.get("pipeline") if "pipeline" in reads else None
     if isinstance(pipeline, Mapping):
         for stage in pipeline.get("stages") or []:

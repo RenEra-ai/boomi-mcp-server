@@ -28,7 +28,7 @@ from boomi_mcp.categories.meta_tools import (
     list_capabilities_action,
     plan_integration_design_action,
 )
-from boomi_mcp.errors import INVALID_INPUT, PATTERN_NOT_FOUND
+from boomi_mcp.errors import INVALID_INPUT
 from boomi_mcp.kb.account_governance import get_account_governance_catalog
 from boomi_mcp.kb.design_doctrine import get_design_doctrine_catalog
 
@@ -37,12 +37,19 @@ from boomi_mcp.kb.design_doctrine import get_design_doctrine_catalog
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _archetype_names():
-    from boomi_mcp import patterns as patterns_pkg
-    from boomi_mcp.patterns import PatternKind, PatternRegistry
+#: #159 S3: the `archetype` argument takes a discoverable recipe_id.
+_DB_TO_API = "boomi.archetype.database_to_api_sync"
 
-    registry = PatternRegistry.from_package(patterns_pkg)
-    return [c.metadata.name for c in registry.list_patterns(kind=PatternKind.ARCHETYPE)]
+
+def _archetype_names():
+    """The ids the `archetype` argument accepts: the discoverable recipe ids,
+    from the live registry (the archetype pattern registry retired from every
+    served surface in #159 S3)."""
+    from boomi_mcp.categories.integration_authoring import (
+        list_integration_archetypes_action,
+    )
+
+    return [row["recipe_id"] for row in list_integration_archetypes_action()["recipes"]]
 
 
 def _status_by_name():
@@ -120,12 +127,28 @@ def test_pre_selection_no_flags_is_still_valid():
 
 def test_archetype_mode_schema_derived_decisions():
     r = plan_integration_design_action(
-        archetype="database_to_api_sync",
+        archetype=_DB_TO_API,
         intent_flags=["incremental", "retry", "dlq", "notify"],
     )
     assert r["_success"] is True
     assert r["mode"] == "archetype"
-    assert r["archetype"] == "database_to_api_sync"
+    assert r["archetype"] == _DB_TO_API
+    # The brief carries the same projection get_integration_archetype serves,
+    # and the exact reference to it.
+    from boomi_mcp.categories.integration_authoring import (
+        get_integration_archetype_action,
+    )
+
+    served = get_integration_archetype_action(_DB_TO_API)
+    for key in ("descriptor", "input_schema", "component_material_schema"):
+        assert r["recipe"][key] == served[key], key
+    assert r["recommended_recipes"] == [
+        {
+            "recipe_id": _DB_TO_API,
+            "recipe_version": served["recipe_version"],
+            "entry_kind": "executable_recipe",
+        }
+    ]
     assert r["missing_inputs"] == []
     schema_decisions = [
         d for d in r["required_user_decisions"]
@@ -140,7 +163,7 @@ def test_archetype_mode_schema_derived_decisions():
 
 
 def test_archetype_mode_recommends_named_patterns_with_status():
-    r = plan_integration_design_action(archetype="database_to_api_sync")
+    r = plan_integration_design_action(archetype=_DB_TO_API)
     patterns = r["recommended_doctrine_patterns"] + r["recommended_governance_patterns"]
     assert patterns, "a brief must recommend at least one pattern"
     for p in patterns:
@@ -184,7 +207,7 @@ def test_governance_surfaces_buildable_before_relevance():
 
 def test_capability_gaps_match_source_registries():
     r = plan_integration_design_action(
-        archetype="database_to_api_sync",
+        archetype=_DB_TO_API,
         intent_flags=["incremental", "retry", "dlq", "notify"],
     )
     truth = _status_by_name()
@@ -204,9 +227,13 @@ def test_unknown_archetype_returns_small_error_envelope():
     r = plan_integration_design_action(archetype="__nope__")
     assert r["_success"] is False
     assert r["mode"] == "error"
-    assert r["error_code"] == PATTERN_NOT_FOUND
-    assert "__nope__" in r["error"]
-    assert isinstance(r["valid_archetypes"], list) and r["valid_archetypes"]
+    assert r["error_code"] == "RECIPE_NOT_FOUND"
+    assert r["archetype"] == "__nope__"
+    assert r["valid_archetypes"] == _archetype_names()
+    # A legacy archetype NAME is not a recipe id (#159 S3).
+    legacy = plan_integration_design_action(archetype="database_to_api_sync")
+    assert legacy["_success"] is False
+    assert legacy["error_code"] == "RECIPE_NOT_FOUND"
     # Must NOT dump the doctrine/governance catalogs in the error path.
     assert "recommended_doctrine_patterns" not in r
     assert "recommended_governance_patterns" not in r
@@ -232,7 +259,9 @@ def test_non_list_intent_flags_rejected():
 def test_archetype_like_flag_does_not_trigger_archetype_mode():
     """An archetype name passed as an intent flag must NOT be interpreted as
     selecting that archetype (no NL inference, no flag->archetype map)."""
-    name = _archetype_names()[0]
+    # The recipe id's last segment is the flag-shaped token (a dotted id is not
+    # a valid flag at all).
+    name = _archetype_names()[0].rsplit(".", 1)[-1]
     r = plan_integration_design_action(intent_flags=[name])
     assert r["mode"] == "pre_selection"
     assert r["archetype"] is None
@@ -297,7 +326,7 @@ def test_payload_keys_declared_in_output_schema():
     required = set(PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA["required"])
     for result in (
         plan_integration_design_action(intent_flags=["retry"]),
-        plan_integration_design_action(archetype="database_to_api_sync"),
+        plan_integration_design_action(archetype=_DB_TO_API),
         plan_integration_design_action(archetype="__nope__"),
         plan_integration_design_action(intent_flags=["bad flag"]),
     ):
@@ -348,7 +377,7 @@ def test_mcp_call_tool_roundtrip_structured_content():
     result = _run_async(
         server.mcp.call_tool(
             "plan_integration_design",
-            {"archetype": "database_to_api_sync", "intent_flags": ["dlq"]},
+            {"archetype": _DB_TO_API, "intent_flags": ["dlq"]},
         )
     )
     sc = result.structured_content

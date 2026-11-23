@@ -284,8 +284,9 @@ def test_every_served_statement_of_a_listener_method_is_the_authoritys():
     # NON-VACUITY on the REAL collection: the sweep reached the surfaces QA
     # measured, and found sanctioned statements there.
     paths = {path for path, _sentence, _ok in claims}
-    # #159 S2: the listener presets are served as typed recipes now; their
-    # component-material schemas carry the operation type and route method.
+    # #159 S3: the listener presets are served through their `recipe:` selectors
+    # (the `archetype:<name>` selectors retire), so the measured surfaces are the
+    # recipes' component-material schemas.
     for surface in (
         "schema:recipe:boomi.archetype.http_listener_to_rest@1.0.0/component_material_schema/"
         "$defs/ListenerOperationMaterialV1/properties/operation_type/description",
@@ -302,7 +303,10 @@ def test_the_served_statement_guard_refuses_what_qa_found():
     example the table contradicts is refused."""
     from boomi_mcp.categories.components.wss_route_methods import ASC_METHOD_RULE
 
-    listener = "schema:archetype:http_listener_to_db/parameter_schema/$defs/ListenerSource"
+    listener = (
+        "schema:recipe:boomi.archetype.http_listener_to_db@1.0.0/component_material_schema/"
+        "$defs/ListenerOperationMaterialV1"
+    )
     refused = [
         (listener + "/operation_type", "NOT an HTTP verb — the HTTP method derives from input_type (JSON input -> POST)."),
         (listener + "/input_type", "This preset is JSON-input only; both values arrive as HTTP POST."),

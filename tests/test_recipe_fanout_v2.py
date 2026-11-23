@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -86,13 +87,52 @@ def _oracle_spec():
     return IntegrationSpecV1.model_validate(oracle()["integration_spec"])
 
 
+_LEGACY_SELECTOR = re.compile(r'"\$ref:legacy\.adapter:(/[^"]*)"')
+
+
 def _legacy_root(spec):
-    # The LEGACY arm's root for the same composition, through the v1 adapter.
-    from boomi_mcp.patterns.recipe_bridge import run_fanout_recipe
+    """The LEGACY arm's root for the same composition.
+
+    #159 S3 retired fan-out 1.0.0, so this no longer runs that recipe: it lowers
+    the composed ``flow_sequence`` config through the isolated legacy adapter
+    (kept until #160) and replaces each adapter selector
+    (``$ref:legacy.adapter:<json-pointer>``) with the reference the frozen config
+    holds at that pointer — a mechanical substitution with no recipe code in it.
+    """
+    from boomi_mcp.compiler.process_ir.legacy_adapters.flow_sequence import (
+        adapt_flow_sequence,
+    )
+    from boomi_mcp.models.process_ir import parse_process_ir_v1
 
     process = spec.components[-1]
-    result = run_fanout_recipe(recipe_id=RECIPE_ID, components=spec.components, process=process)
-    return dict(result.composed.process_roots)[process.key]
+    config = process.config
+
+    def resolve(match):
+        node = config
+        for part in match.group(1).strip("/").split("/"):
+            node = node[int(part)] if isinstance(node, list) else node[part]
+        return json.dumps(node)
+
+    text = canonical_process_ir_json(adapt_flow_sequence(config).process_ir)
+    assert _LEGACY_SELECTOR.search(text), "non-vacuity: the adapter emitted no selector"
+    return parse_process_ir_v1(json.loads(_LEGACY_SELECTOR.sub(resolve, text)))
+
+
+def _legacy_compose(parts, options):
+    """The isolated legacy composer (kept until #160), without its retired check.
+
+    ``compose_archetypes`` ends by re-running its output through fan-out 1.0.0 —
+    a verification whose result it discards ("Everything below this line is
+    byte-unchanged"). #159 S3 retired that registration, so the check alone is
+    stubbed; every byte of the composed spec is still the legacy composer's.
+    """
+    from unittest import mock
+
+    from boomi_mcp.patterns import composition
+
+    with mock.patch.object(composition, "run_fanout_recipe", lambda **_k: None), \
+            mock.patch.object(composition, "declared_target_version", lambda _a: None):
+        return composition.compose_archetypes(parts, options)
 
 
 def _unit(raw):
@@ -227,8 +267,6 @@ def test_the_witness_holds_with_the_legacy_producers_import_blocked():
 
 
 def test_a_mixed_staged_composition_root_matches_the_legacy_arm():
-    from boomi_mcp.patterns.composition import compose_archetypes
-
     request = copy.deepcopy(oracle()["compose_request"])
     request["parts"].append(copy.deepcopy(request["parts"][3]))
     request["parts"][-1].update({"key": "shipping", "label": "Shipping"})
@@ -239,7 +277,7 @@ def test_a_mixed_staged_composition_root_matches_the_legacy_arm():
         {"from_part": "shape", "to_part": "shipping", "handoff": {"mode": "document_cache"}},
     ]
     options = dict(request["options"], links=links)
-    legacy_spec = compose_archetypes(request["parts"], options)
+    legacy_spec = _legacy_compose(request["parts"], options)
 
     raw, material = flagship_v2()
     raw["targets"].append(dict(raw["targets"][1], part_key="shipping", label="Shipping"))
@@ -280,14 +318,12 @@ def test_a_folder_placed_reuse_staged_composition_matches_the_live_legacy_path()
     """The frozen #157 ``reuse_3legs_staged_all`` input — reuse by component id,
     bind parameters, ``batch_size``, ``date_format``, every leg staged — plus a
     folder and a literal query parameter, run through BOTH paths."""
-    from boomi_mcp.patterns.composition import compose_archetypes
-
     request = json.loads(_REUSE_CASE.read_text())["input"]
     request["options"]["naming"]["folder_path"] = "Integrations/Fanout"
     request["parts"][2]["parameters"]["send_request"]["query_parameters"] = [
         {"name": "mode", "value_source": "literal", "literal_value": "full"}
     ]
-    legacy_spec = compose_archetypes(request["parts"], request["options"])
+    legacy_spec = _legacy_compose(request["parts"], request["options"])
     legacy_process = legacy_spec.components[-1]
 
     raw, material = v2_from_compose_request(request)
@@ -334,16 +370,26 @@ def test_the_ported_constants_are_pinned_to_the_legacy_composition():
 
 
 def test_v2_is_registered_beside_v1_and_v1_stays_the_default():
+    # #159 S3: 1.0.0 is retired and 2.0.0 is the default — the node id keeps its
+    # S1 spelling; the body pins the cutover's registration state.
+    from boomi_mcp.errors import RECIPE_VERSION_UNAVAILABLE
+
     registry = production_registry()
-    assert registry.resolve(RECIPE_ID, None).recipe_version == "1.0.0"
+    assert registry.resolve(RECIPE_ID, None).recipe_version == V2
+    with pytest.raises(RecipeError) as caught:
+        registry.resolve(RECIPE_ID, "1.0.0")
+    assert caught.value.diagnostics[0].code == RECIPE_VERSION_UNAVAILABLE
     v2 = registry.resolve(RECIPE_ID, V2)
-    assert v2.is_default is False
+    assert v2.is_default is True
     assert set(v2.output_types) == {"constraint_requirement", "process_unit", "recorded_intent"}
     assert registry.component_preparation_for(v2) == (
         FanoutComponentMaterialV2,
         prepare_db_rest_fanout_v2,
     )
-    assert registry.component_preparation_for(registry.resolve(RECIPE_ID, "1.0.0")) is None
+    # Control: a material-less executable has no preparation pair.
+    from boomi_mcp.recipes.builtins.catalog import RECIPE_STUB_MINIMAL
+
+    assert registry.component_preparation_for(registry.resolve(RECIPE_STUB_MINIMAL)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1645,56 +1691,46 @@ def test_arch_r1_04_a_deferred_name_is_scoped_to_its_owning_root():
 
 
 def _v1_and_v2_request(*, v2_selects_shared_db):
-    """A pinned v1 invocation over the frozen flagship components (all base
-    components) beside a v2 invocation under namespace ``b``."""
-    from _fanout_v2_support import respell_oracle_credential_refs
+    """Two root-producing invocations in one request: the flagship beside a
+    second invocation under namespace ``b``.
 
-    components = respell_oracle_credential_refs(oracle()["integration_spec"]["components"])
-    process = components[-1]
-    config = process["config"]
-    branch = next(n for n in config["flow_sequence"] if n["kind"] == "branch")
-    v1_raw = {
-        "version": "1",
-        "process_key": process["key"],
-        "source_connection_ref": config["source"]["connection_id"],
-        "source_operation_ref": config["source"]["operation_id"],
-        "map_ref": next(n for n in config["flow_sequence"] if n["kind"] == "map_ref")["map_ref"],
-        "map_label": "Shared transform",
-        "branch_label": branch["label"],
-        "targets": [
-            {
-                "target_id": "t.%d" % index,
-                "connection_ref": leg["target"]["connection_id"],
-                "operation_ref": leg["target"]["operation_id"],
-                "handoff": "document_stream",
-            }
-            for index, leg in enumerate(branch["legs"])
-        ],
-        "component_slots": [
-            {
-                "contribution_id": "c.%d" % index,
-                "component_key": component["key"],
-                "component_type": component["type"],
-                "materialization_mode": "create",
-                "materializer_slot": component["key"],
-            }
-            for index, component in enumerate(components)
-        ],
-    }
+    #159 S3 retired fan-out 1.0.0, so the first invocation is no longer a pinned
+    v1 slot invocation over base components: it is the flagship at 2.0.0. When
+    ``v2_selects_shared_db``, the database connection the v1 slot used to bind is
+    a reference-only BASE component under the same key, and BOTH invocations
+    select it by key. The helper keeps its S1 name because the node ids that use
+    it do.
+    """
+    first_raw, first_material = flagship_v2()
     raw, material = flagship_v2()
     raw.update(key_namespace="b", process_key="b_process")
     raw["naming"]["process_name"] = "Process B"
     raw["naming"]["component_prefix"] = "BBB"
+    base_components = []
     if v2_selects_shared_db:
-        raw["source"]["connection_key"] = "source_db_connection"
-        material["source"].pop("connection")
+        shared, _rest = _base_connections()
+        shared = shared.model_copy(update={"key": "source_db_connection"})
+        base_components.append(shared.model_dump(mode="json"))
+        for selecting_raw, selecting_material in ((raw, material), (first_raw, first_material)):
+            selecting_raw["source"] = {
+                "part_key": "db",
+                "binding_mode": "reuse",
+                "connection_key": "source_db_connection",
+            }
+            selecting_material["source"].pop("connection")
     return recipe_request(
         raw,
         material,
-        base_components=components,
+        base_components=base_components,
         invocation_id="v2",
         extra_invocations=[
-            {"recipe_id": RECIPE_ID, "recipe_version": "1.0.0", "invocation_id": "v1", "raw_input": v1_raw}
+            {
+                "recipe_id": RECIPE_ID,
+                "recipe_version": V2,
+                "invocation_id": "v1",
+                "raw_input": first_raw,
+                "component_material": first_material,
+            }
         ],
     )
 
@@ -1818,14 +1854,21 @@ _PIPELINE_CHILD = textwrap.dedent(
     config["integration_spec"]["version"] = "1.0"
     nested = config["integration_spec"]["components"][0]["config"]["pipeline"]
     config["integration_spec"]["pipeline"] = copy.deepcopy(nested)
+    # #159 S3: a flat process body is refused at admission, so the spec drops
+    # it; the top-level pipeline stays as the inert analysis view on an
+    # otherwise admitted spec (cutover decision 1).
+    config["integration_spec"]["components"] = [
+        c for c in config["integration_spec"]["components"] if c["type"] != "process"
+    ]
     from boomi_mcp.categories import integration_builder
     try:
         with patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
             plan = integration_builder._build_plan(MagicMock(), config)
         success = plan.get("_success")
+        error_code = plan.get("error_code")
     except ImportError:
-        success = "import_error"
-    print(json.dumps({"attempts": attempts, "success": success}))
+        success, error_code = "import_error", None
+    print(json.dumps({"attempts": attempts, "success": success, "error_code": error_code}))
     """
 )
 
@@ -1838,7 +1881,7 @@ def test_arch_r1_09_a_v1_0_spec_with_a_pipeline_never_imports_the_legacy_authori
     )
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert payload["attempts"] == []
-    assert payload["success"] is True
+    assert payload["success"] is True, payload["error_code"]
 
 
 @pytest.mark.parametrize("arm", ["db_host", "rest_base_url"])

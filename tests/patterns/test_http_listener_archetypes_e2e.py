@@ -31,12 +31,41 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from boomi_mcp.categories.integration_authoring import (
-    build_from_archetype_action,
-    get_integration_archetype_action,
-    list_integration_archetypes_action,
-)
 from boomi_mcp.categories.integration_builder import build_integration_action
+
+
+def build_from_archetype_action(*args, **kwargs):
+    """The retired ``build_from_archetype`` tool's action (#159 S3 deletes it).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "build_from_archetype_action")(*args, **kwargs)
+
+
+def get_integration_archetype_action(*args, **kwargs):
+    """The discovery action #159 S3 reshapes to recipe-only (lane D).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "get_integration_archetype_action")(*args, **kwargs)
+
+
+def list_integration_archetypes_action(*args, **kwargs):
+    """The discovery action #159 S3 reshapes to recipe-only (lane D).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "list_integration_archetypes_action")(*args, **kwargs)
+
 
 _DB_ARCHETYPE = "http_listener_to_db"
 _REST_ARCHETYPE = "http_listener_to_rest"
@@ -162,31 +191,29 @@ def _by_key(spec: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 class TestCatalogAndSchema:
+    # #159 S3: discovery is recipe-only (step-4 decision 1); each listener
+    # pattern is served as its 1.0.0 recipe ``boomi.archetype.<pattern>``. The
+    # parametrize ids keep their S2 spelling.
     @pytest.mark.parametrize("archetype", [_DB_ARCHETYPE, _REST_ARCHETYPE])
     def test_listed_in_catalog(self, archetype):
         result = list_integration_archetypes_action(query="listener")
         assert result["_success"] is True
-        assert archetype in [a["name"] for a in result["archetypes"]]
+        listed = {r["recipe_id"]: r["recipe_version"] for r in result["recipes"]}
+        assert listed.get(f"boomi.archetype.{archetype}") == "1.0.0"
         assert result["raw_xml_exposed"] is False
 
     @pytest.mark.parametrize("archetype", [_DB_ARCHETYPE, _REST_ARCHETYPE])
     def test_get_returns_strict_schema_without_xml(self, archetype):
-        result = get_integration_archetype_action(archetype)
+        result = get_integration_archetype_action(f"boomi.archetype.{archetype}")
         assert result["_success"] is True
-        arch = result["archetype"]
-        assert arch["capability_notes"]
-        assert arch["limitations"]
-        assert arch["examples"]
-        schema = arch["parameter_schema"]
-        assert schema.get("additionalProperties") is False
-        for name, prop in schema["properties"].items():
-            assert prop.get("description"), f"property {name!r} missing description"
+        descriptor = result["descriptor"]
+        assert descriptor["capability_notes"]
+        assert descriptor["limitations"]
+        assert descriptor["examples"]
+        for schema in (result["input_schema"], result["component_material_schema"]):
+            assert schema.get("additionalProperties") is False
+            assert schema["properties"]
         assert "<?xml" not in json.dumps(result)
-        # The #133 advanced-tier ASC wrapper is documented (shipped in M6.1 —
-        # advanced runtimes are served via asc_wrapper, no longer deferred).
-        assert "asc_wrapper" in json.dumps(
-            arch["metadata"]["not_for"] + arch["limitations"]
-        )
 
 
 # ===========================================================================
@@ -194,136 +221,9 @@ class TestCatalogAndSchema:
 # ===========================================================================
 
 
-class TestListenerToDbAssembly:
-    def test_component_set_and_keys(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        assert set(_by_key(spec)) == _DB_EXPECTED_KEYS
-
-    def test_main_process_is_intact_listener_stage_graph(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        process = _by_key(spec)["main_process"]
-        config = process["config"]
-        assert config["process_kind"] == "sync_pipeline"
-        # Stage graph INTACT — no pairwise source/target/transform config.
-        for legacy_key in ("source", "target", "transform"):
-            assert legacy_key not in config
-        stages = {s["key"]: s for s in config["pipeline"]["stages"]}
-        assert [s["kind"] for s in config["pipeline"]["stages"]] == [
-            "listener",
-            "map",
-            "write",
-        ]
-        listener_stage = stages["listener"]
-        assert listener_stage["config"] == {
-            "primitive": "wss_listen",
-            "operation_id": "$ref:source_wss_listener_operation",
-        }
-        # No connection binding on the listener stage (WSS has no connection).
-        assert "connection_id" not in listener_stage["config"]
-        assert set(process["depends_on"]) == {
-            "source_wss_listener_operation",
-            "transform_transform_map",
-            "target_db_connection",
-            "target_db_write_operation",
-        }
-
-    def test_wss_operation_component_config(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        op = _by_key(spec)["source_wss_listener_operation"]
-        assert op["type"] == "connector-action"
-        config = op["config"]
-        assert config["connector_type"] == "wss"
-        assert config["operation_mode"] == "listen"
-        assert config["object_name"] == "orderIntake"
-        assert config["operation_type"] == "EXECUTE"
-        assert config["input_type"] == "singlejson"
-        assert config["output_type"] == "none"
-        assert config["request_profile"] == "$ref:listener_request_profile"
-        assert op["depends_on"] == ["listener_request_profile"]
-
-    def test_listener_request_profile_generated_from_payload_tree(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        profile = _by_key(spec)["listener_request_profile"]
-        assert profile["type"] == "profile.json"
-        assert profile["config"]["profile_type"] == "json.generated"
-        leaf_names = [c["name"] for c in profile["config"]["root"]["children"]]
-        assert leaf_names == ["event_id", "amount"]
-
-    def test_validation_rules_listener_metadata(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        listener = spec["validation_rules"]["listener"]
-        assert listener["object_name"] == "orderIntake"
-        assert listener["operation_type"] == "EXECUTE"
-        # The served path sentence-cases the objectName's first letter
-        # (live-settled 2026-07-04); the component stores it verbatim.
-        assert listener["endpoint_path"] == "/ws/simple/executeOrderIntake"
-        # JSON input -> POST (the method is derived, never set on the op).
-        assert listener["http_method"] == "POST"
-        assert listener["test_mode_supported"] is False
-        assert "#133" in listener["api_type_requirement"]
-
-    def test_transform_map_targets_write_profile(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        map_config = _by_key(spec)["transform_transform_map"]["config"]
-        dumped = json.dumps(map_config)
-        assert "$ref:listener_request_profile" in dumped
-        assert "$ref:target_db_write_profile" in dumped
-
-    def test_plan_resolves_all_refs(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        with patch(_PAGINATE_TARGET) as mock_pag:
-            mock_pag.return_value = []
-            plan = build_integration_action(
-                MagicMock(),
-                _PROFILE,
-                "plan",
-                {"integration_spec": spec, "conflict_policy": "reuse"},
-            )
-        assert plan["_success"] is True, plan
-        statuses = {s["key"]: s for s in plan["steps"]}
-        assert set(statuses) == _DB_EXPECTED_KEYS
-        for key, step in statuses.items():
-            assert not str(step.get("planned_action", "")).startswith("error"), (key, step)
-
-
 # ===========================================================================
 # Spec assembly — http_listener_to_rest
 # ===========================================================================
-
-
-class TestListenerToRestAssembly:
-    def test_component_set_and_stage_graph(self):
-        spec = _spec(_REST_ARCHETYPE, _rest_params())
-        assert set(_by_key(spec)) == _REST_EXPECTED_KEYS
-        config = _by_key(spec)["main_process"]["config"]
-        assert config["process_kind"] == "sync_pipeline"
-        kinds = [s["kind"] for s in config["pipeline"]["stages"]]
-        assert kinds == ["listener", "map", "send"]
-        send_stage = next(
-            s for s in config["pipeline"]["stages"] if s["kind"] == "send"
-        )
-        # The lowered send stage needs an explicit HTTP method.
-        assert send_stage["config"]["action_type"] == "POST"
-
-    def test_listener_metadata_and_endpoint(self):
-        spec = _spec(_REST_ARCHETYPE, _rest_params())
-        listener = spec["validation_rules"]["listener"]
-        assert listener["endpoint_path"] == "/ws/simple/executeEventRelay"
-        assert listener["http_method"] == "POST"
-
-    def test_plan_resolves_all_refs(self):
-        spec = _spec(_REST_ARCHETYPE, _rest_params())
-        with patch(_PAGINATE_TARGET) as mock_pag:
-            mock_pag.return_value = []
-            plan = build_integration_action(
-                MagicMock(),
-                _PROFILE,
-                "plan",
-                {"integration_spec": spec, "conflict_policy": "reuse"},
-            )
-        assert plan["_success"] is True, plan
-        for step in plan["steps"]:
-            assert not str(step.get("planned_action", "")).startswith("error"), step
 
 
 # ===========================================================================
@@ -332,18 +232,6 @@ class TestListenerToRestAssembly:
 
 
 class TestInboundValidation:
-    @pytest.mark.parametrize(
-        "archetype, params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
-    )
-    def test_enabled_records_metadata(self, archetype, params_fn):
-        spec = _spec(archetype, params_fn(inbound_validation={"enabled": True}))
-        block = spec["validation_rules"]["listener"]["inbound_validation"]
-        assert block["mode"] == "profile_bound"
-        assert block["request_profile_id"] == "$ref:listener_request_profile"
-
-    def test_disabled_by_default(self):
-        spec = _spec(_DB_ARCHETYPE, _db_params())
-        assert "inbound_validation" not in spec["validation_rules"]["listener"]
 
     def test_primitive_rejects_profile_less_contract(self):
         """The primitive's own rejection path (unreachable through the archetype,
@@ -381,173 +269,9 @@ class TestInboundValidation:
 # ===========================================================================
 
 
-class TestParameterValidation:
-    def test_unknown_transform_source_path_rejected(self):
-        params = _db_params()
-        params["transform"]["operations"][0]["source_path"] = "Root/nope"
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-        assert "source path" in json.dumps(result)
-
-    def test_unknown_write_profile_target_rejected(self):
-        params = _db_params()
-        params["transform"]["operations"][0]["target_path"] = "Fields/nope"
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-
-    def test_unmapped_required_column_rejected(self):
-        params = _db_params()
-        params["transform"]["operations"] = [
-            {"operation_type": "direct", "source_path": "Root/amount", "target_path": "Fields/col_amount"},
-        ]
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-
-    def test_blank_object_name_rejected(self):
-        params = _db_params()
-        params["listener"]["object_name"] = "  "
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-
-    def test_url_unsafe_object_name_rejected_by_builder(self):
-        params = _db_params()
-        params["listener"]["object_name"] = "has space"
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-
-    def test_non_json_input_type_rejected(self):
-        params = _db_params()
-        params["listener"]["input_type"] = "none"
-        result = build_from_archetype_action(_DB_ARCHETYPE, params)
-        assert result["_success"] is False
-
-    def test_dynamic_rest_target_path_rejected(self):
-        params = _rest_params()
-        params["target"]["send_request"]["path"] = "/v1/items/{id}"
-        result = build_from_archetype_action(_REST_ARCHETYPE, params)
-        assert result["_success"] is False
-
-
 # ===========================================================================
 # asc_wrapper — API Service Component publish mode (M6.1 #133)
 # ===========================================================================
-
-
-class TestAscWrapper:
-    @pytest.mark.parametrize(
-        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
-    )
-    def test_default_output_unchanged_without_wrapper(self, archetype, params_fn):
-        # Byte-compatible default: no webservice component, no publish_mode
-        # key, bare /ws/simple endpoint metadata.
-        spec = _spec(archetype, params_fn())
-        assert "api_service" not in _by_key(spec)
-        listener = spec["validation_rules"]["listener"]
-        assert "publish_mode" not in listener
-        assert listener["endpoint_path"].startswith("/ws/simple/")
-        spec_disabled = _spec(archetype, params_fn(asc_wrapper={"enabled": False}))
-        assert spec == spec_disabled
-
-    @pytest.mark.parametrize(
-        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
-    )
-    def test_enabled_emits_webservice_component(self, archetype, params_fn):
-        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
-        by_key = _by_key(spec)
-        asc = by_key["api_service"]
-        assert asc["type"] == "webservice"
-        assert asc["action"] == "create"
-        assert asc["depends_on"] == ["main_process"]
-        routes = asc["config"]["routes"]
-        assert len(routes) == 1
-        assert routes[0]["process"] == "$ref:main_process"
-        # All-inherit route by default (empty string = inherit).
-        assert routes[0]["http_method"] == ""
-        assert routes[0]["object_name"] == ""
-        # The ASC counts in component_count and appears after main_process.
-        keys = [c["key"] for c in spec["components"]]
-        assert keys.index("main_process") < keys.index("api_service")
-        assert spec["validation_rules"]["component_count"] == len(spec["components"])
-        assert "<?xml" not in json.dumps(spec)
-
-    @pytest.mark.parametrize(
-        "archetype,params_fn,object_name",
-        [(_DB_ARCHETYPE, _db_params, "orderIntake"), (_REST_ARCHETYPE, _rest_params, "eventRelay")],
-    )
-    def test_enabled_listener_metadata_switches_to_api_service(
-        self, archetype, params_fn, object_name
-    ):
-        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
-        listener = spec["validation_rules"]["listener"]
-        assert listener["publish_mode"] == "api_service"
-        assert listener["api_type_requirement"] == "advanced"
-        # /ws/rest paths are case-VERBATIM (never sentence-cased).
-        assert listener["endpoint_path"] == f"/ws/rest/{object_name}"
-        assert listener["http_method"] == "POST"
-        assert listener["api_service_component_key"] == "api_service"
-        assert listener["route_process_key"] == "main_process"
-        # The bare path stays available for diagnostics.
-        assert listener["bare_wss_endpoint_path"].startswith("/ws/simple/execute")
-        # The endpoint summary mirrors the ASC route.
-        source_endpoint = next(e for e in spec["endpoints"] if e["key"] == "wss_listener")
-        assert source_endpoint["endpoint_path"] == f"/ws/rest/{object_name}"
-        assert source_endpoint["publish_mode"] == "api_service"
-
-    def test_wrapper_overrides_shape_the_route_and_path(self):
-        spec = _spec(
-            _DB_ARCHETYPE,
-            _db_params(
-                asc_wrapper={
-                    "enabled": True,
-                    "base_url_path": "Intake",
-                    "route_url_path": "V1",
-                    "http_method": "post",
-                    "title": "Order API",
-                    "version": "2.0.0",
-                    "component_name": "Order API Service",
-                }
-            ),
-        )
-        asc = _by_key(spec)["api_service"]
-        assert asc["name"] == "Order API Service"
-        assert asc["config"]["base_url_path"] == "Intake"
-        assert asc["config"]["title"] == "Order API"
-        assert asc["config"]["version"] == "2.0.0"
-        route = asc["config"]["routes"][0]
-        assert route["http_method"] == "POST"
-        assert route["url_path"] == "V1"
-        listener = spec["validation_rules"]["listener"]
-        # Segments compose case-verbatim with empty segments omitted.
-        assert listener["endpoint_path"] == "/ws/rest/Intake/orderIntake/V1"
-
-    @pytest.mark.parametrize(
-        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
-    )
-    def test_enabled_spec_plans_clean_with_asc_after_process(self, archetype, params_fn):
-        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
-        with patch(_PAGINATE_TARGET) as mock_pag:
-            mock_pag.return_value = []
-            plan = build_integration_action(
-                MagicMock(),
-                _PROFILE,
-                "plan",
-                {"integration_spec": spec, "conflict_policy": "reuse"},
-            )
-        assert plan["_success"] is True, plan
-        for step in plan["steps"]:
-            assert not str(step.get("planned_action", "")).startswith("error"), step
-        order = plan["execution_order"]
-        assert order.index("main_process") < order.index("api_service")
-
-    def test_invalid_wrapper_fields_rejected(self):
-        result = build_from_archetype_action(
-            _DB_ARCHETYPE, _db_params(asc_wrapper={"enabled": True, "banana": 1})
-        )
-        assert result["_success"] is False
-        result = build_from_archetype_action(
-            _DB_ARCHETYPE, _db_params(asc_wrapper={"enabled": "not-a-bool-shape"})
-        )
-        assert result["_success"] is False
 
 
 # ===========================================================================
@@ -743,6 +467,16 @@ class TestTypedListenerPresets:
         )
         assert plan.validation_report.is_valid is (not name_bound)
         legacy = _legacy_spec(case_id).model_dump(mode="json")
+        # #159 S3: the legacy flat process body is refused at admission, so the
+        # cross-check plans the legacy route's SUPPORTING components — the
+        # blocked reuse is a supporting connection either way. A component that
+        # names the process (the advanced case's API Service route) goes with it.
+        processes = {c["key"] for c in legacy["components"] if c["type"] == "process"}
+        legacy["components"] = [
+            c
+            for c in legacy["components"]
+            if c["type"] != "process" and not processes & set(c.get("depends_on") or ())
+        ]
         legacy_plan = build_integration_action(
             MagicMock(), _PROFILE, "plan", {"integration_spec": legacy, "conflict_policy": "reuse"}
         )

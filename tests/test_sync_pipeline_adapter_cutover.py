@@ -330,22 +330,45 @@ def test_the_real_archetype_pre_lowers_so_it_can_never_reach_this_dialect(adapte
     The spy assertion is kept because it DOES still catch an inline
     ``SyncPipelineBuilder.build`` added inside ``_build_main_process`` itself.
     """
-    # Reuse the archetype payload an existing wrapper test already maintains, so
-    # this cannot drift from the real archetype's accepted shape.
-    from test_build_integration_wrapper import _MINIMAL_PAYLOAD, server
+    # #159 S3 re-pin (retirement witness). `build_from_archetype` is retired; the
+    # database->API executable is the pinned recipe
+    # `boomi.archetype.database_to_api_sync` 1.0.0, and the mechanism that keeps it
+    # off this dialect is now stronger than pre-lowering: the recipe emits its
+    # process as a CANONICAL ProcessIR unit in `spec.processes`, and no flat
+    # process row carrying a `process_kind` at all — so nothing can dispatch it to
+    # `SyncPipelineBuilder.build` (a flat body is refused at admission anyway).
+    # Input: the #157 replay input of `database_to_api_sync/wm_off_dlq_off_create`
+    # (provenance in that case's provenance.json). The spy assertion still catches
+    # an inline adapter call added anywhere on the recipe's plan path.
+    # `server` as the wrapper suite imports it (that module sets the local-secrets env).
+    from test_build_integration_wrapper import server
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
-    result = server.build_from_archetype("database_to_api_sync", _MINIMAL_PAYLOAD)
-    assert result["_success"] is True, result
+    assert not hasattr(server, "build_from_archetype")
 
-    process_configs = [
-        component.get("config") or {}
-        for component in (result["integration_spec"].get("components") or [])
-        if (component.get("config") or {}).get("process_kind")
+    case = (
+        Path(__file__).resolve().parent
+        / "fixtures/governance/issue_157/cases/database_to_api_sync"
+        / "wm_off_dlq_off_create/input.canonical.json"
+    )
+    request = AuthoringRequestV1.model_validate(json.loads(case.read_text(encoding="utf-8")))
+    planned, internals = plan_authoring_request_v1(
+        request, profile="adapter-cutover", account_id="adapter-cutover"
+    )
+    assert not planned.errors, planned.errors
+    spec = internals.normalized.integration_spec
+    assert len(spec.processes) == 1, "expected the recipe to emit one canonical process unit"
+    assert spec.processes[0].process_ir is not None
+    flat_process_configs = [
+        component.config or {}
+        for component in spec.components
+        if component.type == "process"
     ]
-    assert process_configs, "expected the archetype to emit a process component"
-    for config in process_configs:
-        assert config["process_kind"] == "database_to_api_sync"
-        assert "pipeline" not in config
+    assert all(
+        "process_kind" not in config and "process_type" not in config and "pipeline" not in config
+        for config in flat_process_configs
+    ), flat_process_configs
     assert adapter_spy == []
 
 

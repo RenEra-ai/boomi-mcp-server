@@ -45,11 +45,6 @@ if _src not in sys.path:
 sys.path.insert(0, str(_project_root / "tests" / "patterns"))
 sys.path.insert(0, str(_project_root / "tests"))
 
-from boomi_mcp.categories.integration_authoring import (
-    build_from_archetype_action,
-    compose_archetypes_action,
-    list_integration_archetypes_action,
-)
 from boomi_mcp.categories.meta_tools import (
     get_schema_template_action,
     plan_integration_design_action,
@@ -68,12 +63,7 @@ from boomi_mcp.models.recipe_contributions import (
     parse_recipe_contribution,
     scan_forbidden_recipe_shape,
 )
-from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
-from boomi_mcp.patterns.recipe_bridge import (
-    build_catalog,
-    run_fanout_recipe,
-    run_sync_preset_recipe,
-)
+from boomi_mcp.patterns.recipe_bridge import build_catalog
 from boomi_mcp.recipes import (
     MaterializationCatalog,
     RecipeError,
@@ -85,13 +75,52 @@ from boomi_mcp.recipes import (
 )
 from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes.builtins.catalog import (
-    RECIPE_API_TO_API_SYNC,
+    RECIPE_API_TO_DATABASE_SYNC,
     RECIPE_DB_REST_FANOUT,
 )
+from boomi_mcp.recipes.builtins.fanout import (
+    ComposeDbRestFanoutInputV2,
+    FanoutComponentMaterialV2,
+    prepare_db_rest_fanout_v2,
+)
 from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
-from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1
+from boomi_mcp.recipes.builtins.sync import (
+    ApiToDatabaseSyncInputV1,
+    ApiToDatabaseSyncMaterialV1,
+    SyncRecipeInputV1,
+    emit_api_to_api_sync,
+    prepare_api_to_database_sync_v1,
+)
 
-from test_archetype_composition import _cache_links, _options, _parts
+from _fanout_v2_support import V2, flagship_v2, oracle
+from test_archetype_composition import _cache_links
+
+#: #159 S3 retired the slot-based production recipes (fan-out 1.0.0, the
+#: API->API and API->DB 0.1.0 presets). The slot-input tests below keep driving
+#: the engine's input gate with the SAME still-defined sync executor, registered
+#: in a test registry under this id.
+_SLOT_SYNC_ID = "test.slot.api_to_api_sync"
+_SLOT_REGISTRY = build_test_registry(
+    (
+        RecipeRegistrationV1(
+            recipe_id=_SLOT_SYNC_ID,
+            recipe_version="1.0.0",
+            entry_kind="executable_recipe",
+            is_default=True,
+            input_model=SyncRecipeInputV1,
+            executor=emit_api_to_api_sync,
+            output_types=(
+                "component_contribution",
+                "constraint_requirement",
+                "process_ir_patch",
+            ),
+            conflict_policy=RecipeConflictPolicyV1(
+                mode="error_unless_declared",
+                merge_rules=("dedupe_identical_constraint",),
+            ),
+        ),
+    )
+)
 
 SENTINELS = (
     "SENTINEL-SQL-SELECT-SECRETS",
@@ -107,33 +136,90 @@ SENTINELS = (
 # ---------------------------------------------------------------------------
 
 
-def _poisoned_compose_parts():
-    parts = _parts()
-    for part in parts:
-        if part["kind"] == "db_source":
-            settings = part["parameters"]["binding"]["settings"]
-            settings["host"] = "SENTINEL-HOSTNAME"
-            settings["username"] = "SENTINEL-USERNAME"
-            settings["credential_ref"] = "SENTINEL-CREDENTIAL-REF"
-            part["parameters"]["read_operation"]["sql"] = "SENTINEL-SQL-SELECT-SECRETS"
-    return parts
+def _poison_db_connection(connection):
+    connection["host"] = "SENTINEL-HOSTNAME"
+    connection["username"] = "SENTINEL-USERNAME"
+    connection["credential_ref"] = "credential://SENTINEL-CREDENTIAL-REF"
 
 
-def _poisoned_preset_parameters():
-    parameters = json.loads(json.dumps(ApiToApiSyncArchetype.examples[0].parameters))
-    source_binding = parameters["source"]["binding"]
-    if source_binding.get("settings") is not None:
-        source_binding["settings"]["base_url"] = "https://SENTINEL-HOSTNAME.invalid"
-        source_binding["settings"]["default_headers"] = {
-            "X-Trace": "SENTINEL-HEADER-VALUE"
-        }
-    target_binding = parameters["target"]["binding"]
-    if target_binding.get("settings") is not None:
-        target_binding["settings"]["base_url"] = "https://SENTINEL-HOSTNAME.invalid"
-        target_binding["settings"]["default_headers"] = {
-            "X-Trace": "SENTINEL-HEADER-VALUE"
-        }
-    return parameters
+def _poisoned_fanout():
+    """The flagship fan-out 2.0.0 invocation with sentinels in its MATERIAL.
+
+    #159 S3: the composition route is retired, so the poison rides the surviving
+    executable's closed component material — the channel that carries
+    connection settings and SQL to the trusted preparer, never to the recipe.
+    """
+    raw, material = flagship_v2()
+    _poison_db_connection(material["source"]["connection"])
+    material["source"]["read"]["sql"] = "SENTINEL-SQL-SELECT-SECRETS"
+    return raw, material
+
+
+def _poisoned_preset():
+    """The API->DB 1.0.0 matrix seed with sentinels in its material: a created
+    REST source on a sentinel host and a created database target carrying the
+    sentinel host, user and credential reference (#159 S3: the API->API preset
+    this test used is retired)."""
+    seed = json.loads(
+        (
+            _project_root / "tests" / "fixtures" / "recipe_matrix_seeds"
+            / "boomi.archetype.api_to_database_sync@1.0.0.json"
+        ).read_text()
+    )["request"]
+    raw, material = seed["raw_input"], seed["component_material"]
+    material["source"]["connection"]["base_url"] = "https://SENTINEL-HOSTNAME.invalid"
+    flagship_raw, flagship_material = flagship_v2()
+    raw["target"] = {
+        "binding_mode": "create",
+        "auth_mode": flagship_raw["source"]["auth_mode"],
+    }
+    connection = flagship_material["source"]["connection"]
+    _poison_db_connection(connection)
+    material["target"]["connection"] = connection
+    return raw, material
+
+
+def _run_prepared(recipe_id, version, input_model, material_model, preparer, raw, material):
+    """Prepare the supporting components (the trusted side) and run the recipe."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+
+    prepared = preparer(
+        input_model.model_validate(raw),
+        material_model.model_validate(material),
+        base_catalog={},
+    )
+    result = run_recipes(
+        [RecipeRequestV1(recipe_id, "poisoned", raw, version)],
+        catalog=MaterializationCatalog({}),
+        connector_metadata=_connector_metadata_from_components(
+            prepared.supporting_components
+        ),
+        supporting_components=prepared.supporting_components,
+    )
+    return prepared, result
+
+
+def _run_fanout(raw, material):
+    return _run_prepared(
+        RECIPE_DB_REST_FANOUT, V2, ComposeDbRestFanoutInputV2, FanoutComponentMaterialV2,
+        prepare_db_rest_fanout_v2, raw, material,
+    )
+
+
+def _poisoned_spec():
+    """The frozen flagship composition (cb7034b) with the sentinels written into
+    its database connection and read profile — the legacy-shaped component list
+    the slot catalog projects (#159 S3: no longer composed live)."""
+    spec = json.loads(json.dumps(oracle()["integration_spec"]))
+    for component in spec["components"]:
+        config = component.get("config") or {}
+        if component["key"] == "source_db_connection":
+            config["host"] = "SENTINEL-HOSTNAME"
+            config["username"] = "SENTINEL-USERNAME"
+            config["credential_ref"] = "SENTINEL-CREDENTIAL-REF"
+        if component["key"] == "source_db_read_profile":
+            config["query"] = "SENTINEL-SQL-SELECT-SECRETS"
+    return IntegrationSpecV1.model_validate(spec)
 
 
 def _recipe_side_blob(result):
@@ -156,27 +242,29 @@ def _recipe_side_blob(result):
     ]
     for item in result.composed.component_slots:
         parts.append(repr(item.contribution))
+    # #159 S1+: a typed recipe's process units (envelope + root) and recorded
+    # intents are recipe-side output too.
+    for unit in result.process_units:
+        parts.append(json.dumps(unit.model_dump(mode="json"), sort_keys=True, default=str))
+    for intent in result.recorded_intents:
+        parts.append(json.dumps(intent.model_dump(mode="json"), sort_keys=True, default=str))
     return "\n".join(parts)
 
 
 def test_compose_sentinels_never_reach_the_recipe_side(caplog):
     caplog.set_level(logging.DEBUG)
-    options = dict(_options())
-    options["links"] = _cache_links("billing")
-    response = compose_archetypes_action(parts=_poisoned_compose_parts(), options=options)
-    assert response["_success"] is True
+    raw, material = _poisoned_fanout()
+    raw["links"] = _cache_links("billing")
+    prepared, result = _run_fanout(raw, material)
 
-    # The sentinels ARE in the legacy spec — otherwise the test proves nothing.
-    spec_blob = json.dumps(response["integration_spec"], sort_keys=True)
+    # The sentinels ARE in the prepared components — otherwise the test proves
+    # nothing.
+    spec_blob = json.dumps(
+        [c.model_dump(mode="json") for c in prepared.supporting_components], sort_keys=True
+    )
     assert "SENTINEL-SQL-SELECT-SECRETS" in spec_blob
     assert "SENTINEL-HOSTNAME" in spec_blob
 
-    spec = IntegrationSpecV1.model_validate(response["integration_spec"])
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=spec.components[-1],
-    )
     blob = _recipe_side_blob(result)
     for sentinel in SENTINELS:
         assert sentinel not in blob, sentinel
@@ -185,17 +273,17 @@ def test_compose_sentinels_never_reach_the_recipe_side(caplog):
 
 def test_preset_sentinels_never_reach_the_recipe_side(caplog):
     caplog.set_level(logging.DEBUG)
-    response = build_from_archetype_action(
-        "api_to_api_sync", _poisoned_preset_parameters()
+    raw, material = _poisoned_preset()
+    prepared, result = _run_prepared(
+        RECIPE_API_TO_DATABASE_SYNC, "1.0.0", ApiToDatabaseSyncInputV1,
+        ApiToDatabaseSyncMaterialV1, prepare_api_to_database_sync_v1, raw, material,
     )
-    assert response["_success"] is True
+    spec_blob = json.dumps(
+        [c.model_dump(mode="json") for c in prepared.supporting_components], sort_keys=True
+    )
+    assert "SENTINEL-HOSTNAME" in spec_blob  # non-vacuity: the material carried it
+    assert "SENTINEL-CREDENTIAL-REF" in spec_blob
 
-    spec = IntegrationSpecV1.model_validate(response["integration_spec"])
-    result = run_sync_preset_recipe(
-        recipe_id=RECIPE_API_TO_API_SYNC,
-        components=spec.components,
-        process=spec.components[-1],
-    )
     blob = _recipe_side_blob(result)
     for sentinel in SENTINELS:
         assert sentinel not in blob, sentinel
@@ -203,10 +291,17 @@ def test_preset_sentinels_never_reach_the_recipe_side(caplog):
 
 
 def test_the_recipe_provenance_on_the_response_carries_no_sentinel():
-    response = compose_archetypes_action(
-        parts=_poisoned_compose_parts(), options=_options()
+    # #159 S3: the response is the typed workflow's, not the retired compose
+    # tool's; its served recipe provenance must carry no material value.
+    from _fanout_v2_support import recipe_request
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    result, _ = compile_authoring_request_v1(recipe_request(*_poisoned_fanout()), profile="p")
+    assert result.recipe_provenance  # non-vacuity
+    blob = json.dumps(
+        [record.model_dump(mode="json") for record in result.recipe_provenance],
+        sort_keys=True,
     )
-    blob = json.dumps(response["recipe_provenance"], sort_keys=True)
     for sentinel in SENTINELS:
         assert sentinel not in blob
 
@@ -224,11 +319,7 @@ def test_the_registry_snapshot_carries_no_authored_material():
 
 def test_the_materialization_catalog_is_not_serializable():
     """A serializable catalog is one ``model_dump()`` from a diagnostic."""
-    spec = IntegrationSpecV1.model_validate(
-        compose_archetypes_action(parts=_poisoned_compose_parts(), options=_options())[
-            "integration_spec"
-        ]
-    )
+    spec = _poisoned_spec()
     catalog, _slots = build_catalog(spec.components)
     with pytest.raises(TypeError):
         pickle.dumps(catalog)
@@ -237,11 +328,8 @@ def test_the_materialization_catalog_is_not_serializable():
 
 
 def test_the_catalog_repr_leaks_nothing():
-    spec = IntegrationSpecV1.model_validate(
-        compose_archetypes_action(parts=_poisoned_compose_parts(), options=_options())[
-            "integration_spec"
-        ]
-    )
+    spec = _poisoned_spec()
+    assert "SENTINEL-HOSTNAME" in spec.model_dump_json()  # non-vacuity
     catalog, _slots = build_catalog(spec.components)
     rendered = repr(catalog)
     assert rendered.startswith("<MaterializationCatalog slots=")
@@ -251,11 +339,7 @@ def test_the_catalog_repr_leaks_nothing():
 
 def test_the_projected_slot_headers_carry_no_configuration():
     """The slots the recipe receives are headers plus an opaque name."""
-    spec = IntegrationSpecV1.model_validate(
-        compose_archetypes_action(parts=_poisoned_compose_parts(), options=_options())[
-            "integration_spec"
-        ]
-    )
+    spec = _poisoned_spec()
     _catalog, slots = build_catalog(spec.components)
     blob = json.dumps(slots, sort_keys=True)
     for sentinel in SENTINELS:
@@ -319,12 +403,13 @@ def test_a_poisoned_recipe_input_is_rejected_before_the_model(field, value):
         run_recipes(
             [
                 RecipeRequestV1(
-                    recipe_id=RECIPE_API_TO_API_SYNC,
+                    recipe_id=_SLOT_SYNC_ID,
                     invocation_id="i1",
                     raw_input=raw,
                 )
             ],
             catalog=MaterializationCatalog({}),
+            registry=_SLOT_REGISTRY,
         )
     assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
 
@@ -335,13 +420,17 @@ def test_an_input_rejection_diagnostic_carries_no_value():
         run_recipes(
             [
                 RecipeRequestV1(
-                    recipe_id=RECIPE_API_TO_API_SYNC,
+                    recipe_id=_SLOT_SYNC_ID,
                     invocation_id="i1",
                     raw_input=raw,
                 )
             ],
             catalog=MaterializationCatalog({}),
+            registry=_SLOT_REGISTRY,
         )
+    # Non-vacuity: the refusal IS the input gate's (a not-found id carries no
+    # value either, which is how this test passed vacuously on the S3 WIP base).
+    assert exc.value.diagnostics[0].code == RECIPE_INPUT_INVALID
     blob = json.dumps([d.model_dump(mode="json") for d in exc.value.diagnostics])
     assert "SENTINEL-SQL-SELECT-SECRETS" not in blob
     assert "SENTINEL-SQL-SELECT-SECRETS" not in str(exc.value)
@@ -2138,7 +2227,10 @@ def test_an_undeclared_output_type_is_rejected():
 def test_plan_integration_design_returns_references_only():
     """An advisory surface that handed back executable material would BE the
     "prose becomes executable" failure this issue exists to prevent."""
-    response = plan_integration_design_action(archetype="api_to_api_sync")
+    # #159 S3: the design surface takes a published recipe_id (discovery is
+    # recipe-only) and its reference is that EXECUTABLE recipe (the adapters
+    # retired).
+    response = plan_integration_design_action(archetype="boomi.archetype.database_to_api_sync")
     recipes = response["recommended_recipes"]
     assert recipes
     for entry in recipes:
@@ -2231,14 +2323,8 @@ def test_the_scanner_reports_a_structural_pointer_not_a_value():
 
 def test_the_scanner_accepts_a_legitimate_contribution_unchanged():
     """A guard that rejects valid input is not a guard, it is an outage."""
-    spec = IntegrationSpecV1.model_validate(
-        compose_archetypes_action(parts=_parts(), options=_options())["integration_spec"]
-    )
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=spec.components[-1],
-    )
+    _prepared, result = _run_fanout(*flagship_v2())
+    assert result.composed.process_roots  # non-vacuity
     for _key, root in result.composed.process_roots:
         assert scan_forbidden_recipe_shape(root.model_dump(mode="json")) is None
 
@@ -2278,9 +2364,7 @@ def test_distinct_keys_that_do_not_collide_still_build_a_full_catalog():
     """The guard must not reject the ordinary case."""
     from boomi_mcp.patterns.recipe_bridge import build_catalog
 
-    spec = IntegrationSpecV1.model_validate(
-        compose_archetypes_action(parts=_parts(), options=_options())["integration_spec"]
-    )
+    spec = IntegrationSpecV1.model_validate(oracle()["integration_spec"])
     catalog, slots = build_catalog(spec.components)
     assert len(catalog.slots()) == len(spec.components)
     assert len(slots) == len(spec.components)
@@ -2315,13 +2399,21 @@ def test_long_keys_that_differ_still_produce_different_slots():
 
 
 def test_a_long_part_key_composes_end_to_end():
-    """The user-visible half: the whole action must succeed, not just the slot."""
-    parts = _parts()
-    for part in parts:
-        if part["kind"] == "rest_target" and part["key"] == "billing":
-            part["key"] = "b" * 101
-    response = compose_archetypes_action(parts=parts, options=_options())
-    assert response["_success"] is True, response.get("error")
+    """The user-visible half: the whole route must succeed, not just the slot.
+
+    #159 S3: the route is fan-out 2.0.0 through the typed workflow (the compose
+    tool is retired); a 101-character target part key must still compile.
+    """
+    from _fanout_v2_support import recipe_request
+    from boomi_mcp.authoring.workflow import compile_authoring_request_v1
+
+    raw, material = flagship_v2()
+    long_key = "b" * 101
+    for target in raw["targets"] + material["targets"]:
+        if target["part_key"] == "billing":
+            target["part_key"] = long_key
+    result, _ = compile_authoring_request_v1(recipe_request(raw, material), profile="p")
+    assert result.validation_report.is_valid, [d.code for d in result.errors]
 
 
 def test_a_non_ascii_component_key_still_yields_a_valid_slot():

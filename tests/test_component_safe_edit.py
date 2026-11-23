@@ -929,3 +929,55 @@ def test_unknown_stored_operation_profiles_change_nothing_in_an_unmapped_update(
     assert client.component.pushed == []
     # The reader DID consult the account for both linked profiles, so the unknown arm was reached.
     assert {CAPTURED_GET_RESPONSE_PROFILE, CAPTURED_PATCH_REQUEST_PROFILE} <= set(client.component.reads)
+
+
+# ---------------------------------------------------------------------------
+# #159 S3 (cutover decision 2): the legacy body arm on a process is refused
+# ---------------------------------------------------------------------------
+
+_CURRENT_PROCESS = (
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+    'type="process" name="p-old" folderId="42">'
+    '<bns:object><process xmlns=""><shapes/></process></bns:object>'
+    '</bns:Component>'
+)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"process_kind": "database_to_api_sync", "password": "CANARY_V"},
+        {"process_type": "CANARY_V"},
+        {"flow_sequence": [{"CANARY_K": "CANARY_V"}]},
+        {"name": "p-new", "source": {"CANARY_K": "CANARY_V"}},
+    ],
+)
+def test_a_legacy_process_body_patch_is_refused_at_prepare_and_apply(body, monkeypatch):
+    """A structured BODY patch on a process names no canonical unit, so safe edit
+    refuses it with the unit-required code at prepare, value-free, without dispatching
+    any builder; apply has no token that covers it, so nothing is written. A
+    metadata-only patch on the same process stays on the smart-merge path."""
+    _spy_compare(monkeypatch)
+    client = _FakeClient(_CURRENT_PROCESS)
+    patch = {"config": dict(body)}
+    prep = prepare_component_edit_action(client, "p", COMPONENT_ID, patch)
+    assert prep["_success"] is False
+    assert prep["error_code"] == "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED"
+    assert prep["field"] == "config"
+    assert "patch.authoring_request" in prep["hint"]
+    assert "CANARY_K" not in repr(prep) and "CANARY_V" not in repr(prep)
+    # Apply can never reach a write for it: no prepare issues a token for the body,
+    # and a token prepared for a metadata patch does not cover it.
+    metadata = prepare_component_edit_action(
+        client, "p", COMPONENT_ID, {"config": {"name": "p-renamed"}})
+    assert metadata["_success"] is True, metadata
+    for token, code in (
+        ("bogus-token", "COMPONENT_EDIT_TOKEN_INVALID"),
+        (metadata["confirmation_token"], "COMPONENT_EDIT_PATCH_MISMATCH"),
+    ):
+        applied = apply_component_edit_action(
+            client, "p", COMPONENT_ID, patch, token, confirm_apply=True)
+        assert applied["_success"] is False
+        assert applied["error_code"] == code, applied
+        assert "CANARY_K" not in repr(applied) and "CANARY_V" not in repr(applied)
+    assert client.component.pushed == []

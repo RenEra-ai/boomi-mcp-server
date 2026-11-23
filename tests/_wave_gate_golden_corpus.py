@@ -2537,17 +2537,6 @@ def arch_build_archetype_process_xml(spec, name="Archetype DLQ Golden"):
     return ProcessFlowBuilder.build(resolved, name=name, folder_name="Golden/Fixtures")
 
 
-def _case_archetype_dlq_document_cache():
-    return arch_build_archetype_process_xml(arch_emit(copy.deepcopy(ARCH_WIRED_DC)))
-
-
-def _case_archetype_notify_dlq_document_cache():
-    spec = arch_emit(
-        copy.deepcopy(ARCH_WIRED_DC), catch_notify=copy.deepcopy(ARCH_CATCH_NOTIFY)
-    )
-    return arch_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden")
-
-
 # ---------------------------------------------------------------------------
 # K. WSS listener chains (consumed by tests/test_sync_pipeline_adapter_cutover.py)
 #
@@ -2804,10 +2793,10 @@ def _build_registry():
         "recipe:compose_stream": ("process-xml-v1", _recipe_case("compose_stream")),
         "recipe:compose_all_cache": ("process-xml-v1", _recipe_case("compose_all_cache")),
         "recipe:api_to_api_sync_0": ("process-xml-v1", _recipe_case("api_to_api_sync_0")),
-        # J — archetype-path DLQ
-        "archetype_dlq:document_cache": ("process-component-v1", _case_archetype_dlq_document_cache),
-        # #184 amendment 3: golden-000060 retired with its dead synthetic Stops.
-        "archetype_dlq:notify_document_cache_terminal": ("process-component-v1", _case_archetype_notify_dlq_document_cache),
+        # J — archetype-path DLQ: retired. golden-000060 (#184 amendment 3, dead
+        # synthetic Stops); golden-000056 and golden-000088 (#159 S3, with the
+        # archetype route that rendered them — their DLQ bytes are re-homed onto the
+        # L1 preset as recorded digests in tests/patterns/test_database_to_api_sync_dlq.py).
         # K — the six WSS listener chains register from the parity corpus below
         # under their `listener_chain:*` identities (#158).
     }

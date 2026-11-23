@@ -6,18 +6,21 @@ importable — and on import ORDER when two modules register the same name. For 
 layer whose whole job is to make executable code provable, that is the wrong
 default: a recipe exists here because a line below says so.
 
-The four entry kinds are all represented deliberately, because the registry's
-ability to TELL THEM APART is an acceptance criterion, and a kind with no entry
-is a kind nobody tested:
+Three of the four entry kinds are represented here; the registry's ability to
+TELL ALL FOUR APART is an acceptance criterion, and the fourth
+(``compatibility_adapter``) is exercised through ``build_test_registry`` since
+#159 S3 retired the production adapters:
 
-* the executable recipes: two versions of the fan-out (1.0.0, the default;
-  2.0.0, typed assembly with a component-material channel), the two slot-based
-  sync presets (0.1.0) and the #159 S2 typed presets — API->database 1.0.0
-  beside its 0.1.0 default, database->API, the two HTTP listeners and the
-  Stop-only stub
+* the six executable recipes (#159 S3): the typed fan-out 2.0.0 (the default,
+  with a component-material channel), API->database 1.0.0, database->API 1.0.0,
+  the two HTTP listeners and the Stop-only stub — each its id's default and each
+  emitting one canonical process unit
 * one constraint-only entry
 * one advisory entry — the doctrine pointer, with no executor to call
-* three compatibility adapters, each naming the exact recipe it adapts to
+
+#159 S3 retired fan-out 1.0.0, the slot-based sync presets (API->API and
+API->database 0.1.0) and the three compatibility adapters. Their id constants
+stay exported below only while isolated legacy modules (#160) still name them.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from ..contracts import (
     RecipeCapabilityRequirementV1,
     RecipeConflictPolicyV1,
     RecipeExampleV1,
-    RecipeReferenceV1,
     RecipeRegistrationV1,
 )
 from . import http_listener_to_db as _listener_db
@@ -41,10 +43,8 @@ from .database_to_api_sync import (
     prepare_database_to_api_sync,
 )
 from .fanout import (
-    ComposeDbRestFanoutInputV1,
     ComposeDbRestFanoutInputV2,
     FanoutComponentMaterialV2,
-    emit_db_rest_fanout,
     emit_db_rest_fanout_v2,
     prepare_db_rest_fanout_v2,
 )
@@ -53,8 +53,6 @@ from .sync import (
     ApiToDatabaseSyncInputV1,
     ApiToDatabaseSyncMaterialV1,
     SyncRecipeInputV1,
-    emit_api_to_api_sync,
-    emit_api_to_database_sync,
     emit_api_to_database_sync_v1,
     prepare_api_to_database_sync_v1,
 )
@@ -62,6 +60,8 @@ from .sync import (
 # Recipe ids. Namespaced by owner so a future third-party registration cannot
 # collide with a built-in by accident.
 RECIPE_DB_REST_FANOUT = "boomi.compose.db_rest_fanout"
+#: #159 S3: retired (no registration). Still exported for the isolated legacy
+#: archetype module until #160 deletes it.
 RECIPE_API_TO_API_SYNC = "boomi.archetype.api_to_api_sync"
 RECIPE_API_TO_DATABASE_SYNC = "boomi.archetype.api_to_database_sync"
 RECIPE_DATABASE_TO_API_SYNC = "boomi.archetype.database_to_api_sync"
@@ -70,24 +70,22 @@ RECIPE_HTTP_LISTENER_TO_REST = "boomi.archetype.http_listener_to_rest"
 RECIPE_STUB_MINIMAL = "boomi.archetype.stub_minimal"
 RECIPE_CONSTRAINT_INBOUND_VALIDATE = "boomi.constraint.inbound_validate"
 RECIPE_ADVISORY_INTEGRATION_DESIGN = "boomi.advisory.integration_design"
+#: #159 S3: the three compatibility adapters are retired (no registrations). The
+#: ids stay exported only while isolated legacy callers still import them (#160).
 ADAPTER_COMPOSE_ARCHETYPES = "boomi.adapter.compose_archetypes"
 ADAPTER_API_TO_API_SYNC = "boomi.adapter.api_to_api_sync"
 ADAPTER_API_TO_DATABASE_SYNC = "boomi.adapter.api_to_database_sync"
 
-_FANOUT_VERSION = "1.0.0"
-#: #159 S1: registered BESIDE 1.0.0, never as the default. 1.0.0 stays the
-#: default and the ``compose_archetypes`` adapter's exact target through S2; S3
-#: retires the legacy registration and promotes this one.
+#: #159 S1 registered 2.0.0 beside 1.0.0; #159 S3 retired 1.0.0 and promoted
+#: this one to the default.
 _FANOUT_V2_VERSION = "2.0.0"
-_SYNC_VERSION = "0.1.0"
-#: #159 S2: the typed API->DB preset, registered BESIDE 0.1.0 (still the
-#: default and the compatibility adapter's exact target until S3).
+#: #159 S2 registered the typed API->DB preset beside 0.1.0; #159 S3 retired
+#: 0.1.0 and promoted this one to the default.
 _API_DB_V1_VERSION = "1.0.0"
 #: #159 S2: the typed presets with no earlier version; each is its id's default.
 _PRESET_VERSION = "1.0.0"
 _CONSTRAINT_VERSION = "1.0.0"
 _ADVISORY_VERSION = "1.0.0"
-_ADAPTER_VERSION = "1.0.0"
 
 # Merge rules must be canonically sorted — the contract enforces it, so the
 # registry revision cannot change just because someone reordered a literal.
@@ -176,105 +174,16 @@ class InboundValidateInputV1(SyncRecipeInputV1):
 # ---------------------------------------------------------------------------
 #
 # Every example is a CONCRETE invocation the registry validates against the
-# registration's own input (and component-material) model at construction. The
-# slot-based versions (fan-out 1.0.0, the 0.1.0 sync presets) reference base
-# components their example cannot carry: a request that runs one must supply a
-# base component for each slot, and their limitations say so.
+# registration's own input (and component-material) model at construction.
 
-_NO_SECRETS_NOTE = (
-    "The recipe input carries no connection settings, SQL, URLs or credentials."
-)
 _CAPABILITY_NOTE = (
     "Preflight checks the declared compiler capabilities; an unmet one fails with "
     "RECIPE_CAPABILITY_GATED before anything is emitted."
-)
-_SLOT_EXAMPLE_NOTE = (
-    "The served example names its components by slot only: a request that runs it "
-    "must supply an existing base component for every slot."
 )
 _LITERAL_QUERY_NOTE = (
     "Literal REST query parameter names are limited to filter, limit, mode and offset."
 )
 
-
-def _slots(*entries: Tuple[str, str, str]) -> list:
-    """``component_slots`` for a slot-based example: ``(key, type, mode)`` in
-    order, each slot materialized under its own key."""
-    return [
-        {
-            "component_key": key,
-            "component_type": component_type,
-            "contribution_id": f"c.{index}",
-            "materialization_mode": mode,
-            "materializer_slot": key,
-        }
-        for index, (key, component_type, mode) in enumerate(entries)
-    ]
-
-
-_FANOUT_V1_GUIDANCE = dict(
-    limitations=(
-        "Every component is referenced through component_slots: each slot must name "
-        "an existing base component, and the recipe creates none.",
-        "Two to twenty-five REST targets behind one Branch; with any document_cache "
-        "handoff, at most twenty-four.",
-        "A document_cache handoff requires cache_ref, and cache_ref is refused when no "
-        "target uses one.",
-        "One database source and one shared map; no retry, dead-letter or watermark "
-        "handling.",
-        _SLOT_EXAMPLE_NOTE,
-    ),
-    not_for=(
-        "Requests that should build their connections, operations, profiles and map: "
-        "use version 2.0.0 with component_material.",
-        "Listener-entry, API-to-API or API-to-database processes.",
-    ),
-    capability_notes=(_NO_SECRETS_NOTE, _CAPABILITY_NOTE),
-    examples=(
-        RecipeExampleV1(
-            example_id="fanout.v1.two_targets",
-            summary=(
-                "Database read, one map and two streamed REST targets over existing "
-                "base components."
-            ),
-            is_template=False,
-            raw_input={
-                "branch_label": "Fan out",
-                "component_slots": _slots(
-                    ("source_db_connection", "connector-settings", "create"),
-                    ("source_db_read_profile", "profile.db", "create"),
-                    ("source_db_get_operation", "connector-action", "create"),
-                    ("transform_target_profile", "profile.json", "create"),
-                    ("transform_transform_map", "transform.map", "create"),
-                    ("target_rest_connection", "connector-settings", "create"),
-                    ("target_rest_operation", "connector-action", "create"),
-                    ("target_billing_rest_connection", "connector-settings", "create"),
-                    ("target_billing_rest_operation", "connector-action", "create"),
-                    ("main_process", "process", "create"),
-                ),
-                "map_ref": "$ref:transform_transform_map",
-                "process_key": "main_process",
-                "source_connection_ref": "$ref:source_db_connection",
-                "source_operation_ref": "$ref:source_db_get_operation",
-                "targets": [
-                    {
-                        "connection_ref": "$ref:target_rest_connection",
-                        "handoff": "document_stream",
-                        "operation_ref": "$ref:target_rest_operation",
-                        "target_id": "t.0",
-                    },
-                    {
-                        "connection_ref": "$ref:target_billing_rest_connection",
-                        "handoff": "document_stream",
-                        "operation_ref": "$ref:target_billing_rest_operation",
-                        "target_id": "t.1",
-                    },
-                ],
-                "version": "1",
-            },
-        ),
-    ),
-)
 
 _FANOUT_V2_GUIDANCE = dict(
     limitations=(
@@ -288,8 +197,8 @@ _FANOUT_V2_GUIDANCE = dict(
         "references.",
     ),
     not_for=(
-        "Processes whose components already exist as a complete set: version 1.0.0 "
-        "references them by slot.",
+        "Processes whose components already exist as a complete set: author the "
+        "process directly (intent_kind=\"process_ir\") over those components.",
         "Listener-entry, API-to-API or API-to-database processes.",
     ),
     capability_notes=(
@@ -369,92 +278,6 @@ _FANOUT_V2_GUIDANCE = dict(
                     ]
                 },
                 "version": "2",
-            },
-        ),
-    ),
-)
-
-_SYNC_SLOT_REFS = {
-    "map_ref": "$ref:transform_transform_map",
-    "process_key": "main_process",
-    "source_connection_ref": "$ref:source_rest_source_connection",
-    "source_operation_ref": "$ref:source_rest_source_operation",
-    "version": "1",
-}
-
-_API_TO_API_V0_GUIDANCE = dict(
-    limitations=(
-        "Fixed REST fetch, map, REST send, stop sequence with one source and one target.",
-        "Every component is referenced through component_slots naming existing base "
-        "components; the recipe creates none.",
-        "No retry, dead-letter, watermark or listener entry.",
-        _SLOT_EXAMPLE_NOTE,
-    ),
-    not_for=(
-        "Database targets: use boomi.archetype.api_to_database_sync.",
-        "More than one target, or a database source.",
-    ),
-    capability_notes=(_NO_SECRETS_NOTE, _CAPABILITY_NOTE),
-    examples=(
-        RecipeExampleV1(
-            example_id="sync.api_to_api.basic",
-            summary="REST fetch, field map and REST send over existing components.",
-            is_template=False,
-            raw_input={
-                **_SYNC_SLOT_REFS,
-                "component_slots": _slots(
-                    ("source_response_profile", "profile.json", "create"),
-                    ("source_rest_source_connection", "connector-settings", "create"),
-                    ("source_rest_source_operation", "connector-action", "create"),
-                    ("transform_target_profile", "profile.json", "create"),
-                    ("transform_transform_map", "transform.map", "create"),
-                    ("target_rest_connection", "connector-settings", "create"),
-                    ("target_rest_operation", "connector-action", "create"),
-                    ("main_process", "process", "create"),
-                ),
-                "target_connection_ref": "$ref:target_rest_connection",
-                "target_operation_ref": "$ref:target_rest_operation",
-            },
-        ),
-    ),
-)
-
-_API_TO_DB_V0_GUIDANCE = dict(
-    limitations=(
-        "Fixed REST fetch, map, database write, stop sequence with one source and one "
-        "target.",
-        "Every component is referenced through component_slots naming existing base "
-        "components; the recipe creates none.",
-        "No retry, dead-letter, watermark or listener entry.",
-        _SLOT_EXAMPLE_NOTE,
-    ),
-    not_for=(
-        "REST targets: use boomi.archetype.api_to_api_sync.",
-        "More than one target, or a database source.",
-    ),
-    capability_notes=(_NO_SECRETS_NOTE, _CAPABILITY_NOTE),
-    examples=(
-        RecipeExampleV1(
-            example_id="sync.api_to_database.basic",
-            summary=(
-                "REST fetch, field map and database write over existing components, the "
-                "connection reused."
-            ),
-            is_template=False,
-            raw_input={
-                **_SYNC_SLOT_REFS,
-                "component_slots": _slots(
-                    ("source_response_profile", "profile.json", "create"),
-                    ("source_rest_source_connection", "connector-settings", "create"),
-                    ("source_rest_source_operation", "connector-action", "create"),
-                    ("target_db_connection", "connector-settings", "reuse_reference"),
-                    ("target_db_write_profile", "profile.db", "create"),
-                    ("target_db_write_operation", "connector-action", "create"),
-                    ("transform_transform_map", "transform.map", "create"),
-                    ("main_process", "process", "create"),
-                ),
-                "target_connection_ref": "$ref:target_db_connection",
-                "target_operation_ref": "$ref:target_db_write_operation",
             },
         ),
     ),
@@ -825,36 +648,14 @@ _STUB_GUIDANCE = dict(
 
 
 PRODUCTION_REGISTRATIONS: Tuple[RecipeRegistrationV1, ...] = (
-    RecipeRegistrationV1(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        recipe_version=_FANOUT_VERSION,
-        entry_kind="executable_recipe",
-        is_default=True,
-        input_model=ComposeDbRestFanoutInputV1,
-        executor=emit_db_rest_fanout,
-        output_types=(
-            "component_contribution",
-            "constraint_requirement",
-            "process_ir_patch",
-        ),
-        capability_requirements=(
-            _SOURCE_EMITTER,
-            _TARGET_EMITTER,
-            _MAP_EMITTER,
-            _BRANCH_EMITTER,
-            _CACHE_LOAD_EMITTER,
-            _CACHE_RETRIEVE_EMITTER,
-        ),
-        conflict_policy=_FANOUT_CONFLICT_POLICY,
-        **_FANOUT_V1_GUIDANCE,
-    ),
     # #159 S1: typed assembly. The executor emits one process unit; the trusted
     # preparer turns the closed component material into every supporting spec.
     RecipeRegistrationV1(
         recipe_id=RECIPE_DB_REST_FANOUT,
         recipe_version=_FANOUT_V2_VERSION,
         entry_kind="executable_recipe",
-        is_default=False,
+        # #159 S3: the default (fan-out 1.0.0 retired with the #153 lift).
+        is_default=True,
         input_model=ComposeDbRestFanoutInputV2,
         executor=emit_db_rest_fanout_v2,
         output_types=(
@@ -876,45 +677,13 @@ PRODUCTION_REGISTRATIONS: Tuple[RecipeRegistrationV1, ...] = (
         implementation_dependency_modules=(_component_material.__name__,),
         **_FANOUT_V2_GUIDANCE,
     ),
-    RecipeRegistrationV1(
-        recipe_id=RECIPE_API_TO_API_SYNC,
-        recipe_version=_SYNC_VERSION,
-        entry_kind="executable_recipe",
-        is_default=True,
-        input_model=SyncRecipeInputV1,
-        executor=emit_api_to_api_sync,
-        output_types=(
-            "component_contribution",
-            "constraint_requirement",
-            "process_ir_patch",
-        ),
-        capability_requirements=(_SOURCE_EMITTER, _TARGET_EMITTER, _MAP_EMITTER),
-        conflict_policy=_SYNC_CONFLICT_POLICY,
-        **_API_TO_API_V0_GUIDANCE,
-    ),
-    RecipeRegistrationV1(
-        recipe_id=RECIPE_API_TO_DATABASE_SYNC,
-        recipe_version=_SYNC_VERSION,
-        entry_kind="executable_recipe",
-        is_default=True,
-        input_model=SyncRecipeInputV1,
-        executor=emit_api_to_database_sync,
-        output_types=(
-            "component_contribution",
-            "constraint_requirement",
-            "process_ir_patch",
-        ),
-        capability_requirements=(_SOURCE_EMITTER, _TARGET_EMITTER, _MAP_EMITTER),
-        conflict_policy=_SYNC_CONFLICT_POLICY,
-        **_API_TO_DB_V0_GUIDANCE,
-    ),
-    # #159 S2: the typed API->DB preset, BESIDE 0.1.0 (the default and the
-    # compatibility adapter's exact target until S3).
+    # #159 S2: the typed API->DB preset. #159 S3: the default and the only
+    # API->DB version (0.1.0 retired with the #153 lift and its adapter).
     RecipeRegistrationV1(
         recipe_id=RECIPE_API_TO_DATABASE_SYNC,
         recipe_version=_API_DB_V1_VERSION,
         entry_kind="executable_recipe",
-        is_default=False,
+        is_default=True,
         input_model=ApiToDatabaseSyncInputV1,
         executor=emit_api_to_database_sync_v1,
         output_types=("constraint_requirement", "process_unit"),
@@ -1013,33 +782,6 @@ PRODUCTION_REGISTRATIONS: Tuple[RecipeRegistrationV1, ...] = (
         recipe_version=_ADVISORY_VERSION,
         entry_kind="advisory",
         is_default=True,
-    ),
-    RecipeRegistrationV1(
-        recipe_id=ADAPTER_COMPOSE_ARCHETYPES,
-        recipe_version=_ADAPTER_VERSION,
-        entry_kind="compatibility_adapter",
-        is_default=True,
-        adapter_target=RecipeReferenceV1(
-            recipe_id=RECIPE_DB_REST_FANOUT, recipe_version=_FANOUT_VERSION
-        ),
-    ),
-    RecipeRegistrationV1(
-        recipe_id=ADAPTER_API_TO_API_SYNC,
-        recipe_version=_ADAPTER_VERSION,
-        entry_kind="compatibility_adapter",
-        is_default=True,
-        adapter_target=RecipeReferenceV1(
-            recipe_id=RECIPE_API_TO_API_SYNC, recipe_version=_SYNC_VERSION
-        ),
-    ),
-    RecipeRegistrationV1(
-        recipe_id=ADAPTER_API_TO_DATABASE_SYNC,
-        recipe_version=_ADAPTER_VERSION,
-        entry_kind="compatibility_adapter",
-        is_default=True,
-        adapter_target=RecipeReferenceV1(
-            recipe_id=RECIPE_API_TO_DATABASE_SYNC, recipe_version=_SYNC_VERSION
-        ),
     ),
 )
 

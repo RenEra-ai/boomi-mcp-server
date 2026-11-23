@@ -169,22 +169,29 @@ def _shape_tree(text: str):
 
 def test_the_build_integration_plan_refuses_the_retained_oracle_input():
     """The create/reuse and literal-reference spellings of the legacy both-bound config
-    are refused at plan time on the build_integration route: its validator runs with the
-    database_to_api_sync source gate, which admits no REST source (golden-000079's input
-    validates only under `allow_rest_source=True`, which no serving caller of this route
-    passes). Apply re-runs this plan, so nothing reaches the renderer."""
+    are refused on the build_integration route.
+
+    #159 S3 (cutover decision 1): the refusal is now admission's — a flat
+    `database_to_api_sync` body is refused before normalization, any validator, preview,
+    lookup or write, with the registered unit-required code at the body's selector
+    pointer, and no plan steps are produced. (Before the cutover the step-level builder
+    validator refused it with PROCESS_CONNECTOR_BINDING_INVALID at source.connector_type;
+    that validator is no longer reached.) Apply re-runs this plan, so nothing reaches a
+    renderer."""
     import json
     from unittest.mock import MagicMock, patch
 
+    from boomi_mcp.authoring.process_admission import unit_required_envelope
     from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
 
     literal = json.loads(_ORACLE_INPUT.read_text(encoding="utf-8"))
     referenced = json.loads(_ORACLE_INPUT.read_text(encoding="utf-8"))
     referenced["source"].update(connection_id="$ref:rconn", operation_id="$ref:rop")
     referenced["target"].update(connection_id="$ref:conn", operation_id="$ref:op")
     referenced["transform"]["map_ref"] = "$ref:map"
-    # In-spec dependencies on the update path (existing ids), so only the process step
-    # reaches builder validation.
+    # In-spec dependencies on the update path (existing ids) — would-write siblings
+    # AHEAD of the refused process.
     dependencies = [
         {"key": key, "type": kind, "action": "update", "name": key,
          "component_id": "00000000-0000-0000-0000-00000000000%d" % index, "config": config}
@@ -198,25 +205,34 @@ def test_the_build_integration_plan_refuses_the_retained_oracle_input():
         spec = {"conflict_policy": "reuse", "integration_spec": {"version": "1.0", "name": "l9", "components": [
             *others, {"key": "proc", "type": "process", "action": "create", "name": "P",
                       "config": process_config, "depends_on": [other["key"] for other in others]}]}}
-        with patch.object(ib, "paginate_metadata", return_value=[]):
+        with patch.object(ib, "paginate_metadata", return_value=[]) as lookups:
             plan = ib._build_plan(MagicMock(), spec)
-        step = next(step for step in plan["steps"] if step["key"] == "proc")
-        assert step["planned_action"] == "error_process_validation", step
-        assert (step["validation_error"]["error_code"], step["validation_error"]["field"]) == (
-            "PROCESS_CONNECTOR_BINDING_INVALID", "source.connector_type"), step
+        assert lookups.call_count == 0
+        assert plan["_success"] is False, plan
+        assert plan["error_code"] == PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED, plan
+        assert plan["field"] == "integration_spec.components.%d.config.process_kind" % len(others)
+        assert set(plan) == set(unit_required_envelope("x"))
+        assert "steps" not in plan
+        assert "PROCESS_CONNECTOR_BINDING_INVALID" not in json.dumps(plan)
 
 
 def test_the_safe_edit_route_builds_the_retained_oracle_input_into_the_oracles_shapes():
-    """The census's one working caller: prepare_component_edit / apply_component_edit
-    hand a structured process body straight to the legacy builder without the plan-time
-    validator, so the retained oracle input is built and PUSHED, and its shapes are the
-    frozen oracle's (golden-000079) up to canvas layout. golden-000081 renders the same
-    shapes from the canonical spelling (the first test above), which is the transfer this
-    route must take. Offline: only the live fetch and the SDK client are stand-ins."""
+    """The census's former working caller: prepare_component_edit / apply_component_edit
+    handed a structured process body straight to the legacy builder, so the retained
+    oracle input was built and PUSHED with golden-000079's shapes.
+
+    #159 S3 (cutover decision 2): that legacy body arm is refused — prepare answers with
+    the unit-required code, pointing at `config` and at `patch.authoring_request`, and
+    nothing is written; apply of the same body cannot write either. The transfer this
+    route takes is the canonical arm, witnessed by
+    `test_the_public_safe_edit_applies_the_canonical_mapped_both_sides_update` below
+    (golden-000081's canonical spelling, the oracle's shapes). Offline: only the live
+    fetch and the SDK client are stand-ins."""
     import json
     from unittest.mock import MagicMock, patch
 
     from boomi_mcp.categories.components import safe_edit_component as safe_edit
+    from boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
 
     current = {"type": "process", "version": 3, "xml": (
         _ROOT / "tests/fixtures/golden_xml/dynamic_path_target_profile.xml").read_text(encoding="utf-8")}
@@ -224,13 +240,24 @@ def test_the_safe_edit_route_builds_the_retained_oracle_input_into_the_oracles_s
     client = MagicMock()
     with patch.object(safe_edit, "component_get_xml", return_value=current):
         prepared = safe_edit.prepare_component_edit_action(client, "prof", "PROC-ID", body)
-        assert prepared["_success"] is True, prepared
+        assert prepared["_success"] is False, prepared
+        assert prepared["error_code"] == PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED, prepared
+        assert str(prepared.get("field") or "").startswith("config")
+        assert "patch.authoring_request" in prepared["hint"]
+        assert prepared.get("confirmation_token") is None
+        assert prepared["boomi_mutation"] is False
+        blob = json.dumps(prepared)
+        assert "Edited" not in blob and "DDP_PATH" not in blob
+        # No token can be prepared for this body, so apply is refused at its token
+        # check here — this leg proves only that nothing is written, not which
+        # refusal apply itself would give the body (lane A's safe-edit matrix owns that).
         applied = safe_edit.apply_component_edit_action(
             client, "prof", "PROC-ID", body,
-            confirmation_token=prepared["confirmation_token"], confirm_apply=True)
-    assert applied["_success"] is True and applied["boomi_mutation"] is True, applied
-    pushed = client.component.update_component_raw.call_args.args[1]
-    assert _shape_tree(pushed) == _shape_tree(_ORACLE.read_text(encoding="utf-8"))
+            confirmation_token="not-a-prepared-token", confirm_apply=True)
+    assert applied["_success"] is False, applied
+    assert applied.get("boomi_mutation") is not True
+    client.component.update_component_raw.assert_not_called()
+    client.component.update_component.assert_not_called()
 
 
 def test_the_public_safe_edit_applies_the_canonical_mapped_both_sides_update(monkeypatch):

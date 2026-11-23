@@ -1346,9 +1346,10 @@ def discharge_endpoints(
 # ---------------------------------------------------------------------------
 
 #: The legacy producer modules #160 deletes. The batch child refuses every
-#: import under these prefixes — even one a caller would catch — and filters the
-#: SAME prefixes out of the discovery and registry inputs, so one tuple decides
-#: both what is blocked and what is simulated as deregistered.
+#: import under these prefixes — even one a caller would catch. Until #159 S3 it
+#: also filtered the same prefixes out of the discovery and registry inputs (a
+#: simulated deregistration); since the S3 cutover the deregistration is real and
+#: the child filters nothing.
 LEGACY_PRODUCER_PREFIXES: Tuple[str, ...] = (
     "boomi_mcp.patterns.archetypes",
     "boomi_mcp.patterns.composition",
@@ -1356,14 +1357,11 @@ LEGACY_PRODUCER_PREFIXES: Tuple[str, ...] = (
     "boomi_mcp.compiler.process_ir.legacy_adapters",
 )
 
-#: The ONE batch child. It installs the blocker BEFORE any ``boomi_mcp`` import,
-#: then simulates the retirement at the discovery and registry INPUTS only —
-#: the package scan no longer sees the blocked modules, the recipe layer's
-#: source-module list drops them, and the obsolete registrations (the
-#: ``boomi.adapter.*`` compatibility adapters and the fan-out version their
-#: legacy surface targets) are filtered — while the real revision, planning and
-#: projection code runs unchanged. It reads the case ids on argv and the
-#: canonical inputs from the committed fixtures.
+#: The ONE batch child. It installs the blocker BEFORE any ``boomi_mcp`` import
+#: and then runs the ACTUAL production registry, discovery, revision, planning
+#: and projection code with nothing filtered (#159 S3: the retirement the S1/S2
+#: child simulated is now real). It reads the case ids on argv and the canonical
+#: inputs from the committed fixtures.
 BATCH_CHILD_PROGRAM = r'''
 import json, sys
 BLOCKED = tuple(json.loads(sys.argv[1]))
@@ -1391,55 +1389,12 @@ class _Blocker:
 sys.meta_path.insert(0, _Blocker())  # BEFORE any boomi_mcp import
 sys.path[:0] = [sys.argv[2], sys.argv[3]]
 
-import importlib
-import pkgutil
-
-
-def _retired_walk(path=None, prefix="", onerror=None):
-    """``pkgutil.walk_packages`` over a tree the retired modules are GONE from.
-
-    Filtering the stock walker's output is not enough: it imports every
-    subpackage to recurse into it, so the blocked package would be imported
-    before the filter ever saw its name.
-    """
-    for info in pkgutil.iter_modules(path, prefix):
-        if _blocked(info.name):
-            continue
-        yield info
-        if not info.ispkg:
-            continue
-        try:
-            module = importlib.import_module(info.name)
-        except ImportError:
-            if onerror is not None:
-                onerror(info.name)
-            continue
-        except Exception:
-            if onerror is not None:
-                onerror(info.name)
-                continue
-            raise
-        sub = getattr(module, "__path__", None)
-        if sub:
-            yield from _retired_walk(sub, info.name + ".", onerror)
-
-
-pkgutil.walk_packages = _retired_walk  # discovery input: the modules are gone
-
+# #159 S3: NO simulation. The retirement is real — the retired registrations,
+# tools and RECIPE_LAYER_MODULES entries are gone from the tree — so the child
+# runs the ACTUAL production registry and discovery with no input filtered; the
+# blocker alone stands between it and a legacy producer module.
 from boomi_mcp.recipes import registry as registry_module
 from boomi_mcp.recipes.builtins import catalog as catalog_module
-
-registry_module.RECIPE_LAYER_MODULES = tuple(
-    name for name in registry_module.RECIPE_LAYER_MODULES if not _blocked(name)
-)
-_OBSOLETE = {tuple(item) for item in json.loads(sys.argv[4])}
-_ADAPTER_PREFIX = sys.argv[5]
-catalog_module.PRODUCTION_REGISTRATIONS = tuple(
-    reg for reg in catalog_module.PRODUCTION_REGISTRATIONS
-    if not reg.recipe_id.startswith(_ADAPTER_PREFIX)
-    and (reg.recipe_id, reg.recipe_version) not in _OBSOLETE
-)
-registry_module._PRODUCTION_REGISTRY = None
 
 # #159 S2 (L4): the projector's LAZILY imported authorities, imported here under
 # the blocker so a forbidden transitive import surfaces even before a case
@@ -1459,13 +1414,13 @@ import _issue_157_flows_accounting as acct
 from boomi_mcp.authoring.workflow import AuthoringWorkflowError, compile_authoring_request_v1
 from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
-APPLY_CASE = sys.argv[6]
+APPLY_CASE = sys.argv[4]
 cases = acct.load_cases()
 out = {}
 applied = {}
 with patch("boomi_mcp.categories.integration_builder.paginate_metadata", lambda *a, **k: []), \
         patch(acct._GET_XML, acct.replay_component_get_xml()):
-    for case_id in sys.argv[7:]:
+    for case_id in sys.argv[5:]:
         case = cases[case_id]
         # ROWS boundary: the frozen, account-less one the rows were recorded on
         # (metadata query -> [], reads by id -> the pinned captures).
@@ -1689,8 +1644,6 @@ def run_import_blocked_batch(
             json.dumps(list(blocked_prefixes)),
             str(ROOT / "src"),
             str(ROOT / "tests"),
-            json.dumps([list(item) for item in simulated_retirements()]),
-            ADAPTER_ID_PREFIX,
             apply_case,
             *case_ids,
         ],

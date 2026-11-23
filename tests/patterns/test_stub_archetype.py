@@ -13,7 +13,9 @@ from boomi_mcp.patterns import (
     PatternRegistry,
     pattern_validation_error,
 )
-from boomi_mcp.patterns.archetypes import (
+# #159 S3: the archetypes package re-exports nothing; import the isolated
+# defining module directly (kept until #160).
+from boomi_mcp.patterns.archetypes.stub_minimal import (
     StubMinimalIntegrationArchetype,
     StubMinimalIntegrationParameters,
 )

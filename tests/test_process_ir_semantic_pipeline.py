@@ -342,7 +342,8 @@ def test_the_package_is_wired_at_exactly_the_two_intended_sites():
     was "we know every place it is reached from". A THIRD call site appearing
     silently is exactly what this catches.
 
-    * ``integration_builder.py`` — slice 8, the plan/apply mutation gate.
+    * ``integration_builder.py`` — slice 8, the plan/apply mutation gate
+      (retired at #159 S3 with the legacy process builders).
     * ``pipeline.py``            — the CANONICAL compiler gate: every caller of
       ``compile_process_ir_v1`` is validated before an emission plan exists.
     * ``emission.py``            — the legacy adapter, which now only hands its
@@ -366,7 +367,10 @@ def test_the_package_is_wired_at_exactly_the_two_intended_sites():
     reached = sorted(
         Path(line).name for line in result.stdout.split() if line.strip()
     )
-    assert reached == ["emission.py", "integration_builder.py", "pipeline.py"], reached
+    # #159 S3 (cutover decision 1): the slice-8 legacy-body gate left
+    # ``integration_builder.py`` with the legacy process builders; a canonical
+    # unit is validated by the compiler gate in ``pipeline.py``.
+    assert reached == ["emission.py", "pipeline.py"], reached
 
 
 # ---------------------------------------------------------------------------

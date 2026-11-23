@@ -42,9 +42,9 @@ from boomi_mcp.recipes.builtins import catalog
 from boomi_mcp.recipes.builtins.catalog import (
     PRODUCTION_REGISTRATIONS,
     RECIPE_ADVISORY_INTEGRATION_DESIGN,
-    RECIPE_API_TO_API_SYNC,
     RECIPE_CONSTRAINT_INBOUND_VALIDATE,
     RECIPE_DB_REST_FANOUT,
+    RECIPE_STUB_MINIMAL,
 )
 from boomi_mcp.recipes.contracts import (
     ExpectedRecipeEntryV1,
@@ -95,6 +95,26 @@ def _reg(**kwargs):
     )
     base.update(kwargs)
     return RecipeRegistrationV1(**base)
+
+
+def _production_with_a_test_adapter():
+    """The production registrations plus ONE compatibility adapter.
+
+    #159 S3 retired every production adapter, so the fourth entry kind is carried
+    by a test-built adapter targeting a surviving production executable (fan-out
+    2.0.0). An executor-less entry hashes the catalog module's source wherever it
+    is constructed, so this adapter's digest has the production shape.
+    """
+    adapter = RecipeRegistrationV1(
+        recipe_id="test.adapter.compose_archetypes",
+        recipe_version="1.0.0",
+        entry_kind="compatibility_adapter",
+        is_default=True,
+        adapter_target=RecipeReferenceV1(
+            recipe_id=RECIPE_DB_REST_FANOUT, recipe_version="2.0.0"
+        ),
+    )
+    return PRODUCTION_REGISTRATIONS + (adapter,)
 
 
 # ---------------------------------------------------------------------------
@@ -1124,10 +1144,12 @@ def test_every_production_input_model_forbids_extras():
         checked += 1
     # A census pin: a new input model must come with a deliberate update here.
     # Five since #159 S1 (fan-out 2.0.0 beside 1.0.0); ten since #159 S2 (the
-    # typed API->DB 1.0.0, DB->API, the two listeners and the stub), plus one
-    # component-material model per material registration, each of which must
-    # pass the same gates as an input model.
-    assert checked == 10
+    # typed API->DB 1.0.0, DB->API, the two listeners and the stub); seven since
+    # #159 S3 retired fan-out 1.0.0 and the two 0.1.0 sync presets (six
+    # executables and the constraint entry), plus one component-material model
+    # per material registration, each of which must pass the same gates as an
+    # input model.
+    assert checked == 7
     materials = [
         registration.component_material_model
         for registration in PRODUCTION_REGISTRATIONS
@@ -1329,8 +1351,11 @@ def test_the_gate_walks_past_wrapper_nodes_to_find_the_model_config():
     A ``model_validator(mode="after")`` wraps the model node in
     ``{"type": "function-after", "config": None, "schema": {...}}``. Reading only
     the top level finds ``config: None``, concludes nothing, and fail-closed then
-    REJECTS a legitimate model. ``ComposeDbRestFanoutInputV1`` has exactly this
-    shape, so the naive version is a build break (issue #145, live QA).
+    REJECTS a legitimate model. ``ComposeDbRestFanoutInputV1`` had exactly this
+    shape, so the naive version was a build break (issue #145, live QA). #159 S3
+    retired that registration; the walk stays required for any model with an
+    after-validator, which the probe below constructs, and every wrapped
+    production model (none today) must still pass it.
     """
     from pydantic import model_validator
 
@@ -1356,7 +1381,10 @@ def test_the_gate_walks_past_wrapper_nodes_to_find_the_model_config():
         if registration.input_model is not None
         and registration.input_model.__pydantic_core_schema__.get("config") is None
     ]
-    assert wrapped_production, "no production model exercises the wrapper walk"
+    for registration in wrapped_production:
+        registry_module._check_input_model_forbids_extras(
+            registration.recipe_id, registration.input_model
+        )  # accepts
 
 
 def test_a_bare_plain_field_validator_is_still_refused_by_the_schema_gate():
@@ -2143,14 +2171,14 @@ def test_a_missing_recipe_is_a_mismatch():
 def test_equal_versions_with_different_code_are_a_mismatch_not_a_match():
     """The skew this issue actually exists for.
 
-    Two registries can agree on ``api_to_api_sync@0.1.0`` and run different
+    Two registries can agree on ``stub_minimal@1.0.0`` and run different
     bytes. A version-only comparison would call that a match.
     """
     registry = production_registry()
     entries = []
     for d in registry.descriptors():
         sha = d.provenance.implementation_sha256
-        if d.recipe_id == RECIPE_API_TO_API_SYNC:
+        if d.recipe_id == RECIPE_STUB_MINIMAL:
             sha = "0" * 64
         entries.append(
             ExpectedRecipeEntryV1(
@@ -2162,7 +2190,7 @@ def test_equal_versions_with_different_code_are_a_mismatch_not_a_match():
     skew = registry.compare(_expected_from(registry, entries=tuple(entries)))
     assert skew.status == "mismatch"
     assert [m.recipe_id for m in skew.implementation_mismatches] == [
-        RECIPE_API_TO_API_SYNC
+        RECIPE_STUB_MINIMAL
     ]
     assert skew.version_mismatches == ()
 
@@ -2227,8 +2255,12 @@ def test_the_snapshot_is_fully_sorted_and_carries_the_revisions():
 
 
 def test_the_snapshot_names_every_entry_kind_the_registry_distinguishes():
+    # #159 S3 retired the production adapters: production names three kinds, and
+    # the fourth is carried by a test-built adapter beside the same entries.
     kinds = {entry["entry_kind"] for entry in production_registry().snapshot()["entries"]}
-    assert kinds == {
+    assert kinds == {"executable_recipe", "constraint_only", "advisory"}
+    built = build_test_registry(_production_with_a_test_adapter())
+    assert {entry["entry_kind"] for entry in built.snapshot()["entries"]} == {
         "executable_recipe",
         "constraint_only",
         "advisory",
@@ -2302,11 +2334,11 @@ def test_naming_a_real_recipe_id_resolves_but_still_executes_nothing(monkeypatch
     calls = []
     monkeypatch.setattr(
         catalog,
-        "emit_api_to_api_sync",
+        "emit_stub_minimal",
         lambda inp: calls.append("ran") or (),  # pragma: no cover
         raising=False,
     )
-    descriptor = production_registry().resolve(RECIPE_API_TO_API_SYNC)
+    descriptor = production_registry().resolve(RECIPE_STUB_MINIMAL)
     assert descriptor.entry_kind == "executable_recipe"
     assert calls == []
 
@@ -2630,8 +2662,9 @@ def test_the_shared_material_module_moves_only_the_fanout_v2_digest():
     component-material boundary (``recipes.component_material``) is inside the
     digest of every registration that declares it (fan-out 2.0.0 first) and
     nowhere else. Perturbing its source moves exactly those
-    ``implementation_sha256`` values and leaves the undeclaring sync recipes
-    (and fan-out 1.0.0) where they were."""
+    ``implementation_sha256`` values and leaves the undeclaring entries where
+    they were (#159 S3: the stub, constraint and advisory entries; the
+    undeclaring sync presets and fan-out 1.0.0 are retired)."""
     import inspect as inspect_module
 
     import boomi_mcp.recipes.registry as registry_mod
@@ -2669,10 +2702,11 @@ def test_the_shared_material_module_moves_only_the_fanout_v2_digest():
     }
     assert (catalog.RECIPE_DB_REST_FANOUT, "2.0.0") in declaring
     assert moved == declaring
-    for sync_id in (catalog.RECIPE_API_TO_API_SYNC, catalog.RECIPE_API_TO_DATABASE_SYNC):
-        sync_keys = [key for key in baseline if key[0] == sync_id and key not in declaring]
-        assert sync_keys, sync_id  # non-vacuous: undeclaring sync recipes are registered
-        assert all(after[key] == baseline[key] for key in sync_keys)
+    # Non-vacuous: registrations that do NOT declare the module exist (#159 S3:
+    # the stub, the constraint and the advisory entry) and none of them moved.
+    undeclaring = [key for key in baseline if key not in declaring]
+    assert (catalog.RECIPE_STUB_MINIMAL, "1.0.0") in undeclaring
+    assert all(after[key] == baseline[key] for key in undeclaring)
 
 
 # ---------------------------------------------------------------------------
@@ -2743,13 +2777,15 @@ def test_a_source_revision_alone_is_enough_for_a_real_match():
 def test_an_empty_entries_list_is_a_mismatch_not_unknown():
     """An empty entries list ASSERTS "this registry has no recipes".
 
-    That is a claim, not an absent one — so the live registry's twelve recipe
-    ids are a real difference, reported with ``live_only``. ``unknown`` is for a
-    comparison that could not establish parity, not for one whose answer is no.
+    That is a claim, not an absent one — so the live registry's eight recipe
+    ids (#159 S3: six executables, one constraint, one advisory) are a real
+    difference, reported with ``live_only``. ``unknown`` is for a comparison that
+    could not establish parity, not for one whose answer is no.
     """
-    skew = production_registry().compare(ExpectedRecipeRegistryV1())
+    registry = production_registry()
+    skew = registry.compare(ExpectedRecipeRegistryV1())
     assert skew.status == "mismatch"
-    assert len(skew.live_only) == 12
+    assert len(skew.live_only) == len(registry.descriptors()) == 8
     assert skew.missing_from_live == ()
 
 
@@ -2833,6 +2869,8 @@ def test_the_layer_module_list_covers_the_whole_recipe_package():
         outside - contract_modules - neutral_layer_modules - _engine_invoking_modules()
     )
     assert unclaimed == set(), unclaimed
+    # #159 S3: no retired legacy producer is carried by the layer any more.
+    assert not {m for m in RECIPE_LAYER_MODULES if _is_retired_legacy_producer(m)}
     # ...and no clause is carrying a module another already claims.
     assert contract_modules & _engine_invoking_modules() == set()
     assert neutral_layer_modules & _engine_invoking_modules() == set()
@@ -2843,12 +2881,15 @@ def test_the_layer_module_list_covers_the_whole_recipe_package():
     # which is clause 3's own turf) AND be imported by a module clause 3 claims.
     # A module nobody in the layer imports has no business moving the layer's
     # revision, and one outside the patterns package is someone else's authority.
-    invokers = _engine_invoking_modules()
+    # #159 S3: the retired archetypes no longer carry the neutral layer into the
+    # digest; the surviving recipe executors (clause 1) import it, so they count
+    # as claiming importers beside the clause-3 invokers.
+    invokers = _engine_invoking_modules() | listed
     importers = set()
-    for invoker in invokers:
+    for invoker in sorted(invokers):
         module = importlib.import_module(invoker)
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-        pkg = invoker.rsplit(".", 1)[0]
+        pkg = invoker if Path(module.__file__).name == "__init__.py" else invoker.rsplit(".", 1)[0]
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
@@ -2949,6 +2990,10 @@ def test_source_revision_moves_for_any_module_in_the_execution_path(module_name)
     finally:
         build_info_mod.inspect.getsource = original
 
+    if _is_retired_legacy_producer(module_name):
+        # #159 S3: the bridge retired with the archetype route; it left the layer.
+        assert mutated == baseline, module_name
+        return
     assert mutated != baseline, module_name
 
 
@@ -2972,8 +3017,11 @@ def test_an_executor_less_entry_hashes_its_declaration_source():
             if d.entry_kind in ("compatibility_adapter", "advisory")
         }
 
-    baseline = executor_less_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
-    assert len(baseline) == 4
+    # #159 S3: production keeps one advisory entry and no adapter; the adapter
+    # kind is carried by a test-built adapter beside the production entries.
+    registrations = _production_with_a_test_adapter()
+    baseline = executor_less_hashes(build_test_registry(registrations))
+    assert len(baseline) == 2
 
     catalog_module = importlib.import_module("boomi_mcp.recipes.builtins.catalog")
     real_getsource = inspect_module.getsource
@@ -2987,7 +3035,7 @@ def test_an_executor_less_entry_hashes_its_declaration_source():
     original = registry_mod.inspect.getsource
     registry_mod.inspect.getsource = perturbed
     try:
-        mutated = executor_less_hashes(build_test_registry(PRODUCTION_REGISTRATIONS))
+        mutated = executor_less_hashes(build_test_registry(registrations))
     finally:
         registry_mod.inspect.getsource = original
 
@@ -3081,6 +3129,15 @@ _ENGINE_ENTRY_POINTS = frozenset(
 )
 
 
+def _is_retired_legacy_producer(module_name):
+    """Under one of the legacy producer prefixes #160 deletes — the SAME tuple the
+    import-blocked #157 replay refuses (``_issue_157_flows_accounting``)."""
+    from _issue_157_flows_accounting import LEGACY_PRODUCER_PREFIXES
+
+    return any(module_name == p or module_name.startswith(p + ".")
+               for p in LEGACY_PRODUCER_PREFIXES)
+
+
 def _engine_invoking_modules():
     """Every module that calls a recipe-engine entry point DIRECTLY.
 
@@ -3139,8 +3196,14 @@ def test_every_module_that_invokes_the_engine_is_in_the_layer_digest():
 
     invoking = _engine_invoking_modules()
     assert invoking, "the call scan found nothing — the pin would be vacuous"
-    missing = invoking - set(RECIPE_LAYER_MODULES)
+    # #159 S3: a retired legacy producer (the prefixes the import-blocked #157
+    # replay refuses) is in no execution path, so it is not owed a place in the
+    # layer; the blocked replay is what proves no route imports it.
+    missing = {m for m in invoking - set(RECIPE_LAYER_MODULES)
+               if not _is_retired_legacy_producer(m)}
     assert missing == set(), missing
+    assert {m for m in invoking if _is_retired_legacy_producer(m)}, (
+        "the exemption covers nothing — drop it once #160 deletes the producers")
 
 
 def test_the_engine_invocation_scan_finds_the_surfaces_we_expect():
@@ -3182,15 +3245,22 @@ def test_the_reporting_layer_is_outside_the_digest_by_the_same_rule():
 def test_the_migrated_surfaces_are_in_the_layer_digest():
     """Named explicitly too, so the derived pin above cannot go vacuous.
 
-    If ``recipe_bridge`` were ever renamed, the caller scan would find nothing
-    and silently pass. This states the three modules the digest must carry today.
+    #159 S3: the migrated legacy surfaces retired with their registrations, so
+    the digest must NOT carry them (building the production registry would import
+    them), while the surviving executors' modules it must carry stay named.
     """
     from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
 
-    assert {
+    retired = {
         "boomi_mcp.patterns.archetypes.api_to_api_sync",
         "boomi_mcp.patterns.archetypes.api_to_database_sync",
         "boomi_mcp.patterns.composition",
+        "boomi_mcp.patterns.recipe_bridge",
+    }
+    assert retired & set(RECIPE_LAYER_MODULES) == set()
+    assert all(_is_retired_legacy_producer(m) for m in retired)
+    assert {
+        reg.executor.__module__ for reg in PRODUCTION_REGISTRATIONS if reg.executor is not None
     } <= set(RECIPE_LAYER_MODULES)
 
 
@@ -3203,11 +3273,10 @@ def test_the_migrated_surfaces_are_in_the_layer_digest():
     ],
 )
 def test_source_revision_moves_for_a_migrated_surface(module_name):
-    """A migrated archetype can silently change the emitted result.
-
-    QA proved it: renaming an emitted component leaves the build succeeding and
-    every published field byte-identical. ``source_revision`` is the only thing
-    positioned to notice, so it must.
+    """#159 S3: a migrated legacy surface RETIRED with its registration, so it is
+    out of the layer — an edit to it no longer moves ``source_revision`` (and
+    building the registry no longer imports it). Before S3 this asserted the
+    opposite, because the surface could change an emitted result.
     """
     import importlib
     import inspect as inspect_module
@@ -3232,7 +3301,7 @@ def test_source_revision_moves_for_a_migrated_surface(module_name):
     finally:
         build_info_mod.inspect.getsource = original
 
-    assert mutated != baseline, module_name
+    assert mutated == baseline, module_name
 
 
 def test_the_downstream_compiler_modules_are_deliberately_outside_the_digest():
@@ -3854,10 +3923,12 @@ def test_running_a_registered_but_non_executable_entry_says_so():
     for a typo in a name that was correct (issue #145, live QA)."""
     from boomi_mcp.errors import RECIPE_REQUEST_INVALID
 
-    registry = production_registry()
+    # #159 S3: production carries no adapter, so the adapter arm runs on a
+    # test-built one beside the production entries.
+    registry = build_test_registry(_production_with_a_test_adapter())
     for recipe_id in (
         RECIPE_ADVISORY_INTEGRATION_DESIGN,
-        "boomi.adapter.compose_archetypes",
+        "test.adapter.compose_archetypes",
     ):
         descriptor = registry.resolve(recipe_id)
         with pytest.raises(RecipeError) as exc:
@@ -4107,15 +4178,36 @@ def test_an_adapter_pointing_at_a_non_executable_entry_fails_at_construction():
 
 
 def test_every_production_adapter_target_is_registered_and_executable():
-    """The production catalog satisfies the rule it now enforces."""
+    """The production catalog satisfies the rule it now enforces.
+
+    #159 S3 retired the three production adapters, so production carries none —
+    and a retired executable cannot come back as an adapter target: an adapter
+    naming fan-out 1.0.0 is refused against the production entries, while one
+    naming the surviving 2.0.0 default builds and resolves to an executable.
+    """
     registry = production_registry()
-    by_key = {(d.recipe_id, d.recipe_version): d for d in registry.descriptors()}
-    adapters = [d for d in registry.descriptors() if d.adapter_target is not None]
-    assert len(adapters) == 3
+    assert [d for d in registry.descriptors() if d.adapter_target is not None] == []
+
+    built = build_test_registry(_production_with_a_test_adapter())
+    by_key = {(d.recipe_id, d.recipe_version): d for d in built.descriptors()}
+    adapters = [d for d in built.descriptors() if d.adapter_target is not None]
+    assert len(adapters) == 1
     for adapter in adapters:
         key = (adapter.adapter_target.recipe_id, adapter.adapter_target.recipe_version)
         assert key in by_key, key
         assert by_key[key].entry_kind == "executable_recipe", key
+
+    retired = RecipeRegistrationV1(
+        recipe_id="test.adapter.retired_target",
+        recipe_version="1.0.0",
+        entry_kind="compatibility_adapter",
+        is_default=True,
+        adapter_target=RecipeReferenceV1(
+            recipe_id=RECIPE_DB_REST_FANOUT, recipe_version="1.0.0"
+        ),
+    )
+    with pytest.raises(ValueError, match="unregistered adapter target"):
+        build_test_registry(PRODUCTION_REGISTRATIONS + (retired,))
 
 
 def test_live_only_is_globally_sorted_in_the_mixed_case():
@@ -5497,8 +5589,14 @@ def test_guidance_is_served_and_validated_examples_are_never_templates():
 
 
 def test_guidance_reaches_the_pinned_discovery_surface():
-    """The served pin path (``_resolve_pinned_target``) carries the new fields."""
-    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
+    """The served pin path carries the new fields.
+
+    #159 S3: the adapter-based ``_resolve_pinned_target`` retired with the
+    adapters; the served path is the ONE discovery projection both
+    ``get_integration_archetype`` and ``get_schema_template('recipe:...')``
+    publish (``recipe_descriptor_projection``), at the exact pin.
+    """
+    from boomi_mcp.categories.integration_authoring import recipe_descriptor_projection
 
     registry = build_test_registry(
         (
@@ -5513,7 +5611,9 @@ def test_guidance_reaches_the_pinned_discovery_surface():
             ),
         )
     )
-    served = _resolve_pinned_target("t.adapter", "0.1.0", registry)
+    served = recipe_descriptor_projection(registry, registry.resolve("t.target", "0.1.0"))[
+        "descriptor"
+    ]
     assert served["not_for"] == ["Listener-entry processes."]
     assert served["examples"][0]["example_id"] == "sync.basic"
     assert registry.resolve("t.adapter").public_payload()["not_for"] == [
@@ -5581,7 +5681,10 @@ def test_a_discovery_caller_cannot_mutate_the_served_examples():
     ``raw_input`` or ``component_material`` in place cannot change what the next
     lookup, discovery listing or pinned discovery payload serves — the digest
     and the registry revision keep describing exactly what is served."""
-    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
+    # #159 S3: the adapter-pinned discovery (`_resolve_pinned_target`) retired with
+    # the compatibility adapters; the pinned discovery payload is the recipe-only
+    # projection `get_integration_archetype` serves.
+    from boomi_mcp.categories.integration_authoring import recipe_descriptor_projection
 
     material = _material_registration(examples=(_flagship_material_example(),))
     key = (material.recipe_id, material.recipe_version)
@@ -5600,7 +5703,7 @@ def test_a_discovery_caller_cannot_mutate_the_served_examples():
     )
     before_material = registry.resolve(*key).public_payload()
     before_listing = [d.public_payload() for d in registry.descriptors()]
-    before_pinned = _resolve_pinned_target("t.adapter", "0.1.0", registry)
+    before_pinned = recipe_descriptor_projection(registry, registry.resolve(*key))
     revision = registry.registry_revision
     assert before_material["examples"][0]["component_material"]  # non-vacuous
 
@@ -5620,7 +5723,7 @@ def test_a_discovery_caller_cannot_mutate_the_served_examples():
 
     assert registry.resolve(*key).public_payload() == before_material
     assert [d.public_payload() for d in registry.descriptors()] == before_listing
-    assert _resolve_pinned_target("t.adapter", "0.1.0", registry) == before_pinned
+    assert recipe_descriptor_projection(registry, registry.resolve(*key)) == before_pinned
     assert registry.registry_revision == revision
     # ...and the digest still covers the example: the same registration
     # rebuilt hashes identically, a different example does not.

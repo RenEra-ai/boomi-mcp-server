@@ -130,6 +130,11 @@ def test_the_typed_request_rejects_an_unknown_field():
         models.AuthoringRequestV1.model_validate(payload)
 
 
+#: #159 S3: compose_archetypes retired with its tool; the fan-out is the
+#: ``recipe:boomi.compose.db_rest_fanout@2.0.0`` selector.
+_RETIRED_SELECTORS = frozenset({"compose_archetypes"})
+
+
 @pytest.mark.parametrize(
     "selector",
     [
@@ -148,6 +153,12 @@ def test_the_typed_request_rejects_an_unknown_field():
 def test_existing_selectors_are_untouched(selector):
     """#146 adds selectors; it does not edit the bodies of the existing ones."""
     served = get_schema_template_action(schema_name=selector)
+    if selector in _RETIRED_SELECTORS:
+        # #159 S3: retired with its tool (tombstone candidate for this row).
+        assert served["_success"] is False
+        assert served["error_code"] == "SCHEMA_NAME_UNSUPPORTED"
+        assert selector not in served["valid_schema_names"]
+        return
     assert served["_success"] is True
     assert served["schema_name"] == selector
     # The new metadata rides on NEW selectors only.

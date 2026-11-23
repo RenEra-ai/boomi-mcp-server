@@ -2311,8 +2311,16 @@ def scan_examples(documents: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def authoring_boundaries() -> List[Dict[str, Any]]:
     """The public arbitrary-config entry points that can carry a legacy
-    ``process_kind``, plus every registered archetype that emits one."""
-    from boomi_mcp.authoring.contract import list_archetype_registry
+    ``process_kind``, plus every recipe the served discovery lists.
+
+    #159 S3: ``build_from_archetype`` and ``compose_archetypes`` retired with the
+    archetype route, and discovery is recipe-only — so the registered-archetype
+    rows became the recipes ``list_integration_archetypes`` serves, each anchored
+    at the module defining its executor (the production registration)."""
+    from boomi_mcp.categories.integration_authoring import (
+        list_integration_archetypes_action,
+    )
+    from boomi_mcp.recipes.builtins.catalog import PRODUCTION_REGISTRATIONS
 
     rows: List[Dict[str, Any]] = []
 
@@ -2345,17 +2353,21 @@ def authoring_boundaries() -> List[Dict[str, Any]]:
         })
 
     add("server.py", "build_integration", "hand-authored IntegrationSpecV1 config")
-    add("server.py", "build_from_archetype", "archetype-expanded config")
-    add("server.py", "compose_archetypes", "composed multi-archetype config")
     add("server.py", "import_integration_draft", "imported draft config")
 
-    for entry in list_archetype_registry():
-        name = entry.get("archetype") or entry.get("name") or entry.get("id")
-        if not name:
+    executors = {
+        (reg.recipe_id, reg.recipe_version): reg.executor
+        for reg in PRODUCTION_REGISTRATIONS if reg.executor is not None
+    }
+    served = list_integration_archetypes_action()
+    for entry in served.get("recipes", []):
+        executor = executors.get((entry.get("recipe_id"), entry.get("recipe_version")))
+        if executor is None:
             continue
-        module = "src/boomi_mcp/patterns/archetypes/%s.py" % name
+        module = "src/%s.py" % executor.__module__.replace(".", "/")
         if (_ROOT / module).is_file():
-            add(module, str(name), "registered archetype", line=1)
+            add(module, "%s@%s" % (entry["recipe_id"], entry["recipe_version"]),
+                "served recipe", line=1)
     rows.sort(key=lambda r: (r["path"], r["symbol"], r["form"]))
     return rows
 
@@ -3326,18 +3338,16 @@ def collect_served_artifacts() -> List[Dict[str, Any]]:
                 str(key), subtree))
 
     # --- SS-ARCHETYPE-CATALOG ----------------------------------------
-    # The SERVED descriptor, not the bare registry row: `list_archetype_registry`
-    # returns only {name, version, migrated}, so filtering it for legacy tokens
-    # would snapshot almost nothing. The caller-visible surface is the action's
-    # description/tags/use_cases, and that is where `process_kind='sync_pipeline'`
-    # is actually advertised.
+    # The SERVED descriptor, not a bare registry row. #159 S3: discovery is
+    # recipe-only, so the surface is the recipe descriptors the action serves
+    # (limitations, notes, examples), keyed by their exact pin.
     from boomi_mcp.categories.integration_authoring import (
         list_integration_archetypes_action,
     )
     served_archetypes = list_integration_archetypes_action()
-    for entry in served_archetypes.get("archetypes", []):
-        name = entry.get("name")
-        if name and _mentions_legacy(entry):
+    for entry in served_archetypes.get("recipes", []):
+        name = "%s@%s" % (entry.get("recipe_id"), entry.get("recipe_version"))
+        if entry.get("recipe_id") and _mentions_legacy(entry):
             artifacts.append(_artifact(
                 "SS-ARCHETYPE-CATALOG",
                 "integration_authoring.list_integration_archetypes_action()",
@@ -3586,7 +3596,13 @@ def _builder_diagnostic_envelopes() -> Dict[str, Any]:
     derivation, loudly, not record its own failure as the contract.
     """
     from boomi_mcp.categories import integration_builder
+    from boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
 
+    # #159 S3 (cutover decision 1): the three legacy process-kind diagnostics are no
+    # longer served — every raw process body is refused at admission, before any plan
+    # step exists, with the ONE unit-required code. The probes keep their keys (the
+    # legacy diagnostic each used to reach), and the artifact pins the refusal a caller
+    # now receives instead: the plan envelope itself, value-free.
     probes = {
         "PROCESS_KIND_REQUIRED": {},
         "PROCESS_KIND_UNSUPPORTED": {"process_kind": "__not_a_real_kind__"},
@@ -3597,29 +3613,19 @@ def _builder_diagnostic_envelopes() -> Dict[str, Any]:
     for selector, config in probes.items():
         plan = integration_builder._build_plan(None, {"components": [{
             "key": "p", "type": "process", "name": "P",
-            # The explicit component_id is what keeps the PUBLIC plan path
-            # offline — without one, `_resolve_existing_components` queries
-            # component metadata and the probe cannot run without a client. The
-            # action is not load-bearing (create with an id is client-free too);
-            # the envelopes are identical either way.
+            # The explicit component_id keeps the PUBLIC plan path offline.
             "action": "update", "component_id": "00000000-0000-0000-0000-000000000000",
             "config": config,
         }]})
-        envelopes = [
-            step["validation_error"] for step in (plan.get("steps") or [])
-            if isinstance(step, dict) and step.get("validation_error")
-        ]
-        if len(envelopes) != 1:
+        if plan.get("_success") is not False or plan.get("steps"):
             raise AssertionError(
-                "the %s probe yielded %d validation envelopes through the public "
-                "plan path — the served diagnostic it pins would silently stop "
-                "being frozen" % (selector, len(envelopes)))
-        out[selector] = envelopes[0]
-        if envelopes[0].get("error_code") != selector:
+                "the %s probe was not refused before planning — the served refusal it "
+                "pins would silently stop being frozen" % selector)
+        if plan.get("error_code") != PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED:
             raise AssertionError(
-                "the %s probe now yields %r — an earlier gate is firing first, so "
-                "this artifact would pin the wrong served text"
-                % (selector, envelopes[0].get("error_code")))
+                "the %s probe now yields %r — another gate is firing first, so this "
+                "artifact would pin the wrong served text" % (selector, plan.get("error_code")))
+        out[selector] = {k: plan[k] for k in ("error", "error_code", "field", "hint") if k in plan}
     return out
 
 
@@ -4007,18 +4013,15 @@ RETRACTION_MATRIX: Tuple[Dict[str, Any], ...] = (
     },
     {
         "surface_id": "SS-ARCHETYPE-CATALOG",
-        "source_modules": ("src/boomi_mcp/authoring/contract.py",
-                            "src/boomi_mcp/categories/integration_authoring.py"),
-        "surface_class": "Served archetype descriptors and parameter schemas",
-        "producer": "authoring.contract.list_archetype_registry()",
-        "anchors": ("src/boomi_mcp/authoring/contract.py:335 "
-                    "(list_archetype_registry)",
-                    "src/boomi_mcp/categories/integration_authoring.py:205 "
-                    "(list_integration_archetypes_action)"),
-        "legacy_guidance": "every registered archetype whose emitted spec carries a legacy "
-                           "process_kind advertises it through the served descriptor",
+        "source_modules": ("src/boomi_mcp/categories/integration_authoring.py",),
+        "surface_class": "Served recipe descriptors (recipe-only discovery since #159 S3)",
+        "producer": "integration_authoring.list_integration_archetypes_action()",
+        "anchors": ("src/boomi_mcp/categories/integration_authoring.py:102 "
+                    "(list_integration_archetypes_action)",),
+        "legacy_guidance": "a served recipe descriptor whose guidance or examples carry a "
+                           "legacy process_kind advertises it through discovery",
         "owning_issue": "#159",
-        "post_retraction_assertion": "no served archetype descriptor emits or documents a "
+        "post_retraction_assertion": "no served recipe descriptor emits or documents a "
                                      "legacy process_kind.",
     },
 )

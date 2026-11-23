@@ -223,21 +223,32 @@ def test_the_scan_universe_is_complete_and_non_vacuous(derived):
 
     # And every census family the inventory claims to cover actually found rows.
     present = {r["census"] for r in derived["census"]}
+    # #159 S3: the serving cutover EMPTIED two families on purpose — no production
+    # caller of the legacy semantic bridge is left (`_process_ir_semantic_error`
+    # retired), and every shipped example authors canonical units (no
+    # `example_producer`). Their detectors stay proven by the synthetic witnesses
+    # (`test_a_legacy_semantic_validation_caller_is_reported`, the example arm of the
+    # #159 zero-caller census), so only the still-populated families are required here.
     for required in ("registry_lookup", "renderer_call", "legacy_emitter",
-                     "legacy_semantic_validation", "component_xml_write",
+                     "component_xml_write",
                      "raw_api_invoker", "process_kind_producer",
-                     "process_kind_consumer", "example_producer",
+                     "process_kind_consumer",
                      "authoring_boundary"):
         assert required in present, "census family %r is empty" % required
+    for emptied in ("legacy_semantic_validation", "example_producer"):
+        assert emptied not in present, "census family %r is populated again" % emptied
 
-    # The four registry-resolution sites issue #149 names are all present.
+    # The four registry-resolution sites issue #149 named all RETIRED at #159 S3 (the
+    # builder dispatch left the serving module); the dispatch table is read only by
+    # its own definition module now.
     resolvers = {
         r["symbol"] for r in derived["census"]
         if r["census"] == "registry_lookup"
         and r["path"] == "src/boomi_mcp/categories/integration_builder.py"
     }
-    assert {"_resolve_preservation_policy", "build_structured_update_xml",
-            "_execute_component", "_process_component_preflight"} <= resolvers
+    assert resolvers == set(), resolvers
+    assert {r["path"] for r in derived["census"] if r["census"] == "registry_lookup"} == {
+        "src/boomi_mcp/categories/components/builders/process_flow_builder.py"}
 
 
 def test_the_vocabulary_is_derived_from_the_live_runtime(derived):
@@ -439,7 +450,7 @@ def test_a_generic_method_name_on_an_unrelated_target_is_not_reported(census_onl
 
 @pytest.mark.parametrize("label,body", [
     ("aliased wrapper around a legacy-bearing function",
-     "from .integration_builder import build_structured_update_xml as bsux\n"
+     "from .integration_builder import _execute_component as bsux\n"
      "def wrap(comp, xml):\n"
      "    return bsux(comp, xml)\n"),
     ("wrapper around the public build entry point",
@@ -447,9 +458,9 @@ def test_a_generic_method_name_on_an_unrelated_target_is_not_reported(census_onl
      "def wrap(client, profile, action, config):\n"
      "    return build_integration_action(client, profile, action, config)\n"),
     ("a wrapper AROUND the wrapper (second hop)",
-     "from .integration_builder import build_structured_update_xml\n"
+     "from .integration_builder import _execute_component\n"
      "def inner(comp, xml):\n"
-     "    return build_structured_update_xml(comp, xml)\n"
+     "    return _execute_component(comp, xml)\n"
      "def outer(comp, xml):\n"
      "    return inner(comp, xml)\n"),
 ])
@@ -488,14 +499,22 @@ def test_a_wrapper_importing_through_a_barrel_reexport_is_reported(census_only):
 
 
 def test_the_barrel_reexport_edges_exist_at_head(baseline):
-    """Guard the guard: the two production sites the regression removed."""
+    """Guard the guard: the two production sites the regression removed.
+
+    #159 S3: both sites (`_resolve_preservation_policy`, `build_structured_update_xml`)
+    stopped resolving a builder at the serving cutover, so the HEAD witness is that
+    NO serving-module caller reaches the dispatch any more; the barrel-canonicalized
+    edge itself stays proven by
+    `test_a_wrapper_importing_through_a_barrel_reexport_is_reported`."""
     edges = {
         (r["path"], r["symbol"]) for r in baseline["census"]
         if r["census"] == "legacy_transitive_call"
         and "get_process_flow_builder" in r["form"]
     }
     for symbol in ("_resolve_preservation_policy", "build_structured_update_xml"):
-        assert ("src/boomi_mcp/categories/integration_builder.py", symbol) in edges, symbol
+        assert ("src/boomi_mcp/categories/integration_builder.py", symbol) not in edges, symbol
+    assert not {path for path, _symbol in edges
+                if path == "src/boomi_mcp/categories/integration_builder.py"}, edges
 
 
 def test_every_repo_root_module_and_script_is_scanned():
@@ -790,14 +809,14 @@ def test_the_served_digests_cover_every_surface_not_just_token_matches(derived):
 
 @pytest.mark.parametrize("label,body", [
     ("alias bound BELOW its use",
-     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "from ...categories.integration_builder import _execute_component\n"
      "def bridge(c, x):\n"
      "    return _m12_12_impl(c, x)\n"
-     "_m12_12_impl = build_structured_update_xml\n"),
+     "_m12_12_impl = _execute_component\n"),
     ("import BELOW its use",
      "def bridge2(c, x):\n"
-     "    return build_structured_update_xml(c, x)\n"
-     "from ...categories.integration_builder import build_structured_update_xml\n"),
+     "    return _execute_component(c, x)\n"
+     "from ...categories.integration_builder import _execute_component\n"),
     ("http client imported BELOW its use",
      "def push(x):\n"
      "    return _m12_12_hx.post(_m12_12_B + '/Component', content=x)\n"
@@ -832,18 +851,18 @@ def test_a_binding_declared_below_its_use_is_still_resolved(census_only, label, 
 
 @pytest.mark.parametrize("label,body,expect", [
     ("alias assigned AFTER the nested def that uses it",
-     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "from ...categories.integration_builder import _execute_component\n"
      "def outer():\n"
      "    def inner(c, x):\n"
      "        return _m12_12_al(c, x)\n"
-     "    _m12_12_al = build_structured_update_xml\n"
+     "    _m12_12_al = _execute_component\n"
      "    return inner\n",
      "legacy_transitive_call"),
     ("import placed AFTER the nested def that uses it",
      "def outer2():\n"
      "    def inner(c, x):\n"
-     "        return build_structured_update_xml(c, x)\n"
-     "    from ...categories.integration_builder import build_structured_update_xml\n"
+     "        return _execute_component(c, x)\n"
+     "    from ...categories.integration_builder import _execute_component\n"
      "    return inner\n",
      "legacy_transitive_call"),
     # NOTE: a `get_process_flow_builder` import is deliberately NOT a param here.
@@ -910,12 +929,12 @@ def test_a_function_local_http_host_resolves_regardless_of_placement(placement):
 
 @pytest.mark.parametrize("label,body", [
     ("a default value calls an alias the body later shadows",
-     "from ...categories.integration_builder import build_structured_update_xml as _m12_12_x\n"
+     "from ...categories.integration_builder import _execute_component as _m12_12_x\n"
      "def f(a=_m12_12_x(None, None)):\n"
      "    from ...models.integration_models import IntegrationComponentSpec as _m12_12_x\n"
      "    return _m12_12_x\n"),
     ("a class body calls an alias a later class import shadows",
-     "from ...categories.integration_builder import build_structured_update_xml as _m12_12_y\n"
+     "from ...categories.integration_builder import _execute_component as _m12_12_y\n"
      "class M1212C:\n"
      "    z = _m12_12_y(None, None)\n"
      "    from ...models.integration_models import IntegrationComponentSpec as _m12_12_y\n"),
@@ -944,33 +963,33 @@ def test_the_prepass_does_not_shadow_an_enclosing_binding(census_only, label, bo
     ("function",
      "def m12_12_m2(v):\n"
      "    def inner(c, x):\n"
-     "        return build_structured_update_xml(c, x)\n"
+     "        return _execute_component(c, x)\n"
      "    match v:\n"
      "        case 1:\n"
      "            from ...categories.integration_builder import "
-     "build_structured_update_xml\n"
+     "_execute_component\n"
      "    return inner\n",
      "def m12_12_m2(v):\n"
      "    match v:\n"
      "        case 1:\n"
      "            from ...categories.integration_builder import "
-     "build_structured_update_xml\n"
+     "_execute_component\n"
      "    def inner(c, x):\n"
-     "        return build_structured_update_xml(c, x)\n"
+     "        return _execute_component(c, x)\n"
      "    return inner\n"),
     ("module",
      "match 1:\n"
      "    case 1:\n"
      "        from ...categories.integration_builder import "
-     "build_structured_update_xml\n"
+     "_execute_component\n"
      "def m12_12_mm(c, x):\n"
-     "    return build_structured_update_xml(c, x)\n",
+     "    return _execute_component(c, x)\n",
      "def m12_12_mm(c, x):\n"
-     "    return build_structured_update_xml(c, x)\n"
+     "    return _execute_component(c, x)\n"
      "match 1:\n"
      "    case 1:\n"
      "        from ...categories.integration_builder import "
-     "build_structured_update_xml\n"),
+     "_execute_component\n"),
 ])
 def test_a_match_case_binding_is_order_insensitive(scope, first, second):
     """`match` cases bind their scope exactly as `if`/`try` bodies do.
@@ -1217,7 +1236,7 @@ def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
      "def m12_12_init2():\n"
      "    global _m12_12_gb\n"
      "    from ...categories.integration_builder import "
-     "build_structured_update_xml as _m12_12_gb\n"
+     "_execute_component as _m12_12_gb\n"
      "def m12_12_call(c, x):\n"
      "    return _m12_12_gb(c, x)\n",
      "legacy_transitive_call"),
@@ -1231,29 +1250,29 @@ def test_the_scan_contract_scopes_its_ordering_claim_to_what_it_does(baseline):
     # `global A; A = build_structured_update_xml` still added a real legacy
     # caller with neither a row nor residue. Three placements, one rule.
     ("a legacy alias ASSIGNED under `global`",
-     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "from ...categories.integration_builder import _execute_component\n"
      "def m12_12_ga():\n"
      "    global _m12_12_ga1\n"
-     "    _m12_12_ga1 = build_structured_update_xml\n"
+     "    _m12_12_ga1 = _execute_component\n"
      "def m12_12_gau(c, x):\n"
      "    return _m12_12_ga1(c, x)\n",
      "legacy_transitive_call"),
     ("a legacy alias ASSIGNED under `nonlocal`",
-     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "from ...categories.integration_builder import _execute_component\n"
      "def m12_12_no():\n"
      "    _m12_12_nl = None\n"
      "    def m12_12_ni():\n"
      "        nonlocal _m12_12_nl\n"
-     "        _m12_12_nl = build_structured_update_xml\n"
+     "        _m12_12_nl = _execute_component\n"
      "    def m12_12_nu(c, x):\n"
      "        return _m12_12_nl(c, x)\n"
      "    return m12_12_ni, m12_12_nu\n",
      "legacy_transitive_call"),
     ("a legacy alias ASSIGNED under `global` in a module-level class body",
-     "from ...categories.integration_builder import build_structured_update_xml\n"
+     "from ...categories.integration_builder import _execute_component\n"
      "class M12_12_CB:\n"
      "    global _m12_12_cb1\n"
-     "    _m12_12_cb1 = build_structured_update_xml\n"
+     "    _m12_12_cb1 = _execute_component\n"
      "def m12_12_cbu(c, x):\n"
      "    return _m12_12_cb1(c, x)\n",
      "legacy_transitive_call"),
@@ -1279,7 +1298,7 @@ def test_a_name_published_outward_survives_scope_restore(census_only, label, bod
 
 @pytest.mark.parametrize("label,body,expect", [
     ("an alias bound and CALLED inside a class body",
-     "from ...categories.integration_builder import build_structured_update_xml as _m12_cb\n"
+     "from ...categories.integration_builder import _execute_component as _m12_cb\n"
      "class M12ClassAlias:\n"
      "    _bound = _m12_cb\n"
      "    _result = _bound(1, 2)\n",
@@ -1334,7 +1353,7 @@ def test_a_nonlocal_publication_is_not_misrouted_past_its_owner(label, binding):
     sources = inv.python_sources()
     target = "src/boomi_mcp/categories/components/processes.py"
     head = ("from ...categories.integration_builder import "
-            "build_structured_update_xml as _m12_leg\n"
+            "_execute_component as _m12_leg\n"
             "def _m12_safe(c, x):\n    return None\n")
 
     def _tree(outer_value):
@@ -1411,13 +1430,13 @@ def test_a_function_local_import_does_not_erase_a_later_module_level_edge(census
     sources = dict(inv.python_sources())
     target = "src/boomi_mcp/categories/components/processes.py"
     sources[target] = sources[target] + (
-        "\n\nfrom ...categories.integration_builder import build_structured_update_xml\n"
+        "\n\nfrom ...categories.integration_builder import _execute_component\n"
         "def m12_12_shadower():\n"
         "    from ...models.integration_models import IntegrationComponentSpec "
-        "as build_structured_update_xml\n"
-        "    return build_structured_update_xml\n"
+        "as _execute_component\n"
+        "    return _execute_component\n"
         "def m12_12_real(c, x):\n"
-        "    return build_structured_update_xml(c, x)\n")
+        "    return _execute_component(c, x)\n")
     diff = inv.compare(inv.build_inventory(sources=sources, include_served=False),
                        census_only)
     assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, \
@@ -1534,7 +1553,7 @@ def test_the_axis_walk_unions_payload_and_overview_listings():
 
 
 def test_a_simple_assignment_alias_carries_transitive_identity(census_only):
-    """`alias = build_structured_update_xml; alias(...)` is a real legacy caller.
+    """`alias = _execute_component; alias(...)` is a real legacy caller.
 
     Only `_watched` SINK names were aliased on assignment, and a legacy-BEARING
     function is not a watched sink name — so the rebind resolved to nothing and
@@ -1542,8 +1561,8 @@ def test_a_simple_assignment_alias_carries_transitive_identity(census_only):
     aliases as a required resolution form.
     """
     diff = _added(census_only, "_m12_12_synthetic_assign_alias", (
-        "from .integration_builder import build_structured_update_xml\n"
-        "alias = build_structured_update_xml\n"
+        "from .integration_builder import _execute_component\n"
+        "alias = _execute_component\n"
         "def wrap(comp, xml):\n"
         "    return alias(comp, xml)\n"
     ))
@@ -1623,7 +1642,7 @@ def test_the_retraction_matrix_anchors_cover_every_producer_module(derived):
 
 
 def test_a_module_qualified_wrapper_is_reported(census_only):
-    """`import mod; mod.build_structured_update_xml(...)`.
+    """`import mod; mod._execute_component(...)`.
 
     The closure once admitted only `ast.Name` callees, so a module-qualified
     wrapper reached the legacy renderer with no census row at all.
@@ -1631,7 +1650,7 @@ def test_a_module_qualified_wrapper_is_reported(census_only):
     diff = _added(census_only, "_m12_12_synthetic_qualified_wrapper", (
         "from . import integration_builder as ib\n"
         "def wrap(comp, xml):\n"
-        "    return ib.build_structured_update_xml(comp, xml)\n"
+        "    return ib._execute_component(comp, xml)\n"
     ))
     assert "legacy_transitive_call" in {r.split(" | ")[0] for r in diff.added}, diff.report()
 
@@ -1672,9 +1691,14 @@ def test_the_legacy_process_protocol_templates_are_frozen(derived):
     """
     frozen = {a["selector"] for a in derived["served_artifacts"]
               if a["surface_class"] == "SS-SCHEMA-TEMPLATES"}
+    # #159 S3: the three legacy process protocol templates retired with process_kind
+    # authoring — the process template no longer advertises a protocol axis, so the
+    # walk reaches none of them; the process template itself is still frozen (it
+    # serves the retirement and the canonical route).
     for protocol in ("database_to_api_sync", "wrapper_subprocess", "sync_pipeline"):
         selector = "resource_type=process|operation=create|protocol=%s" % protocol
-        assert selector in frozen, "legacy protocol template %r is not frozen" % protocol
+        assert selector not in frozen, "retired protocol template %r is served again" % protocol
+    assert "resource_type=process|operation=create" in frozen
     assert sum(1 for s in frozen if "|protocol=" in s) >= 8
 
 
@@ -1726,12 +1750,16 @@ def test_a_hand_rolled_transport_post_is_reported_as_a_write_sink(census_only):
 
 
 def test_a_legacy_semantic_validation_caller_is_reported(census_only):
-    """`_process_ir_semantic_error` is named by the design plan and is private,
-    so a public-only filter over the bridge module missed it."""
+    """`_process_ir_semantic_error` was named by the design plan and was private,
+    so a public-only filter over the bridge module missed it. #159 S3 retired that
+    serving helper, so the witness now calls the isolated bridge directly (kept for
+    #160) — the family is empty at HEAD and this proves its detector still sees a
+    caller."""
     diff = _added(census_only, "_m12_12_synthetic_semantic", (
-        "from .integration_builder import _process_ir_semantic_error\n"
+        "from ..compiler.process_ir.semantic_validation.legacy_bridge import "
+        "validate_legacy_process_config\n"
         "def check(kind, config):\n"
-        "    return _process_ir_semantic_error(kind, config)\n"
+        "    return validate_legacy_process_config(kind, config)\n"
     ))
     assert "legacy_semantic_validation" in {r.split(" | ")[0] for r in diff.added}
 

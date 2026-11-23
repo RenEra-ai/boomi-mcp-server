@@ -1289,11 +1289,19 @@ def _specialized_surfaces():
 
 
 def _live_archetypes():
-    """Archetype names from the live registry, not a literal."""
-    from boomi_mcp.authoring.contract import list_archetype_registry
+    """The ids plan_integration_design's ``archetype`` argument accepts, from
+    the live registry, not a literal. #159 S3: those are the discoverable
+    recipe ids (the archetype pattern registry retired from every served
+    surface)."""
+    from boomi_mcp.categories.integration_authoring import (
+        list_integration_archetypes_action,
+    )
 
     try:
-        return tuple(entry["name"] for entry in list_archetype_registry())
+        return tuple(
+            row["recipe_id"]
+            for row in list_integration_archetypes_action().get("recipes", ())
+        )
     except Exception:  # noqa: BLE001 — a registry that cannot build sweeps nothing
         return ()
 
@@ -2624,7 +2632,6 @@ _AMENDMENT_CATALOG_PARAMS = {
     ("list_capabilities", "expected_capability_revision"): "string",
     ("list_integration_archetypes", "expected_recipe_registry"): "object",
     ("get_integration_archetype", "recipe_version"): "string",
-    ("build_from_archetype", "recipe_version"): "string",
     ("manage_process", "config"): "string",
 }
 

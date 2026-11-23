@@ -1671,9 +1671,11 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
     - The exceptions are three modules. The recipe engine and the revision oracle touch no account by contract,
       and effect derivation holds no plan: for a create under `reuse` it already answers "may be substituted",
       whatever the binding.
-    - The declared-only planner binding is read for its id by `_bound_existing_id` alone.
+    - The declared-only planner binding is read for its id by `_bound_existing_id` and, since #159 S3, by flat
+      process admission (`flat_process_refusal_field`: an explicit declared id or nothing).
     - `apply_writes_component_config` reads only its `reference_only` flag.
     - Canonical safe-edit admission and its dependency read use declared ids only (a name binding is refused), so they pass no bindings.
+    - Flat process admission (#159 S3) binds only by an explicit declared id on every route, so it passes none either.
     - Both account-holding routes build the map from their component plan."""
     import ast
 
@@ -1691,6 +1693,11 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
     declared_only_owners = {
         ("categories/components/safe_edit_component.py", "_admit_canonical_request"),
         ("categories/components/safe_edit_component.py", "_verified_dependencies"),
+        # #159 S3 (step-4 decision 4): flat process admission binds ONLY by an explicit
+        # declared id, deliberately account-independent — a name-only row refuses even
+        # when the account holds a match — so it reads the DECLARED binding, never the
+        # route's resolved one.
+        ("authoring/process_admission.py", "flat_process_refusal_field"),
     }
 
     def calls(path):
@@ -1720,7 +1727,8 @@ def test_every_identity_reading_takes_the_bindings_its_route_resolved():
             if called == "planned_existing_ids":
                 planned.add(owner)
     assert unbound == [], unbound
-    assert declared == {("_bound_existing_id", "existing_id"), ("apply_writes_component_config", "reference_only")}, declared
+    assert declared == {("_bound_existing_id", "existing_id"), ("apply_writes_component_config", "reference_only"),
+                        ("flat_process_refusal_field", "existing_id")}, declared
     assert planned >= {"_apply_plan", "plan_authoring_request_v1"}, planned
     assert seen > 20, seen
 

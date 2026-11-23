@@ -22,16 +22,17 @@ class IntegrationComponentSpec(BaseModel):
     config: Dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Type-specific configuration payload. For type='process', "
-            "config.process_kind selects a structured process-flow builder "
-            "(e.g. 'database_to_api_sync' or 'wrapper_subprocess' — issue #25) "
-            "and is REQUIRED for any authoring action that emits or rebuilds "
-            "process XML (create / create_clone / update): such a process "
-            "without process_kind is rejected at plan time with "
-            "PROCESS_KIND_REQUIRED (legacy freeform JSON-to-XML process "
-            "authoring has been removed). A reference-only reuse of an existing "
-            "process (no XML emitted) may omit it. Use manage_component for an "
-            "explicit raw process XML escape hatch."
+            "Type-specific configuration payload. For type='process' a row "
+            "only BINDS an existing process by its explicit id: "
+            "action='create' with config.reference_only=true and "
+            "config.component_id, or a top-level component_id under "
+            "conflict_policy='reuse'. Any other process row — a process_kind / "
+            "process_type selector, flow_sequence, xml or any other body field, "
+            "an update, or a name without an id — is refused with "
+            "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED before any write; a "
+            "process body is authored as a canonical unit in 'processes' (or "
+            "authoring_request intent_kind='process_ir'). Use manage_component "
+            "for an explicit raw process XML escape hatch."
         ),
     )
     depends_on: List[str] = Field(default_factory=list, description="Component keys this component depends on")
@@ -45,10 +46,11 @@ class IntegrationComponentSpec(BaseModel):
         return value
 
 
-#: The spec version that opts into the STRICT top-level pipeline surface
-#: (ADR-001 §5). The ONE spelling the planner's import gate reads (#159 S1,
-#: ARCH-r1-09); the legacy authority's ``STRICT_VERSION`` is pinned equal to it
-#: by ``tests/test_issue_139_authority.py``.
+#: The spec version that opted into the STRICT top-level pipeline surface
+#: (ADR-001 §5). #159 S3: the planner no longer reads it (the strict authority
+#: retired with the legacy process builders); the isolated legacy authority's
+#: ``STRICT_VERSION`` is still pinned equal to it by
+#: ``tests/test_issue_139_authority.py`` until #160.
 STRICT_PIPELINE_VERSION = "1.1"
 
 
@@ -58,21 +60,15 @@ class IntegrationSpecV1(BaseModel):
     version: Literal["1.0", "1.1"] = Field(
         default="1.0",
         description=(
-            "Authoring surface selector (issue #139D / ADR-001 §5, §9). "
-            "'1.0' (the default, and the value every archetype emits) is the "
-            "frozen legacy surface: an authored top-level 'pipeline' is accepted "
-            "and preserved as an INERT echo that drives nothing, exactly as "
-            "today. '1.1' opts in to the STRICT surface, on which a top-level "
-            "'pipeline' that disagrees with the single authored process — or is "
-            "ambiguous because the spec authors two or more processes — is "
-            "rejected at plan time with LEGACY_ADAPTER_AUTHORITY_CONFLICT, "
-            "before collision resolution and before any mutation. '1.1' NEVER "
-            "makes 'pipeline' executable; the process component's own config is "
-            "still the only executable authority. Selecting the strict surface "
-            "requires the explicit 'integration_spec' input form — the "
-            "'source_description' and bare top-level forms rebuild the spec from "
-            "a fixed key allowlist that carries no 'version', so they always "
-            "normalize to '1.0'. V1 is NOT deprecated and emits no warning."
+            "Authoring surface selector (issue #139D / ADR-001 §5, §9). '1.0' "
+            "is the default. '1.1' is still accepted and selects no different "
+            "behaviour since #159 S3: the strict pipeline-vs-process authority "
+            "retired with the legacy process builders, so a top-level "
+            "'pipeline' is an inert analysis view on both versions. The "
+            "'source_description' and bare top-level forms rebuild the spec "
+            "from a fixed key allowlist that carries no 'version', so they "
+            "always normalize to '1.0'. V1 is NOT deprecated and emits no "
+            "warning."
         ),
     )
     name: str = Field(..., description="Integration name")
@@ -161,15 +157,10 @@ class IntegrationSpecV1(BaseModel):
         description=(
             "Optional semantic stage graph (M5 sync-pipeline contract). When "
             "present, describes the stage graph; no Boomi XML is emitted from "
-            "this field alone — it is an inspectable/analysis view, never an "
-            "executable input (ADR-001 §4). On version='1.0' it is preserved as "
-            "an inert echo even when it contradicts the authored process. On "
-            "version='1.1' it is validated against the single authored process's "
-            "normalized semantics and a disagreement is rejected with "
-            "LEGACY_ADAPTER_AUTHORITY_CONFLICT; it is additionally withheld "
-            "(echoed as null) when that process resolves to reuse of an existing "
-            "component, because the request then authors no process for the view "
-            "to describe (ADR-001 §5 view-faithfulness)."
+            "this field — it is an inspectable/analysis view, never an "
+            "executable input (ADR-001 §4), preserved as an inert echo on every "
+            "version. A secret-shaped key anywhere in it is refused with "
+            "PLAINTEXT_SECRET_REJECTED before normalization."
         ),
     )
 

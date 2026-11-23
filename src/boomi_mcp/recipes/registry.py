@@ -199,11 +199,10 @@ RECIPE_LAYER_MODULES: Tuple[str, ...] = (
     # `test_the_downstream_compiler_is_not_in_the_layer_digest` asserts is intact.
     f"{_IMPORT_PREFIX}.patterns.archetype_assembly",
     f"{_IMPORT_PREFIX}.patterns.archetype_parameters",
-    # Migrated surfaces — they call the bridge, so they are in the path.
-    f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_api_sync",
-    f"{_IMPORT_PREFIX}.patterns.archetypes.api_to_database_sync",
-    f"{_IMPORT_PREFIX}.patterns.composition",
-    f"{_IMPORT_PREFIX}.patterns.recipe_bridge",
+    # #159 S3: the bridge-calling legacy surfaces (`patterns.archetypes.*`,
+    # `patterns.composition`, `patterns.recipe_bridge`) are no longer in any
+    # execution path — their registrations and tools retired — so they leave the
+    # layer, and building the production registry no longer imports them.
     f"{_IMPORT_PREFIX}.recipes.builtins.catalog",
     f"{_IMPORT_PREFIX}.recipes.builtins.database_to_api_sync",
     f"{_IMPORT_PREFIX}.recipes.builtins.fanout",

@@ -701,6 +701,12 @@ _ISSUE_153_PREFIXES = (
 #: future codes.
 _ISSUE_153_EXTRA_CODES = frozenset({"INTEGRATION_COMPONENT_KEY_DUPLICATE"})
 
+#: #159 S3 (cutover decision 1): the ONE process-component code another issue
+#: registers — the unit-required refusal of a raw process body, which blames the
+#: process component the caller authored. Named, owned by #159, and pinned both
+#: ways below, so the family stays closed to anything else.
+_ISSUE_159_PROCESS_COMPONENT_CODES = frozenset({"PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED"})
+
 
 def test_issue_153_owns_its_three_families_as_a_biconditional():
     """#153 is the SOLE introducer of its three families.
@@ -719,8 +725,13 @@ def test_issue_153_owns_its_three_families_as_a_biconditional():
         assert code.startswith(_ISSUE_153_PREFIXES) or code in _ISSUE_153_EXTRA_CODES, code
 
     for code, spec in ERROR_TAXONOMY.items():
+        if code in _ISSUE_159_PROCESS_COMPONENT_CODES:
+            assert spec.owner == "#159", code
+            continue
         if code.startswith(_ISSUE_153_PREFIXES) or code in _ISSUE_153_EXTRA_CODES:
             assert spec.owner == "#153", code
+    # the exemption is exactly the registered code(s), never a stale name
+    assert _ISSUE_159_PROCESS_COMPONENT_CODES <= set(ERROR_TAXONOMY)
 
 
 def test_issue_153_does_not_extend_a_family_it_does_not_own():

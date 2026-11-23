@@ -25,12 +25,23 @@ _tests = str(Path(__file__).resolve().parent.parent)
 if _tests not in sys.path:
     sys.path.insert(0, _tests)
 
-from boomi_mcp.categories.integration_authoring import build_from_archetype_action
 from boomi_mcp.categories.integration_builder import _build_plan
 
 # The golden-case definitions live in the corpus (#165); this module CONSUMES
 # them. The aliases keep every existing call site and assertion unchanged.
 import _wave_gate_golden_corpus as _corpus
+
+
+def build_from_archetype_action(*args, **kwargs):
+    """The retired ``build_from_archetype`` tool's action (#159 S3 deletes it).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "build_from_archetype_action")(*args, **kwargs)
+
 
 NS = {"bns": "http://api.platform.boomi.com/"}
 _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
@@ -78,60 +89,6 @@ def _operational_intent(spec: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_document_cache_ref_emits_wired_reliability():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    # Issue #99 G1: the wired sync path opts into the connector-scoped Try/Catch.
-    assert _main_process(spec)["config"]["reliability"] == {
-        "retry_count": 0,
-        "try_catch_scope": "connector",
-        "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
-    }
-
-
-def test_error_subprocess_ref_emits_wired_reliability():
-    spec = _emit({"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}})
-    assert _main_process(spec)["config"]["reliability"] == {
-        "retry_count": 0,
-        "try_catch_scope": "connector",
-        "dlq": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID},
-    }
-
-
-def test_ref_token_binding_added_to_depends_on():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": "$ref:my_cache"}})
-    main = _main_process(spec)
-    assert "my_cache" in main["depends_on"]
-    assert main["config"]["reliability"]["dlq"]["document_cache_id"] == "$ref:my_cache"
-
-
-def test_literal_binding_not_added_to_depends_on():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    # A literal id needs no $ref dependency edge.
-    assert _CACHE_ID not in _main_process(spec)["depends_on"]
-
-
-def test_guidance_only_does_not_wire():
-    spec = _emit({"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<addr>>"}})
-    assert _main_process(spec)["config"]["reliability"] == {"retry_count": 0, "dlq": {"mode": "disabled"}}
-
-
-def test_disabled_unchanged():
-    spec = _emit({"enabled": False})
-    assert _main_process(spec)["config"]["reliability"] == {"retry_count": 0, "dlq": {"mode": "disabled"}}
-
-
-def test_retry_gt1_with_wired_dlq_emits_retry_count():
-    # Issue #88: caller retry max_attempts=5 with a wired DLQ emits
-    # process retry_count = max_attempts - 1 = 4 (platform-timed).
-    spec = _emit(
-        {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}},
-        retry={"max_attempts": 5, "backoff": "platform"},
-    )
-    rel = _main_process(spec)["config"]["reliability"]
-    assert rel["retry_count"] == 4
-    assert rel["dlq"] == {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}
-
-
 # ---------------------------------------------------------------------------
 # Contract validation — no silent acceptance of unimplementable input
 # ---------------------------------------------------------------------------
@@ -144,45 +101,11 @@ def _expect_validation_error(dlq: dict):
     return result
 
 
-def test_document_cache_ref_requires_id():
-    _expect_validation_error({"enabled": True, "target": {"mode": "document_cache_ref"}})
-
-
-def test_error_subprocess_ref_requires_process_id():
-    _expect_validation_error({"enabled": True, "target": {"mode": "error_subprocess_ref"}})
-
-
-def test_cross_mode_fields_rejected():
-    _expect_validation_error(
-        {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID, "process_id": _HANDLER_ID}}
-    )
-
-
-def test_guidance_only_requires_kind_and_address():
-    _expect_validation_error({"enabled": True, "target": {"mode": "guidance_only", "kind": "queue"}})
-
-
-def test_legacy_kind_address_without_mode_rejected():
-    # The old folder|topic|queue + address shape (no mode) is no longer silently
-    # accepted — mode is required.
-    _expect_validation_error({"enabled": True, "target": {"kind": "queue", "address": "<<addr>>"}})
-
-
-def test_unsupported_mode_rejected():
-    _expect_validation_error({"enabled": True, "target": {"mode": "folder", "address": "<<addr>>"}})
-
-
 # ---------------------------------------------------------------------------
 # RetryPolicy contract reconciliation (#88): bounds, mapping, no over-promise
 # ---------------------------------------------------------------------------
 
 _WIRED_DLQ = {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}}
-
-
-def test_max_attempts_6_maps_to_retry_count_5():
-    # Boomi platform maximum: 6 attempts = 5 retries.
-    spec = _emit(_WIRED_DLQ, retry={"max_attempts": 6, "backoff": "platform"})
-    assert _main_process(spec)["config"]["reliability"]["retry_count"] == 5
 
 
 def _expect_retry_validation_error(retry: dict, dlq: dict | None = None):
@@ -193,91 +116,15 @@ def _expect_retry_validation_error(retry: dict, dlq: dict | None = None):
     assert result["error_code"] == "PARAM_VALIDATION_FAILED", result
 
 
-def test_max_attempts_7_rejected():
-    _expect_retry_validation_error({"max_attempts": 7}, _WIRED_DLQ)
-
-
-def test_legacy_backoff_exponential_rejected():
-    _expect_retry_validation_error({"max_attempts": 1, "backoff": "exponential"})
-
-
-def test_removed_initial_interval_seconds_rejected():
-    # extra="forbid" rejects the dropped field rather than silently ignoring it.
-    _expect_retry_validation_error({"max_attempts": 1, "initial_interval_seconds": 2})
-
-
 # ---------------------------------------------------------------------------
 # Operational intent
 # ---------------------------------------------------------------------------
-
-
-def test_operational_intent_emitted_status_for_wired_modes():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    dq = _operational_intent(spec)["reliability"]["dlq_requested"]
-    assert dq["status"] == "emitted"
-    assert dq["builder_mode"] == "document_cache_ref"
-    assert dq["binding"] == _CACHE_ID
-    assert "deferred_to" not in dq
-    # The dlq intent block mirrors the emitted process dlq.
-    assert _operational_intent(spec)["reliability"]["dlq"] == {
-        "mode": "document_cache_ref",
-        "document_cache_id": _CACHE_ID,
-    }
-
-
-def test_operational_intent_guidance_only_status_and_no_freeform_echo():
-    spec = _emit(
-        {
-            "enabled": True,
-            "target": {
-                "mode": "guidance_only",
-                "kind": "queue",
-                "address": "<<secret addr>>",
-                "reason": "<<secret reason addr>>",
-            },
-        }
-    )
-    dq = _operational_intent(spec)["reliability"]["dlq_requested"]
-    assert dq["status"] == "guidance_only"
-    assert dq["kind"] == "queue"
-    assert dq["address_present"] is True
-    assert dq["reason_present"] is True
-    # Neither free-form caller value (address OR reason) may be echoed anywhere
-    # in the spec — both are leak vectors.
-    blob = json.dumps(spec)
-    assert "<<secret addr>>" not in blob
-    assert "<<secret reason addr>>" not in blob
-
-
-def test_operational_intent_retry_no_longer_deferred():
-    # Issue #88: with a wired DLQ, retry is emitted (not deferred). The intent
-    # records the emitted process_retry_count and carries no deferred_to.
-    spec = _emit(
-        {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}},
-        retry={"max_attempts": 5},
-    )
-    retry = _operational_intent(spec)["reliability"]["retry"]
-    assert "deferred_to" not in retry
-    assert retry["requested_max_attempts"] == 5
-    assert retry["process_retry_count"] == 4
 
 
 # ---------------------------------------------------------------------------
 # Cross-issue interaction with #86 build_from_archetype design_doctrine_hints:
 # a WIRED DLQ must NOT trigger the "DLQ kept disabled" downgrade hint.
 # ---------------------------------------------------------------------------
-
-
-def test_no_dlq_downgrade_hint_for_wired_mode():
-    result = _result({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    hints = result.get("design_doctrine_hints", [])
-    assert not any("DLQ" in h for h in hints), hints
-
-
-def test_dlq_downgrade_hint_present_for_guidance_only():
-    result = _result({"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<addr>>"}})
-    hints = result.get("design_doctrine_hints", [])
-    assert any("error_routing_and_dlq" in h for h in hints), hints
 
 
 # ---------------------------------------------------------------------------
@@ -311,42 +158,6 @@ def _append_component(spec: dict, key: str, ctype: str) -> dict:
     return spec
 
 
-@patch(_PAGINATE, return_value=[])
-def test_error_subprocess_ref_round_trips_with_in_spec_subprocess(_mock_pag):
-    spec = _emit({"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": "$ref:dlq_handler"}})
-    spec = _append_component(spec, "dlq_handler", "process")
-    plan = _build_plan(MagicMock(), {"integration_spec": spec})
-    assert plan["_success"] is True, plan
-    # The referenced in-spec subprocess must itself plan clean — no step may
-    # carry a validation error (it must satisfy the process_kind-required gate).
-    assert all(s.get("validation_error") is None for s in plan["steps"]), [
-        (s["key"], s.get("validation_error")) for s in plan["steps"]
-        if s.get("validation_error") is not None
-    ]
-    step = next(s for s in plan["steps"] if s["key"] == _main_process(spec)["key"])
-    assert step.get("validation_error") is None
-
-
-@patch(_PAGINATE, return_value=[])
-def test_document_cache_ref_round_trips_with_in_spec_documentcache(_mock_pag):
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": "$ref:dlq_cache"}})
-    spec = _append_component(spec, "dlq_cache", "documentcache")
-    plan = _build_plan(MagicMock(), {"integration_spec": spec})
-    assert plan["_success"] is True, plan
-    step = next(s for s in plan["steps"] if s["key"] == _main_process(spec)["key"])
-    assert step.get("validation_error") is None
-
-
-@patch(_PAGINATE, return_value=[])
-def test_wrong_type_dlq_ref_flagged_by_plan_check(_mock_pag):
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": "$ref:dlq_cache"}})
-    # Wrong type: a connector-settings component where a documentcache is required.
-    spec = _append_component(spec, "dlq_cache", "connector-settings")
-    plan = _build_plan(MagicMock(), {"integration_spec": spec})
-    step = next(s for s in plan["steps"] if s["key"] == _main_process(spec)["key"])
-    assert step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
-
-
 # ---------------------------------------------------------------------------
 # Archetype-path golden — reaches the verified catcherrors + DLQ catch path
 # ---------------------------------------------------------------------------
@@ -361,58 +172,12 @@ def test_archetype_document_cache_ref_matches_golden():
     assert _sha256(_l1_canonical_process_xml(dlq=_WIRED_DC)) == _GOLDEN_SHA256
 
 
-def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
-    spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
-    root = ET.fromstring(_build_archetype_process_xml(spec))
-    shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
-    # Issue #99 G1: connector scope emits a Try/Catch per connector — the source
-    # connector (DB Get) in its own catcherrors and the target connector (REST)
-    # in its own catcherrors, separated by the source so the target retry does
-    # not re-run the DB read. Each connector gets its own DLQ catch leg.
-    assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "catcherrors", "connectoraction", "map", "catcherrors",
-        "connectoraction", "stop", "doccacheload", "doccacheload",
-    ]
-    # Both catch legs route to the same DLQ document cache.
-    dlq_legs = [s for s in shapes if s.attrib["shapetype"] == "doccacheload"]
-    assert len(dlq_legs) == 2
-    for leg in dlq_legs:
-        assert leg.find("configuration/doccacheload").attrib["docCache"] == _CACHE_ID
-    # The source Try/Catch carries retry 0; the target carries the configured
-    # retry (here 0 — the default max_attempts=1).
-    catcherrors = [s for s in shapes if s.attrib["shapetype"] == "catcherrors"]
-    assert len(catcherrors) == 2
-    assert catcherrors[0].find("configuration/catcherrors").attrib["retryCount"] == "0"
-
-
 # ---------------------------------------------------------------------------
 # Issue #89 — catch_notify reaches process.reliability and the emitted XML
 # ---------------------------------------------------------------------------
 
 _WIRED_DC = _corpus.ARCH_WIRED_DC
 _WIRED_SUB = {"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}}
-
-
-def test_catch_notify_reaches_process_reliability_document_cache():
-    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
-    assert _main_process(spec)["config"]["reliability"] == {
-        "retry_count": 0,
-        "try_catch_scope": "connector",
-        "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
-        "catch_notify": {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"]},
-    }
-
-
-def test_catch_notify_reaches_process_reliability_error_subprocess():
-    spec = _emit(_WIRED_SUB, catch_notify=_CATCH_NOTIFY)
-    rel = _main_process(spec)["config"]["reliability"]
-    assert rel["dlq"] == {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}
-    assert rel["catch_notify"] == {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"]}
-
-
-def test_catch_notify_level_normalized_to_uppercase():
-    spec = _emit(_WIRED_DC, catch_notify={"level": "warning", "message_template": _CATCH_NOTIFY["message_template"]})
-    assert _main_process(spec)["config"]["reliability"]["catch_notify"]["level"] == "WARNING"
 
 
 def _expect_notify_validation_error(catch_notify: dict, dlq: dict | None = _WIRED_DC):
@@ -423,71 +188,12 @@ def _expect_notify_validation_error(catch_notify: dict, dlq: dict | None = _WIRE
     assert result["error_code"] == "PARAM_VALIDATION_FAILED", result
 
 
-def test_catch_notify_without_wired_dlq_rejected():
-    _expect_notify_validation_error(_CATCH_NOTIFY, dlq={"enabled": False})
-
-
-def test_catch_notify_with_guidance_only_rejected():
-    _expect_notify_validation_error(
-        _CATCH_NOTIFY,
-        dlq={"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<addr>>"}},
-    )
-
-
-def test_catch_notify_missing_caught_error_token_rejected():
-    _expect_notify_validation_error({"level": "ERROR", "message_template": "static text, no token"})
-
-
-def test_catch_notify_unsupported_level_rejected():
-    _expect_notify_validation_error({"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]})
-
-
-def test_catch_notify_extra_channel_key_rejected():
-    _expect_notify_validation_error(
-        {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"], "email_to": "ops@example.com"}
-    )
-
-
-def test_catch_notify_operational_intent_records_no_echo():
-    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
-    notify_intent = _operational_intent(spec)["reliability"]["catch_notify"]
-    assert notify_intent == {
-        "requested": True,
-        "status": "emitted",
-        "level": "ERROR",
-        "message_template_present": True,
-        "references_caught_error_property": True,
-    }
-    # The message body is never echoed into the intent metadata.
-    assert _CATCH_NOTIFY["message_template"] not in str(notify_intent)
-
-
 def test_archetype_notify_matches_golden():
     """#159 S3: re-homed onto the L1 preset — its materialized notify DLQ process
     is the retired golden-000088's frozen bytes (digest oracle above)."""
     assert _sha256(_l1_canonical_process_xml(
         dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
     )) == _NOTIFY_GOLDEN_SHA256
-
-
-def test_archetype_notify_shape_sequence():
-    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
-    root = ET.fromstring(_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden"))
-    shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
-    # Issue #99 G1: connector scope — each connector's catch leg is the full
-    # notify -> dlq route sequence (one per connector). #184 amendment 3: no
-    # catch-row Stop follows either DLQ cache load. Add to Cache hands on no
-    # documents, so a Stop wired after it never ran (cap184-cache-put-successor).
-    assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "catcherrors", "connectoraction", "map", "catcherrors",
-        "connectoraction", "stop",
-        "notify", "doccacheload",
-        "notify", "doccacheload",
-    ]
-    loads = [s for s in shapes if s.attrib["shapetype"] == "doccacheload"]
-    assert len(loads) == 2
-    for load in loads:
-        assert list(load.find("dragpoints")) == []
 
 
 # ===========================================================================
@@ -789,15 +495,21 @@ def _l1_canonical_process_xml(dlq=None, catch_notify=None, name="Archetype DLQ G
 
 
 def test_l1_process_xml_equals_the_archetype_goldens_and_the_legacy_builder():
-    """The frozen archetype goldens (DLQ: ``try_catch_dlq_document_cache_archetype.xml``;
-    notify DLQ: golden-000088 ``issue184_cache_notify_archetype_terminal.xml``,
-    frozen independently of both builders) and, without a DLQ, the legacy
-    builder's own rendering of the same input."""
+    """The frozen archetype goldens, by the digests recorded from their committed
+    bytes before #159 S3 removed them (DLQ: golden-000056
+    ``try_catch_dlq_document_cache_archetype.xml``; notify DLQ: golden-000088
+    ``issue184_cache_notify_archetype_terminal.xml``, frozen independently of
+    both builders).
+
+    #159 S3: the third arm — the no-DLQ case against the legacy archetype route's
+    own rendering — retired with that route. It had no recorded digest, and one
+    minted now would come from the code under test; the no-DLQ legacy-builder
+    parity stays covered per frozen case by
+    ``test_l1_each_frozen_case_materializes_the_legacy_builder_process``."""
     assert _sha256(_l1_canonical_process_xml(dlq=_WIRED_DC)) == _GOLDEN_SHA256
     assert _sha256(_l1_canonical_process_xml(
         dlq=_WIRED_DC, catch_notify=_CATCH_NOTIFY, name="Archetype Notify DLQ Golden"
     )) == _NOTIFY_GOLDEN_SHA256
-    assert _l1_canonical_process_xml(name="Archetype DLQ Golden") == _build_archetype_process_xml(_emit())
 
 
 _L1_XML_IDS = {

@@ -353,7 +353,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "shared_web_server",
             "api_service_component",
             "orchestrate_deploy",
-            "build_from_archetype",
+            "build_integration",
         ],
         "provenance": {"source_label": _M6_ASC_RECON, "retrieval_date": "2026-07-04"},
         "verification_status": "live_verified",
@@ -493,7 +493,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "api_service_component",
             "manage_deployment",
             "orchestrate_deploy",
-            "build_from_archetype",
+            "build_integration",
         ],
         "provenance": {"source_label": _M6_ASC_RECON_QA, "retrieval_date": "2026-07-05"},
         "verification_status": "live_verified",
@@ -1079,7 +1079,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "Fork the recipe into a properly authored integration and apply the "
             "design doctrine before promoting it."
         ),
-        "applies_to": ["marketplace", "build_from_archetype", "recipe"],
+        "applies_to": ["marketplace", "list_integration_archetypes", "recipe"],
         "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
         "verification_status": "companion_unverified",
         "category": "marketplace",
@@ -1111,7 +1111,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "Apply the recipe asset-type filter in Marketplace search and "
             "confirm the asset type before installing."
         ),
-        "applies_to": ["marketplace", "recipe", "build_from_archetype"],
+        "applies_to": ["marketplace", "recipe", "list_integration_archetypes"],
         "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
         "verification_status": "companion_unverified",
         "category": "marketplace",

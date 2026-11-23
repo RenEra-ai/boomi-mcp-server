@@ -22,9 +22,17 @@ from boomi_mcp.authoring.contract import (  # noqa: E402
     AUTHORING_ACTIONS,
     build_authoring_contract_manifest,
     compare_capability_revision,
-    list_archetype_registry,
+)
+from boomi_mcp.categories.integration_authoring import (  # noqa: E402
+    list_integration_archetypes_action,
 )
 from boomi_mcp.categories.meta_tools import list_capabilities_action  # noqa: E402
+from boomi_mcp.recipes import production_registry  # noqa: E402
+
+
+def _discoverable_recipe_ids():
+    """The recipe rows discovery serves — derived, never a literal list."""
+    return [row["recipe_id"] for row in list_integration_archetypes_action()["recipes"]]
 
 #: Every top-level key `list_capabilities` returned BEFORE #146. Enumerated, so
 #: an accidental removal fails here rather than in a caller.
@@ -58,9 +66,11 @@ def test_the_authoring_contract_is_published():
     catalog = list_capabilities_action()
     contract = catalog["authoring_contract"]
     assert contract.get("status") != "unavailable"
+    # #159 S3: the archetype list retired; discovery is recipe-only.
+    assert "archetypes" not in contract
     for key in (
         "actions",
-        "archetypes",
+        "recipe_registry",
         "capabilities",
         "capability_revision",
         "schema_revision",
@@ -73,24 +83,33 @@ def test_the_authoring_contract_is_published():
 
 
 def test_all_six_runtime_archetypes_are_reported():
-    """The four-vs-six evidence. DERIVED from the live scan, never a literal —
-    a hard-coded six would have reported six on the runtime that served four."""
+    """The four-vs-six evidence, recipe-only since #159 S3. DERIVED from the live
+    registry, never a literal: the manifest reports the registry this runtime
+    actually serves, and every discoverable recipe is a named schema row."""
     manifest = build_authoring_contract_manifest()
-    reported = [entry["name"] for entry in manifest["archetypes"]]
-    assert len(reported) == 6, reported
-    assert reported == sorted(reported)
-    assert reported == [entry["name"] for entry in list_archetype_registry()]
+    snapshot = production_registry().snapshot()
+    block = manifest["recipe_registry"]
+    assert block["registry_revision"] == snapshot["registry_revision"]
+    assert block["entry_count"] == len(snapshot["entries"])
+    selectors = {entry["selector"] for entry in manifest["schemas"]}
+    recipe_ids = _discoverable_recipe_ids()
+    assert len(recipe_ids) == 6, recipe_ids
+    assert {f"recipe:{rid}" for rid in recipe_ids} <= selectors
 
 
 def test_an_unmigrated_archetype_is_marked_not_hidden():
     """Omitting an archetype the runtime has would recreate the exact blindness
     this manifest exists to remove."""
+    # #159 S3 (tombstone candidate): the archetype list and its `migrated`
+    # flag retired with the archetype route. Nothing the runtime serves is
+    # hidden instead: every registered recipe is counted, and every
+    # discoverable one is listed — the registry carries more entries than
+    # discovery lists, so the count is not the list wearing another name.
     manifest = build_authoring_contract_manifest()
-    migrated = {e["name"]: e["migrated"] for e in manifest["archetypes"]}
-    assert migrated["api_to_api_sync"] is True
-    assert migrated["stub_minimal_integration"] is False
-    # Both states present — otherwise the flag proves nothing.
-    assert set(migrated.values()) == {True, False}
+    assert "archetypes" not in manifest
+    registered = len(production_registry().snapshot()["entries"])
+    assert manifest["recipe_registry"]["entry_count"] == registered
+    assert registered > len(_discoverable_recipe_ids())
 
 
 def test_no_expected_revision_is_not_requested_never_match():
@@ -122,37 +141,41 @@ def test_a_mismatch_still_returns_the_live_catalog():
     )
     contract = catalog["authoring_contract"]
     assert contract["capability_comparison"]["status"] == "mismatch"
-    assert len(contract["archetypes"]) == 6
+    assert contract["recipe_registry"]["entry_count"] == len(
+        production_registry().snapshot()["entries"]
+    )
     assert contract["schemas"]
 
 
 def test_a_simulated_four_archetype_live_manifest_mismatches_the_six_entry_one(
     monkeypatch,
 ):
-    """The originating incident, reproduced.
+    """The originating incident, reproduced on the recipe-only surface (#159 S3).
 
-    A runtime serving four archetypes must produce a DIFFERENT capability
-    revision from one serving six — otherwise the comparison would have reported
-    parity for the very skew that motivated this issue.
+    A runtime serving a smaller recipe registry must produce a DIFFERENT
+    capability revision from the full one — otherwise the comparison would have
+    reported parity for the very skew that motivated this issue.
     """
     from boomi_mcp.authoring import contract as contract_module
 
-    six_revision = build_authoring_contract_manifest()["capability_revision"]
+    full_revision = build_authoring_contract_manifest()["capability_revision"]
 
     contract_module.reset_manifest_cache()
-    full = list_archetype_registry()
-    monkeypatch.setattr(
-        contract_module, "list_archetype_registry", lambda: tuple(full[:4])
-    )
-    four_revision = build_authoring_contract_manifest()["capability_revision"]
+    real_block = contract_module._recipe_registry_block()
+
+    def _smaller():
+        block = dict(real_block)
+        block["entry_count"] = real_block["entry_count"] - 2
+        block["registry_revision"] = "0" * 64
+        return block
+
+    monkeypatch.setattr(contract_module, "_recipe_registry_block", _smaller)
+    smaller_revision = build_authoring_contract_manifest()["capability_revision"]
     contract_module.reset_manifest_cache()
 
-    assert four_revision != six_revision
-    # And a client holding the six-archetype revision is TOLD, not left guessing.
-    monkeypatch.setattr(
-        contract_module, "list_archetype_registry", lambda: tuple(full[:4])
-    )
-    assert compare_capability_revision(six_revision)["status"] == "mismatch"
+    assert smaller_revision != full_revision
+    # And a client holding the full revision is TOLD, not left guessing.
+    assert compare_capability_revision(full_revision)["status"] == "mismatch"
     contract_module.reset_manifest_cache()
 
 
@@ -174,9 +197,7 @@ def test_every_manifest_collection_is_sorted():
     assert [c["capability_id"] for c in manifest["capabilities"]] == sorted(
         c["capability_id"] for c in manifest["capabilities"]
     )
-    assert [a["name"] for a in manifest["archetypes"]] == sorted(
-        a["name"] for a in manifest["archetypes"]
-    )
+    assert "archetypes" not in manifest
 
 
 def test_each_selector_action_and_capability_appears_exactly_once():
@@ -184,7 +205,6 @@ def test_each_selector_action_and_capability_appears_exactly_once():
     for collection, key in (
         (manifest["schemas"], "selector"),
         (manifest["capabilities"], "capability_id"),
-        (manifest["archetypes"], "name"),
     ):
         values = [entry[key] for entry in collection]
         assert len(values) == len(set(values)), values
@@ -247,7 +267,6 @@ def test_provenance_is_symbolic_never_a_filesystem_path():
     manifest = build_authoring_contract_manifest()
     allowed = {
         "runtime_schema_registry",
-        "archetype_registry",
         "recipe_registry",
         "canonical_compiler",
         "semantic_validator",
@@ -278,10 +297,11 @@ def test_the_schema_revision_covers_the_whole_served_authoring_contract():
         "recipe_contributions",
         "recipe_registry",
         "workflow_sequences",
-        "archetype:stub_minimal_integration",
+        "recipe:boomi.archetype.stub_minimal",
     ):
         assert inherited in bundle, inherited
         assert bundle[inherited] != "unavailable", inherited
+    assert not any(selector.startswith("archetype:") for selector in bundle)
     # ...and the owned ones are still there.
     for owned in ("AuthoringRequestV1", "ProcessIRV1", "validation_report"):
         assert owned in bundle, owned
@@ -363,30 +383,31 @@ def test_every_selector_the_revision_covers_is_published():
     ]
     assert {e["selector"] for e in inherited} >= {
         "IntegrationSpecV1",
-        "archetype:stub_minimal_integration",
+        "recipe:boomi.archetype.stub_minimal",
     }
 
 
 def test_every_archetype_parameter_schema_is_covered_and_individually_named():
-    """QA #435 + Codex round 6. The aggregate `archetype_parameters` entry was
-    neither fetchable nor able to say WHICH archetype moved; each archetype now
-    appears under its own real selector."""
+    """QA #435 + Codex round 6, recipe-only since #159 S3. Each discoverable
+    recipe's accepted input appears under its own real, fetchable selector, so
+    the revision says WHICH recipe moved."""
     from boomi_mcp.authoring import contract as contract_module
 
     contract_module.reset_manifest_cache()
     bundle = contract_module._schema_bundle()
-    archetypes = [e["name"] for e in contract_module.list_archetype_registry()]
-    assert len(archetypes) == 6
+    recipe_ids = _discoverable_recipe_ids()
+    assert len(recipe_ids) == 6
     assert "archetype_parameters" not in bundle
-    for name in archetypes:
-        selector = f"archetype:{name}"
+    assert not any(selector.startswith("archetype:") for selector in bundle)
+    for recipe_id in recipe_ids:
+        selector = f"recipe:{recipe_id}"
         assert selector in bundle, selector
         assert bundle[selector].startswith("sha256:"), selector
 
-    # Moving ONE archetype's parameter schema moves the revision, and the entry
-    # that moved is identifiable.
+    # Moving ONE recipe's input schema moves the revision, and the entry that
+    # moved is identifiable.
     real = contract_module._inherited_schema_digest
-    target = f"archetype:{archetypes[0]}"
+    target = f"recipe:{recipe_ids[0]}"
 
     def _perturb(selector):
         return "sha256:" + "c" * 64 if selector == target else real(selector)
@@ -398,8 +419,8 @@ def test_every_archetype_parameter_schema_is_covered_and_individually_named():
         contract_module._inherited_schema_digest = real
         contract_module.reset_manifest_cache()
     assert moved[target] != bundle[target]
-    for name in archetypes[1:]:
-        assert moved[f"archetype:{name}"] == bundle[f"archetype:{name}"]
+    for recipe_id in recipe_ids[1:]:
+        assert moved[f"recipe:{recipe_id}"] == bundle[f"recipe:{recipe_id}"]
 
 
 def test_a_documentation_only_edit_does_not_move_the_schema_revision():
@@ -410,22 +431,25 @@ def test_a_documentation_only_edit_does_not_move_the_schema_revision():
     from boomi_mcp.authoring import contract as contract_module
     from boomi_mcp.categories import meta_tools
 
+    selector = "recipe:boomi.archetype.stub_minimal"
     contract_module.reset_manifest_cache()
-    before = contract_module._schema_bundle()["archetype:stub_minimal_integration"]
+    before = contract_module._schema_bundle()[selector]
 
     real = meta_tools.get_schema_template_action
 
     def _with_edited_prose(*args, **kwargs):
         payload = dict(real(*args, **kwargs))
-        if kwargs.get("schema_name") == "archetype:stub_minimal_integration":
-            payload["examples"] = ["a completely different example"]
-            payload["limitations"] = ["reworded limitation"]
-            payload["capability_notes"] = "rewritten note"
+        if kwargs.get("schema_name") == selector:
+            descriptor = dict(payload["descriptor"])
+            descriptor["examples"] = ["a completely different example"]
+            descriptor["limitations"] = ["reworded limitation"]
+            descriptor["capability_notes"] = ["rewritten note"]
+            payload["descriptor"] = descriptor
         return payload
 
     meta_tools.get_schema_template_action = _with_edited_prose
     try:
-        after = contract_module._schema_bundle()["archetype:stub_minimal_integration"]
+        after = contract_module._schema_bundle()[selector]
     finally:
         meta_tools.get_schema_template_action = real
         contract_module.reset_manifest_cache()

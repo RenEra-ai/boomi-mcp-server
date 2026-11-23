@@ -623,85 +623,45 @@ def test_apply_rejects_name_governance_plan_before_execute(_mock_pag):
 
 @patch(_PAGINATE, return_value=[])
 def test_build_plan_allows_database_to_api_archetype_names(_mock_pag):
-    # Acceptance criterion: archetype-emitted names pass the lint without caller
-    # effort. Build a real database_to_api_sync spec via the archetype's own
-    # emit_spec (the same emit logic build_from_archetype uses) and route it
-    # through the plan; no create step may be converted to error_name_governance.
-    # We call emit_spec directly rather than build_from_archetype_action to keep
-    # this test independent of package-wide PatternRegistry discovery (which is
-    # fragile under a stale editable-install .pth) — the emitted names are
-    # identical either way.
-    from boomi_mcp.patterns.archetypes.database_to_api_sync import (
-        DatabaseToApiSyncArchetype,
-        DatabaseToApiSyncParameters,
-    )
+    # Acceptance criterion: recipe-emitted names pass the lint without caller
+    # effort.
+    #
+    # #159 S3: the archetype's flat process body is no longer an admissible plan
+    # input (it is refused at admission), and the database->API executable is the
+    # pinned recipe `boomi.archetype.database_to_api_sync` 1.0.0. So the names are
+    # taken from that recipe's own output on an ADMITTED request — the #157
+    # replay input of `database_to_api_sync/wm_off_dlq_off_create` (one pinned
+    # invocation; provenance in that case's provenance.json) — and the spec the
+    # recipe prepares (supporting components + its canonical process unit) is
+    # routed through the raw plan, where the name lint runs. No create step may be
+    # converted to error_name_governance.
+    import json
 
-    # Smallest executable database_to_api_sync payload (mirrors the e2e suite's
-    # _minimal()): create DB + create REST + a single direct transform.
-    payload = {
-        "naming": {"integration_name": "demo-sync", "component_prefix": "DEMO"},
-        "source": {
-            "binding": {
-                "mode": "create",
-                "settings": {
-                    "driver": "microsoft_jdbc",
-                    "auth_mode": "username_password",
-                    "host": "db.internal",
-                    "database": "AppDB",
-                    "username": "svc_sync",
-                    "credential_ref": "secrets/db/svc_sync",
-                },
-            },
-            "read_operation": {
-                "sql": "<<user-authored DB read statement>>",
-                "result_schema": {
-                    "fields": [{"name": "source_a", "data_type": "character"}]
-                },
-            },
-        },
-        "target": {
-            "binding": {
-                "mode": "create",
-                "settings": {"base_url": "https://api.example.com", "auth_mode": "none"},
-            },
-            "send_request": {"method": "POST", "path": "/v1/items"},
-            "payload_profile": {
-                "format": "json",
-                "root": {
-                    "name": "Root",
-                    "kind": "object",
-                    "children": [
-                        {"name": "target_a", "kind": "simple", "data_type": "character"}
-                    ],
-                },
-            },
-        },
-        "transform": {
-            "operations": [
-                {
-                    "operation_type": "direct",
-                    "source_field": "source_a",
-                    "target_path": "Root/target_a",
-                }
-            ]
-        },
-        "execution": {"trigger": {"mode": "manual"}},
-        "reliability": {
-            "retry": {"max_attempts": 1},
-            "dlq": {"enabled": False},
-            "error_classifier": {},
-        },
-    }
-    spec = DatabaseToApiSyncArchetype.emit_spec(
-        DatabaseToApiSyncParameters(**payload)
+    from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    case = (
+        Path(__file__).resolve().parent
+        / "fixtures/governance/issue_157/cases/database_to_api_sync"
+        / "wm_off_dlq_off_create/input.canonical.json"
     )
+    request = AuthoringRequestV1.model_validate(json.loads(case.read_text(encoding="utf-8")))
+    planned, internals = plan_authoring_request_v1(
+        request, profile="governance", account_id="governance"
+    )
+    assert not planned.errors, planned.errors
+    spec = internals.normalized.integration_spec
+    # Non-vacuity: the recipe really emitted named components AND a process unit.
+    assert spec.components and spec.processes
     plan = _build_plan(
         MagicMock(),
-        {"conflict_policy": "reuse", "integration_spec": spec.model_dump()},
+        {"conflict_policy": "reuse", "integration_spec": spec.model_dump(mode="json")},
     )
-    assert plan["_success"] is True
+    assert plan["_success"] is True, plan
+    created = [s["key"] for s in plan["steps"] if s["planned_action"] == "create"]
+    assert created, "nothing planned a create, so the lint had nothing to judge"
     offenders = [
         s["key"] for s in plan["steps"]
         if s["planned_action"] == "error_name_governance"
     ]
-    assert offenders == [], f"archetype names tripped the name lint: {offenders}"
+    assert offenders == [], f"recipe names tripped the name lint: {offenders}"

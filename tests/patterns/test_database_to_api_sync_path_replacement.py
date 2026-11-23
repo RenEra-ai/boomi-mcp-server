@@ -14,11 +14,21 @@ import pytest
 from boomi_mcp.categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
-from boomi_mcp.categories.integration_authoring import build_from_archetype_action
 from boomi_mcp.patterns.archetypes.database_to_api_sync import (
     DatabaseToApiSyncArchetype,
     _build_dynamic_path,
 )
+
+
+def build_from_archetype_action(*args, **kwargs):
+    """The retired ``build_from_archetype`` tool's action (#159 S3 deletes it).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "build_from_archetype_action")(*args, **kwargs)
 
 
 def _params(path: str, path_replacements, children=None) -> Dict[str, Any]:
@@ -100,184 +110,9 @@ def _expect_rejected(payload):
 # ---------------------------------------------------------------------------
 
 
-def test_path_replacement_lowered_to_dynamic_path():
-    proc = _main_process(
-        _params(
-            "/admin/cdscm/api/v1/clients/{clientId}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-    dp = proc["config"]["target"]["dynamic_path"]
-    assert dp["ddp_name"] == "DDP_PATH_CLIENTS"
-    assert dp["request_profile_id"] == "$ref:transform_target_profile"
-    assert dp["profile_type"] == "profile.json"
-    assert dp["segments"] == [
-        {"type": "static", "value": "/admin/cdscm/api/v1/clients/"},
-        {
-            "type": "profile",
-            # A STRING, matching the served ProcessIR schema, which types this field
-            # as a string. The profile field index keys it with an integer, and the
-            # archetype used to pass that through — harmless for the legacy chain,
-            # which renders it into XML where everything is text, but wrong the
-            # moment the canonical route consumes it. Measured when this changed:
-            # every golden is byte-identical, so the coercion costs nothing.
-            "element_id": "3",
-            "element_name": "clientId (Root/Object/clientId)",
-        },
-    ]
-    # The dynamic_path $ref must be a declared dependency for reachability.
-    assert "transform_target_profile" in proc["depends_on"]
-
-
-def test_path_replacement_blanks_operation_path():
-    # The REST Client operation cannot hold an in-operation URL path param, so
-    # with replacements the operation path is blank and flags path_replacements;
-    # the path is supplied at the connector step (Codex review finding 1).
-    op = _by_key(
-        _params(
-            "/admin/cdscm/api/v1/clients/{clientId}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )["target_rest_operation"]
-    assert op["config"]["path"] == ""
-    assert op["config"]["path_replacements"] == [
-        {"name": "clientId", "target_path": "Root/clientId"}
-    ]
-
-
-def test_no_path_replacements_emits_no_dynamic_path():
-    payload = _params("/v1/customers", [])
-    by_key = _by_key(payload)
-    proc = by_key["main_process"]
-    assert "dynamic_path" not in proc["config"]["target"]
-    assert "transform_target_profile" not in proc["depends_on"]
-    # static path is still emitted verbatim on the operation, no path_replacements
-    op = by_key["target_rest_operation"]
-    assert op["config"]["path"] == "/v1/customers"
-    assert "path_replacements" not in op["config"]
-
-
-def test_dpp_name_derives_from_resource_segment():
-    proc = _main_process(
-        _params(
-            "/admin/cdscm/api/v1/matters/{clientId}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-    assert proc["config"]["target"]["dynamic_path"]["ddp_name"] == "DDP_PATH_MATTERS"
-
-
-def test_trailing_static_segment_preserved():
-    proc = _main_process(
-        _params(
-            "/v1/clients/{clientId}/activate",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-    segs = proc["config"]["target"]["dynamic_path"]["segments"]
-    assert segs[0] == {"type": "static", "value": "/v1/clients/"}
-    assert segs[1]["type"] == "profile"
-    assert segs[2] == {"type": "static", "value": "/activate"}
-
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-
-
-def test_duplicate_replacement_names_rejected():
-    _expect_rejected(
-        _params(
-            "/v1/clients/{clientId}",
-            [
-                {"name": "clientId", "target_path": "Root/clientId"},
-                {"name": "clientId", "target_path": "Root/name"},
-            ],
-        )
-    )
-
-
-def test_replacement_name_missing_from_path_rejected():
-    _expect_rejected(
-        _params(
-            "/v1/clients/{otherId}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-
-
-def test_replacement_target_not_a_leaf_rejected():
-    _expect_rejected(
-        _params(
-            "/v1/clients/{clientId}",
-            [{"name": "clientId", "target_path": "Root/does_not_exist"}],
-        )
-    )
-
-
-def test_undeclared_path_token_rejected():
-    # '{region}' has no matching replacement -> would survive as a literal in the
-    # emitted path; reject it (Codex review P2).
-    _expect_rejected(
-        _params(
-            "/v1/clients/{clientId}/{region}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-
-
-def test_replacement_target_unbound_rejected():
-    # 'extra' is a declared simple leaf but no transform output binds it, so it
-    # carries no mapped value at runtime — reject as a path source.
-    children = [
-        {"name": "clientId", "kind": "simple", "data_type": "character", "required": True},
-        {"name": "name", "kind": "simple", "data_type": "character"},
-        {"name": "extra", "kind": "simple", "data_type": "character"},
-    ]
-    _expect_rejected(
-        _params(
-            "/v1/clients/{extra}",
-            [{"name": "extra", "target_path": "Root/extra"}],
-            children=children,
-        )
-    )
-
-
-def test_empty_brace_path_segment_rejected():
-    # Issue #127 B3: the old non-empty-token regex '{([^{}]+)}' skipped an empty
-    # '{}' segment, so '/v1/{}/{clientId}' validated clean and emitted a literal
-    # '/v1/{}/' segment. The residual-brace check must reject it.
-    _expect_rejected(
-        _params(
-            "/v1/{}/{clientId}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-
-
-def test_unbalanced_path_brace_rejected():
-    # Issue #127 B3: a stray unmatched brace also survived the non-empty-token
-    # regex. '{clientId}' is a declared token (so no missing-token error); the
-    # trailing stray '}' must trip the residual-brace check.
-    _expect_rejected(
-        _params(
-            "/v1/clients/{clientId}}",
-            [{"name": "clientId", "target_path": "Root/clientId"}],
-        )
-    )
-
-
-def test_brace_bearing_replacement_name_rejected():
-    # Issue #127 B3 (review r1): a replacement name containing braces could fool
-    # the residual-brace stripping (name='clientId}{region' would strip BOTH
-    # '{clientId}' and '{region}' tokens, leaving no residual), so it is rejected
-    # at the contract layer via the name field validator.
-    _expect_rejected(
-        _params(
-            "/v1/{clientId}{region}",
-            [{"name": "clientId}{region", "target_path": "Root/clientId"}],
-        )
-    )
 
 
 def test_build_dynamic_path_defends_against_post_validation_brace():

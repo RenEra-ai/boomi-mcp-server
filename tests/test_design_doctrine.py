@@ -470,20 +470,6 @@ def _plan_config(comp):
     }
 
 
-@patch(_PAGINATE, return_value=[])
-def test_build_plan_warns_when_process_lacks_error_handling(_mock_pag):
-    # An authored structured process with NO reliability block lacks modeled
-    # error handling and must warn.
-    plan = _build_plan(MagicMock(), _structured_no_error_handling_plan_config())
-    assert plan["_success"] is True
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step["planned_action"] == "create"
-    warnings = plan["warnings"] or []
-    joined = "\n".join(warnings)
-    assert "try_catch_placement" in joined
-    assert "error_routing_and_dlq" in joined
-
-
 _STUB_ID = "00000000-0000-0000-0000-stubbed00001"
 
 
@@ -609,30 +595,27 @@ def _structured_no_error_handling_plan_config(reliability=None):
 
 
 @patch(_PAGINATE, return_value=[])
-def test_build_plan_no_warning_for_structured_process_with_dlq(_mock_pag):
-    # Structured route (process_kind set) honors config.reliability.dlq — and
-    # the step must actually be authored, not validation-errored, for this to
-    # exercise the gate.
-    plan = _build_plan(MagicMock(), _structured_dlq_plan_config())
-    assert plan["_success"] is True
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step.get("validation_error") is None
-    assert main_step["planned_action"] == "create"
-    joined = "\n".join(plan["warnings"] or [])
-    assert "try_catch_placement" not in joined
-    assert "error_routing_and_dlq" not in joined
-
-
-@patch(_PAGINATE, return_value=[])
 def test_build_plan_errors_for_process_without_process_kind(_mock_pag):
     # Legacy freeform process JSON authoring has been removed: an untyped
     # process (no process_kind) is rejected at plan time before the
     # design-doctrine warning path is ever reached.
+    #
+    # #159 S3 (cutover decision 1): the rejection is now admission's — any flat
+    # process body, typed or not, is refused before the plan (and so before the
+    # design-doctrine warning path) with the unit-required code at the static
+    # `config` pointer; PROCESS_KIND_REQUIRED is no longer served for it.
+    from boomi_mcp.authoring.process_admission import unit_required_envelope
+    from boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+
     comp = _process_comp({"name": "DemoProcess"})
     plan = _build_plan(MagicMock(), _plan_config(comp))
-    step = next(s for s in plan["steps"] if s["key"] == "p1")
-    assert step["planned_action"] == "error_process_validation"
-    assert step["validation_error"]["error_code"] == "PROCESS_KIND_REQUIRED"
+    assert plan["_success"] is False
+    assert "steps" not in plan
+    assert plan["error_code"] == PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+    assert plan["field"] == "integration_spec.components.0.config"
+    assert set(plan) == set(unit_required_envelope("x"))
+    assert "PROCESS_KIND_REQUIRED" not in str(plan)
+    assert "DemoProcess" not in str(plan)
 
 
 def test_process_models_error_handling_predicate():
@@ -645,53 +628,25 @@ def test_process_models_error_handling_predicate():
             key="p", type="process", action="create", name="P", config=config
         )
 
-    # Structured route (process_kind set) trusts the supported DLQ modes with a
-    # valid 0..5 retry count — the configs that actually emit a Try/Catch.
-    assert _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
-    )
-    assert _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 0, "dlq": {"mode": "error_subprocess_ref"}}})
-    )
-    # Issue #88: retry_count 1..5 with a supported DLQ mode is now un-gated and
-    # emits a Try/Catch → counts as modeled error handling.
-    assert _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 2, "dlq": {"mode": "document_cache_ref"}}})
-    )
-    # retry_count > 0 without a wired DLQ catch path is gated (no Try/Catch
-    # emitted) → NOT error handling.
-    assert not _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 2, "dlq": {"mode": "disabled"}}})
-    )
-    # retry_count out of range (6) → gated → NOT error handling.
-    assert not _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 6, "dlq": {"mode": "document_cache_ref"}}})
-    )
-    # Structured but DLQ disabled → no error handling.
-    assert not _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}}})
-    )
-    # Legacy route ignores the reliability block entirely.
-    assert not _process_models_error_handling(
-        comp({"reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
-    )
-    # Issue #108 M10.4: a structured reliability.catch_exception block wires a
-    # Try/Catch (bare catcherrors -> exception, no DLQ) → counts as modeled error
-    # handling, including retry_count > 0 without a DLQ.
-    assert _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"catch_exception": {"message_template": "halt {1}"}}})
-    )
-    assert _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 3, "catch_exception": {"message_template": "halt {1}"}}})
-    )
+    # #159 S3: the structured-route signal retired with the legacy builder
+    # dispatch (its ``_should_emit_try_catch`` read ``config.reliability``). A
+    # reliability block is no longer evidence on ANY route — every former
+    # positive and negative of that arm is now "not error handling", while the
+    # raw-XML / shape evidence below is unchanged.
+    for reliability in (
+        {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}},
+        {"retry_count": 0, "dlq": {"mode": "error_subprocess_ref"}},
+        {"retry_count": 2, "dlq": {"mode": "document_cache_ref"}},
+        {"retry_count": 2, "dlq": {"mode": "disabled"}},
+        {"retry_count": 6, "dlq": {"mode": "document_cache_ref"}},
+        {"retry_count": 0, "dlq": {"mode": "disabled"}},
+        {"catch_exception": {"message_template": "halt {1}"}},
+        {"retry_count": 3, "catch_exception": {"message_template": "halt {1}"}},
+    ):
+        assert not _process_models_error_handling(
+            comp({"process_kind": "database_to_api_sync", "reliability": reliability})
+        ), reliability
+        assert not _process_models_error_handling(comp({"reliability": reliability})), reliability
     # Legacy route trusts raw-XML / shape catch evidence.
     assert _process_models_error_handling(comp({"shapes": [{"shapetype": "catcherrors"}]}))
     assert _process_models_error_handling(comp({"xml": "<bns:shape shapetype=\"trycatch\"/>"}))
@@ -719,24 +674,6 @@ def test_process_models_error_handling_predicate():
     )
     # Non-dict config does not crash.
     assert not _process_models_error_handling(comp({}))
-
-
-@patch(_PAGINATE, return_value=[])
-def test_build_plan_warns_for_structured_process_with_disabled_dlq(_mock_pag):
-    # A structured process whose reliability block has DLQ disabled emits no
-    # Try/Catch and thus carries no modeled error handling — it must still warn
-    # (a reliability block without a real catch path is not error handling).
-    plan = _build_plan(
-        MagicMock(),
-        _structured_no_error_handling_plan_config(
-            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}}
-        ),
-    )
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step["planned_action"] == "create"
-    joined = "\n".join(plan["warnings"] or [])
-    assert "try_catch_placement" in joined
-    assert "error_routing_and_dlq" in joined
 
 
 # ---------------------------------------------------------------------------

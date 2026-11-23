@@ -33,10 +33,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import Field
 
-from boomi_mcp.categories.integration_authoring import (
-    build_from_archetype_action,
-    compose_archetypes_action,
-)
 from boomi_mcp.categories.integration_builder import _build_plan
 from boomi_mcp.compiler.process_ir.diagnostics import ProcessIRCompileError
 from boomi_mcp.compiler.process_ir.legacy_adapters.emission import emit_legacy_result
@@ -51,7 +47,6 @@ from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
 from boomi_mcp.patterns.archetypes.api_to_database_sync import (
     ApiToDatabaseSyncArchetype,
 )
-from boomi_mcp.patterns.recipe_bridge import run_fanout_recipe, run_sync_preset_recipe
 from boomi_mcp.recipes import placeholder_component_id
 from boomi_mcp.recipes.contracts import RecipeInputBase
 from boomi_mcp.recipes.builtins.catalog import (
@@ -61,6 +56,14 @@ from boomi_mcp.recipes.builtins.catalog import (
 )
 
 from test_archetype_composition import _cache_links, _options, _parts
+
+import sys as _sys
+
+_TESTS_ROOT = str(Path(__file__).resolve().parent.parent)
+if _TESTS_ROOT not in _sys.path:
+    _sys.path.insert(0, _TESTS_ROOT)
+
+from _fanout_v2_support import V2, respell_oracle_credential_refs, v2_from_compose_request  # noqa: E402
 
 _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "recipe_parity"
@@ -136,22 +139,85 @@ _EXAMPLES = {
 }
 
 
-def _compose(name):
+def _compose_request(name):
     parts_fn, links_fn = _COMPOSE_CASES[name]
     options = dict(_options())
     if links_fn is not None:
         options["links"] = links_fn()
-    result = compose_archetypes_action(parts=parts_fn(), options=options)
+    return {"parts": parts_fn(), "options": options}
+
+
+def _compose(name):
+    """The RETIRED compose tool's response (#159 S3). Imported here so only the
+    tests of the retired surface fail once the action is deleted."""
+    from boomi_mcp.categories.integration_authoring import compose_archetypes_action
+
+    request = _compose_request(name)
+    result = compose_archetypes_action(parts=request["parts"], options=request["options"])
     assert result["_success"] is True, result.get("error")
     return result
 
 
 def _build_preset(name):
+    """The RETIRED archetype build tool's response (#159 S3), imported lazily
+    for the same reason as :func:`_compose`."""
+    from boomi_mcp.categories.integration_authoring import build_from_archetype_action
+
     archetype, index = _PRESET_CASES[name]
     example = _EXAMPLES[archetype].examples[index]
-    result = build_from_archetype_action(archetype, example.parameters)
+    result = _build_from_archetype(archetype, example.parameters)
     assert result["_success"] is True, result.get("error")
     return result
+
+
+def _build_from_archetype(*args, **kwargs):
+    from boomi_mcp.categories.integration_authoring import build_from_archetype_action
+
+    return build_from_archetype_action(*args, **kwargs)
+
+
+# #159 S3: the compose ARMS of L1-L4. Fan-out 1.0.0 and the compose tool are
+# retired, so the RECIPE arm is the surviving fan-out 2.0.0 — run on the SAME
+# composition, re-spelled into its split by ``v2_from_compose_request`` — and
+# the LEGACY arm is the composition FROZEN at the baseline commit (the L1
+# fixture), lowered through the isolated legacy adapter. Neither side is
+# produced by the retired code path.
+
+
+def _legacy_compose_spec(name):
+    return _fixture(f"{name}.json")
+
+
+def _v2_run(name):
+    """``(prepared, run_result)`` of fan-out 2.0.0 on the named composition."""
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+    from boomi_mcp.recipes import MaterializationCatalog, RecipeRequestV1, run_recipes
+    from boomi_mcp.recipes.builtins.fanout import (
+        ComposeDbRestFanoutInputV2,
+        FanoutComponentMaterialV2,
+        prepare_db_rest_fanout_v2,
+    )
+
+    raw, material = v2_from_compose_request(_compose_request(name))
+    prepared = prepare_db_rest_fanout_v2(
+        ComposeDbRestFanoutInputV2.model_validate(raw),
+        FanoutComponentMaterialV2.model_validate(material),
+        base_catalog={},
+    )
+    result = run_recipes(
+        [RecipeRequestV1(RECIPE_DB_REST_FANOUT, "parity", raw, V2)],
+        catalog=MaterializationCatalog({}),
+        connector_metadata=_connector_metadata_from_components(
+            prepared.supporting_components
+        ),
+        supporting_components=prepared.supporting_components,
+    )
+    return prepared, result
+
+
+def _v2_root(name):
+    _prepared, result = _v2_run(name)
+    return dict(result.composed.process_roots)["main_process"]
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +242,21 @@ def test_every_parity_fixture_is_claimed_by_a_case():
 
 @pytest.mark.parametrize("name", sorted(_COMPOSE_CASES))
 def test_l1_compose_spec_is_byte_identical_to_baseline(name):
-    assert _compose(name)["integration_spec"] == _fixture(f"{name}.json")
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_l1_preset_spec_is_byte_identical_to_baseline(name):
-    assert _build_preset(name)["integration_spec"] == _fixture(f"{name}.json")
+    """#159 S3: fan-out 2.0.0's supporting components against the baseline dump,
+    every field of every component (the one documented credential re-spelling
+    applied to the expected side); its process is a unit, whose envelope matches
+    the baseline process entry here and whose XML L3 compares."""
+    prepared, result = _v2_run(name)
+    baseline = _fixture(f"{name}.json")
+    expected = [
+        c for c in respell_oracle_credential_refs(baseline["components"]) if c["type"] != "process"
+    ]
+    assert [c.model_dump(mode="json") for c in prepared.supporting_components] == expected
+    (unit,) = result.process_units
+    process = baseline["components"][-1]
+    assert unit.envelope.component_key == process["key"]
+    assert unit.envelope.name == process["name"]
+    assert set(unit.envelope.depends_on) == set(process["depends_on"])
 
 
 # ---------------------------------------------------------------------------
@@ -191,13 +266,13 @@ def test_l1_preset_spec_is_byte_identical_to_baseline(name):
 
 @pytest.mark.parametrize("name", sorted(_COMPOSE_CASES))
 def test_l2_compose_component_plan_order_is_unchanged(name):
-    spec = _compose(name)["integration_spec"]
-    assert _plan_steps(spec) == _fixture(f"{name}_component_plan.json")
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_l2_preset_component_plan_order_is_unchanged(name):
-    spec = _build_preset(name)["integration_spec"]
+    """#159 S3: the planner's order for the typed spec fan-out 2.0.0 produces —
+    the baseline envelope, the supporting components and the process unit —
+    against the baseline ComponentPlan."""
+    prepared, result = _v2_run(name)
+    spec = dict(_fixture(f"{name}.json"))
+    spec["components"] = [c.model_dump(mode="json") for c in prepared.supporting_components]
+    spec["processes"] = [unit.model_dump(mode="json") for unit in result.process_units]
     assert _plan_steps(spec) == _fixture(f"{name}_component_plan.json")
 
 
@@ -213,52 +288,26 @@ def _spec_and_process(payload):
 
 @pytest.mark.parametrize("name", sorted(_COMPOSE_CASES))
 def test_l3_compose_recipe_arm_matches_the_legacy_arm_byte_for_byte(name):
-    spec, process = _spec_and_process(_compose(name)["integration_spec"])
+    _spec, process = _spec_and_process(_legacy_compose_spec(name))
 
     legacy = emit_legacy_result(
         adapt_flow_sequence(process.config),
         resolver=placeholder_component_id,
         dialect="flow_sequence",
     )
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
+    _prepared, result = _v2_run(name)
     artifact = result.artifact_for(process.key)
     assert artifact is not None
     assert artifact.process_xml == legacy.process_xml
     assert artifact.verifier.errors == ()
 
 
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_l3_preset_recipe_arm_matches_the_legacy_arm_byte_for_byte(name):
-    archetype = _PRESET_CASES[name][0]
-    recipe_id = (
-        RECIPE_API_TO_API_SYNC
-        if archetype == "api_to_api_sync"
-        else RECIPE_API_TO_DATABASE_SYNC
-    )
-    spec, process = _spec_and_process(_build_preset(name)["integration_spec"])
-
-    legacy = emit_legacy_result(
-        adapt_sync_pipeline_config(process.config),
-        resolver=placeholder_component_id,
-        dialect="sync_pipeline",
-    )
-    result = run_sync_preset_recipe(
-        recipe_id=recipe_id, components=spec.components, process=process
-    )
-    artifact = result.artifact_for(process.key)
-    assert artifact is not None
-    assert artifact.process_xml == legacy.process_xml
-    assert artifact.verifier.errors == ()
-
-
+#: #159 S3: the API->API preset arm (``api_to_api_sync_0``) retired with its
+#: executable; its golden stays byte-pinned through the direct canonical unit
+#: (``recipe:api_to_api_sync_0`` in the wave-gate golden manifest).
 _GOLDEN_CASES = {
     "compose_stream": "composed_db_to_api_fanout.xml",
     "compose_all_cache": "composed_db_to_api_cache_fanout.xml",
-    "api_to_api_sync_0": "api_to_api_sync_fetch_map_send.xml",
 }
 
 
@@ -271,21 +320,10 @@ def test_l3_recipe_arm_matches_its_committed_golden(name):
     differential, by construction, cannot see.
     """
     golden = (_GOLDEN / _GOLDEN_CASES[name]).read_bytes().decode("utf-8")
-    if name in _COMPOSE_CASES:
-        spec, process = _spec_and_process(_compose(name)["integration_spec"])
-        result = run_fanout_recipe(
-            recipe_id=RECIPE_DB_REST_FANOUT,
-            components=spec.components,
-            process=process,
-        )
-    else:
-        spec, process = _spec_and_process(_build_preset(name)["integration_spec"])
-        result = run_sync_preset_recipe(
-            recipe_id=RECIPE_API_TO_API_SYNC,
-            components=spec.components,
-            process=process,
-        )
-    assert result.artifact_for(process.key).process_xml == golden
+    # #159 S3: the surviving fan-out 2.0.0 on the same composition.
+    assert name in _COMPOSE_CASES
+    _prepared, result = _v2_run(name)
+    assert result.artifact_for("main_process").process_xml == golden
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +346,8 @@ def test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical(na
     """
     from boomi_mcp.compiler.process_ir.semantic_validation import context, lineage, pipeline
 
-    _spec, process = _spec_and_process(_compose(name)["integration_spec"])
+    # #159 S3: the legacy arm's composition is the frozen baseline dump.
+    _spec, process = _spec_and_process(_legacy_compose_spec(name))
     adapted = adapt_flow_sequence(process.config)
 
     emit_legacy_result(adapted, resolver=placeholder_component_id, dialect=None)
@@ -332,16 +371,11 @@ def test_l4_legacy_cache_arm_passes_strictly_once_cache_identity_is_canonical(na
 
 @pytest.mark.parametrize("name", ["compose_mixed_cache", "compose_all_cache"])
 def test_l4_recipe_cache_arm_passes_strictly_with_one_shared_reference(name):
-    spec, process = _spec_and_process(_compose(name)["integration_spec"])
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
-    # It compiled under validation_policy=None (the engine hard-codes it), so
-    # reaching here at all is the assertion. Now show WHY: one shared reference
-    # across the staging put and every consuming get.
-    root = dict(result.composed.process_roots)[process.key]
+    # #159 S3: the recipe arm is fan-out 2.0.0. It compiled under
+    # validation_policy=None (the engine hard-codes it), so reaching here at all
+    # is the assertion. Now show WHY: one shared reference across the staging
+    # put and every consuming get.
+    root = _v2_root(name)
     branch = root.body.steps[-1]
     refs = set()
     for leg in branch.legs:
@@ -356,13 +390,7 @@ def test_l4_recipe_cache_arm_passes_strictly_with_one_shared_reference(name):
 
 def test_l4_recipe_stream_arm_uses_no_cache_reference_at_all():
     """The negative control: no cache handoff means no cache node anywhere."""
-    spec, process = _spec_and_process(_compose("compose_stream")["integration_spec"])
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
-    root = dict(result.composed.process_roots)[process.key]
+    root = _v2_root("compose_stream")
     branch = root.body.steps[-1]
     for leg in branch.legs:
         assert leg.terminal.kind == "target"
@@ -375,15 +403,7 @@ def test_l4_recipe_stream_arm_uses_no_cache_reference_at_all():
 
 
 def test_cache_staging_leg_precedes_the_first_consumer():
-    spec, process = _spec_and_process(
-        _compose("compose_mixed_cache")["integration_spec"]
-    )
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
-    root = dict(result.composed.process_roots)[process.key]
+    root = _v2_root("compose_mixed_cache")
     legs = root.body.steps[-1].legs
     staging = [i for i, leg in enumerate(legs) if leg.terminal.kind == "cache_put"]
     consumers = [
@@ -397,28 +417,14 @@ def test_cache_staging_leg_precedes_the_first_consumer():
 
 def test_max_cache_composition_is_bounded_at_twenty_four_targets():
     """25 legs total: one staging put plus 24 consumers."""
-    spec, process = _spec_and_process(_compose("compose_max_cache")["integration_spec"])
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
-    root = dict(result.composed.process_roots)[process.key]
+    root = _v2_root("compose_max_cache")
     legs = root.body.steps[-1].legs
     assert len(legs) == 25
     assert sum(1 for leg in legs if leg.terminal.kind == "cache_put") == 1
 
 
 def test_max_stream_composition_carries_all_twenty_five_targets():
-    spec, process = _spec_and_process(
-        _compose("compose_max_stream")["integration_spec"]
-    )
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=process,
-    )
-    root = dict(result.composed.process_roots)[process.key]
+    root = _v2_root("compose_max_stream")
     legs = root.body.steps[-1].legs
     assert len(legs) == 25
     assert all(leg.terminal.kind == "target" for leg in legs)
@@ -429,192 +435,9 @@ def test_max_stream_composition_carries_all_twenty_five_targets():
 # ---------------------------------------------------------------------------
 
 
-def test_compose_response_carries_recipe_provenance():
-    result = _compose("compose_stream")
-    provenance = result["recipe_provenance"]
-    assert provenance["adapter"]["entry_kind"] == "compatibility_adapter"
-    assert provenance["adapter"]["adapter_target"]["recipe_id"] == RECIPE_DB_REST_FANOUT
-    assert len(provenance["registry_revision"]) == 64
-
-
-def test_preset_response_carries_recipe_provenance():
-    result = _build_preset("api_to_api_sync_0")
-    provenance = result["recipe_provenance"]
-    assert provenance["adapter"]["adapter_target"]["recipe_id"] == RECIPE_API_TO_API_SYNC
-
-
-def test_unmigrated_archetype_reports_no_recipe_provenance():
-    """Honest absence beats a plausible-looking reference to unused code."""
-    from boomi_mcp.patterns.archetypes.http_listener_to_db import (
-        HttpListenerToDbArchetype,
-    )
-
-    example = HttpListenerToDbArchetype.examples[0]
-    result = build_from_archetype_action("http_listener_to_db", example.parameters)
-    assert result["_success"] is True
-    assert "recipe_provenance" not in result
-
-
 # ---------------------------------------------------------------------------
 # Codex-review regression (issue #145): the pin must reach execution
 # ---------------------------------------------------------------------------
-
-
-def test_the_pin_names_the_executable_recipe_not_the_adapter():
-    """``recipe_version`` pins what RUNS, not the compatibility wrapper.
-
-    Validating the pin against the ADAPTER id made the real executable version
-    (``0.1.0``) a hard ``RECIPE_VERSION_UNAVAILABLE`` while the adapter's
-    unrelated ``1.0.0`` was accepted and then ignored — a pin the tool took and
-    the execution did not keep (issue #145, Codex review).
-    """
-    from boomi_mcp.categories.integration_authoring import (
-        get_integration_archetype_action,
-    )
-    from boomi_mcp.recipes import production_registry
-
-    registry = production_registry()
-    adapter = registry.resolve("boomi.adapter.api_to_api_sync")
-    executable = registry.resolve(adapter.adapter_target.recipe_id)
-    assert adapter.recipe_version != executable.recipe_version, (
-        "the two versions must differ, or this test proves nothing"
-    )
-
-    ok = get_integration_archetype_action(
-        "api_to_api_sync", recipe_version=executable.recipe_version
-    )
-    assert ok["_success"] is True
-    assert (
-        ok["recipe_executable_descriptor"]["recipe_version"]
-        == executable.recipe_version
-    )
-
-    rejected = get_integration_archetype_action(
-        "api_to_api_sync", recipe_version=adapter.recipe_version
-    )
-    assert rejected["_success"] is False
-    assert rejected["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_a_pinned_build_reports_the_version_that_actually_ran(name):
-    from boomi_mcp.recipes import production_registry
-
-    archetype = _PRESET_CASES[name][0]
-    adapter_id = f"boomi.adapter.{archetype}"
-    registry = production_registry()
-    executable = registry.resolve(
-        registry.resolve(adapter_id).adapter_target.recipe_id
-    )
-
-    index = _PRESET_CASES[name][1]
-    example = _EXAMPLES[archetype].examples[index]
-    result = build_from_archetype_action(
-        archetype, example.parameters, recipe_version=executable.recipe_version
-    )
-    assert result["_success"] is True, result.get("error")
-    ran = result["recipe_provenance"]["executable"]
-    assert ran["recipe_id"] == executable.recipe_id
-    assert ran["recipe_version"] == executable.recipe_version
-
-
-def test_a_pin_that_cannot_be_honoured_returns_no_spec():
-    """Validated BEFORE emission — answering with a spec would answer a
-    different question than the caller asked."""
-    example = ApiToApiSyncArchetype.examples[0]
-    result = build_from_archetype_action(
-        "api_to_api_sync", example.parameters, recipe_version="9.9.9"
-    )
-    assert result["_success"] is False
-    assert result["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
-    assert "integration_spec" not in result
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_the_pin_is_carried_all_the_way_into_run_recipes(monkeypatch, name):
-    """Structural: the version must appear on the RecipeRequestV1 the engine sees.
-
-    The response field alone could be reporting an intention; this observes the
-    request object the engine actually resolves.
-
-    Parametrized over EVERY migrated preset. Covering only ``api_to_api_sync``
-    left ``api_to_database_sync``'s threading unguarded — dropping the pin from
-    its ``emit_spec`` kept the whole suite green while
-    ``recipe_provenance.executable`` reported a version that did not run
-    (issue #145, live QA).
-    """
-    import boomi_mcp.patterns.recipe_bridge as bridge
-    from boomi_mcp.recipes import production_registry
-
-    archetype, index = _PRESET_CASES[name]
-    registry = production_registry()
-    executable = registry.resolve(
-        registry.resolve(f"boomi.adapter.{archetype}").adapter_target.recipe_id
-    )
-
-    seen = []
-    real = bridge.run_recipes
-
-    def spy(requests, **kwargs):
-        seen.extend((r.recipe_id, r.recipe_version) for r in requests)
-        return real(requests, **kwargs)
-
-    monkeypatch.setattr(bridge, "run_recipes", spy)
-    build_from_archetype_action(
-        archetype,
-        _EXAMPLES[archetype].examples[index].parameters,
-        recipe_version=executable.recipe_version,
-    )
-    assert seen == [(executable.recipe_id, executable.recipe_version)]
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_an_unpinned_build_reaches_the_engine_with_the_declared_version(
-    monkeypatch, name
-):
-    """An absent pin still names a version — the adapter's declared target.
-
-    This used to assert ``[None]``, i.e. "let the engine pick the default". That
-    was the defect: the response reported the DECLARED version while the engine
-    ran the DEFAULT, so the two agreed only by coincidence (issue #145, Codex
-    review). The right control is that an unpinned call is explicit, not silent.
-    """
-    import boomi_mcp.patterns.recipe_bridge as bridge
-    from boomi_mcp.recipes import production_registry
-
-    archetype, index = _PRESET_CASES[name]
-    declared = (
-        production_registry()
-        .resolve(f"boomi.adapter.{archetype}")
-        .adapter_target.recipe_version
-    )
-
-    seen = []
-    real = bridge.run_recipes
-
-    def spy(requests, **kwargs):
-        seen.extend(r.recipe_version for r in requests)
-        return real(requests, **kwargs)
-
-    monkeypatch.setattr(bridge, "run_recipes", spy)
-    build_from_archetype_action(
-        archetype, _EXAMPLES[archetype].examples[index].parameters
-    )
-    assert seen == [declared]
-
-
-def test_an_unmigrated_archetype_still_rejects_a_pin():
-    from boomi_mcp.patterns.archetypes.http_listener_to_db import (
-        HttpListenerToDbArchetype,
-    )
-
-    result = build_from_archetype_action(
-        "http_listener_to_db",
-        HttpListenerToDbArchetype.examples[0].parameters,
-        recipe_version="1.0.0",
-    )
-    assert result["_success"] is False
-    assert "integration_spec" not in result
 
 
 def test_every_archetype_accepts_the_uniform_emit_spec_contract():
@@ -637,122 +460,9 @@ def test_every_archetype_accepts_the_uniform_emit_spec_contract():
         assert parameters["recipe_version"].default is None
 
 
-def test_an_unpinned_resolve_uses_the_ADAPTERS_declared_version():
-    """Not the target's own default — those can differ.
-
-    Reverting ``recipe_version or adapter.adapter_target.recipe_version`` left
-    the whole suite green, because every test drove construction and none
-    observed the return value (issue #145, live QA). This builds a registry
-    where the declared version is NOT the default, which is the only arrangement
-    that can tell the two apart.
-    """
-    from boomi_mcp.categories.integration_authoring import _resolve_pinned_target
-    from boomi_mcp.recipes.registry import build_test_registry
-    from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
-    from boomi_mcp.recipes.contracts import (
-        RecipeConflictPolicyV1,
-        RecipeReferenceV1,
-        RecipeRegistrationV1,
-    )
-
-    def target(version, default):
-        return RecipeRegistrationV1(
-            recipe_id="t.target",
-            recipe_version=version,
-            entry_kind="executable_recipe",
-            is_default=default,
-            input_model=SyncRecipeInputV1,
-            executor=emit_api_to_api_sync,
-            output_types=(
-                "component_contribution",
-                "constraint_requirement",
-                "process_ir_patch",
-            ),
-            conflict_policy=RecipeConflictPolicyV1(),
-        )
-
-    registry = build_test_registry(
-        (
-            RecipeRegistrationV1(
-                recipe_id="t.adapter",
-                recipe_version="1.0.0",
-                entry_kind="compatibility_adapter",
-                is_default=True,
-                # DECLARES 0.1.0 ...
-                adapter_target=RecipeReferenceV1(
-                    recipe_id="t.target", recipe_version="0.1.0"
-                ),
-            ),
-            target("0.1.0", False),
-            # ... while 0.2.0 is the DEFAULT.
-            target("0.2.0", True),
-        )
-    )
-    assert registry.resolve("t.target").recipe_version == "0.2.0"
-
-    unpinned = _resolve_pinned_target("t.adapter", None, registry)
-    assert unpinned["recipe_version"] == "0.1.0", "must follow the DECLARED version"
-
-    pinned = _resolve_pinned_target("t.adapter", "0.2.0", registry)
-    assert pinned["recipe_version"] == "0.2.0", "an explicit pin still wins"
-
-
 # ---------------------------------------------------------------------------
 # Codex re-review regressions (issue #145)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name", sorted(_PRESET_CASES))
-def test_an_unpinned_run_and_its_provenance_agree(monkeypatch, name):
-    """One resolution, so the report cannot describe a version that did not run.
-
-    Resolving separately let them disagree: an unpinned call passed ``None`` to
-    the engine (which runs the DEFAULT) while the response derived
-    ``recipe_provenance.executable`` from the adapter's DECLARED target
-    (issue #145, Codex review).
-    """
-    import boomi_mcp.patterns.recipe_bridge as bridge
-
-    archetype, index = _PRESET_CASES[name]
-    seen = []
-    real = bridge.run_recipes
-
-    def spy(requests, **kwargs):
-        seen.extend(r.recipe_version for r in requests)
-        return real(requests, **kwargs)
-
-    monkeypatch.setattr(bridge, "run_recipes", spy)
-    result = build_from_archetype_action(
-        archetype, _EXAMPLES[archetype].examples[index].parameters
-    )
-    assert result["_success"] is True
-    provenance = result["recipe_provenance"]
-    reported = provenance["executable"]["recipe_version"]
-    assert seen == [reported], (seen, reported)
-    assert None not in seen, "an unpinned run must still name its version"
-    # The same field is pinned on ``compose_archetypes`` and was not here — the
-    # one-of-two-identical-surfaces shape this issue keeps hitting (issue #145).
-    from boomi_mcp.recipes import production_registry
-
-    assert provenance["registry_revision"] == production_registry().registry_revision
-
-
-def test_compose_runs_and_reports_the_same_version(monkeypatch):
-    """``compose_archetypes`` exposes no pin, so there is ONE right answer."""
-    import boomi_mcp.patterns.recipe_bridge as bridge
-
-    seen = []
-    real = bridge.run_recipes
-
-    def spy(requests, **kwargs):
-        seen.extend(r.recipe_version for r in requests)
-        return real(requests, **kwargs)
-
-    monkeypatch.setattr(bridge, "run_recipes", spy)
-    result = _compose("compose_stream")
-    reported = result["recipe_provenance"]["executable"]["recipe_version"]
-    assert seen == [reported], (seen, reported)
-    assert None not in seen
 
 
 @pytest.mark.parametrize("pin", ["", " ", "  "])
@@ -764,22 +474,30 @@ def test_an_explicit_empty_pin_is_rejected_by_both_tools_alike(pin):
     the engine — the same input accepted by one tool and rejected by the other
     (issue #145, Codex review).
     """
+    # #159 S3: the two tools are now the recipe-only get and the typed
+    # build_integration (the archetype build tool is retired). The SAME blank
+    # pin on the surviving fan-out id refuses on both, and neither answers with
+    # a spec; the get names the pin as unavailable.
+    from unittest import mock
+
+    from boomi_mcp.categories import integration_builder
     from boomi_mcp.categories.integration_authoring import (
         get_integration_archetype_action,
     )
+    from _fanout_v2_support import flagship_v2, recipe_request
 
-    described = get_integration_archetype_action("api_to_api_sync", recipe_version=pin)
+    described = get_integration_archetype_action(RECIPE_DB_REST_FANOUT, recipe_version=pin)
     assert described["_success"] is False
     assert described["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
 
-    built = build_from_archetype_action(
-        "api_to_api_sync",
-        ApiToApiSyncArchetype.examples[0].parameters,
-        recipe_version=pin,
-    )
+    request = recipe_request(*flagship_v2()).model_dump(mode="json", exclude_none=True)
+    request["intent"]["invocations"][0]["recipe_version"] = pin
+    with mock.patch.object(integration_builder, "paginate_metadata", lambda *a, **k: []):
+        built = integration_builder.build_integration_action(
+            mock.MagicMock(), "p", "plan", {"authoring_request": request}
+        )
     assert built["_success"] is False
-    assert built["error_code"] == "RECIPE_VERSION_UNAVAILABLE"
-    assert "integration_spec" not in built
+    assert "integration_spec" not in built and "authoring_result" not in built
 
 
 def test_every_archetype_emit_spec_annotation_resolves():

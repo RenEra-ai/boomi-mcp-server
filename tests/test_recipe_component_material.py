@@ -129,9 +129,24 @@ def _blocked(request):
     return caught.value.diagnostics
 
 
+def _materialless_request(raw_input, material):
+    """One invocation of a registration that declares NO component material.
+
+    #159 S3 made fan-out 2.0.0 (a material registration) the fan-out default, so
+    the material-less vehicle is the surviving Stop-only stub at its default.
+    """
+    request = recipe_request(raw_input, material, recipe_version=None).model_dump(
+        mode="json", exclude_none=True
+    )
+    request["intent"]["invocations"][0]["recipe_id"] = catalog_module.RECIPE_STUB_MINIMAL
+    return AuthoringRequestV1.model_validate(request)
+
+
 def test_material_is_refused_by_a_registration_that_declares_none():
     raw, material = flagship_v2()
-    (diagnostic,) = _blocked(recipe_request({"version": "1"}, material, recipe_version=None))
+    (diagnostic,) = _blocked(
+        _materialless_request({"version": "1", "process_key": "main_process"}, material)
+    )
     assert diagnostic.path == "/intent/invocations/0/component_material"
     assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
     assert diagnostic.subject_id == "component_material_not_declared"
@@ -431,7 +446,10 @@ def test_a_default_and_an_explicit_pin_of_one_descriptor_bind_identically(monkey
 
 
 def test_two_versions_composing_identical_ir_bind_to_different_hashes(monkeypatch):
-    registry = _registry(_registration(), _registration(recipe_version="2.0.1"))
+    # #159 S3: 2.0.0 is the production default, so the sibling is a non-default.
+    registry = _registry(
+        _registration(), _registration(recipe_version="2.0.1", is_default=False)
+    )
     first = _hashes(monkeypatch, registry, V2)
     second = _hashes(monkeypatch, registry, "2.0.1")
     assert first.integration_spec_preview == second.integration_spec_preview
@@ -861,7 +879,7 @@ def test_a_cross_field_raw_input_refusal_names_the_object_that_failed():
 def test_a_v1_raw_input_refusal_names_its_invocations_input():
     """The engine's own invocation loop (a registration without material) places
     the refusal too: under the invocation's ``raw_input``, the key name unserved."""
-    request = recipe_request({"canary_key_5c1e": 1}, None, recipe_version=None)
+    request = _materialless_request({"canary_key_5c1e": 1}, None)
     (diagnostic,) = _blocked(request)
     assert RECIPE_INPUT_INVALID in diagnostic.cause_codes
     # The first refusal is the missing required field: a declared location.

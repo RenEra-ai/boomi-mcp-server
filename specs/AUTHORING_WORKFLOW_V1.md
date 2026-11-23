@@ -354,8 +354,8 @@ echo, so citing it for the preview would be claiming an authority that does not 
 
 The capability manifest additionally excludes absolute paths, timestamps, pids, build
 ids, profile names and raw account ids; provenance is symbolic (`runtime_schema_registry`,
-`archetype_registry`, `recipe_registry`, `canonical_compiler`, `semantic_validator`,
-`topology_planner`) and never a filesystem path.
+`recipe_registry`, `canonical_compiler`, `semantic_validator`, `topology_planner`) and never a
+filesystem path.
 
 The one place an opaque caller payload passes through is `RecipeInvocationRequestV1.raw_input`,
 which is handed to the recipe engine's own input gate (`RECIPE_INPUT_INVALID`). #146 routes to that

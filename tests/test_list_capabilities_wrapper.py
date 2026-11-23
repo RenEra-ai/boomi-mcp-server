@@ -65,9 +65,11 @@ def test_list_capabilities_wrapper_filters_to_live_registry():
     for name in (
         "list_integration_archetypes",
         "get_integration_archetype",
-        "build_from_archetype",
     ):
         assert name in catalog_names, f"{name!r} missing from filtered catalog"
+    # #159 S3: the retired build/compose tools are neither registered nor listed.
+    for name in ("build_from_archetype", "compose_archetypes"):
+        assert name not in registered_names and name not in catalog_names, name
 
 
 def test_list_capabilities_wrapper_includes_orchestrate_deploy():

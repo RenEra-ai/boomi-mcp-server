@@ -232,8 +232,10 @@ def manage_process_action(
                 ),
                 "valid_actions": ["list", "get"],
                 "hint": (
-                    "For typed process authoring use list_integration_archetypes()/"
-                    "build_from_archetype()/build_integration. For an explicit raw "
+                    "For typed process authoring use build_integration with "
+                    "config.authoring_request: a recipe from "
+                    "list_integration_archetypes() / get_integration_archetype(), "
+                    "or ProcessIR units. For an explicit raw "
                     "XML component escape hatch use manage_component. Components are "
                     "deleted via manage_component(action='delete') or the Boomi "
                     "Platform Build page."

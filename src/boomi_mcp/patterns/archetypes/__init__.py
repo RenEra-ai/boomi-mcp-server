@@ -1,41 +1,7 @@
-"""Concrete V3 archetypes. Discovered by PatternRegistry.from_package('boomi_mcp.patterns')."""
+"""Isolated V3 archetype modules, kept on disk for #160's deletion pass.
 
-from .api_to_api_sync import (
-    ApiToApiSyncArchetype,
-    ApiToApiSyncParameters,
-)
-from .api_to_database_sync import (
-    ApiToDatabaseSyncArchetype,
-    ApiToDatabaseSyncParameters,
-)
-from .database_to_api_sync import (
-    DatabaseToApiSyncArchetype,
-    DatabaseToApiSyncParameters,
-)
-from .http_listener_to_db import (
-    HttpListenerToDbArchetype,
-    HttpListenerToDbParameters,
-)
-from .http_listener_to_rest import (
-    HttpListenerToRestArchetype,
-    HttpListenerToRestParameters,
-)
-from .stub_minimal import (
-    StubMinimalIntegrationArchetype,
-    StubMinimalIntegrationParameters,
-)
-
-__all__ = [
-    "ApiToApiSyncArchetype",
-    "ApiToApiSyncParameters",
-    "ApiToDatabaseSyncArchetype",
-    "ApiToDatabaseSyncParameters",
-    "DatabaseToApiSyncArchetype",
-    "DatabaseToApiSyncParameters",
-    "HttpListenerToDbArchetype",
-    "HttpListenerToDbParameters",
-    "HttpListenerToRestArchetype",
-    "HttpListenerToRestParameters",
-    "StubMinimalIntegrationArchetype",
-    "StubMinimalIntegrationParameters",
-]
+#159 S3: no served surface reaches an archetype any more (discovery is
+recipe-only), so this package re-exports nothing. Import a module directly
+(``boomi_mcp.patterns.archetypes.<name>``) where a historical test still needs
+one.
+"""

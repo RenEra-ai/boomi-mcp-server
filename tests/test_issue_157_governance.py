@@ -700,36 +700,29 @@ def test_a_recipe_envelope_carries_governance_only():
 
 
 def test_the_recipe_lift_refuses_a_second_governance_source_and_accepts_a_prefix(monkeypatch):
-    """Drives the real lift with a composed root and a typed envelope."""
-    from boomi_mcp.authoring.workflow import _lift_recipe_roots_into_units
-    from boomi_mcp.models.authoring_workflow import RecipeProcessEnvelopeV1
+    """#159 S3: the #153 lift retired — every surviving executable emits a process
+    UNIT that carries its own envelope. Drives the real normalization with a
+    recipe-emitted unit: a per-root envelope naming the unit is a second
+    governance source, one naming no unit is unmatched, and a component prefix is
+    accepted on the unit's own envelope (the one governance source left)."""
+    import test_process_component_recipe_lift as lift
 
-    root = _ir()
-    lifted = IntegrationComponentSpec(key="main", type="process", action="create", config={"process_kind": "x"})
-    envelope = RecipeProcessEnvelopeV1(component_key="main", component_prefix="R", description="d")
-    _supporting, units = _lift_recipe_roots_into_units([lifted, IntegrationComponentSpec(**_conn())], (("main", root),), {"main": envelope})
-    assert units[0].envelope.component_prefix == "R" and units[0].envelope.name is None
-    with_name = IntegrationComponentSpec(key="main", type="process", action="create", name="Dup", config={})
+    lift._install_direct_unit_recipe(monkeypatch)
     with pytest.raises(AuthoringWorkflowError) as excinfo:
-        _lift_recipe_roots_into_units([with_name], (("main", root),), {"main": envelope})
-    assert excinfo.value.code == "GOVERNANCE_SOURCE_CONFLICT"
-    with_folder = IntegrationComponentSpec(key="main", type="process", action="create", config={"folder_name": "F"})
-    with pytest.raises(AuthoringWorkflowError) as excinfo:
-        _lift_recipe_roots_into_units([with_folder], (("main", root),), {"main": envelope})
+        lift._normalize_direct({"name": "Unit", "action": "create"},
+                               process_envelopes=[{"component_key": "proc", "component_prefix": "R"}])
     assert excinfo.value.code == "GOVERNANCE_SOURCE_CONFLICT"
     with pytest.raises(AuthoringWorkflowError) as excinfo:
-        _lift_recipe_roots_into_units([lifted], (("main", root),), {"other": envelope})
+        lift._normalize_direct({"name": "Unit", "action": "create"},
+                               process_envelopes=[{"component_key": "other", "component_prefix": "R"}])
     assert excinfo.value.code == "GOVERNANCE_ENVELOPE_UNMATCHED"
+    spec = lift._normalize_direct({"name": "Unit", "action": "create", "description": "d"})
+    assert (spec.processes[0].envelope.name, spec.processes[0].envelope.description) == ("Unit", "d")
+    # the prefix is unit-envelope governance: accepted there with no name
+    from boomi_mcp.models.process_component import ProcessComponentEnvelopeAuthoredV1
 
-
-def test_the_pre_157_lift_is_unchanged_without_an_envelope():
-    from boomi_mcp.authoring.workflow import _lift_recipe_roots_into_units
-
-    lifted = IntegrationComponentSpec(key="main", type="process", action="create", name="Named", config={"description": "d", "folder_name": "F"})
-    _s, units = _lift_recipe_roots_into_units([lifted], (("main", _ir()),), {})
-    assert (units[0].envelope.name, units[0].envelope.description, units[0].envelope.folder_name) == ("Named", "d", "F")
-    with pytest.raises(AuthoringWorkflowError):
-        _lift_recipe_roots_into_units([IntegrationComponentSpec(key="main", type="process", action="create", config={})], (("main", _ir()),), {})
+    prefixed = ProcessComponentEnvelopeAuthoredV1(component_key="main", action="create", component_prefix="R")
+    assert prefixed.component_prefix == "R" and prefixed.name is None
 
 
 def test_the_process_xml_goldens_are_untouched_by_governance():

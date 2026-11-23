@@ -378,14 +378,38 @@ def test_build_integration_strips_layout_before_planning(monkeypatch):
 
 @pytest.fixture
 def safe_edit_process(monkeypatch):
-    """A body patch whose structured build and merge yield PROCESS (the merge itself is
-    covered elsewhere): what is under test is the layout step after it."""
-    monkeypatch.setattr(safe_edit_component, "build_structured_update_xml",
-                        lambda *a, **k: {"_success": True, "built_xml": PROCESS, "policy": None})
+    """A process body edit whose canonical compile, materialization and merge yield
+    PROCESS (each is covered elsewhere — the #184 public witness drives the real
+    chain): what is under test is the layout step after the merge.
+
+    #159 S3: a process body is edited only through the canonical arm
+    (``patch.authoring_request``); the legacy structured-builder arm refuses. The
+    stubs below stand in for the compile and the dependency reads, never for the
+    merge -> arrange -> token -> write steps under test."""
+    from types import SimpleNamespace
+
+    from boomi_mcp.authoring import workflow as _workflow
+    from boomi_mcp.categories.components import canonical_process_apply as _cpa
+
+    request = SimpleNamespace(intent=SimpleNamespace(units=(
+        SimpleNamespace(envelope=SimpleNamespace(component_key="root")),)))
+    monkeypatch.setattr(safe_edit_component, "_parse_canonical_request",
+                        lambda raw, phase: (request, None))
+    monkeypatch.setattr(safe_edit_component, "_admit_canonical_request",
+                        lambda request, component_id: None)
+    monkeypatch.setattr(safe_edit_component, "_verified_dependencies",
+                        lambda *a, **k: {"_success": True, "readings": {}})
+    monkeypatch.setattr(_workflow, "compile_authoring_request_v1", lambda *a, **k: (
+        SimpleNamespace(revision_binding=SimpleNamespace(compile_hash="sha256:" + "a" * 64)),
+        SimpleNamespace(component_plan_unjudged=False, resolved_component_ids={"root": "x"},
+                        materialization_plans={"root": object()}, symbols=None,
+                        connector_resolution_snapshot=None),
+    ))
+    monkeypatch.setattr(_cpa, "materialize_canonical_process_xml", lambda **k: PROCESS)
     monkeypatch.setattr(safe_edit_component, "merge_for_update", lambda current, built, policy: built)
     monkeypatch.setattr(safe_edit_component, "compare_versions",
                         lambda *a, **k: {"_success": True, "diff": {}})
-    return {"component_type": "process", "config": {"process_kind": "x"}}
+    return {"authoring_request": {"contract_version": "2"}}
 
 
 @pytest.mark.parametrize("mode", [None, "preserve"])
@@ -590,6 +614,11 @@ def _legacy_process():
 
 @pytest.mark.parametrize("mode", ["arrange", "preserve"])
 def test_a_legacy_process_create_is_placed_then_arranged_once(mode):
+    """#159 S3 (cutover decision 3): the legacy process create this route placed and
+    arranged is gone. `_execute_component` is directly callable, so a flat process body
+    reaching it is refused value-free in EITHER layout mode — before placement, before
+    the arrange hook, before any transport. The canonical create's single arrangement
+    is pinned by `test_a_process_ir_create_is_arranged_once_and_attested_over_the_arranged_bytes`."""
     comp = _legacy_process()
     client = _Client()
     real = ib._execute_component
@@ -598,16 +627,12 @@ def test_a_legacy_process_create_is_placed_then_arranged_once(mode):
         result = real(client, "p", comp, comp.config,
                       placement=ib._ComponentPlacement(folder_id="F9", requested_name=None),
                       layout_mode=mode)
-    assert result["_success"], result
-    (sent,) = _sent(client)
-    assert spy.call_count == 1
-    (call,) = spy.call_args_list
-    assert 'folderId="F9"' in call.args[0], "placement precedes arrangement"
-    if mode == "arrange":
-        assert sent == arrange_process_body(call.args[0])[0] != call.args[0]
-    else:
-        assert sent == call.args[0]
-    assert result["layout"]["mode"] == mode
+    assert result["_success"] is False
+    assert result["error_code"] == "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED"
+    assert result["boomi_mutation"] is False
+    assert spy.call_count == 0
+    assert _sent(client) == []
+    assert "99999999-9999-9999-9999-999999999999" not in repr(result)
 
 
 # ---- one explicit internal-caller preserve per hook (#182 forward contract)

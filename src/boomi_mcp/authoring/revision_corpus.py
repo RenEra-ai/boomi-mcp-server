@@ -975,7 +975,6 @@ _UNREAD_BY_THE_REPLAY = frozenset({
     ("boomi_mcp.authoring.contract", "_replay_ids"),
     ("boomi_mcp.authoring.contract", "_replay_registry"),
     ("boomi_mcp.authoring.contract", "_schema_bundle"),
-    ("boomi_mcp.authoring.contract", "list_archetype_registry"),
     ("boomi_mcp.authoring.process_ir_projection", "_CACHE"),
     ("boomi_mcp.authoring", "process_ir_projection"),
     ("boomi_mcp.categories.components._shared", "component_get_xml"),

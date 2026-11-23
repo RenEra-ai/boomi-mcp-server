@@ -1186,64 +1186,66 @@ def test_builder_loop_back_does_not_trigger_start_inbound():
 
 
 def _recipe_artifacts():
+    """One emitted artifact per surviving executable surface (#159 S3 re-source).
+
+    The retired archetype/compose actions and the retired API->API / fan-out 1.0.0
+    recipe registrations no longer produce these. Each label is now rendered from
+    a CANONICAL request whose values are independent of the code under test, by
+    the same plan -> compile -> emit chain the golden corpus renders through:
+
+    * ``compose_stream`` / ``compose_all_cache``: the pinned fan-out 2.0.0
+      invocations of golden-000004 / golden-000003
+      (``_wave_gate_golden_corpus.fanout_v2_golden_request``; provenance there:
+      the frozen ``recipe_parity`` specs);
+    * ``compose_mixed_cache``: that same pinned invocation with the mixed star
+      the retired label composed — ``billing`` on a ``document_cache`` handoff,
+      ``orders`` streamed (``test_archetype_composition._cache_links("billing")``'s
+      links, restated here because the helper module is retiring);
+    * ``api_to_api``: the direct canonical unit of golden-000001 (the API->API
+      executable retires; its direct replay stays);
+    * ``api_to_db``: the #157 replay input of
+      ``api_to_database_sync/create`` (one pinned
+      ``boomi.archetype.api_to_database_sync`` 1.0.0 invocation; provenance in
+      that case's ``provenance.json``).
+    """
+    import copy
+    import json
     import sys
 
-    sys.path.insert(0, str(Path(__file__).parent / "patterns"))
-    from boomi_mcp.categories.integration_authoring import (
-        build_from_archetype_action,
-        compose_archetypes_action,
-    )
-    from boomi_mcp.models.integration_models import IntegrationSpecV1
-    from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
-    from boomi_mcp.patterns.archetypes.api_to_database_sync import (
-        ApiToDatabaseSyncArchetype,
-    )
-    from boomi_mcp.patterns.recipe_bridge import (
-        run_fanout_recipe,
-        run_sync_preset_recipe,
-    )
-    from boomi_mcp.recipes.builtins.catalog import (
-        RECIPE_API_TO_API_SYNC,
-        RECIPE_API_TO_DATABASE_SYNC,
-        RECIPE_DB_REST_FANOUT,
-    )
-    from test_archetype_composition import _cache_links, _options, _parts
+    sys.path.insert(0, str(Path(__file__).parent))
+    import _wave_gate_golden_corpus as corpus
+    from boomi_mcp.compiler.process_ir.emitter_registry import emit_process
+    from boomi_mcp.compiler.process_ir.pipeline import compile_process_ir_v1
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
 
-    artifacts = {}
+    def emit(request):
+        unit, symbols, _internals = corpus.plan_recipe_golden_request(request)
+        _cfg, plan = compile_process_ir_v1(unit.process_ir, symbols)
+        return emit_process(plan, symbols)
 
-    for label, links in (
-        ("compose_stream", None),
-        ("compose_mixed_cache", _cache_links("billing")),
-        ("compose_all_cache", _cache_links("orders", "billing")),
-    ):
-        options = dict(_options())
-        if links:
-            options["links"] = links
-        response = compose_archetypes_action(parts=_parts(), options=options)
-        spec = IntegrationSpecV1.model_validate(response["integration_spec"])
-        result = run_fanout_recipe(
-            recipe_id=RECIPE_DB_REST_FANOUT,
-            components=spec.components,
-            process=spec.components[-1],
-        )
-        artifacts[label] = result.artifact_for(spec.components[-1].key)
-
-    for label, archetype, cls, recipe_id in (
-        ("api_to_api", "api_to_api_sync", ApiToApiSyncArchetype, RECIPE_API_TO_API_SYNC),
+    mixed = corpus.fanout_v2_golden_request("compose_stream").model_dump(mode="json")
+    mixed["intent"]["invocations"][0]["raw_input"]["links"] = [
+        {"from_part": "db", "to_part": "shape"},
+        {"from_part": "shape", "to_part": "orders"},
+        {"from_part": "shape", "to_part": "billing", "handoff": {"mode": "document_cache"}},
+    ]
+    api_to_db = json.loads(
         (
-            "api_to_db",
-            "api_to_database_sync",
-            ApiToDatabaseSyncArchetype,
-            RECIPE_API_TO_DATABASE_SYNC,
-        ),
-    ):
-        response = build_from_archetype_action(archetype, cls.examples[0].parameters)
-        spec = IntegrationSpecV1.model_validate(response["integration_spec"])
-        result = run_sync_preset_recipe(
-            recipe_id=recipe_id, components=spec.components, process=spec.components[-1]
-        )
-        artifacts[label] = result.artifact_for(spec.components[-1].key)
-
+            Path(__file__).parent
+            / "fixtures/governance/issue_157/cases/api_to_database_sync/create/input.canonical.json"
+        ).read_text(encoding="utf-8")
+    )
+    requests = {
+        "compose_stream": corpus.fanout_v2_golden_request("compose_stream"),
+        "compose_mixed_cache": AuthoringRequestV1.model_validate(copy.deepcopy(mixed)),
+        "compose_all_cache": corpus.fanout_v2_golden_request("compose_all_cache"),
+        "api_to_api": corpus.api_to_api_sync_golden_request(),
+        "api_to_db": AuthoringRequestV1.model_validate(api_to_db),
+    }
+    artifacts = {label: emit(request) for label, request in requests.items()}
+    # Non-vacuity of the re-sourcing: five DISTINCT graphs (a handoff star that
+    # were silently ignored would make the mixed label a copy of another).
+    assert len({artifact.process_xml for artifact in artifacts.values()}) == len(artifacts)
     return artifacts
 
 

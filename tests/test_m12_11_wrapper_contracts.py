@@ -63,10 +63,16 @@ def test_list_capabilities_gained_exactly_one_trailing_optional_parameter():
 
 
 def test_build_from_archetype_is_untouched():
-    assert list(inspect.signature(server.build_from_archetype).parameters) == [
+    """#159 S3: build_from_archetype retired (tombstone candidate). The two
+    discovery wrappers that remain keep exact, recipe-only signatures."""
+    assert not hasattr(server, "build_from_archetype")
+    assert list(inspect.signature(server.get_integration_archetype).parameters) == [
         "name",
-        "parameters",
         "recipe_version",
+    ]
+    assert list(inspect.signature(server.list_integration_archetypes).parameters) == [
+        "query",
+        "expected_recipe_registry",
     ]
 
 

@@ -45,14 +45,23 @@ def test_integration_spec_v1_returns_json_schema():
 
 
 def test_archetype_schema_returns_parameter_schema_and_metadata():
+    """#159 S3: the archetype:<name> selectors retired (tombstone candidate).
+    A retired selector refuses value-free and points at the recipe selector,
+    which serves the recipe's descriptor and input schema instead."""
     result = get_schema_template_action(schema_name="archetype:database_to_api_sync")
-    assert result["_success"] is True
-    assert result["schema_name"] == "archetype:database_to_api_sync"
-    assert result["metadata"]["name"] == "database_to_api_sync"
-    assert "properties" in result["parameter_schema"]
-    assert result["example_policy"] == "example_only_not_reusable_template"
-    assert result["raw_xml_exposed"] is False
-    assert result["boomi_mutation"] is False
+    assert result["_success"] is False
+    assert result["error_code"] == SCHEMA_NAME_UNSUPPORTED
+    assert "database_to_api_sync" not in result["error"]
+    assert "recipe:" in result["use_instead"]
+    assert "parameter_schema" not in result
+
+    recipe = get_schema_template_action(
+        schema_name="recipe:boomi.archetype.database_to_api_sync@1.0.0"
+    )
+    assert recipe["_success"] is True
+    assert "properties" in recipe["input_schema"]
+    assert recipe["raw_xml_exposed"] is False
+    assert recipe["boomi_mutation"] is False
 
 
 def test_unknown_archetype_returns_schema_name_unsupported():
@@ -60,7 +69,9 @@ def test_unknown_archetype_returns_schema_name_unsupported():
     assert result["_success"] is False
     assert result["error_code"] == SCHEMA_NAME_UNSUPPORTED
     assert "valid_schema_names" in result
-    assert "archetype:database_to_api_sync" in result["valid_schema_names"]
+    # #159 S3: no archetype selector is offered; the recipe selectors are.
+    assert not any(n.startswith("archetype:") for n in result["valid_schema_names"])
+    assert "recipe:boomi.archetype.database_to_api_sync@1.0.0" in result["valid_schema_names"]
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +148,9 @@ def test_valid_schema_names_covers_all_families():
     assert "design_doctrine" in names
     assert "account_governance" in names  # issue #93
     assert any(n.startswith("workflow:") for n in names)
-    assert any(n.startswith("archetype:") for n in names)
+    # #159 S3: archetype:<name> retired; the recipe selectors replace it.
+    assert not any(n.startswith("archetype:") for n in names)
+    assert any(n.startswith("recipe:") for n in names)
     assert any(n.startswith("design_pattern:") for n in names)
     assert any(n.startswith("governance_pattern:") for n in names)  # issue #93
 
@@ -160,18 +173,23 @@ def test_archetype_discovery_resolves_callers_namespace():
         f"sys.path.insert(0, {repo_root!r})\n"
         "from src.boomi_mcp.categories.meta_tools import get_schema_template_action\n"
         "r = get_schema_template_action(schema_name='archetype:database_to_api_sync')\n"
+        "walked = sorted(m for m in sys.modules if '.patterns.archetypes' in m)\n"
         "print(json.dumps({'success': r.get('_success'),\n"
-        "                  'module': (r.get('context') or {}).get('module', '')}))\n"
+        "                  'error_code': r.get('error_code'), 'walked': walked}))\n"
     )
+    # #159 S3 (tombstone candidate): archetype discovery retired from every
+    # served surface. Under the caller's src.boomi_mcp namespace the retired
+    # selector still dispatches without crashing, refuses, and walks no
+    # archetype module at all — the property this pinned no longer has a subject.
     proc = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True, text=True, cwd="/", timeout=120,
     )
     assert proc.returncode == 0, f"dispatch crashed: {proc.stderr[-2000:]}"
     result = json.loads(proc.stdout.strip().splitlines()[-1])
-    assert result["success"] is True or result["module"].startswith(
-        "src.boomi_mcp.patterns"
-    ), f"discovery did not resolve the caller's namespace: {result!r}"
+    assert result["success"] is False, result
+    assert result["error_code"] == "SCHEMA_NAME_UNSUPPORTED", result
+    assert result["walked"] == [], result
 
 
 # ---------------------------------------------------------------------------
@@ -245,28 +263,30 @@ def test_script_schemas_listed_and_in_unknown_envelope():
 
 
 def test_compose_archetypes_schema_returns_authoring_contract():
-    result = get_schema_template_action(schema_name="compose_archetypes")
+    """#159 S3: the compose_archetypes selector retired with its tool. The
+    fan-out contract is served by the recipe selector instead: both handoff
+    modes in the input schema, and the closed component-material schema."""
+    retired = get_schema_template_action(schema_name="compose_archetypes")
+    assert retired["_success"] is False
+    assert retired["error_code"] == "SCHEMA_NAME_UNSUPPORTED"
+
+    result = get_schema_template_action(
+        schema_name="recipe:boomi.compose.db_rest_fanout@2.0.0"
+    )
     assert result["_success"] is True
-    assert result["schema_name"] == "compose_archetypes"
     assert result["read_only"] is True
     assert result["raw_xml_exposed"] is False
     assert result["boomi_mutation"] is False
-    assert set(result["part_kinds"]) == {"db_source", "transform", "rest_target"}
-    assert set(result["handoff_modes"]) == {"document_stream", "document_cache"}
-    assert "cache_property_authoring" in result["handoff_modes"]["document_cache"]
-    assert result["error_codes"] == [
-        "COMPOSITION_CONTRACT_MISMATCH",
-        "COMPOSITION_UNSUPPORTED_TOPOLOGY",
-        "COMPOSITION_COMPONENT_KEY_COLLISION",
-    ]
-    # Placeholder-only example — sentinel part payloads, no canned SQL/payloads.
-    blob = str(result["example"])
-    assert "<<" in blob
-    assert "select" not in blob.lower()
+    handoff = result["input_schema"]["$defs"]["FanoutHandoffV2"]
+    assert handoff["properties"]["mode"]["enum"] == ["document_stream", "document_cache"]
+    assert result["component_material_schema"]["additionalProperties"] is False
 
 
 def test_compose_archetypes_listed_and_in_unknown_envelope():
+    """#159 S3: retired, so neither listed nor offered in the unknown envelope;
+    the fan-out recipe selector is offered instead."""
     names = _valid_schema_names()
-    assert "compose_archetypes" in names
+    assert "compose_archetypes" not in names
+    assert "recipe:boomi.compose.db_rest_fanout@2.0.0" in names
     envelope = get_schema_template_action(schema_name="__bogus__")
-    assert "compose_archetypes" in envelope["valid_schema_names"]
+    assert "compose_archetypes" not in envelope["valid_schema_names"]

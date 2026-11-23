@@ -98,6 +98,66 @@ def _echoed_pipeline(plan):
 
 
 # ---------------------------------------------------------------------------
+# #159 S3 (cutover decision 1): raw process authoring is refused at admission
+# ---------------------------------------------------------------------------
+#
+# Every payload below that carries a flat process BODY (any selector, or any other
+# body field) is now refused by `authoring/process_admission.py` before
+# normalization, the secret scans, the strict authority, collision resolution or
+# any write. The tests whose subject survives that cutover assert the refusal
+# with their own discriminator; the inert top-level pipeline view is pinned on
+# ADMITTED specs — a flat process row that only BINDS an existing process by an
+# explicit id, or a canonical unit in `integration_spec.processes`.
+
+from src.boomi_mcp.authoring.process_admission import unit_required_envelope  # noqa: E402
+from src.boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED  # noqa: E402
+
+_UNIT_REQUIRED = PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+_BOUND_PROCESS_ID = "88888888-8888-8888-8888-888888888888"
+
+
+def _assert_unit_refusal(plan, field=None):
+    """The admission refusal: the registered code, the value-free envelope whose
+    key set is the admission module's own, and no authority verdict."""
+    assert plan["_success"] is False, plan
+    assert plan["error_code"] == _UNIT_REQUIRED, plan
+    assert set(plan) == set(unit_required_envelope("x")), sorted(plan)
+    assert plan["boomi_mutation"] is False
+    assert _AUTHORITY_CODE not in json.dumps(plan)
+    if field is not None:
+        assert plan["field"] == field, plan["field"]
+
+
+def _bound_process_row(key="main_process", name="Sentinel Contradictory Process"):
+    """An admitted flat process row: it BINDS an existing process by explicit id
+    and carries no body, so it writes nothing (step-4 decision 4)."""
+    return {
+        "key": key,
+        "type": "process",
+        "action": "create",
+        "name": name,
+        "config": {"reference_only": True, "component_id": _BOUND_PROCESS_ID},
+    }
+
+
+def _admitted(version=STRICT_VERSION, pipeline="contradictory"):
+    """The #135 payload with its process body replaced by an explicit-id bind.
+
+    ``pipeline`` keeps the fixture's top-level view ("contradictory"), replaces it
+    with a copy of the retired nested body's pipeline ("agreeing"), or drops it
+    (None). Every supporting row of the fixture is kept.
+    """
+    config = _contradictory(version)
+    nested = config["integration_spec"]["components"][0]["config"]["pipeline"]
+    if pipeline == "agreeing":
+        config["integration_spec"]["pipeline"] = copy.deepcopy(nested)
+    elif pipeline is None:
+        config["integration_spec"]["pipeline"] = None
+    config["integration_spec"]["components"][0] = _bound_process_row()
+    return config
+
+
+# ---------------------------------------------------------------------------
 # 1. The selector itself — and why it has to be a `version` literal
 # ---------------------------------------------------------------------------
 
@@ -170,29 +230,40 @@ def test_strict_surface_is_reachable_only_through_the_explicit_spec_form():
 
 
 def test_v1_contradiction_still_plans_clean_and_echoes():
-    """The #135 silent-precedence baseline, restated here as a leak detector: if
-    this ever fails, the strict surface has leaked into V1."""
-    plan = _plan(_contradictory())
-    assert plan["_success"] is True
-    assert _main_step(plan)["planned_action"] == "create"
-    assert _echoed_pipeline(plan) is not None
-    assert _AUTHORITY_CODE not in json.dumps(plan)
+    """The leak detector, after the #159 S3 cutover: the V1 silent-precedence
+    payload no longer plans — its process body is refused at admission — and the
+    refusal is the strict surface's refusal, byte for byte, never the authority
+    code. Neither surface echoes the view of a refused payload."""
+    v1 = _plan(_contradictory())
+    _assert_unit_refusal(v1, field="integration_spec.components.0.config.process_kind")
+    assert "integration_spec" not in v1 and "steps" not in v1
+    assert v1 == _plan(_contradictory(STRICT_VERSION))
 
 
 @pytest.mark.parametrize("version", ["1.0", STRICT_VERSION])
 def test_no_top_level_pipeline_is_identical_on_both_surfaces(version):
-    """`version="1.1"` changes NOTHING unless a top-level pipeline is authored."""
+    """`version="1.1"` changes NOTHING unless a top-level pipeline is authored —
+    on a body payload (both refused alike) and on an admitted one (both plan)."""
     config = _contradictory(version)
     config["integration_spec"]["pipeline"] = None
     plan = _plan(config)
-    assert plan["_success"] is True
-    assert _AUTHORITY_CODE not in json.dumps(plan)
+    _assert_unit_refusal(plan)
+    other = _contradictory("1.0" if version == STRICT_VERSION else STRICT_VERSION)
+    other["integration_spec"]["pipeline"] = None
+    assert plan == _plan(other)
+
+    admitted = _plan(_admitted(version, pipeline=None))
+    assert admitted["_success"] is True
+    assert _AUTHORITY_CODE not in json.dumps(admitted)
+    assert _main_step(admitted)["planned_action"] == "reuse"
 
 
 def test_strict_and_legacy_plans_are_identical_apart_from_the_version_when_agreeing():
-    """An agreeing strict payload must plan exactly like its V1 twin."""
-    strict = _plan(_agreeing(STRICT_VERSION))
-    legacy = _plan(_agreeing("1.0"))
+    """An agreeing strict payload must plan exactly like its V1 twin — pinned on
+    the ADMITTED spec (an explicit-id process bind plus the agreeing view), the
+    only shape a flat process row may still take."""
+    strict = _plan(_admitted(STRICT_VERSION, pipeline="agreeing"))
+    legacy = _plan(_admitted("1.0", pipeline="agreeing"))
     assert strict["_success"] is legacy["_success"] is True
     assert strict["steps"] == legacy["steps"]
     assert strict["execution_order"] == legacy["execution_order"]
@@ -209,31 +280,37 @@ def test_strict_and_legacy_plans_are_identical_apart_from_the_version_when_agree
 
 
 def test_strict_disagreement_is_rejected():
+    """#159 S3: the disagreeing strict payload is still rejected — now at
+    admission, pointing at the process body's selector, not at the view."""
     plan = _plan(_contradictory(STRICT_VERSION))
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert plan["field"] == "integration_spec.pipeline"
-    assert "conflicts with" in plan["error"]
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
+    assert "conflicts with" not in plan["error"]
     assert plan["hint"]
 
 
 def test_strict_agreement_is_accepted_and_keeps_the_view():
-    plan = _plan(_agreeing())
+    """The inert view survives on an admitted strict spec (explicit-id bind)."""
+    config = _admitted(STRICT_VERSION, pipeline="agreeing")
+    plan = _plan(config)
     assert plan["_success"] is True
-    assert _echoed_pipeline(plan) is not None
+    assert _main_step(plan)["planned_action"] == "reuse"
+    assert _echoed_pipeline(plan) == IntegrationSpecV1(
+        **config["integration_spec"]
+    ).model_dump()["pipeline"]
     assert _AUTHORITY_CODE not in json.dumps(plan)
 
 
 def test_strict_multi_authored_is_ambiguous():
+    """#159 S3: two authored process bodies never reach the ambiguity count —
+    admission refuses the FIRST body row in list order."""
     config = _agreeing()
     second = copy.deepcopy(config["integration_spec"]["components"][0])
     second["key"] = "second_process"
     second["name"] = "Second Sentinel Process"
     config["integration_spec"]["components"].append(second)
     plan = _plan(config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert "multiple authored" in plan["error"]
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
+    assert "multiple authored" not in plan["error"]
 
 
 def test_strict_zero_authored_preserves_the_inert_view():
@@ -246,15 +323,17 @@ def test_strict_zero_authored_preserves_the_inert_view():
 
 @pytest.mark.parametrize("version", ["1.0", STRICT_VERSION])
 def test_the_pipeline_authority_gate_matches_the_authority(version):
-    """#159 S1 (D8): ``_build_plan`` imports and consults the legacy authority
-    ONLY when the spec authors a top-level pipeline. The gate is sound exactly
-    when the authority decides NOT_APPLICABLE for every spec without one —
-    pinned here against the authority itself, on both surfaces, with the
-    authored process present — and the gate must not be vacuous: with a
-    pipeline the strict surface reaches a real disposition."""
+    """#159 S1 (D8) gated ``_build_plan``'s legacy-authority import on a strict
+    top-level pipeline. #159 S3 retired the authority from serving entirely: the
+    planner module no longer imports it on ANY path, and the isolated authority
+    (kept for #160) still decides NOT_APPLICABLE for every spec without a
+    pipeline and a real disposition with one — so the retired gate was sound,
+    and nothing serves it now. The planner's constant stays pinned to the
+    authority's until #160."""
     import inspect
 
     from src.boomi_mcp.categories import integration_builder
+    from src.boomi_mcp.models.integration_models import STRICT_PIPELINE_VERSION
 
     components = _agreeing(version)["integration_spec"]["components"]
     without = IntegrationSpecV1(
@@ -264,18 +343,10 @@ def test_the_pipeline_authority_gate_matches_the_authority(version):
     with_pipeline = _spec(components, version=version)
     expected = NOT_APPLICABLE if version != STRICT_VERSION else AGREE
     assert evaluate_pipeline_authority(with_pipeline).disposition == expected
-    source = inspect.getsource(integration_builder._build_plan)
-    # ARCH-r1-09: the gate also requires the STRICT version — the authority
-    # decides NOT_APPLICABLE for every other version even WITH a pipeline
-    # (asserted just above for 1.0), so the import is skipped there too. The
-    # planner's constant is pinned to the authority's.
-    from src.boomi_mcp.models.integration_models import STRICT_PIPELINE_VERSION
-
     assert STRICT_PIPELINE_VERSION == STRICT_VERSION
-    gate = source.index(
-        "if spec.pipeline is not None and spec.version == STRICT_PIPELINE_VERSION:"
-    )
-    assert gate < source.index("from ..compiler.process_ir.legacy_adapters.authority import")
+    source = inspect.getsource(integration_builder)
+    assert "legacy_adapters.authority" not in source
+    assert "evaluate_pipeline_authority" not in source
 
 
 def _spec(components, version=STRICT_VERSION, pipeline=None):
@@ -378,28 +449,11 @@ def test_missing_process_kind_is_undecidable_and_keeps_its_own_error():
         evaluate_pipeline_authority(_normalize_to_spec(config)).disposition
         == UNDECIDABLE
     )
+    # #159 S3: a body WITHOUT a selector is still a body. Admission refuses it at
+    # the config pointer; PROCESS_KIND_REQUIRED is no longer served for it.
     plan = _plan(config)
-    assert plan["_success"] is True
-    step = _main_step(plan)
-    assert step["planned_action"] == "error_process_validation"
-    assert step["validation_error"]["error_code"] == "PROCESS_KIND_REQUIRED"
-    assert _AUTHORITY_CODE not in json.dumps(plan)
-
-
-def test_ambiguity_outranks_an_unavailable_process_kind():
-    """Ambiguity needs only the DECLARED cardinality, so it stands even when a
-    process's semantics are unavailable (ADR-001 §5, "Ambiguity vs the clean-plan
-    gate"). This is the ordering choice the ADR leaves to #139."""
-    config = _agreeing()
-    second = copy.deepcopy(config["integration_spec"]["components"][0])
-    second["key"] = "second_process"
-    second["name"] = "Second Sentinel Process"
-    config["integration_spec"]["components"].append(second)
-    config["integration_spec"]["components"][0]["config"].pop("process_kind")
-    plan = _plan(config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert "multiple authored" in plan["error"]
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config")
+    assert "PROCESS_KIND_REQUIRED" not in json.dumps(plan)
 
 
 def test_invalid_nested_pipeline_keeps_its_exact_legacy_code_on_the_strict_surface():
@@ -407,27 +461,18 @@ def test_invalid_nested_pipeline_keeps_its_exact_legacy_code_on_the_strict_surfa
     error that must reach the caller unchanged — it is the clean-plan gate, not an
     authority conflict. This is why LEGACY_ADAPTER_PIPELINE_DRAFT_ONLY stays
     catalog-only: recoding these would break the #135 freeze pins."""
+    # #159 S3: admission never resolves a builder or lowers the body, so an
+    # INVALID nested pipeline earns exactly the refusal a valid one does — no
+    # SYNC_PIPELINE_* code is computed, let alone served.
     config = _agreeing()
+    valid = _plan(copy.deepcopy(config))
     config["integration_spec"]["components"][0]["config"]["pipeline"]["stages"][0][
         "kind"
     ] = "lookup"
     plan = _plan(config)
-    assert plan["_success"] is True
-    err = _main_step(plan)["validation_error"]
-    assert err["error_code"] == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
-    assert err["field"] == "pipeline.stages[read_stage].kind"
-    assert _AUTHORITY_CODE not in json.dumps(plan)
-
-
-def test_unlowerable_authored_view_is_a_conflict_not_the_clean_plan_gate():
-    """The mirror case: a schema-valid top-level view that cannot lower has no
-    error of its own (it is inert on V1), and it can never equal the submitted
-    process — so it is a disagreement."""
-    config = _agreeing()
-    config["integration_spec"]["pipeline"]["stages"][0]["kind"] = "lookup"
-    plan = _plan(config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
+    assert plan == valid
+    assert "SYNC_PIPELINE_" not in json.dumps(plan)
 
 
 # ---------------------------------------------------------------------------
@@ -576,9 +621,16 @@ def test_a_wrapper_subprocess_can_never_be_summarized_by_a_linear_pipeline():
         "process_kind": "wrapper_subprocess",
         "process_calls": [{"process_id": "22222222-2222-2222-2222-222222222222"}],
     }
+    # The isolated authority (kept for #160) still classifies the wrapper as
+    # outside the linear view...
+    assert (
+        evaluate_pipeline_authority(_normalize_to_spec(config)).disposition
+        == NOT_REPRESENTABLE
+    )
+    # ...but #159 S3 serves no flat wrapper body at all: the wrapper selector is
+    # refused at admission, before the authority is consulted.
     plan = _plan(config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
 
 
 _LINEAR_DB_TO_API = {
@@ -725,52 +777,49 @@ def test_an_invalid_submitted_process_is_the_clean_plan_gate_not_a_conflict():
 # ---------------------------------------------------------------------------
 
 
-def test_strict_reuse_withholds_the_view_but_still_accepts():
-    """An authored view may only describe a process this request actually authors
-    AND materializes. On collision-driven reuse the submitted config is discarded,
-    so the view is withheld — and the bearer is NEVER rejected for it."""
-    plan = _plan(_agreeing(), existing=[_collision_stub()])
-    assert plan["_success"] is True
-    assert _main_step(plan)["planned_action"] == "reuse"
-    assert _echoed_pipeline(plan) is None
-
-
 def test_v1_twin_of_the_reuse_case_still_echoes_the_view():
-    """The same payload on V1 keeps its frozen inert echo (#135 pins this)."""
-    plan = _plan(_agreeing("1.0"), existing=[_collision_stub()])
-    assert plan["_success"] is True
-    assert _main_step(plan)["planned_action"] == "reuse"
-    assert _echoed_pipeline(plan) is not None
+    """A reused process on V1 keeps its inert echo. #159 S3: the only reuse a flat
+    process row may still express is an explicit-id bind; the view survives it,
+    whatever the account holds, with no account lookup for the bind."""
+    for existing in ([], [_collision_stub()]):
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.paginate_metadata"
+        ) as mock_pag:
+            mock_pag.return_value = list(existing)
+            plan = _build_plan(MagicMock(), _admitted("1.0", pipeline="agreeing"))
+        assert plan["_success"] is True
+        assert _main_step(plan)["planned_action"] == "reuse"
+        assert _main_step(plan)["existing_component_id"] == _BOUND_PROCESS_ID
+        assert _echoed_pipeline(plan) is not None
+        assert mock_pag.call_count == 0
 
 
 def test_a_materializing_strict_create_keeps_the_view():
-    plan = _plan(_agreeing(), existing=[])
-    assert _main_step(plan)["planned_action"] == "create"
+    """#159 S3: a process that MATERIALIZES is a canonical unit in
+    `integration_spec.processes`; a strict top-level view beside it stays the
+    inert analysis view — accepted and echoed, never compared."""
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP, appliable_process_unit
+
+    view = _contradictory(STRICT_VERSION)["integration_spec"]["pipeline"]
+    config = {
+        "dry_run": True,
+        "integration_spec": {
+            "name": "Sentinel Canonical",
+            "version": STRICT_VERSION,
+            "pipeline": copy.deepcopy(view),
+            "components": [copy.deepcopy(APPLIABLE_CONN), copy.deepcopy(APPLIABLE_OP)],
+            "processes": [appliable_process_unit().model_dump(mode="json")],
+        },
+    }
+    plan = _plan(config, existing=[])
+    assert plan["_success"] is True, plan
+    proc = next(s for s in plan["steps"] if s["key"] == "proc")
+    assert proc["planned_action"] == "create"
     assert _echoed_pipeline(plan) is not None
-
-
-def test_withholding_follows_the_apply_predicate_not_planned_action():
-    """An explicit component_id skips candidate resolution, so the step keeps
-    planned_action="create" at plan time while _apply_plan still reuses it.
-    Reading planned_action alone would echo a view of a component the request
-    never authored."""
-    config = _agreeing()
-    config["integration_spec"]["components"][0]["component_id"] = (
-        "99999999-9999-9999-9999-999999999999"
-    )
-    plan = _plan(config)
-    step = _main_step(plan)
-    assert step["planned_action"] == "create"
-    assert step["existing_component_id"]
-    assert _echoed_pipeline(plan) is None
-
-
-def test_withholding_does_not_apply_under_a_non_reuse_conflict_policy():
-    config = _agreeing()
-    config["conflict_policy"] = "clone"
-    plan = _plan(config, existing=[_collision_stub()])
-    assert plan["_success"] is True
-    assert _echoed_pipeline(plan) is not None
+    assert [s["key"] for s in _echoed_pipeline(plan)["stages"]] == [
+        s["key"] for s in view["stages"]
+    ]
+    assert _AUTHORITY_CODE not in json.dumps(plan)
 
 
 # ---------------------------------------------------------------------------
@@ -782,10 +831,19 @@ def test_withholding_does_not_apply_under_a_non_reuse_conflict_policy():
 def test_rejection_never_depends_on_live_account_contents(existing):
     """ADR-001 §5 determinism note: both authority decisions are computed from the
     authored payload BEFORE collision resolution, so collision-reuse can never buy
-    a self-contradictory payload an exemption."""
-    plan = _plan(_contradictory(STRICT_VERSION), existing=existing)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
+    a self-contradictory payload an exemption.
+
+    #159 S3: the refusal is now admission's, and it is decided before any
+    lookup — the same envelope with and without a same-name live process, and
+    the account is never asked."""
+    with patch(
+        "src.boomi_mcp.categories.integration_builder.paginate_metadata"
+    ) as mock_pag:
+        mock_pag.return_value = list(existing)
+        plan = _build_plan(MagicMock(), _contradictory(STRICT_VERSION))
+    _assert_unit_refusal(plan)
+    assert mock_pag.call_count == 0
+    assert plan == _plan(_contradictory(STRICT_VERSION), existing=[])
 
 
 def test_ambiguity_rejects_before_any_account_lookup():
@@ -803,38 +861,36 @@ def test_ambiguity_rejects_before_any_account_lookup():
     ) as mock_pag:
         mock_pag.return_value = []
         plan = _build_plan(MagicMock(), config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
+    # #159 S3: admission is structural too, and it runs first.
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
     assert mock_pag.call_count == 0
-
-
-def test_a_conflict_is_decided_early_but_reported_after_validation():
-    """The conflict dispositions DO need the process's semantics, so they are
-    subject to the clean-plan gate and are reported at the end of the plan.
-
-    The decision itself is still computed from the authored payload before any
-    lookup — only its reporting waits — which is why account contents still cannot
-    move a payload across the accept/reject boundary (pinned separately by
-    test_rejection_never_depends_on_live_account_contents).
-    """
-    plan = _plan(_contradictory(STRICT_VERSION))
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
 
 
 def test_authority_errors_are_value_free():
     """ADR-001 §7: a stable code, the authored JSON path, a safe remediation hint,
-    and no payload values — no component keys, names, ids, or config."""
-    plan = _plan(_contradictory(STRICT_VERSION))
+    and no payload values — no component keys, names, ids, or config.
+
+    #159 S3: the refusal a body payload now earns is admission's, and it is
+    value-free too — canaries planted in body KEYS and VALUES never surface."""
+    config = _contradictory(STRICT_VERSION)
+    body = config["integration_spec"]["components"][0]["config"]
+    body["CANARY_KEY_139"] = {"nested": "CANARY_VALUE_139"}
+    body["pipeline"]["stages"][0]["config"]["note"] = "CANARY_STAGE_139"
+    plan = _plan(config)
+    _assert_unit_refusal(plan)
     blob = json.dumps(plan)
     case = _case("contradictory_pipelines")
     for leak in (
         "main_process",
+        "Sentinel Contradictory",
+        "sync_pipeline",
+        "CANARY_KEY_139",
+        "CANARY_VALUE_139",
+        "CANARY_STAGE_139",
         case["expected_lowered_source_connection_id"],
         case["expected_lowered_target_connection_id"],
     ):
         assert leak not in blob
-    assert set(plan) == {"_success", "error_code", "error", "field", "hint"}
 
 
 def test_evaluation_does_not_mutate_the_submitted_spec():
@@ -847,25 +903,40 @@ def test_evaluation_does_not_mutate_the_submitted_spec():
 
 def test_a_strict_conflict_blocks_apply_before_any_component_executes():
     """The rejection is a plan-level failure, so the apply path never reaches
-    _execute_component — it cannot partial-apply."""
+    _execute_component — it cannot partial-apply.
+
+    #159 S3: the refusal is now admission's. The would-write supporting rows
+    (four connector UPDATES) are moved AHEAD of the refused process, so a refusal
+    that ran per row instead of before the plan would have written them."""
     from src.boomi_mcp.categories import integration_builder as ib
 
     config = _contradictory(STRICT_VERSION)
+    components = config["integration_spec"]["components"]
+    components.append(components.pop(0))
+    assert components[-1]["type"] == "process"
+    assert all(c["action"] == "update" for c in components[:-1])
     config["dry_run"] = False
+    client = MagicMock()
     with patch.object(ib, "paginate_metadata", return_value=[]), patch.object(
         ib, "_execute_component"
     ) as mock_exec:
-        result = ib._apply_plan(MagicMock(), "renera", config)
+        result = ib._apply_plan(client, "renera", config)
     assert result["_success"] is False
-    assert result["error_code"] == _AUTHORITY_CODE
+    assert result["error_code"] == _UNIT_REQUIRED
+    assert result["field"].startswith(f"integration_spec.components.{len(components) - 1}.")
     assert mock_exec.call_count == 0
+    assert client.method_calls == []
 
 
 def test_a_top_level_pipeline_secret_is_still_rejected_before_authority():
     """ADR-001 §11 takes precedence over the authority rule: the raw top-level
     pipeline secret scan (#139A) runs first, and its code — not the authority
-    code — is what the caller sees."""
-    config = _contradictory(STRICT_VERSION)
+    code — is what the caller sees.
+
+    #159 S3: the scan is preserved for the inert view on an ADMITTED spec (an
+    explicit-id process bind). On a body payload admission runs first, and its
+    refusal is value-free, so the secret is never echoed either way."""
+    config = _admitted(STRICT_VERSION)
     config["integration_spec"]["pipeline"]["stages"][0]["config"][
         "password"
     ] = "SENTINEL-NOT-A-REAL-SECRET"
@@ -873,6 +944,14 @@ def test_a_top_level_pipeline_secret_is_still_rejected_before_authority():
     assert plan["_success"] is False
     assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
     assert "SENTINEL-NOT-A-REAL-SECRET" not in json.dumps(plan)
+
+    body = _contradictory(STRICT_VERSION)
+    body["integration_spec"]["pipeline"]["stages"][0]["config"][
+        "password"
+    ] = "SENTINEL-NOT-A-REAL-SECRET"
+    refused = _plan(body)
+    _assert_unit_refusal(refused)
+    assert "SENTINEL-NOT-A-REAL-SECRET" not in json.dumps(refused)
 
 
 # ---------------------------------------------------------------------------
@@ -906,7 +985,10 @@ def test_list_capabilities_publishes_the_same_authority_record():
     caps = list_capabilities_action()
     entry = caps["tools"]["build_integration"]
     assert entry["authority_versions"] == _AUTHORITY_VERSIONS
-    assert any("1.1" in str(ex) for ex in entry["examples"])
+    # #159 S3: the published record states the retirement — '1.1' selects no
+    # different behaviour and the conflict code is no longer served.
+    assert "no serving route raises" in _AUTHORITY_VERSIONS["strict_behavior"]
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" in _AUTHORITY_VERSIONS["strict_behavior"]
 
 
 def test_v1_is_published_as_not_deprecated():
@@ -1057,44 +1139,83 @@ def test_a_not_representable_process_never_gets_impossible_advice():
         "dry_run": True,
         "integration_spec": json.loads(spec.model_dump_json()),
     }
+    # #159 S3: the payload is refused at admission, and that refusal's advice
+    # must be achievable too: it names the canonical unit routes, and never the
+    # retired escape hatch (authoring as sync_pipeline) or the view-matching
+    # instruction.
     plan = _plan(config)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert "no representation as a singular linear pipeline view" in plan["error"]
-    # The impossible instruction must NOT be given here...
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
     assert "make it semantically identical" not in plan["hint"]
-    # ...and the actionable escape hatch must be.
-    assert "sync_pipeline" in plan["hint"]
-
-
-def test_a_genuine_mismatch_still_says_to_make_the_view_match():
-    """The contrasting case: a representable process really can be matched, so the
-    'make it identical' remediation stays correct there."""
-    plan = _plan(_contradictory(STRICT_VERSION))
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert "make it semantically identical" in plan["hint"]
-    assert "no representation as a singular linear" not in plan["error"]
+    assert "sync_pipeline" not in plan["hint"]
+    assert "intent_kind='process_ir'" in plan["hint"]
+    assert "integration_spec.processes" in plan["hint"]
 
 
 def test_every_authority_rejection_stays_value_free():
-    """All three rejection shapes share the value-free envelope."""
-    plans = [
-        _plan(_contradictory(STRICT_VERSION)),
-        _plan(
-            {
-                "dry_run": True,
-                "integration_spec": json.loads(
-                    _ref_spec({"catch": {"enabled": True}}).model_dump_json()
-                ),
-            }
-        ),
+    """All rejection shapes share the value-free envelope.
+
+    #159 S3: swept over the admission refusal's selector variants — each
+    selector spelling, a selector-free body, raw XML, a blank / unknown /
+    non-string selector, and an update of a bind — every one with the same
+    envelope, a static pointer, and no submitted value."""
+    base = json.loads(_ref_spec().model_dump_json())
+    pointer = "integration_spec.components.0"
+
+    def variant(mutate):
+        payload = copy.deepcopy(base)
+        mutate(payload["components"][0])
+        return {"dry_run": True, "integration_spec": payload}
+
+    def respell(key):
+        def _m(c):
+            c["config"][key] = c["config"].pop("process_kind")
+        return _m
+
+    def selector_free(c):
+        c["config"].pop("process_kind")
+
+    def flow_sequence_only(c):
+        c["config"] = {"flow_sequence": [{"kind": "stop"}]}
+
+    def xml_only(c):
+        c["config"] = {"xml": "<process/>"}
+
+    def blank(c):
+        c["config"]["process_kind"] = "   "
+
+    def unknown(c):
+        c["config"]["process_kind"] = "not_a_kind"
+
+    def non_string(c):
+        c["config"]["process_kind"] = 123
+
+    def update_bind(c):
+        c["action"] = "update"
+        c["config"] = {"reference_only": True, "component_id": _BOUND_PROCESS_ID}
+
+    cases = [
+        (variant(lambda c: None), pointer + ".config.process_kind"),
+        (variant(respell("process_type")), pointer + ".config.process_type"),
+        (variant(selector_free), pointer + ".config"),
+        (variant(flow_sequence_only), pointer + ".config.flow_sequence"),
+        (variant(xml_only), pointer + ".config.xml"),
+        (variant(blank), pointer + ".config.process_kind"),
+        (variant(unknown), pointer + ".config.process_kind"),
+        (variant(non_string), pointer + ".config.process_kind"),
+        (variant(update_bind), pointer + ".action"),
     ]
-    for plan in plans:
-        assert plan["_success"] is False
-        assert set(plan) == {"_success", "error_code", "error", "field", "hint"}
+    for config, field in cases:
+        plan = _plan(config)
+        _assert_unit_refusal(plan, field=field)
         blob = json.dumps(plan)
-        for leak in ("main_process", "$ref:db_conn", "Sentinel Ref Process"):
+        for leak in (
+            "main_process",
+            "$ref:db_conn",
+            "Sentinel Ref Process",
+            "not_a_kind",
+            "<process/>",
+            _BOUND_PROCESS_ID,
+        ):
             assert leak not in blob
 
 
@@ -1135,25 +1256,6 @@ def test_an_unlowerable_authored_view_is_an_ordinary_mismatch(view_stages):
         ],
     )
     assert evaluate_pipeline_authority(spec).disposition == DISAGREE
-
-
-def test_an_unlowerable_view_gets_the_achievable_remedy_not_the_impossible_one():
-    spec = _ref_spec()
-    spec.pipeline = type(spec.pipeline)(
-        stages=[
-            {"key": "a", "kind": "read", "config": {}},
-            {"key": "z", "kind": "branch", "config": {}},
-        ],
-        dependencies=[{"from_stage": "a", "to_stage": "z"}],
-    )
-    plan = _plan(
-        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
-    )
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    # It must NOT claim the process has no linear view — it demonstrably does.
-    assert "no representation as a singular linear" not in plan["error"]
-    assert "make it semantically identical" in plan["hint"]
 
 
 _INERT_RELIABILITY = {"retry_count": 0, "dlq": {"mode": "disabled"}}
@@ -1280,13 +1382,16 @@ def test_the_process_type_alias_cannot_bypass_the_strict_surface():
         evaluate_pipeline_authority(_normalize_to_spec(config)).disposition == AGREE
     )
 
-    # ...and a CONTRADICTORY payload spelled the same way is still rejected.
+    # ...and a CONTRADICTORY payload spelled the same way is still rejected —
+    # #159 S3: at admission, which reads the former alias as a selector too and
+    # points at the spelling the caller used.
     contradictory = _contradictory(STRICT_VERSION)
     cproc = contradictory["integration_spec"]["components"][0]["config"]
     cproc["process_type"] = cproc.pop("process_kind")
     plan = _plan(contradictory)
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_type")
+    # The agreeing alias payload is refused identically: no alias buys a plan.
+    assert _plan(config) == plan
 
 
 def test_the_alias_is_resolved_for_block_configs_too():
@@ -1508,7 +1613,13 @@ def test_a_config_that_lowers_but_fails_validation_is_the_clean_plan_gate(
     plan = _plan(
         {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
     )
-    assert _AUTHORITY_CODE not in json.dumps(plan)
+    # #159 S3: on the serving path the body is refused at admission, at the
+    # spelling the caller used — neither the validation error nor a conflict is
+    # computed for it.
+    _assert_unit_refusal(
+        plan, field="integration_spec.components.0.config." + kind_key
+    )
+    assert expected_code not in json.dumps(plan)
 
 
 @pytest.mark.parametrize("kind_key", ["process_kind", "process_type"])
@@ -1538,32 +1649,6 @@ def _ref_typemismatch_spec():
     return spec
 
 
-@pytest.mark.parametrize("agreeing", [True, False], ids=["agreeing-view", "disagreeing-view"])
-def test_a_ref_type_mismatch_outranks_the_authority_verdict(agreeing):
-    """QA bug #172, and the reason this is fixed as a CLASS.
-
-    Enumerating validation passes inside the comparison closed three instances of
-    one bug in a row (lower-time, then validate_config-time, then $ref-type-time).
-    The conflict disposition now YIELDS to whatever error the plan itself produced
-    for the authored process, so a fourth pass is covered without being named.
-
-    The agreeing case is the sharper one: there the caller would otherwise be told
-    their view conflicts when the real defect is a broken $ref, and the hint's
-    remedy would be actively wrong advice.
-    """
-    spec = _ref_typemismatch_spec()
-    if not agreeing:
-        spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
-
-    plan = _plan(
-        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
-    )
-    assert plan["_success"] is True
-    step = _main_step(plan)
-    assert step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
-    assert _AUTHORITY_CODE not in json.dumps(plan)
-
-
 def test_the_gate_is_computed_account_independently():
     """ADR-001 §5's hardest invariant, and the one the first attempt at this gate
     broke: the same payload must not flip verdict on live account contents.
@@ -1584,8 +1669,10 @@ def test_the_gate_is_computed_account_independently():
     without_collision = _plan(config)
     with_collision = _plan(config, existing=[stub])
 
+    # #159 S3: the verdict is admission's, and it cannot flip on the account.
     for plan in (without_collision, with_collision):
-        assert _AUTHORITY_CODE not in json.dumps(plan)
+        _assert_unit_refusal(plan)
+    assert without_collision == with_collision
 
 
 def test_an_unrelated_plan_exit_cannot_suppress_a_conflict():
@@ -1605,83 +1692,24 @@ def test_an_unrelated_plan_exit_cannot_suppress_a_conflict():
     bad_policy = _contradictory(STRICT_VERSION)
     bad_policy["conflict_policy"] = "nonsense"
 
+    # #159 S3: the admission refusal runs first of all, so neither later exit
+    # (an unknown dependency, an invalid conflict policy) can replace it.
     for config in (unknown_dep, bad_policy):
         plan = _plan(config)
+        _assert_unit_refusal(
+            plan, field="integration_spec.components.0.config.process_kind"
+        )
+    # Control: on an ADMITTED spec those exits are real and do surface.
+    admitted_dep = _admitted(STRICT_VERSION)
+    admitted_dep["integration_spec"]["components"].append(
+        copy.deepcopy(unknown_dep["integration_spec"]["components"][-1])
+    )
+    admitted_policy = _admitted(STRICT_VERSION)
+    admitted_policy["conflict_policy"] = "nonsense"
+    for config in (admitted_dep, admitted_policy):
+        plan = _plan(config)
         assert plan["_success"] is False
-        assert plan["error_code"] == _AUTHORITY_CODE
-
-
-@pytest.mark.parametrize(
-    "mutate,expect_error",
-    [
-        pytest.param(lambda c: None, False, id="clean"),
-        pytest.param(
-            lambda c: c["source"].update({"connection_id": "$ref:the_map"}),
-            True,
-            id="ref-type-mismatch",
-        ),
-        pytest.param(
-            lambda c: c["source"].update({"operation_id": "$ref:the_map"}),
-            True,
-            id="ref-type-mismatch-operation",
-        ),
-        pytest.param(
-            lambda c: c["transform"].update({"map_ref": "$ref:db_conn"}),
-            # NOT an error: `map_ref` positions are not $ref-type-checked today
-            # (only connection_id / operation_id are). That is a pre-existing gap
-            # identical on V1, and the oracle's job is to pin gate==plan, not to
-            # assert the plan is right.
-            False,
-            id="unchecked-map-ref-position",
-        ),
-    ],
-)
-def test_the_gate_agrees_with_the_plans_own_verdict(mutate, expect_error):
-    """DIFFERENTIAL ORACLE against the plan itself.
-
-    The gate must re-run the account-independent validation passes rather than
-    read the collision-gated step, which risks it drifting out of sync with the
-    plan as passes are added. This pins the two together: for a NON-colliding
-    create (where the plan runs every pass), the gate's verdict must equal whether
-    the plan reported a validation error on that step.
-
-    A future pass added to the plan but missed by the gate fails here rather than
-    reaching a user as a masked error.
-    """
-    from src.boomi_mcp.categories.integration_builder import (
-        _authored_process_validation_error,
-    )
-
-    spec = _ref_spec()
-    mutate(spec.components[0].config)
-
-    gate_error = _authored_process_validation_error(spec, "main_process")
-
-    # Compare against the V1 TWIN: on the strict surface a clean gate verdict
-    # short-circuits the plan with the authority rejection, so it would produce no
-    # steps and the oracle would be circular. V1 never runs authority, so it always
-    # plans the component and reports whatever its own passes found.
-    legacy = json.loads(spec.model_dump_json())
-    legacy["version"] = "1.0"
-    plan = _plan({"dry_run": True, "integration_spec": legacy})
-    step = _main_step(plan)
-    plan_error = step.get("validation_error") or None
-    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
-
-    assert (gate_error is not None) is expect_error
-    assert (gate_error is not None) == (plan_error is not None), (
-        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
-    )
-    if gate_error is not None:
-        assert gate_error.error_code == plan_error["error_code"]
-
-
-def test_a_clean_authored_process_still_reports_the_conflict():
-    """The control for the whole gate: yielding must not swallow real conflicts."""
-    plan = _plan(_contradictory(STRICT_VERSION))
-    assert plan["_success"] is False
-    assert plan["error_code"] == _AUTHORITY_CODE
-    assert not _main_step_or_none(plan)
+        assert plan.get("error_code") != _UNIT_REQUIRED
 
 
 def _main_step_or_none(plan):
@@ -1734,48 +1762,6 @@ def _sync_ref_spec(mutate=None):
     spec.components[0].config.clear()
     spec.components[0].config.update(config)
     return spec
-
-
-@pytest.mark.parametrize(
-    "mutate,expect_error",
-    [
-        pytest.param(None, False, id="clean"),
-        pytest.param(
-            lambda c: c["pipeline"]["stages"][0]["config"].update(
-                {"connection_id": "$ref:the_map"}
-            ),
-            True,
-            id="ref-type-mismatch",
-        ),
-    ],
-)
-def test_the_gate_agrees_with_the_plan_for_sync_pipeline_too(mutate, expect_error):
-    """The sync_pipeline branch of the oracle.
-
-    It reaches `$ref` type-checking only after lowering, so it is a genuinely
-    separate path from the base builder's — a mutation that disabled it left the
-    base-builder oracle green, which is how this gap was found.
-    """
-    from src.boomi_mcp.categories.integration_builder import (
-        _authored_process_validation_error,
-    )
-
-    spec = _sync_ref_spec(mutate)
-    gate_error = _authored_process_validation_error(spec, "main_process")
-
-    legacy = json.loads(spec.model_dump_json())
-    legacy["version"] = "1.0"
-    plan = _plan({"dry_run": True, "integration_spec": legacy})
-    step = _main_step(plan)
-    plan_error = step.get("validation_error") or None
-    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
-
-    assert (gate_error is not None) is expect_error
-    assert (gate_error is not None) == (plan_error is not None), (
-        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
-    )
-    if gate_error is not None:
-        assert gate_error.error_code == plan_error["error_code"]
 
 
 # ---------------------------------------------------------------------------
@@ -1832,65 +1818,45 @@ _PREFLIGHT_CASES = [
 
 
 @pytest.mark.parametrize("mutate,expected_code", _PREFLIGHT_CASES)
-def test_the_gate_shares_the_planners_preflight(mutate, expected_code):
-    """The differential oracle, BROADENED.
-
-    Round 4 found the gate missing `PROCESS_NAME_REQUIRED`,
-    `PROCESS_KIND_XML_CONFLICT` and name governance — the fourth instance of one
-    class. The oracle that was supposed to catch that already existed; its input
-    set was simply too narrow (only `$ref` mutations). So this sweeps the
-    planner's preflight surface instead of a couple of shapes.
-
-    The gate now DELEGATES to the planner's own preflight, so agreement is
-    structural rather than maintained by hand — but this still pins it, because
-    the delegation could regress.
-    """
-    from src.boomi_mcp.categories.integration_builder import (
-        _authored_process_validation_error,
-    )
-
-    spec = _ref_spec()
-    mutate(spec)
-
-    gate_error = _authored_process_validation_error(spec, "main_process")
-
-    legacy = json.loads(spec.model_dump_json())
-    legacy["version"] = "1.0"
-    plan = _plan({"dry_run": True, "integration_spec": legacy})
-    step = _main_step(plan)
-    plan_error = step.get("validation_error") or None
-    assert step["planned_action"] != "reuse", "control: the plan must run every pass"
-
-    assert (gate_error is not None) == (plan_error is not None), (
-        f"gate and plan disagree: gate={gate_error!r} plan={plan_error!r}"
-    )
-    if expected_code is None:
-        assert gate_error is None
-    else:
-        assert gate_error is not None
-        assert gate_error.error_code == expected_code
-        assert plan_error["error_code"] == expected_code
-
-
-@pytest.mark.parametrize("mutate,expected_code", _PREFLIGHT_CASES)
 def test_a_failing_preflight_is_never_masked_by_an_authority_conflict(
     mutate, expected_code
 ):
-    """End-to-end: with a DISAGREEING view, the process's own error must win."""
-    spec = _ref_spec()
-    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
-    mutate(spec)
+    """End-to-end: with a DISAGREEING view, the process's own error must win.
 
-    plan = _plan(
-        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    #159 S3: no legacy preflight runs on a flat body any more, so the sweep now
+    pins the opposite direction of masking — NO legacy variant changes the
+    admission refusal. Clean or broken, every mutation earns the identical
+    value-free refusal; none of the retired preflight codes is computed or
+    served, and none of them is masked by the authority code either.
+    """
+    def refused(mutation):
+        spec = _ref_spec()
+        spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
+        mutation(spec)
+        return _plan(
+            {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+        )
+
+    plan = refused(mutate)
+    _assert_unit_refusal(plan)
+    blob = json.dumps(plan)
+    for case in _PREFLIGHT_CASES:
+        code = case.values[1]
+        if code is not None:
+            assert code not in blob
+    # Whatever the variant, the refusal is the clean payload's own (only the
+    # static pointer may move, when the variant removes the selector).
+    clean = refused(lambda s: None)
+    assert {k: v for k, v in plan.items() if k != "field"} == {
+        k: v for k, v in clean.items() if k != "field"
+    }
+    assert plan["field"] in (
+        "integration_spec.components.0.config.process_kind",
+        "integration_spec.components.0.config",
     )
-    if expected_code is None:
-        # Nothing wrong with the process — the conflict is the right answer.
-        assert plan["_success"] is False
-        assert plan["error_code"] == _AUTHORITY_CODE
-    else:
-        assert _AUTHORITY_CODE not in json.dumps(plan)
-        assert _main_step(plan)["validation_error"]["error_code"] == expected_code
+    assert (plan["field"] == "integration_spec.components.0.config") is (
+        expected_code == "PROCESS_KIND_REQUIRED"
+    )
 
 
 def test_a_plaintext_secret_in_the_process_is_not_masked_by_a_conflict():
@@ -1909,43 +1875,15 @@ def test_a_plaintext_secret_in_the_process_is_not_masked_by_a_conflict():
     spec.components[0].config["password"] = "SENTINEL-NOT-A-REAL-SECRET"
     before = spec.model_dump()
 
-    plan = _plan(
-        {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
-    )
-    assert _AUTHORITY_CODE not in json.dumps(plan)
-    assert _main_step(plan)["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+    # #159 S3: a body carrying a secret is refused at admission, which reads key
+    # presence only — the refusal is value-free, so no secret-specific scan (or
+    # redaction) is needed for it, and the submitted payload is left untouched.
+    submitted = {"dry_run": True, "integration_spec": json.loads(spec.model_dump_json())}
+    submitted_before = copy.deepcopy(submitted)
+    plan = _build_plan(MagicMock(), submitted)
+    _assert_unit_refusal(plan, field="integration_spec.components.0.config.process_kind")
     assert "SENTINEL-NOT-A-REAL-SECRET" not in json.dumps(plan)
+    assert "password" not in json.dumps(plan)
+    assert submitted == submitted_before
     assert spec.model_dump() == before
 
-
-def test_name_governance_is_deliberately_outside_the_clean_plan_gate():
-    """A DELIBERATE scope boundary, pinned so it cannot drift by accident.
-
-    ADR-001 §5 scopes the clean-plan gate to an "authored-semantics-unavailable"
-    failure — `PROCESS_KIND_REQUIRED`, a schema-parse error, an invalid config.
-    Name governance (#93/#102) is a *policy* lint, not a semantic one: a process
-    named "New Map" has perfectly well-defined semantics, and an authored view
-    that contradicts it genuinely does conflict. Reporting the conflict there is
-    therefore correct, not masking — the payload is simply wrong in two ways, and
-    the V1 surface still reports the governance error as it always did.
-
-    Folding it in would also reintroduce account-dependence: the governance lint
-    only flags create/create_clone steps, so a collision-driven reuse would skip
-    it and flip the strict verdict on live account contents — the exact defect
-    ADR-001 §5 forbids and that an earlier revision of this gate had.
-    """
-    spec = _ref_spec()
-    spec.pipeline.stages[0].config["connection_id"] = "a-different-connection"
-    spec.components[0].name = "New Map"  # a platform default name
-    payload = json.loads(spec.model_dump_json())
-
-    strict = _plan({"dry_run": True, "integration_spec": copy.deepcopy(payload)})
-    assert strict["_success"] is False
-    assert strict["error_code"] == _AUTHORITY_CODE
-
-    # V1 is untouched: it still reports the governance error.
-    legacy = copy.deepcopy(payload)
-    legacy["version"] = "1.0"
-    v1 = _plan({"dry_run": True, "integration_spec": legacy})
-    assert _AUTHORITY_CODE not in json.dumps(v1)
-    assert _main_step(v1)["validation_error"]["error_code"] == "COMPONENT_NAME_BOOMI_DEFAULT"

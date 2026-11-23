@@ -1,12 +1,17 @@
-"""Wrapper tests for V3 archetype MCP tools (Issues #18, #19).
+"""Wrapper tests for the recipe discovery MCP tools (Issues #18, #19; #159 S3).
 
 Verifies that the server.py MCP wrappers:
-- Register all three tools.
+- Register the two recipe-only discovery tools, and NOT the retired
+  build_from_archetype / compose_archetypes tools (#159 S3).
+- Keep review_transformation registered on its own (it is not an archetype tool).
 - Carry read-only / closed-world annotations.
 - Pass through to the action layer with no credential / Boomi() calls.
 - Expose stable JSON-schema input contracts via mcp.list_tools().
 - Are reachable end-to-end through mcp.call_tool() with structured success
   and failure payloads, all without credential reads or Boomi() construction.
+
+Node ids of the retired build/compose tests are kept (the manifest pins them);
+their bodies witness the retirement or the replacement discovery path.
 """
 
 import asyncio
@@ -15,6 +20,9 @@ import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+from fastmcp.exceptions import NotFoundError
 
 _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
@@ -33,9 +41,14 @@ import server  # noqa: E402
 TOOL_NAMES = (
     "list_integration_archetypes",
     "get_integration_archetype",
-    "build_from_archetype",
-    "compose_archetypes",
 )
+
+#: Retired in #159 S3 together with their action dispatchers.
+RETIRED_TOOL_NAMES = ("build_from_archetype", "compose_archetypes")
+
+_STUB = "boomi.archetype.stub_minimal"
+_FANOUT = "boomi.compose.db_rest_fanout"
+_DB_TO_API = "boomi.archetype.database_to_api_sync"
 
 
 def _annotation_value(annotations, key):
@@ -91,6 +104,11 @@ def test_tools_registered():
     for name in TOOL_NAMES:
         tool = _resolve_tool(name)
         assert tool is not None, f"{name} not registered"
+    for name in RETIRED_TOOL_NAMES:
+        assert _resolve_tool(name) is None, f"{name} is retired but still registered"
+    # The step-4 prototype moved review_transformation under the archetype-tool
+    # conditional; it is its own tool and must stay registered on its own.
+    assert _resolve_tool("review_transformation") is not None
 
 
 def test_tool_annotations_read_only_and_closed_world():
@@ -113,24 +131,24 @@ def test_tool_annotations_read_only_and_closed_world():
 def test_list_wrapper_returns_success():
     result = server.list_integration_archetypes()
     assert result["_success"] is True
-    names = [a["name"] for a in result["archetypes"]]
-    assert "stub_minimal_integration" in names
+    ids = [r["recipe_id"] for r in result["recipes"]]
+    assert _STUB in ids
 
 
 def test_get_wrapper_returns_success():
-    result = server.get_integration_archetype("stub_minimal_integration")
+    result = server.get_integration_archetype(_STUB)
     assert result["_success"] is True
-    assert result["archetype"]["metadata"]["name"] == "stub_minimal_integration"
+    assert result["descriptor"]["recipe_id"] == _STUB
+    assert result["next_tool"] == "build_integration"
 
 
 def test_build_wrapper_returns_success():
-    result = server.build_from_archetype(
-        "stub_minimal_integration",
-        {"integration_name": "demo"},
-    )
-    assert result["_success"] is True
-    assert result["integration_spec"]["name"] == "demo"
-    assert result["boomi_mutation"] is False
+    """#159 S3: the build wrapper retired with its dispatcher (tombstone
+    candidate); the server module no longer carries either."""
+    assert not hasattr(server, "build_from_archetype")
+    assert not hasattr(server, "build_from_archetype_action")
+    assert not hasattr(server, "compose_archetypes")
+    assert not hasattr(server, "compose_archetypes_action")
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +163,8 @@ def test_wrappers_do_not_call_boomi_or_credentials():
         patch.object(server, "Boomi") as m_boomi,
     ):
         r1 = server.list_integration_archetypes()
-        r2 = server.get_integration_archetype("stub_minimal_integration")
-        r3 = server.build_from_archetype(
-            "stub_minimal_integration",
-            {"integration_name": "demo"},
-        )
+        r2 = server.get_integration_archetype(_STUB)
+        r3 = server.get_integration_archetype(_FANOUT, "2.0.0")
 
     assert r1["_success"] is True
     assert r2["_success"] is True
@@ -170,6 +185,9 @@ def test_list_tools_reports_all_authoring_tools():
     listed = {t.name for t in tools}
     for name in TOOL_NAMES:
         assert name in listed, f"{name} missing from mcp.list_tools()"
+    assert "review_transformation" in listed
+    for name in RETIRED_TOOL_NAMES:
+        assert name not in listed, f"{name} is retired but still listed"
 
 
 def test_list_tools_schemas_use_native_types_no_stale_args():
@@ -179,51 +197,25 @@ def test_list_tools_schemas_use_native_types_no_stale_args():
     list_schema = list_tool.parameters
     assert list_schema["type"] == "object"
     list_props = list_schema["properties"]
-    # #145 M12.10 adds expected_recipe_registry: a caller-supplied snapshot the
-    # server COMPARES against and reports as recipe_registry_skew. It is
-    # comparison-only — it can never select, register, or reach recipe code —
-    # so it does not reopen the profile / boomi_client surface this pin guards.
-    assert set(list_props.keys()) == {"query", "tags", "expected_recipe_registry"}, (
-        "list_integration_archetypes must expose only query + tags + "
-        "expected_recipe_registry — no profile / boomi_client"
+    # #145 M12.10 added expected_recipe_registry (comparison-only). #159 S3
+    # dropped the legacy tags filter: the recipe registry has no tag authority.
+    assert set(list_props.keys()) == {"query", "expected_recipe_registry"}, (
+        "list_integration_archetypes must expose only query + "
+        "expected_recipe_registry — no tags / profile / boomi_client"
     )
-    assert list_props["tags"]["type"] == "array"
-    assert list_props["tags"]["items"]["type"] == "string"
     assert list_props["query"]["type"] == "string"
 
     get_tool = by_name["get_integration_archetype"]
     get_schema = get_tool.parameters
     assert get_schema["type"] == "object"
-    # #145: recipe_version pins an EXACT recipe version; it never falls forward
-    # or backward, and pinning an unmigrated archetype is rejected outright.
+    # recipe_version pins an EXACT recipe version; it never falls forward or
+    # backward.
     assert set(get_schema["properties"].keys()) == {"name", "recipe_version"}
     assert get_schema["properties"]["name"]["type"] == "string"
     assert "name" in get_schema.get("required", [])
 
-    build_tool = by_name["build_from_archetype"]
-    build_schema = build_tool.parameters
-    assert build_schema["type"] == "object"
-    build_props = build_schema["properties"]
-    assert set(build_props.keys()) == {"name", "parameters", "recipe_version"}, (
-        "build_from_archetype must expose only name + parameters — no profile arg"
-    )
-    assert build_props["name"]["type"] == "string"
-    # parameters must be an object at the MCP boundary; the legacy JSON-string
-    # form is intentionally only supported by the action helper for direct
-    # Python callers.
-    assert build_props["parameters"]["type"] == "object"
-    assert "name" in build_schema.get("required", [])
-
-    compose_tool = by_name["compose_archetypes"]
-    compose_schema = compose_tool.parameters
-    assert compose_schema["type"] == "object"
-    compose_props = compose_schema["properties"]
-    assert set(compose_props.keys()) == {"parts", "options"}, (
-        "compose_archetypes must expose only parts + options — no profile arg"
-    )
-    assert compose_props["parts"]["type"] == "array"
-    assert compose_props["options"]["type"] == "object"
-    assert "parts" in compose_schema.get("required", [])
+    for name in RETIRED_TOOL_NAMES:
+        assert name not in by_name
 
 
 # ===========================================================================
@@ -236,63 +228,48 @@ def test_call_tool_list_returns_structured_success():
     payload = _payload(result)
     assert payload["_success"] is True
     assert payload["raw_xml_exposed"] is False
-    names = [a["name"] for a in payload["archetypes"]]
-    assert "stub_minimal_integration" in names
+    ids = [r["recipe_id"] for r in payload["recipes"]]
+    assert _STUB in ids
 
 
 def test_call_tool_get_returns_structured_success():
-    result = _call_tool(
-        "get_integration_archetype",
-        {"name": "stub_minimal_integration"},
-    )
+    result = _call_tool("get_integration_archetype", {"name": _STUB})
     payload = _payload(result)
     assert payload["_success"] is True
     assert payload["raw_xml_exposed"] is False
-    assert payload["next_tool"] == "build_from_archetype"
-    assert payload["archetype"]["metadata"]["name"] == "stub_minimal_integration"
-    assert payload["archetype"]["parameter_schema"]["additionalProperties"] is False
+    assert payload["next_tool"] == "build_integration"
+    assert payload["descriptor"]["recipe_id"] == _STUB
+    assert payload["input_schema"]["additionalProperties"] is False
 
 
 def test_call_tool_get_returns_enriched_describe_payload():
-    """The MCP-facing call_tool path surfaces the same enrichment as the direct action."""
-    result = _call_tool(
-        "get_integration_archetype",
-        {"name": "stub_minimal_integration"},
-    )
-    payload = _payload(result)
-    arch = payload["archetype"]
-    for key in ("capability_notes", "limitations", "examples", "example_policy"):
-        assert key in arch, f"call_tool archetype payload missing {key!r}"
-
-    assert arch["example_policy"] == "example_only_not_reusable_template"
-    assert arch["capability_notes"]
-    assert arch["limitations"]
-    assert arch["examples"]
-
-    for example in arch["examples"]:
-        assert example["is_template"] is False
-        assert example["template_status"] == "example_only_not_reusable_template"
-
-    props = arch["parameter_schema"]["properties"]
-    for prop_name, prop_schema in props.items():
-        assert prop_schema.get("description"), (
-            f"property {prop_name!r} is missing a description"
+    """The MCP-facing call_tool path surfaces the same projection as the action,
+    for EVERY row the list returns, fetched by its exact pin."""
+    listed = _payload(_call_tool("list_integration_archetypes", {}))
+    assert listed["count"] == len(listed["recipes"]) == 6
+    for row in listed["recipes"]:
+        payload = _payload(
+            _call_tool(
+                "get_integration_archetype",
+                {"name": row["recipe_id"], "recipe_version": row["recipe_version"]},
+            )
         )
+        assert payload["_success"] is True, row
+        assert payload["descriptor"] == row
+        for key in ("capability_notes", "limitations", "examples"):
+            assert payload["descriptor"][key], (row["recipe_id"], key)
+        for example in payload["descriptor"]["examples"]:
+            assert example["is_template"] is False
 
 
 def test_call_tool_build_returns_structured_success():
-    result = _call_tool(
-        "build_from_archetype",
-        {
-            "name": "stub_minimal_integration",
-            "parameters": {"integration_name": "demo"},
-        },
-    )
-    payload = _payload(result)
-    assert payload["_success"] is True
-    assert payload["raw_xml_exposed"] is False
-    assert payload["boomi_mutation"] is False
-    assert payload["integration_spec"]["name"] == "demo"
+    """#159 S3: build_from_archetype is not a tool any more (tombstone
+    candidate) — calling it is an unknown-tool error, never a spec."""
+    with pytest.raises(NotFoundError):
+        _call_tool(
+            "build_from_archetype",
+            {"name": "stub_minimal_integration", "parameters": {"integration_name": "demo"}},
+        )
 
 
 def test_call_tool_get_missing_archetype_returns_structured_failure():
@@ -302,19 +279,22 @@ def test_call_tool_get_missing_archetype_returns_structured_failure():
     )
     payload = _payload(result)
     assert payload["_success"] is False
-    assert payload["error_code"] == "PATTERN_NOT_FOUND"
+    assert payload["error_code"] == "RECIPE_NOT_FOUND"
 
 
 def test_call_tool_build_invalid_parameters_returns_field_errors():
-    result = _call_tool(
-        "build_from_archetype",
-        {"name": "stub_minimal_integration", "parameters": {}},
-    )
-    payload = _payload(result)
-    assert payload["_success"] is False
-    assert payload["error_code"] == "PARAM_VALIDATION_FAILED"
-    paths = [fe["field_path"] for fe in payload["field_errors"]]
-    assert "integration_name" in paths
+    """An exact pin that is not served — empty, unknown or retired — refuses
+    with the registry's lookup diagnostic and the versions that ARE served."""
+    for version in ("", "9.9.9", "1.0.0"):
+        payload = _payload(
+            _call_tool(
+                "get_integration_archetype",
+                {"name": _FANOUT, "recipe_version": version},
+            )
+        )
+        assert payload["_success"] is False, version
+        assert payload["error_code"] == "RECIPE_VERSION_UNAVAILABLE", version
+        assert payload["recipe_diagnostics"][0]["available_versions"] == ["2.0.0"]
 
 
 def test_call_tool_paths_do_not_call_boomi_or_credentials():
@@ -324,19 +304,11 @@ def test_call_tool_paths_do_not_call_boomi_or_credentials():
         patch.object(server, "Boomi") as m_boomi,
     ):
         r_list = _payload(_call_tool("list_integration_archetypes", {}))
-        r_get = _payload(
+        r_get = _payload(_call_tool("get_integration_archetype", {"name": _STUB}))
+        r_pin = _payload(
             _call_tool(
                 "get_integration_archetype",
-                {"name": "stub_minimal_integration"},
-            )
-        )
-        r_build = _payload(
-            _call_tool(
-                "build_from_archetype",
-                {
-                    "name": "stub_minimal_integration",
-                    "parameters": {"integration_name": "demo"},
-                },
+                {"name": _FANOUT, "recipe_version": "2.0.0"},
             )
         )
         r_missing = _payload(
@@ -345,7 +317,7 @@ def test_call_tool_paths_do_not_call_boomi_or_credentials():
 
     assert r_list["_success"] is True
     assert r_get["_success"] is True
-    assert r_build["_success"] is True
+    assert r_pin["_success"] is True
     assert r_missing["_success"] is False
 
     m_user.assert_not_called()
@@ -354,110 +326,28 @@ def test_call_tool_paths_do_not_call_boomi_or_credentials():
 
 
 # ===========================================================================
-# Issue #14 (M8) — compose_archetypes MCP wrapper smoke
+# Issue #14 (M8) — the fan-out is a recipe since #159 S3 (compose_archetypes retired)
 # ===========================================================================
 
 
-def _compose_smoke_args():
-    def _target(key, label, base_url, path):
-        return {
-            "key": key,
-            "kind": "rest_target",
-            "label": label,
-            "parameters": {
-                "binding": {
-                    "mode": "create",
-                    "settings": {"base_url": base_url, "auth_mode": "none"},
-                },
-                "send_request": {"method": "POST", "path": path},
-                "payload_profile": {
-                    "format": "json",
-                    "root": {
-                        "name": "Root",
-                        "kind": "object",
-                        "children": [
-                            {
-                                "name": "target_a",
-                                "kind": "simple",
-                                "data_type": "character",
-                            },
-                        ],
-                    },
-                },
-            },
-        }
-
-    return {
-        "parts": [
-            {
-                "key": "db",
-                "kind": "db_source",
-                "parameters": {
-                    "binding": {
-                        "mode": "create",
-                        "settings": {
-                            "driver": "microsoft_jdbc",
-                            "auth_mode": "username_password",
-                            "host": "db.example.invalid",
-                            "database": "AppDB",
-                            "username": "<<db user>>",
-                            "credential_ref": "<<opaque credential reference>>",
-                        },
-                    },
-                    "read_operation": {
-                        "sql": "<<user-authored DB read statement>>",
-                        "result_schema": {
-                            "fields": [
-                                {"name": "source_a", "data_type": "character"},
-                            ],
-                        },
-                    },
-                },
-            },
-            {
-                "key": "shape",
-                "kind": "transform",
-                "parameters": {
-                    "operations": [
-                        {
-                            "operation_type": "direct",
-                            "source_field": "source_a",
-                            "target_path": "Root/target_a",
-                        },
-                    ],
-                },
-            },
-            _target("orders", "Orders", "https://orders.example.invalid", "/v1/orders"),
-            _target("billing", "Billing", "https://billing.example.invalid", "/v1/billing"),
-        ],
-        "options": {
-            "naming": {
-                "integration_name": "demo-composed-fanout",
-                "component_prefix": "DEMO",
-            },
-        },
-    }
-
-
 def test_call_tool_compose_returns_structured_success():
-    result = _call_tool("compose_archetypes", _compose_smoke_args())
-    payload = _payload(result)
+    """The composed fan-out is discovered as the default fan-out recipe: its
+    input schema and its closed component-material schema are both served."""
+    payload = _payload(_call_tool("get_integration_archetype", {"name": _FANOUT}))
     assert payload["_success"] is True
     assert payload["raw_xml_exposed"] is False
     assert payload["boomi_mutation"] is False
-    assert payload["composition"]["fanout_targets"] == 2
-    keys = [c["key"] for c in payload["integration_spec"]["components"]]
-    assert "main_process" in keys
-    assert "target_billing_rest_operation" in keys
+    assert payload["recipe_version"] == "2.0.0"
+    assert {"source", "transform", "targets", "links"} <= set(
+        payload["input_schema"]["properties"]
+    )
+    assert payload["component_material_schema"]["additionalProperties"] is False
 
 
 def test_call_tool_compose_contract_mismatch_returns_structured_failure():
-    args = _compose_smoke_args()
-    args["parts"][1]["parameters"]["operations"][0]["source_field"] = "not_declared"
-    payload = _payload(_call_tool("compose_archetypes", args))
-    assert payload["_success"] is False
-    assert payload["error_code"] == "COMPOSITION_CONTRACT_MISMATCH"
-    assert "integration_spec" not in payload
+    """#159 S3: compose_archetypes is not a tool any more (tombstone candidate)."""
+    with pytest.raises(NotFoundError):
+        _call_tool("compose_archetypes", {"parts": [], "options": {}})
 
 
 def test_compose_wrapper_does_not_call_boomi_or_credentials():
@@ -466,7 +356,7 @@ def test_compose_wrapper_does_not_call_boomi_or_credentials():
         patch.object(server, "get_secret") as m_secret,
         patch.object(server, "Boomi") as m_boomi,
     ):
-        payload = _payload(_call_tool("compose_archetypes", _compose_smoke_args()))
+        payload = _payload(_call_tool("get_integration_archetype", {"name": _FANOUT}))
 
     assert payload["_success"] is True
     m_user.assert_not_called()
@@ -475,122 +365,40 @@ def test_compose_wrapper_does_not_call_boomi_or_credentials():
 
 
 # ===========================================================================
-# Issue #21 — database_to_api_sync contract-only archetype, MCP wrapper smoke
+# Issue #21 — database_to_api_sync, MCP wrapper smoke (a recipe since #159 S3)
 # ===========================================================================
 
 
-_DB_TO_API_SYNC_MINIMAL_PAYLOAD = {
-    "naming": {
-        "integration_name": "demo-db-to-api-sync",
-        "component_prefix": "DEMO",
-    },
-    "source": {
-        "binding": {
-            "mode": "create",
-            "settings": {
-                "driver": "microsoft_jdbc",
-                "auth_mode": "username_password",
-                "host": "db.internal",
-                "database": "AppDB",
-                "username": "svc_sync",
-                "credential_ref": "secrets/db/svc_sync",
-            },
-        },
-        "read_operation": {
-            "sql": "<<user-authored DB read statement>>",
-            "result_schema": {
-                "fields": [
-                    {"name": "source_a", "data_type": "character"},
-                ],
-            },
-        },
-    },
-    "target": {
-        "binding": {
-            "mode": "create",
-            "settings": {
-                "base_url": "https://api.example.com",
-                "auth_mode": "none",
-            },
-        },
-        "send_request": {"method": "POST", "path": "/v1/items"},
-        "payload_profile": {
-            "format": "json",
-            "root": {
-                "name": "Root",
-                "kind": "object",
-                "children": [
-                    {
-                        "name": "target_a",
-                        "kind": "simple",
-                        "data_type": "character",
-                    },
-                ],
-            },
-        },
-    },
-    "transform": {
-        "operations": [
-            {
-                "operation_type": "direct",
-                "source_field": "source_a",
-                "target_path": "Root/target_a",
-            },
-        ],
-    },
-    "execution": {"trigger": {"mode": "manual"}},
-    "reliability": {
-        "retry": {"max_attempts": 1},
-        "dlq": {"enabled": False},
-        "error_classifier": {},
-    },
-}
-
-
 def test_call_tool_list_includes_database_to_api_sync():
-    result = _call_tool("list_integration_archetypes", {})
+    result = _call_tool("list_integration_archetypes", {"query": "database_to_api"})
     payload = _payload(result)
     assert payload["_success"] is True
-    names = [a["name"] for a in payload["archetypes"]]
-    assert "database_to_api_sync" in names
+    assert [r["recipe_id"] for r in payload["recipes"]] == [_DB_TO_API]
 
 
 def test_call_tool_get_database_to_api_sync_schema_is_strict():
-    result = _call_tool(
-        "get_integration_archetype",
-        {"name": "database_to_api_sync"},
-    )
+    result = _call_tool("get_integration_archetype", {"name": _DB_TO_API})
     payload = _payload(result)
     assert payload["_success"] is True
-    arch = payload["archetype"]
-    schema = arch["parameter_schema"]
+    schema = payload["input_schema"]
     assert schema["additionalProperties"] is False
-    for prop_name, prop_schema in schema["properties"].items():
-        assert prop_schema.get("description"), (
-            f"top-level property {prop_name!r} is missing a description"
-        )
+    assert payload["component_material_schema"]["additionalProperties"] is False
 
 
 def test_call_tool_build_database_to_api_sync_minimal_succeeds():
-    result = _call_tool(
-        "build_from_archetype",
-        {
-            "name": "database_to_api_sync",
-            "parameters": _DB_TO_API_SYNC_MINIMAL_PAYLOAD,
-        },
+    """#159 S3: the legacy archetype build retired (tombstone candidate); the
+    discovered descriptor names build_integration and an exact pin instead."""
+    payload = _payload(
+        _call_tool(
+            "get_integration_archetype",
+            {"name": _DB_TO_API, "recipe_version": "1.0.0"},
+        )
     )
-    payload = _payload(result)
     assert payload["_success"] is True
-    assert payload["boomi_mutation"] is False
-    assert payload["raw_xml_exposed"] is False
-    spec = payload["integration_spec"]
-    # Issue #29: the archetype now emits executable component specs (no Boomi
-    # mutation, no raw XML) instead of a zero-component contract spec.
-    keys = [c["key"] for c in spec["components"]]
-    assert "main_process" in keys
-    assert spec["mode"] == "redesign"
-    assert spec["validation_rules"]["contract_only"] is False
-    assert spec["validation_rules"]["component_count"] == len(spec["components"])
+    assert payload["next_tool"] == "build_integration"
+    assert f"'recipe_id': '{_DB_TO_API}'" in payload["next_steps"]
+    assert "'recipe_version': '1.0.0'" in payload["next_steps"]
+    assert "component_material" in payload["next_steps"]
 
 
 # ---------------------------------------------------------------------------

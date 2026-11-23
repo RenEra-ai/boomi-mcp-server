@@ -91,10 +91,14 @@ from .archetype_assembly import (
 # #160 (issue #151, M12.14). A module object is not a class, so the walk skips it.
 # The composition route itself is #159's to migrate.
 from .archetypes import database_to_api_sync as _database_to_api_sync
-from ..recipes.builtins.catalog import (
-    ADAPTER_COMPOSE_ARCHETYPES,
-    RECIPE_DB_REST_FANOUT,
-)
+from ..recipes.builtins.catalog import RECIPE_DB_REST_FANOUT
+
+#: #159 S3: the compose_archetypes compatibility adapter retired with its tool,
+#: and this isolated module (kept on disk for #160) no longer imports the
+#: catalog's constant for it, so the catalog may drop that constant without
+#: breaking pattern-module import. The id is kept only so the legacy code path
+#: still names what it used to resolve; resolving it now fails closed.
+ADAPTER_COMPOSE_ARCHETYPES = "boomi.adapter.compose_archetypes"
 from .recipe_bridge import declared_target_version, run_fanout_recipe
 from .base import PrimitiveBuildContext
 from .primitives._helpers import (

@@ -666,15 +666,25 @@ def test_the_import_blocker_refuses_a_known_forbidden_import(batch):
     assert not any(recipe_id.startswith(acct.ADAPTER_ID_PREFIX) for recipe_id, _v in registered)
     assert not registered & set(acct.obsolete_registrations())
     assert ("boomi.compose.db_rest_fanout", "2.0.0") in registered
-    # #159 S2: the PLANNED retirement is simulated too, API->API included —
-    # each planned id is registered in this (parent) tree, so the filter is real
+    # #159 S3: the retirement is REAL. The child filters nothing, so the blocked
+    # child's registrations ARE the parent catalog's, and neither carries a
+    # compatibility adapter, a superseded adapter target or a planned retirement.
     from boomi_mcp.recipes.builtins import catalog
 
     parent = {(reg.recipe_id, reg.recipe_version) for reg in catalog.PRODUCTION_REGISTRATIONS}
+    assert registered == parent
+    assert acct.simulated_retirements() == ()
     for recipe_id in acct.PLANNED_RETIREMENT_RECIPE_IDS:
-        assert any(rid == recipe_id for rid, _v in parent), recipe_id
-        assert not any(rid == recipe_id for rid, _v in registered), recipe_id
-    assert set(acct.simulated_retirements()) <= parent
+        assert not any(rid == recipe_id for rid, _v in parent), recipe_id
+    # the production layer list itself carries no blocked module (nothing filtered)
+    from boomi_mcp.recipes.registry import RECIPE_LAYER_MODULES
+
+    assert batch["layer_modules"] == list(RECIPE_LAYER_MODULES)
+    # every canonical case replayed in this one child, and nothing it ran tried
+    # to import a blocked module
+    assert len(acct.canonical_case_ids()) == 21
+    assert set(batch["cases"]) == set(acct.canonical_case_ids())
+    assert batch["attempts"] == []
     # the projector's lazily imported authorities import cleanly under the blocker
     assert batch["authority_attempts"] == []
 
@@ -1019,12 +1029,18 @@ def test_the_freeze_cli_refuses_a_source_tree_argument():
 
 
 def test_the_legacy_producers_at_head_still_reproduce_the_frozen_rows():
-    """Until #160 deletes them, the frozen rows are re-derivable from HEAD.
+    """Until #159 S3 the frozen rows were re-derivable from HEAD — the
+    differential control for the corpus itself.
 
-    This is the differential control for the corpus itself: if it fails, either
-    a legacy producer moved (a #160-owned event) or the freeze drifted.
+    #159 S3: the legacy actions (``build_from_archetype`` / ``compose_archetypes``)
+    retired, so no HEAD route can produce the rows any more and the corpus is
+    canonical-only: the frozen extraction is the oracle, held by its digests. The
+    HEAD re-derivation now fails at exactly the retired import — the measurement
+    that the legacy chain is gone, not merely unused.
     """
-    assert acct.check_against_tree() == []
+    assert acct.verify_manifest() == []
+    with pytest.raises(RuntimeError, match="cannot import name 'build_from_archetype_action'"):
+        acct.check_against_tree()
 
 
 def test_the_flagship_root_topology_and_full_envelope_match_the_legacy_outcome(batch):
@@ -1035,16 +1051,14 @@ def test_the_flagship_root_topology_and_full_envelope_match_the_legacy_outcome(b
 
     from boomi_mcp.models.integration_models import IntegrationSpecV1
     from boomi_mcp.models.process_ir import canonical_process_ir_json
-    from boomi_mcp.patterns.recipe_bridge import run_fanout_recipe
+    # #159 S3: fan-out 1.0.0 (the bridge's legacy run) retired; the legacy root is
+    # the frozen composed config lowered through the isolated adapter, exactly as
+    # the fan-out 2.0.0 parity suite computes it.
+    from test_recipe_fanout_v2 import _legacy_root
 
     flagship = batch["flagship"]
     spec = IntegrationSpecV1.model_validate(oracle()["integration_spec"])
-    process = spec.components[-1]
-    legacy = run_fanout_recipe(
-        recipe_id="boomi.compose.db_rest_fanout", components=spec.components, process=process
-    )
-    legacy_root = dict(legacy.composed.process_roots)[process.key]
-    assert flagship.get("root") == canonical_process_ir_json(legacy_root)
+    assert flagship.get("root") == canonical_process_ir_json(_legacy_root(spec))
     frozen = respell_oracle_credential_refs(oracle()["integration_spec"]["components"])[-1]
     expected = {
         "component_key": frozen["key"],

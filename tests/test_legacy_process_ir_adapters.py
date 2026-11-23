@@ -624,7 +624,7 @@ import types as _types
 import typing as _typing
 
 #: Flip to ``True`` in the same commit that empties ``_PRE_CUTOVER_CENSUS``.
-ZERO_CALLER_CUTOVER_COMPLETE = False
+ZERO_CALLER_CUTOVER_COMPLETE = True
 
 #: The audited adapter authority, retained as TEST DATA so the census survives
 #: #160's physical deletion of the modules it was derived from.
@@ -728,6 +728,7 @@ _NON_FINDING_CLASSES = frozenset({
     "reexport_declaration",     # the name appears in an ``__all__`` declaration
     "retired_implementation",   # module no live entry point or registration imports
     "definition_dependency",    # imports a helper/constant from a definition module (#160 input)
+    "unreferenced_producer",    # producer nothing in the scanned production tree refers to (#160 input)
 })
 
 _UNCLASSIFIED_DIALECT = "<unclassified-dialect>"
@@ -1115,6 +1116,8 @@ def _pattern_authority():
         dispatch_methods=tuple(sorted(ArchetypePattern.__abstractmethods__)),
         package_dir=_repo_rel(Path(patterns_pkg.__file__).parent),
         composition=composition,
+        # The discovery walk named above: a live call to it re-roots every archetype.
+        discovery=PatternRegistry.from_package.__name__,
     )
 
 
@@ -1242,9 +1245,15 @@ def _dispatch_findings(sources, patterns, candidates):
 def _mark_unreferenced_producers(records, sources, trees) -> None:
     """Relabel a producer function nothing in the scanned tree refers to.
 
-    It stays a finding either way; the label tells the integrator it is a
-    dead-definition candidate (delete or isolate) rather than a live caller to
-    migrate. A ROUTE is never relabelled: a retained route counts uncalled.
+    #159 S3 (cutover decision 4): a producer that no module in the scanned
+    production tree names — by a ``Name``, an ``Attribute``, an import alias, or
+    a string constant spelling it (``getattr`` by name) — cannot construct an
+    adapter config on any production path, so it is an audited isolated
+    definition (``unreferenced_producer``, a non-finding #160 deletes), not a
+    caller to migrate. Until S3 it stayed a finding labelled as a dead-definition
+    candidate. Any reference in the scanned tree flips it back to a finding
+    (``test_census_counts_an_unreferenced_producer_only_while_nothing_names_it``).
+    A ROUTE is never relabelled: a retained route counts uncalled.
     """
     names = {r["symbol"] for r in records
              if r["class"] == "adapter_producer" and "." not in r["symbol"]}
@@ -1261,10 +1270,13 @@ def _mark_unreferenced_producers(records, sources, trees) -> None:
                 referenced.add(node.attr)
             elif isinstance(node, _ast.alias) and node.name in wanted:
                 referenced.add(node.name)
+            elif isinstance(node, _ast.Constant) and isinstance(node.value, str) \
+                    and node.value in wanted:
+                referenced.add(node.value)
     for record in records:
         if record["class"] == "adapter_producer" and record["symbol"] in names - referenced:
-            record["class"] = "unclassified"
-            record["form"] += " [no reference in the scanned tree: dead-definition candidate]"
+            record["class"] = "unreferenced_producer"
+            record["form"] += " [no reference in the scanned tree: isolated definition]"
 
 
 _IMPORT_STATEMENT = re.compile(
@@ -1338,8 +1350,10 @@ def _live_modules(sources, known, roots, inventory) -> _typing.Set[str]:
     """Modules reachable by static import from the production roots.
 
     Roots are the repo-root entry modules (``server.py`` registers the MCP
-    tools) and the modules defining every REGISTERED pattern (the pattern
-    registry imports and dispatches them dynamically). A module outside this
+    tools) and — only while a live module calls the discovery walk or dispatches
+    through a registry-resolved receiver (``_pattern_route_is_live``) — the
+    modules defining every discovered pattern (the pattern registry imports and
+    dispatches them dynamically). A module outside this
     closure is a dead implementation behind a retired registration: the plan
     keeps such files until #160 deletes them.
     """
@@ -1358,6 +1372,34 @@ def _live_modules(sources, known, roots, inventory) -> _typing.Set[str]:
                 frontier.append(package)
         frontier.extend(sorted(_import_edges(path, sources[path], known, inventory) - live))
     return live
+
+
+def _pattern_route_is_live(sources, trees, live, patterns, sites) -> bool:
+    """Does a live module reach the pattern registry's dynamic discovery or dispatch?
+
+    The discovery entry point is the one ``_pattern_authority`` itself calls
+    (``patterns.discovery``); a registry-resolved dispatch site is one
+    ``_dispatch_findings`` reported. Either one in a live module makes every
+    discovered archetype reachable without a static import.
+    """
+    if any(path in live for path, _symbol, _line in sites):
+        return True
+    method = getattr(patterns, "discovery", None)
+    if not method:
+        return False
+    for path in sorted(live):
+        text = sources.get(path, "")
+        if method not in text:
+            continue
+        tree = trees.get(path) or _ast.parse(text, filename=path)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, _ast.Attribute) else (
+                    func.id if isinstance(func, _ast.Name) else None)
+                if name == method:
+                    return True
+    return False
 
 
 def _retire_dead_records(records, live, authority) -> None:
@@ -1402,9 +1444,16 @@ def _python_census(sources, authority, known_paths=None, patterns=None):
         records.extend(dispatch)
     records.extend(_definition_dependencies(sources, known, authority, inventory))
     roots = {p for p in sources if "/" not in p}
-    if patterns is not None:
-        roots |= {path for _qualname, path in patterns.archetypes.values()}
     live = _live_modules(sources, known, roots, inventory)
+    if patterns is not None:
+        # #159 S3: a discovered archetype is an entry point only while a LIVE module
+        # reaches it dynamically — calls the discovery walk, or dispatches through a
+        # registry-resolved receiver. Static imports already make it live on their own.
+        # With no live discovery or dispatch, the modules the package walk would find
+        # are implementations behind a retired registration (#160 deletes them).
+        if _pattern_route_is_live(sources, trees, live, patterns, sites):
+            roots |= {path for _qualname, path in patterns.archetypes.values()}
+            live = _live_modules(sources, known, roots, inventory)
     _retire_dead_records(records, live, authority)
     reach = {p: symbols for p, symbols in reach.items() if p in live}
     return records, _types.SimpleNamespace(candidates=candidates, dispatch_sites=sites,
@@ -1554,202 +1603,9 @@ def _finding_keys(records):
 # a failure message prints them. DELETE an entry when its caller is migrated;
 # never add one without a recorded decision. At cutover this is empty and
 # ``ZERO_CALLER_CUTOVER_COMPLETE`` is ``True``.
-_PRE_CUTOVER_CENSUS: _typing.FrozenSet[_typing.Tuple[str, str, str, str]] = frozenset({
-    # --- adapter_producer
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
-     'ApiToApiSyncArchetype.emit_spec',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
-     '_build_main_process',
-     "IntegrationComponentSpec(type='process')"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_api_sync.py',
-     '_build_main_process',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
-     'ApiToDatabaseSyncArchetype.emit_spec',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
-     '_build_main_process',
-     "IntegrationComponentSpec(type='process')"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/api_to_database_sync.py',
-     '_build_main_process',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
-     '_build_main_process',
-     "IntegrationComponentSpec(type='process')"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
-     '_build_sync_pipeline_adapter_config',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
-     'HttpListenerToDbArchetype.emit_spec',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
-     '_build_listener_main_process',
-     "IntegrationComponentSpec(type='process')"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/http_listener_to_db.py',
-     '_build_listener_main_process',
-     "dict-literal process_kind='sync_pipeline'"),
-    ('adapter_producer',
-     'src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py',
-     'HttpListenerToRestArchetype.emit_spec',
-     "dict-literal process_kind='sync_pipeline'"),
-    # --- adapter_route
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_build_plan',
-     'evaluate_pipeline_authority(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_build_plan',
-     'import evaluate_pipeline_authority'),
-    ('adapter_route',
-     'src/boomi_mcp/authoring/process_entry.py',
-     'legacy_config_entry',
-     'PROCESS_FLOW_BUILDERS (read)'),
-    ('adapter_route',
-     'src/boomi_mcp/authoring/process_entry.py',
-     'legacy_config_entry',
-     'PROCESS_FLOW_BUILDERS.get(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_build_plan',
-     'ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_execute_component',
-     '<registry-bound>.build(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_execute_component',
-     'PROCESS_FLOW_BUILDERS (read)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_execute_component',
-     'get_process_flow_builder(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     '<registry-bound>.validate_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'PROCESS_FLOW_BUILDERS (read)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'ProcessFlowBuilder.scan_forbidden_secret_fields(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'SyncPipelineBuilder.lower_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'get_process_flow_builder(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_ir_semantic_error',
-     'validate_legacy_process_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_resolve_preservation_policy',
-     'get_process_flow_builder(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_scan_top_level_pipeline_secrets',
-     'ProcessFlowBuilder.scan_forbidden_secret_fields(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     'build_structured_update_xml',
-     '<registry-bound>.build(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     'build_structured_update_xml',
-     'PROCESS_FLOW_BUILDERS (read)'),
-    ('adapter_route',
-     'src/boomi_mcp/categories/integration_builder.py',
-     'build_structured_update_xml',
-     'get_process_flow_builder(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/archetypes/database_to_api_sync.py',
-     '_build_main_process',
-     'SyncPipelineBuilder.lower_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/composition.py',
-     'compose_archetypes',
-     'ProcessFlowBuilder.validate_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/recipe_bridge.py',
-     'run_fanout_recipe',
-     'adapt_flow_sequence(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/recipe_bridge.py',
-     'run_fanout_recipe',
-     'import adapt_flow_sequence'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/recipe_bridge.py',
-     'run_sync_preset_recipe',
-     'adapt_sync_pipeline_config(...)'),
-    ('adapter_route',
-     'src/boomi_mcp/patterns/recipe_bridge.py',
-     'run_sync_preset_recipe',
-     'import adapt_sync_pipeline_config'),
-    # --- archetype_dispatch
-    ('archetype_dispatch',
-     'src/boomi_mcp/categories/integration_authoring.py',
-     'build_from_archetype_action',
-     '<registry-resolved>.emit_spec(...)'),
-    ('archetype_dispatch',
-     'src/boomi_mcp/patterns/composition.py',
-     'compose_archetypes',
-     'DatabaseToApiSyncArchetype.emit_spec(...)'),
-    # (#159 S3: the eight shipped-example keys were removed when lane L7
-    #  migrated the six examples to direct canonical authoring requests.)
-    # --- unclassified
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'ProcessFlowBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'SyncPipelineBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_component_preflight',
-     'WrapperSubprocessBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_process_models_error_handling',
-     'ProcessFlowBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_synthesize_wrapper_subprocess_edges',
-     'WrapperSubprocessBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/categories/integration_builder.py',
-     '_synthesize_wrapper_subprocess_extensions',
-     'WrapperSubprocessBuilder (unclassified reference)'),
-    ('unclassified',
-     'src/boomi_mcp/models/_process_ir_compat.py',
-     'ir_to_legacy_flow_sequence',
-     "dict-literal process_kind='database_to_api_sync' [no reference in the scanned tree: dead-definition candidate]"),
-    ('unclassified',
-     'src/boomi_mcp/models/_process_ir_compat.py',
-     'ir_to_legacy_flow_sequence',
-     "dict-literal process_kind='wrapper_subprocess' [no reference in the scanned tree: dead-definition candidate]"),
-})
+# #159 S3: EMPTY — every pinned caller migrated or was retired with its registration;
+# the 47 entries measured at ed17dde are in this file's history (git log -p).
+_PRE_CUTOVER_CENSUS: _typing.FrozenSet[_typing.Tuple[str, str, str, str]] = frozenset()
 
 
 def _describe(records, keys) -> str:
@@ -1996,6 +1852,94 @@ def test_census_detects_an_injected_reachable_adapter_call(arm):
     assert {(r["symbol"], r["form"], r["line"]) for r in dead
             if r["class"] == "retired_implementation"} == {f[1:] for f in found}
     assert not [r for r in dead if r["class"] in _FINDING_CLASSES]
+
+
+#: An in-memory module whose producer nothing names, and the two ways a module
+#: can name it (a call, and a ``getattr`` by string).
+_ORPHAN_PRODUCER_PATH = "src/boomi_mcp/_l8_orphan_producer.py"
+_ORPHAN_PRODUCER_SOURCE = '''
+def orphan_producer():
+    return {"process_kind": "sync_pipeline", "pipeline": {}}
+'''
+
+
+@pytest.mark.parametrize("reference", [
+    None,
+    "from boomi_mcp._l8_orphan_producer import orphan_producer\n\n\ndef caller():\n"
+    "    return orphan_producer()\n",
+    "import boomi_mcp._l8_orphan_producer as m\n\n\ndef caller():\n"
+    "    return getattr(m, \"orphan_producer\")()\n",
+], ids=["unreferenced", "called", "getattr-by-name"])
+def test_census_counts_an_unreferenced_producer_only_while_nothing_names_it(reference):
+    """#159 S3: an adapter-config producer no production module names is an
+    isolated definition (non-finding); any reference flips it back to a finding."""
+    authority = _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY)
+    entry = "import boomi_mcp._l8_orphan_producer\n"
+    if reference is not None:
+        entry += "import boomi_mcp._l8_orphan_caller\n"
+    sources = {"l8_control_entry.py": entry, _ORPHAN_PRODUCER_PATH: _ORPHAN_PRODUCER_SOURCE}
+    if reference is not None:
+        sources["src/boomi_mcp/_l8_orphan_caller.py"] = reference
+    records, context = _python_census(sources, authority)
+    assert _ORPHAN_PRODUCER_PATH in context.live
+    rows = {(r["class"], r["symbol"]) for r in records if r["path"] == _ORPHAN_PRODUCER_PATH}
+    if reference is None:
+        assert rows == {("unreferenced_producer", "orphan_producer")}
+        assert not _finding_keys(records)
+    else:
+        assert rows == {("adapter_producer", "orphan_producer")}
+    # The real tree: the two audited ``ir_to_legacy_flow_sequence`` producer sites
+    # (cutover decision 4) are seen, and seen as isolated definitions.
+    real = {(r["path"], r["symbol"]) for r in _production_census().records
+            if r["class"] == "unreferenced_producer"}
+    assert ("src/boomi_mcp/models/_process_ir_compat.py", "ir_to_legacy_flow_sequence") in real
+
+
+#: Every discovered archetype module that reached an adapter while the pattern
+#: registry was a live entry point (measured on the cutover tree), and the bridge
+#: the API->API archetype imports.
+_ARCHETYPE_FINDING_PATHS = frozenset({
+    "src/boomi_mcp/patterns/archetypes/api_to_api_sync.py",
+    "src/boomi_mcp/patterns/archetypes/api_to_database_sync.py",
+    "src/boomi_mcp/patterns/archetypes/database_to_api_sync.py",
+    "src/boomi_mcp/patterns/archetypes/http_listener_to_db.py",
+    "src/boomi_mcp/patterns/archetypes/http_listener_to_rest.py",
+    "src/boomi_mcp/patterns/recipe_bridge.py",
+})
+
+
+def test_census_roots_discovered_archetypes_only_while_a_live_module_reaches_them():
+    """#159 S3: the package walk discovers archetypes from disk, so discovery alone
+    is not reachability. A live call to the discovery walk (or a registry-resolved
+    dispatch, ``test_census_resolves_archetype_dispatch_from_the_registration_table``)
+    re-roots every discovered archetype, and its adapter rows come back."""
+    census = _production_census()
+    assert census.patterns.discovery == "from_package"
+    assert not _finding_keys(census.records)
+    archetype_paths = {path for _q, path in census.patterns.archetypes.values()}
+    assert archetype_paths and not (archetype_paths & census.context.live)
+    injected = dict(census.sources)
+    injected["l8_discovery_entry.py"] = (
+        "from boomi_mcp.patterns import PatternRegistry\n"
+        "REGISTRY = PatternRegistry.from_package('boomi_mcp.patterns')\n")
+    records, context = _python_census(injected, _adapter_authority(), patterns=census.patterns)
+    assert archetype_paths <= context.live
+    assert {path for _c, path, _s, _f in _finding_keys(records)} == _ARCHETYPE_FINDING_PATHS
+    # In memory: the same rule with no real archetype involved.
+    package = _DISPATCH_CONTROL_PACKAGE
+    sources = {
+        package + "/__init__.py": "",
+        package + "/legacy_one.py": _DISPATCH_CONTROL_SOURCES[package + "/legacy_one.py"],
+        "l8_control_entry.py": "import boomi_mcp.l8_control_patterns\n",
+    }
+    patterns = _dispatch_control_patterns()
+    patterns.discovery = "from_package"
+    dead, _ = _python_census(sources, _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY), patterns=patterns)
+    assert not _finding_keys(dead)
+    sources["l8_control_entry.py"] += "Registry.from_package('boomi_mcp.l8_control_patterns')\n"
+    live, _ = _python_census(sources, _AdapterAuthority(_AUDITED_ADAPTER_AUTHORITY), patterns=patterns)
+    assert {(c, p.rsplit("/", 1)[1]) for c, p, _s, _f in _finding_keys(live)} == {
+        ("adapter_producer", "legacy_one.py")}
 
 
 def _flow_sequence_example():

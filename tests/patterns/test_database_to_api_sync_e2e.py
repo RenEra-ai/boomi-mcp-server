@@ -31,9 +31,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from boomi_mcp.categories.integration_authoring import build_from_archetype_action
 from boomi_mcp.categories.integration_builder import build_integration_action
 from boomi_mcp.categories.transformation_review import review_transformation_action
+
+
+def build_from_archetype_action(*args, **kwargs):
+    """The retired ``build_from_archetype`` tool's action (#159 S3 deletes it).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "build_from_archetype_action")(*args, **kwargs)
+
 
 _PAGINATE_TARGET = "boomi_mcp.categories.integration_builder.paginate_metadata"
 _EXECUTE_TARGET = "boomi_mcp.categories.integration_builder._execute_component"
@@ -279,241 +290,9 @@ def _has_ref_token(value: Any) -> bool:
 # ===========================================================================
 
 
-class TestFullLocalChain:
-    def test_minimal_archetype_emits_safe_serializable_spec(self):
-        result = _build(_minimal())
-        assert result["_success"] is True, result
-        assert result["raw_xml_exposed"] is False
-        assert result["boomi_mutation"] is False
-        spec = result["integration_spec"]
-        keys = {c["key"] for c in spec["components"]}
-        assert keys == {
-            "source_db_connection",
-            "source_db_read_profile",
-            "source_db_get_operation",
-            "transform_target_profile",
-            "transform_transform_map",
-            "target_rest_connection",
-            "target_rest_operation",
-            "main_process",
-        }
-        # JSON-only output: the entire envelope round-trips through JSON.
-        assert json.loads(json.dumps(result)) == result
-
-    def test_review_validate_unmapped_is_clean_before_planning(self):
-        spec = _spec(_full_reuse())
-        r = review_transformation_action(
-            "validate_unmapped", {"integration_spec": spec}
-        )
-        assert r["_success"] is True, r
-        assert r["valid"] is True, r
-        assert r["read_only"] is True
-        assert r["boomi_mutation"] is False
-
-    @patch(_PAGINATE_TARGET)
-    def test_plan_orders_topologically_with_main_process_last(self, mock_pag):
-        spec = _spec(_minimal())
-        plan = _plan(spec, mock_pag)
-        assert plan["_success"] is True, plan
-        assert plan["profile"] == _PROFILE
-        order = plan["execution_order"]
-        assert set(order) == {c["key"] for c in spec["components"]}
-        # Every key appears exactly once.
-        assert len(order) == len(set(order))
-        pos = {key: i for i, key in enumerate(order)}
-        for comp in spec["components"]:
-            for dep in comp["depends_on"]:
-                assert pos[dep] < pos[comp["key"]], (dep, comp["key"])
-        assert order[-1] == "main_process"
-
-    @patch(_PAGINATE_TARGET)
-    def test_plan_exposes_transform_summary_and_review_hint(self, mock_pag):
-        spec = _spec(_minimal())
-        plan = _plan(spec, mock_pag)
-        steps_by_key = {s["key"]: s for s in plan["steps"]}
-        map_step = steps_by_key["transform_transform_map"]
-        assert map_step["transform_summary"]["map_type"] == "direct"
-        assert map_step["transform_summary"]["direct_mapping_count"] >= 1
-        assert "review_transformation" in map_step["review_hint"]
-
-    def test_operational_intent_records_all_requested_behavior(self):
-        oi = _spec(_full_reuse())["validation_rules"]["operational_intent"]
-        # schedule + execution trigger + run metadata
-        assert oi["schedule"]["applies_after_deploy"] is True
-        assert oi["execution"]["trigger"]["mode"] == "scheduled"
-        assert oi["execution"]["run_metadata"] == {"owner": "crm-team"}
-        # watermark (incremental) intent
-        assert oi["watermark"]["enabled"] is True
-        assert oi["watermark"]["field"] == "source_b"
-        # guidance_only DLQ → retry stays 1; emitted process_retry_count 0 (#88)
-        assert oi["reliability"]["retry"]["requested_max_attempts"] == 1
-        assert oi["reliability"]["retry"]["process_retry_count"] == 0
-        assert oi["reliability"]["dlq"] == {"mode": "disabled"}
-        assert oi["reliability"]["dlq_requested"]["requested"] is True
-        # error classifier + expected status codes
-        assert "error_classifier" in oi["reliability"]
-        assert oi["expected_status_codes"] == [200, 202]
-
-    def test_process_reliability_stays_gated(self):
-        proc = _by_key(_spec(_full_reuse()))["main_process"]
-        assert proc["config"]["reliability"] == {
-            "retry_count": 0,
-            "dlq": {"mode": "disabled"},
-        }
-
-
 # ===========================================================================
 # Apply path: dry-run, mocked real apply, $ref resolution, fail-fast
 # ===========================================================================
-
-
-class TestApplyPath:
-    @patch(_EXECUTE_TARGET)
-    @patch(_PAGINATE_TARGET)
-    def test_dry_run_apply_returns_plan_without_executing(self, mock_pag, mock_exec):
-        mock_pag.return_value = []
-        spec = _spec(_minimal())
-        # No dry_run key -> defaults to True.
-        result = build_integration_action(
-            MagicMock(), _PROFILE, "apply", {"integration_spec": spec}
-        )
-        assert result["_success"] is True, result
-        assert result["dry_run"] is True
-        assert "execution_order" in result  # the plan is included
-        mock_exec.assert_not_called()
-
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_mocked_real_apply_resolves_all_refs_before_execution(
-        self, mock_pag, mock_exec
-    ):
-        mock_pag.return_value = []
-        spec = _spec(_minimal())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"},
-        )
-        assert result["_success"] is True, result
-        assert result["build_id"]
-        # No config passed to _execute_component still carries a $ref token.
-        for call in mock_exec.call_args_list:
-            cfg = call.kwargs["config"]
-            assert not _has_ref_token(cfg), call.kwargs["comp"].key
-        # The process is wired to the concrete ids minted for its dependencies.
-        proc_calls = [c for c in mock_exec.call_args_list if c.kwargs["comp"].key == "main_process"]
-        assert len(proc_calls) == 1
-        proc_cfg = proc_calls[0].kwargs["config"]
-        assert proc_cfg["source"]["connection_id"] == "id-source_db_connection"
-        assert proc_cfg["source"]["operation_id"] == "id-source_db_get_operation"
-        assert proc_cfg["transform"]["map_ref"] == "id-transform_transform_map"
-        assert proc_cfg["target"]["connection_id"] == "id-target_rest_connection"
-        assert proc_cfg["target"]["operation_id"] == "id-target_rest_operation"
-
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_map_script_apply_resolves_script_wrapper_refs(self, mock_pag, mock_exec):
-        mock_pag.return_value = []
-        spec = _spec(_map_script())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"},
-        )
-        assert result["_success"] is True, result
-        # The planner synthesizes a transform.function wrapper for the script
-        # route; every executed component must have had its $refs resolved.
-        executed_keys = {c.kwargs["comp"].key for c in mock_exec.call_args_list}
-        assert any(
-            c.kwargs["comp"].type == "transform.function"
-            for c in mock_exec.call_args_list
-        )
-        assert any(
-            c.kwargs["comp"].type == "script.mapping"
-            for c in mock_exec.call_args_list
-        )
-        for call in mock_exec.call_args_list:
-            assert not _has_ref_token(call.kwargs["config"]), call.kwargs["comp"].key
-        assert "main_process" in executed_keys
-
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_reuse_mode_records_reused_without_creating(self, mock_pag, mock_exec):
-        # Reuse connections carry an explicit component_id, so the plan resolves
-        # them to reuse independent of any name lookup; no created connections.
-        mock_pag.return_value = []
-        spec = _spec(_full_reuse())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"},
-        )
-        assert result["_success"] is True, result
-        db = result["results"]["source_db_connection"]
-        rest = result["results"]["target_rest_connection"]
-        assert db["status"] == "reused"
-        assert db["component_id"] == "<<existing DB connection id>>"
-        assert rest["status"] == "reused"
-        assert rest["component_id"] == "<<existing REST connection id>>"
-        # reference_only connections must never reach _execute_component.
-        executed_keys = {c.kwargs["comp"].key for c in mock_exec.call_args_list}
-        assert "source_db_connection" not in executed_keys
-        assert "target_rest_connection" not in executed_keys
-        # The reused ids still flow into the process via $ref resolution.
-        proc_cfg = next(
-            c.kwargs["config"]
-            for c in mock_exec.call_args_list
-            if c.kwargs["comp"].key == "main_process"
-        )
-        assert proc_cfg["source"]["connection_id"] == "<<existing DB connection id>>"
-        assert proc_cfg["target"]["connection_id"] == "<<existing REST connection id>>"
-
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_unresolvable_plan_fails_fast_without_executing(self, mock_pag, mock_exec):
-        # A reference_only connection that resolves to nothing (no component_id,
-        # zero name matches) makes the plan emit error_missing_target, which the
-        # apply path must reject before executing anything.
-        mock_pag.return_value = []  # zero candidates for every name lookup
-        spec = copy.deepcopy(_spec(_minimal()))
-        conn = _by_key(spec)["source_db_connection"]
-        conn["component_id"] = None
-        conn["config"]["reference_only"] = True
-        conn["config"].pop("component_id", None)
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"},
-        )
-        assert result["_success"] is False, result
-        mock_exec.assert_not_called()
-
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_conflict_policy_fail_blocks_existing_connection(self, mock_pag, mock_exec):
-        # A create-mode connection whose name already exists must fail fast under
-        # conflict_policy=fail. The connection is the first component executed,
-        # so nothing is created before the policy trips.
-        spec = _spec(_minimal())
-        db_name = _by_key(spec)["source_db_connection"]["name"]
-
-        # Return a match for every lookup; the first create component (the DB
-        # connection) trips conflict_policy=fail immediately.
-        mock_pag.return_value = [
-            {"component_id": "existing-db-id", "name": db_name, "folder_name": "#Common"}
-        ]
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "fail"},
-        )
-        assert result["_success"] is False, result
-        mock_exec.assert_not_called()
 
 
 # ===========================================================================
@@ -521,74 +300,7 @@ class TestApplyPath:
 # ===========================================================================
 
 
-class TestVerifyPath:
-    @patch("boomi_mcp.categories.integration_builder.component_get_xml")
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_verify_after_mocked_apply_succeeds(self, mock_pag, mock_exec, mock_get):
-        mock_pag.return_value = []
-        # Issue #80: verify now consumes component_get_xml's return value, so the
-        # mock must return the real dict shape. The main process returns a
-        # graph-valid process XML; non-process components a non-process stub.
-        mock_get.side_effect = _verify_get_side_effect
-        spec = _spec(_minimal())
-        applied = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False},
-        )
-        assert applied["_success"] is True, applied
-        verified = build_integration_action(
-            MagicMock(), _PROFILE, "verify", {"build_id": applied["build_id"]}
-        )
-        assert verified["_success"] is True, verified
-        assert verified["failed_components"] == 0
-        assert not verified["dependency_issues"]
-        # The process component carries a clean graph section; non-process
-        # components carry none (issue #80, M9.4).
-        proc_record = verified["verification"]["main_process"]
-        assert proc_record["process_graph"]["errors"] == []
-        assert "process_graph" not in verified["verification"]["source_db_connection"]
-
-
 # ===========================================================================
 # Secret / safety boundaries on the full chain
 # ===========================================================================
 
-
-class TestSafetyBoundaries:
-    @patch(_EXECUTE_TARGET, side_effect=_execute_stub)
-    @patch(_PAGINATE_TARGET)
-    def test_apply_envelope_never_echoes_dlq_address(self, mock_pag, mock_exec):
-        mock_pag.return_value = []
-        spec = _spec(_full_reuse())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"},
-        )
-        assert "<<dlq queue address>>" not in json.dumps(result)
-
-    def test_apply_error_envelope_never_echoes_credential_ref(self):
-        # When apply fails fast (conflict_policy=fail on an existing connection),
-        # the failure envelope must not surface the DB credential_ref.
-        with (
-            patch(_PAGINATE_TARGET) as mock_pag,
-            patch(_EXECUTE_TARGET, side_effect=_execute_stub) as mock_exec,
-        ):
-            spec = _spec(_minimal())
-            db_name = _by_key(spec)["source_db_connection"]["name"]
-            mock_pag.return_value = [
-                {"component_id": "existing-db-id", "name": db_name, "folder_name": "#Common"}
-            ]
-            result = build_integration_action(
-                MagicMock(),
-                _PROFILE,
-                "apply",
-                {"integration_spec": spec, "dry_run": False, "conflict_policy": "fail"},
-            )
-        assert result["_success"] is False
-        mock_exec.assert_not_called()
-        assert "secrets/db/svc_sync" not in json.dumps(result)

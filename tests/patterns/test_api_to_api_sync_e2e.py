@@ -27,14 +27,43 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from boomi_mcp.categories.integration_authoring import (
-    build_from_archetype_action,
-    get_integration_archetype_action,
-    list_integration_archetypes_action,
-)
 from boomi_mcp.categories.integration_builder import build_integration_action
 from boomi_mcp.categories.meta_tools import get_schema_template_action
 from boomi_mcp.categories.transformation_review import review_transformation_action
+
+
+def build_from_archetype_action(*args, **kwargs):
+    """The retired ``build_from_archetype`` tool's action (#159 S3 deletes it).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "build_from_archetype_action")(*args, **kwargs)
+
+
+def get_integration_archetype_action(*args, **kwargs):
+    """The discovery action #159 S3 reshapes to recipe-only (lane D).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "get_integration_archetype_action")(*args, **kwargs)
+
+
+def list_integration_archetypes_action(*args, **kwargs):
+    """The discovery action #159 S3 reshapes to recipe-only (lane D).
+
+    Resolved at CALL time, so this module still collects once it is gone and only
+    the tests that call it are affected.
+    """
+    from boomi_mcp.categories import integration_authoring
+
+    return getattr(integration_authoring, "list_integration_archetypes_action")(*args, **kwargs)
+
 
 _ARCHETYPE = "api_to_api_sync"
 _PAGINATE_TARGET = "boomi_mcp.categories.integration_builder.paginate_metadata"
@@ -231,33 +260,33 @@ def _has_ref_token(value: Any) -> bool:
 
 class TestCatalogAndSchema:
     def test_list_includes_api_to_api_sync(self):
+        # #159 S3: discovery serves recipes only, and API->API has no executable
+        # recipe (step-4 decision 1: it is authored as a direct ProcessIR unit).
+        # The node keeps its S2 name; the body pins the retired id's ABSENCE
+        # beside the recipes the same query still finds.
         result = list_integration_archetypes_action(query="api")
         assert result["_success"] is True
-        assert _ARCHETYPE in [a["name"] for a in result["archetypes"]]
+        ids = [recipe["recipe_id"] for recipe in result["recipes"]]
+        assert ids, "non-vacuity: the query still matches the API->DB and DB->API recipes"
+        assert "boomi.archetype.api_to_api_sync" not in ids
         assert result["raw_xml_exposed"] is False
 
     def test_get_returns_strict_schema_without_xml(self):
-        result = get_integration_archetype_action(_ARCHETYPE)
-        assert result["_success"] is True
-        assert result["raw_xml_exposed"] is False
-        arch = result["archetype"]
-        assert arch["capability_notes"], "must publish capability_notes"
-        assert arch["limitations"], "must publish limitations"
-        assert arch["examples"], "must publish at least one example"
-        schema = arch["parameter_schema"]
-        # Strict contract: top-level forbids extra properties.
-        assert schema.get("additionalProperties") is False
-        props = schema["properties"]
-        assert props
-        for name, prop in props.items():
-            assert prop.get("description"), f"property {name!r} missing description"
-        # No raw XML markers anywhere in the describe payload.
+        # #159 S3: the retired API->API recipe id does not resolve on the
+        # recipe-only get, and the refusal carries no raw XML.
+        result = get_integration_archetype_action("boomi.archetype.api_to_api_sync")
+        assert result["_success"] is False
+        assert result["error_code"] == "RECIPE_NOT_FOUND"
         assert "<?xml" not in json.dumps(result)
 
     def test_schema_template_resolves(self):
-        result = get_schema_template_action(schema_name=f"archetype:{_ARCHETYPE}")
-        assert result["_success"] is True, result
-        assert "<?xml" not in json.dumps(result)
+        # #159 S3: the ``archetype:<name>`` selector retired, and the API->API
+        # executable retired with no successor — neither spelling resolves.
+        for selector in (f"archetype:{_ARCHETYPE}", "recipe:boomi.archetype.api_to_api_sync@1.0.0"):
+            result = get_schema_template_action(schema_name=selector)
+            assert result["_success"] is False, selector
+            assert result["error_code"] == "SCHEMA_NAME_UNSUPPORTED", selector
+            assert "<?xml" not in json.dumps(result)
 
 
 # ===========================================================================
@@ -265,207 +294,9 @@ class TestCatalogAndSchema:
 # ===========================================================================
 
 
-class TestEmittedSpec:
-    def test_minimal_emits_safe_serializable_spec(self):
-        result = _build(_minimal())
-        assert result["_success"] is True, result
-        assert result["raw_xml_exposed"] is False
-        assert result["boomi_mutation"] is False
-        spec = result["integration_spec"]
-        assert {c["key"] for c in spec["components"]} == _EXPECTED_KEYS
-        # JSON-only output: the entire envelope round-trips through JSON.
-        assert json.loads(json.dumps(result)) == result
-
-    def test_main_process_is_sync_pipeline_stage_graph(self):
-        spec = _spec(_minimal())
-        mp = _by_key(spec)["main_process"]
-        assert mp["type"] == "process"
-        cfg = mp["config"]
-        assert cfg["process_kind"] == "sync_pipeline"
-        # NOT a pairwise process builder: no top-level source/target/transform.
-        assert "source" not in cfg
-        assert "target" not in cfg
-        assert "transform" not in cfg
-        # Verified-linear fetch -> map -> send graph with two ordering edges.
-        stages = cfg["pipeline"]["stages"]
-        assert [s["kind"] for s in stages] == ["fetch", "map", "send"]
-        assert [s["config"]["primitive"] for s in stages] == [
-            "rest_fetch",
-            "map",
-            "rest_send",
-        ]
-        deps = cfg["pipeline"]["dependencies"]
-        assert [(d["from_stage"], d["to_stage"]) for d in deps] == [
-            ("fetch", "map"),
-            ("map", "send"),
-        ]
-        assert mp["depends_on"] == _STAGE_DEPENDS
-
-    def test_spec_pipeline_mirrors_main_process_graph(self):
-        spec = _spec(_minimal())
-        mp = _by_key(spec)["main_process"]
-        assert spec["pipeline"] is not None
-        # spec.pipeline is a validated PipelineSpec (model-dumped with default
-        # fields), so compare the essential graph shape, not raw dict equality.
-        spec_stages = [(s["key"], s["kind"]) for s in spec["pipeline"]["stages"]]
-        mp_stages = [(s["key"], s["kind"]) for s in mp["config"]["pipeline"]["stages"]]
-        assert spec_stages == mp_stages == [("fetch", "fetch"), ("map", "map"), ("send", "send")]
-        spec_edges = [(d["from_stage"], d["to_stage"]) for d in spec["pipeline"]["dependencies"]]
-        mp_edges = [(d["from_stage"], d["to_stage"]) for d in mp["config"]["pipeline"]["dependencies"]]
-        assert spec_edges == mp_edges == [("fetch", "map"), ("map", "send")]
-
-    def test_source_binds_response_profile_no_request_body(self):
-        spec = _spec(_minimal())
-        comps = _by_key(spec)
-        fetch_op = comps["source_rest_source_operation"]["config"]
-        assert fetch_op["method"] == "GET"
-        assert fetch_op["response_profile_id"] == "$ref:source_response_profile"
-        # A GET fetch has no request profile (empty request body).
-        assert "request_profile_id" not in fetch_op
-
-    def test_target_operation_binds_generated_request_profile(self):
-        spec = _spec(_minimal())
-        send_op = _by_key(spec)["target_rest_operation"]["config"]
-        assert send_op["request_profile_id"] == "$ref:transform_target_profile"
-        assert send_op["request_profile_type"] == "json"
-        assert send_op["method"] == "POST"
-
-    def test_no_raw_xml_in_spec(self):
-        spec = _spec(_full_reuse())
-        assert "<?xml" not in json.dumps(spec)
-
-
 # ===========================================================================
 # Parameter validation (negative)
 # ===========================================================================
-
-
-class TestParameterValidation:
-    def test_dynamic_path_token_rejected_source(self):
-        bad = copy.deepcopy(_minimal())
-        bad["source"]["fetch_request"]["path"] = "/v1/items/{id}"
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_dynamic_path_token_rejected_target(self):
-        bad = copy.deepcopy(_minimal())
-        bad["target"]["send_request"]["path"] = "/v1/items/{id}"
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_runtime_bindings_key_rejected(self):
-        bad = copy.deepcopy(_minimal())
-        bad["source"]["fetch_request"]["runtime_bindings"] = [{"location": "path"}]
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_unknown_source_path_rejected(self):
-        bad = copy.deepcopy(_minimal())
-        bad["transform"]["operations"][0]["source_path"] = "Root/does_not_exist"
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_unmapped_required_target_leaf_rejected(self):
-        bad = copy.deepcopy(_minimal())
-        bad["target"]["payload_profile"]["root"]["children"][0]["required"] = True
-        bad["transform"]["operations"] = []  # min_length=1 also fails, but unmapped is the intent
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_secured_create_auth_rejected(self):
-        bad = copy.deepcopy(_minimal())
-        bad["target"]["binding"]["settings"]["auth_mode"] = "bearer_token"
-        bad["target"]["binding"]["settings"]["credential_ref"] = "credential://x"
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "UNSUPPORTED_REST_AUTH_MODE"
-
-    def test_xslt_operation_rejected_with_pointer(self):
-        bad = copy.deepcopy(_minimal())
-        bad["transform"]["operations"] = [
-            {"operation_type": "xslt", "source_path": "Root/source_a", "target_path": "Root/target_a"}
-        ]
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_external_script_ref_rejected(self):
-        bad = copy.deepcopy(_minimal())
-        bad["transform"]["operations"] = [
-            {
-                "operation_type": "map_script",
-                "script_slot": "enrich",
-                "language": "groovy2",
-                "inputs": ["Root/source_a"],
-                "outputs": ["Root/target_a"],
-                "script_component_ref": "$ref:some_script",
-            }
-        ]
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "UNSUPPORTED_SCRIPT_COMPONENT_REF"
-
-    def test_map_script_colliding_variable_names_rejected(self):
-        # Two source leaves whose final segments both sanitize to 'id' collide in
-        # the script's shared input/output namespace -> rejected at the contract.
-        bad = copy.deepcopy(_minimal())
-        bad["source"]["response_profile"]["root"]["children"] = [
-            {"name": "a", "kind": "object", "children": [
-                {"name": "id", "kind": "simple", "data_type": "character"}]},
-            {"name": "b", "kind": "object", "children": [
-                {"name": "id", "kind": "simple", "data_type": "character"}]},
-        ]
-        bad["target"]["payload_profile"]["root"]["children"] = [
-            {"name": "out1", "kind": "simple", "data_type": "character"},
-            {"name": "out2", "kind": "simple", "data_type": "character"},
-        ]
-        bad["transform"]["operations"] = [
-            {
-                "operation_type": "map_script",
-                "script_slot": "s",
-                "language": "groovy2",
-                "inputs": ["Root/a/id", "Root/b/id"],
-                "outputs": ["Root/out1", "Root/out2"],
-                "script_body": "x",
-            }
-        ]
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_map_script_without_body_or_ref_rejected_at_contract(self):
-        # Issue #127 A2: a map_script op carrying neither script_body nor
-        # script_component_ref has no script to materialize; reject it at the
-        # contract layer (PARAM_VALIDATION_FAILED) rather than downstream.
-        bad = copy.deepcopy(_minimal())
-        bad["transform"]["operations"] = [
-            {
-                "operation_type": "map_script",
-                "script_slot": "enrich",
-                "language": "groovy2",
-                "inputs": ["Root/source_a"],
-                "outputs": ["Root/target_a"],
-            }
-        ]
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-    def test_runtime_hints_secret_shaped_key_rejected_via_shared_naming(self):
-        # Issue #127 B1: the shared NamingConfig.runtime_hints scan applies to
-        # every preset that reuses NamingConfig, including api_to_api_sync.
-        bad = copy.deepcopy(_minimal())
-        secret = "Bearer sk_live_API_TO_API_GUARD"
-        bad["naming"]["runtime_hints"] = {"authorization": secret}
-        result = _build(bad)
-        assert result["_success"] is False
-        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-        assert secret not in json.dumps(result)
 
 
 # ===========================================================================
@@ -473,217 +304,9 @@ class TestParameterValidation:
 # ===========================================================================
 
 
-class TestHeadersAndScriptVars:
-    def test_create_mode_default_headers_applied_to_operation(self):
-        # Connection default_headers (accepted by the reused RestCreateSettings
-        # schema) must be honored as operation request headers, not dropped.
-        params = copy.deepcopy(_minimal())
-        params["source"]["binding"]["settings"]["default_headers"] = {
-            "X-Src": "1",
-            "Accept": "application/json",
-        }
-        # An operation header with the same key must win over the connection default.
-        params["source"]["fetch_request"]["request_headers"] = {"Accept": "text/plain"}
-        params["target"]["binding"]["settings"]["default_headers"] = {"X-Tgt": "2"}
-        spec = _spec(params)
-        comps = _by_key(spec)
-        src_op = comps["source_rest_source_operation"]["config"]
-        tgt_op = comps["target_rest_operation"]["config"]
-        assert src_op["request_headers"] == {"X-Src": "1", "Accept": "text/plain"}
-        assert tgt_op["request_headers"] == {"X-Tgt": "2"}
-
-    def test_default_headers_conflict_is_case_insensitive(self):
-        # HTTP header names are case-insensitive: an operation header 'accept'
-        # must override a connection default 'Accept' (one entry, operation
-        # spelling+value wins) — not leak two case-variant Accept headers.
-        params = copy.deepcopy(_minimal())
-        params["source"]["binding"]["settings"]["default_headers"] = {
-            "Accept": "application/json",
-            "X-Keep": "yes",
-        }
-        params["source"]["fetch_request"]["request_headers"] = {"accept": "text/plain"}
-        spec = _spec(params)
-        headers = _by_key(spec)["source_rest_source_operation"]["config"]["request_headers"]
-        # Exactly one Accept-ish header, the operation's; the non-conflicting
-        # default is preserved.
-        assert headers == {"accept": "text/plain", "X-Keep": "yes"}
-        accept_keys = [k for k in headers if k.lower() == "accept"]
-        assert accept_keys == ["accept"]
-
-    def test_default_headers_case_variant_within_dict_rejected(self):
-        # Issue #127 A1: the cross-dict operation-wins dedupe resolves conflicts
-        # BETWEEN default and operation headers, but a single dict carrying two
-        # case-variants of one header ('Accept' + 'accept') would emit both.
-        # Reject it as a structured ARCHETYPE_PARAM_INVALID.
-        params = copy.deepcopy(_minimal())
-        params["source"]["binding"]["settings"]["default_headers"] = {
-            "Accept": "application/json",
-            "accept": "text/plain",
-        }
-        result = _build(params)
-        assert result["_success"] is False
-        assert result["error_code"] == "ARCHETYPE_PARAM_INVALID"
-
-    def test_operation_headers_case_variant_within_dict_rejected(self):
-        # Issue #127 A1: same within-dict rule on operation request_headers.
-        params = copy.deepcopy(_minimal())
-        params["source"]["fetch_request"]["request_headers"] = {
-            "Accept": "a",
-            "accept": "b",
-        }
-        result = _build(params)
-        assert result["_success"] is False
-        assert result["error_code"] == "ARCHETYPE_PARAM_INVALID"
-
-    def test_map_script_sanitizes_unsafe_leaf_names(self):
-        # A hyphenated leaf segment ('order-id') is language-unsafe as a script
-        # variable; the preset sanitizes it to 'order_id' and builds successfully.
-        params = copy.deepcopy(_minimal())
-        params["source"]["response_profile"]["root"]["children"].append(
-            {"name": "order-id", "kind": "simple", "data_type": "character"}
-        )
-        params["target"]["payload_profile"]["root"]["children"].append(
-            {"name": "ext-id", "kind": "simple", "data_type": "character"}
-        )
-        params["transform"]["operations"] = [
-            {"operation_type": "direct", "source_path": "Root/source_a", "target_path": "Root/target_a"},
-            {
-                "operation_type": "map_script",
-                "script_slot": "enrich",
-                "language": "groovy2",
-                "inputs": ["Root/order-id"],
-                "outputs": ["Root/ext-id"],
-                "script_body": "dataContext.storeStream()",
-            },
-        ]
-        spec = _spec(params)
-        tflow = next(f for f in spec["flows"] if f.get("operation") == "transform")
-        msum = next(o for o in tflow["operations"] if o["operation_type"] == "map_script")
-        assert msum["input_variables"] == ["order_id"]
-        assert msum["output_variables"] == ["ext_id"]
-
-    def test_map_script_preserves_valid_underscore_identifiers(self):
-        # A leaf that is already a valid identifier with a leading underscore
-        # ('_id') must be preserved verbatim — not stripped to 'id' — and must not
-        # collide with a distinct 'id' output variable.
-        params = copy.deepcopy(_minimal())
-        params["source"]["response_profile"]["root"]["children"] = [
-            {"name": "_id", "kind": "simple", "data_type": "character"},
-        ]
-        params["target"]["payload_profile"]["root"]["children"] = [
-            {"name": "id", "kind": "simple", "data_type": "character"},
-        ]
-        params["transform"]["operations"] = [
-            {
-                "operation_type": "map_script",
-                "script_slot": "s",
-                "language": "groovy2",
-                "inputs": ["Root/_id"],
-                "outputs": ["Root/id"],
-                "script_body": "x",
-            }
-        ]
-        spec = _spec(params)
-        tflow = next(f for f in spec["flows"] if f.get("operation") == "transform")
-        msum = next(o for o in tflow["operations"] if o["operation_type"] == "map_script")
-        assert msum["input_variables"] == ["_id"]  # leading underscore preserved
-        assert msum["output_variables"] == ["id"]  # distinct from _id, no collision
-
-
 # ===========================================================================
 # Full local chain: review + plan + apply
 # ===========================================================================
-
-
-class TestFullLocalChain:
-    def test_review_validate_unmapped_is_clean(self):
-        spec = _spec(_full_reuse())
-        r = review_transformation_action("validate_unmapped", {"integration_spec": spec})
-        assert r["_success"] is True, r
-        assert r["valid"] is True, r
-        assert r["read_only"] is True
-        assert r["boomi_mutation"] is False
-
-    @patch(_PAGINATE_TARGET)
-    def test_plan_orders_main_process_last(self, mock_pag):
-        spec = _spec(_minimal())
-        plan = _plan(spec, mock_pag)
-        assert plan["_success"] is True, plan
-        order = plan["execution_order"]
-        assert set(order) == _EXPECTED_KEYS
-        assert len(order) == len(set(order))
-        pos = {key: i for i, key in enumerate(order)}
-        for comp in spec["components"]:
-            for dep in comp["depends_on"]:
-                assert pos[dep] < pos[comp["key"]], (dep, comp["key"])
-        assert order[-1] == "main_process"
-
-    @patch(_PAGINATE_TARGET)
-    def test_plan_routes_main_process_through_process_flow_xml(self, mock_pag):
-        spec = _spec(_minimal())
-        plan = _plan(spec, mock_pag)
-        steps_by_key = {s["key"]: s for s in plan["steps"]}
-        assert "main_process" in steps_by_key
-        # A clean plan with no validation errors proves the sync_pipeline config
-        # validated end-to-end through SyncPipelineBuilder.
-        assert not plan.get("errors"), plan.get("errors")
-
-    @patch(_PAGINATE_TARGET)
-    @patch(_EXECUTE_TARGET)
-    def test_mocked_apply_resolves_all_refs_before_execution(self, mock_exec, mock_pag):
-        mock_pag.return_value = []
-        executed: list = []
-
-        def _exec(**kwargs):
-            assert not _has_ref_token(kwargs["config"]), (
-                f"unresolved $ref reached _execute_component for {kwargs['comp'].key}"
-            )
-            executed.append(kwargs["comp"].key)
-            return {"_success": True, "component_id": f"id-{kwargs['comp'].key}"}
-
-        mock_exec.side_effect = _exec
-        spec = _spec(_minimal())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "conflict_policy": "reuse", "dry_run": False},
-        )
-        assert result["_success"] is True, result
-        # main_process executes last, after every dependency created an id.
-        assert executed[-1] == "main_process"
-
-    @patch(_PAGINATE_TARGET)
-    @patch(_EXECUTE_TARGET)
-    def test_reuse_connections_recorded_without_creating(self, mock_exec, mock_pag):
-        mock_pag.return_value = []
-
-        def _exec(**kwargs):
-            return {"_success": True, "component_id": f"id-{kwargs['comp'].key}"}
-
-        mock_exec.side_effect = _exec
-        spec = _spec(_full_reuse())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "conflict_policy": "reuse", "dry_run": False},
-        )
-        assert result["_success"] is True, result
-
-    @patch(_PAGINATE_TARGET)
-    @patch(_EXECUTE_TARGET)
-    def test_dry_run_apply_does_not_execute(self, mock_exec, mock_pag):
-        mock_pag.return_value = []
-        spec = _spec(_minimal())
-        result = build_integration_action(
-            MagicMock(),
-            _PROFILE,
-            "apply",
-            {"integration_spec": spec, "conflict_policy": "reuse", "dry_run": True},
-        )
-        assert result["_success"] is True, result
-        mock_exec.assert_not_called()
 
 
 # ===========================================================================
@@ -719,13 +342,19 @@ class TestDirectCanonicalCases:
     def test_direct_canonical_case_carries_the_legacy_route(self, case):
         from boomi_mcp.authoring.derived_flows import infer_direct_linear_facts
         from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
-        from boomi_mcp.patterns.archetypes.api_to_api_sync import ApiToApiSyncArchetype
+        from boomi_mcp.patterns.archetypes import api_to_api_sync as legacy_module
 
         directory = _API_API_CASES / case
         legacy = json.loads((directory / "input.legacy.json").read_text())
-        spec = ApiToApiSyncArchetype.emit_spec(
-            ApiToApiSyncArchetype.parameters_model.model_validate(legacy["input"]["parameters"])
-        )
+        # The isolated legacy archetype (kept until #160) is the oracle. Its
+        # ``emit_spec`` ends with a discarded re-run through the 0.1.0 preset,
+        # retired in #159 S3; that one check is stubbed, the spec is unchanged.
+        with patch.object(legacy_module, "run_sync_preset_recipe", lambda **_kwargs: None):
+            spec = legacy_module.ApiToApiSyncArchetype.emit_spec(
+                legacy_module.ApiToApiSyncArchetype.parameters_model.model_validate(
+                    legacy["input"]["parameters"]
+                )
+            )
         request = AuthoringRequestV1.model_validate(
             json.loads((directory / "input.canonical.json").read_text())
         )

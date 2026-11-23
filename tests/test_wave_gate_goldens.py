@@ -928,15 +928,13 @@ def test_every_active_golden_renders_with_all_test_modules_unimportable(tmp_path
     # golden-000079 (#184) joins for the same reason: it renders the LEGACY mapped
     # both-sides dynamic path (`EVAL-155-02`), the oracle #160 verifies against and
     # then deletes with the legacy renderer.
-    # golden-000088 (#184 amendment 3) replaces golden-000060 in the #159 role: the
-    # same archetype notify/DLQ configuration, emitted with the cache write as the
-    # catch leg's end. golden-000060 is tombstoned, so it no longer renders at all.
+    # #159 S3: golden-000056 and golden-000088 (the archetype-path DLQ rows, which
+    # replaced golden-000060 in the #159 role) are tombstoned with the archetype
+    # route; they no longer render at all.
     assert set(special) == {
-        "golden-000056",
         "golden-000057",
         "golden-000071",
         "golden-000079",
-        "golden-000088",
     }, special
     assert set(special) <= set(report["shas"])
 

@@ -53,6 +53,8 @@ if str(_SRC) not in sys.path:
 #: reason ("no context in existence to thread") went false when amendment 3 §8 made the
 #: resolver derive child entry contracts without declarations; the builder now derives
 #: that context itself, and this sweep enforces the call.
+#: #159 S3 removed the `integration_builder.py` legacy config bridge row: the serving
+#: legacy-body gate retired with the legacy process builders, so the site is gone.
 STRICT_BY_DESIGN = {
     (
         "src/boomi_mcp/compiler/process_ir/legacy_adapters/emission.py",
@@ -61,14 +63,6 @@ STRICT_BY_DESIGN = {
         "the LEGACY dialect adapter: amendment 3 §8 carries child context to "
         "canonical roots, and a legacy document names no canonical child root "
         "and declares no effects, so strict is the question, not an omission."
-    ),
-    (
-        "src/boomi_mcp/categories/integration_builder.py",
-        "validate_legacy_process_config",
-    ): (
-        "the legacy dialect config bridge: amendment 3 §8 carries child context "
-        "to canonical roots, and a raw legacy component config has no canonical "
-        "child root and no declaration channel, so no context is withheld."
     ),
     (
         "src/boomi_mcp/authoring/contract.py",

@@ -119,14 +119,15 @@ AGENT_AUTHORING_INSTRUCTIONS = (
     "Boomi MCP operating guide:\n"
     "1. Profile first: call list_boomi_profiles(), then pass profile=... to "
     "every account-scoped call.\n"
-    "2. Archetype-first authoring: for component/integration creation, use "
+    "2. Recipe-first authoring: for component/integration creation, use "
     "list_integration_archetypes → get_integration_archetype → "
-    "build_from_archetype → build_integration(plan/apply) → orchestrate_deploy. "
-    "Hand-author IntegrationSpecV1 only when no archetype fits.\n"
+    "build_integration(plan/compile/apply) with config.authoring_request "
+    "(intent_kind='recipe') → orchestrate_deploy. Author ProcessIR units "
+    "(intent_kind='process_ir') only when no recipe fits.\n"
     "3. Discovery: list_capabilities() returns the tool catalog, workflow "
     "sequences, and the full operating_doctrine; "
     "get_schema_template(schema_name=...) returns exact authoring schemas "
-    "(IntegrationSpecV1, archetype:<name>, workflow_sequences).\n"
+    "(AuthoringRequestV1, recipe:<id>, workflow_sequences).\n"
     "4. Prefer typed tools over invoke_boomi_api; mutating raw POST/PUT "
     "requires confirm_write=true — this is enforced, not advisory.\n"
     "5. Deploy/test success is not behavioral correctness: read execution log "
@@ -518,16 +519,12 @@ try:
     from boomi_mcp.categories.integration_authoring import (
         list_integration_archetypes_action,
         get_integration_archetype_action,
-        build_from_archetype_action,
-        compose_archetypes_action,
     )
     print("[INFO] Integration authoring tools loaded successfully")
 except ImportError as e:
     print(f"[WARNING] Failed to import integration authoring tools: {e}")
     list_integration_archetypes_action = None
     get_integration_archetype_action = None
-    build_from_archetype_action = None
-    compose_archetypes_action = None
 
 # --- Transformation Review Tool (Issue #46) ---
 try:
@@ -1381,8 +1378,9 @@ if manage_process_action:
         Read-only inspection of Boomi process components.
 
         manage_process is read-only (list/get). Process authoring is typed:
-        use build_from_archetype()/build_integration with config.process_kind,
-        or manage_component for a raw process XML escape hatch. create/update/
+        use build_integration with config.authoring_request (a recipe from
+        list_integration_archetypes, or ProcessIR units), or manage_component
+        for a raw process XML escape hatch. create/update/
         delete return an ACTION_UNSUPPORTED envelope (legacy freeform process
         JSON authoring has been removed).
 
@@ -1753,8 +1751,8 @@ if manage_component_action:
 
             create - Create a component from XML template:
                 config='{"xml": "<full-component-xml>...</full-component-xml>"}'
-                For processes, prefer build_from_archetype()/build_integration with a
-                typed config.process_kind; pass raw process XML here only as an escape hatch.
+                For processes, prefer build_integration with config.authoring_request
+                (a recipe or ProcessIR units); pass raw process XML here only as an escape hatch.
                 For connectors (connector-settings, connector-action), use manage_connector.
                 Tip: Use query_components get on a similar component to obtain an XML template.
 
@@ -2296,7 +2294,8 @@ if suggest_connection_reuse_action:
         Each candidate carries IntegrationSpecV1-compatible reuse bindings:
         a reference_only config (resolved by component_id) plus an exact-name
         fallback paired with conflict_policy='reuse'. Feed the returned binding
-        into build_from_archetype / build_integration to reuse the connection.
+        into build_integration (an authoring_request base component or recipe
+        binding) to reuse the connection.
 
         Args:
             profile: Boomi profile name (required)
@@ -2637,28 +2636,26 @@ if build_integration_action:
     print("[INFO] Integration builder tool registered successfully")
 
 
-# --- V3 Integration Authoring MCP Tools (Issue #18) ---
+# --- Recipe discovery MCP Tools (Issue #18; recipe-only since #159 S3) ---
 if list_integration_archetypes_action:
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def list_integration_archetypes(
         query: str = None,
-        tags: list[str] = None,
         expected_recipe_registry: dict = None,
     ):
-        """List V3 integration archetypes from the pattern registry.
+        """List the executable integration recipes this server can author.
 
-        Read-only. Does not call Boomi. Use this to discover archetypes that
-        you can then build with `build_from_archetype`.
-
-        Also returns `recipe_registry`: the live typed-recipe registry snapshot
-        (revision, source revision, capability revisions, and one entry per
-        registered recipe with its implementation hash).
+        Read-only. Does not call Boomi. Backed by the typed recipe registry:
+        returns `recipes`, one descriptor per DEFAULT executable recipe
+        (recipe_id, recipe_version, limitations, examples, input schema id),
+        plus `recipe_registry`: the live registry snapshot (revision, source
+        revision, capability revisions, and one entry per registered recipe
+        with its implementation hash). Every row can be fetched by its exact
+        pin with `get_integration_archetype`.
 
         Args:
-            query: Optional case-insensitive substring filter over name,
-                description, tags, use_cases, and not_for.
-            tags: Optional list of tags; archetype must have all listed tags.
+            query: Optional case-insensitive substring filter over recipe_id.
             expected_recipe_registry: Optional snapshot you expect the live
                 registry to match: {schema_version: "1", registry_revision?,
                 source_revision?, entries: [{recipe_id, recipe_version,
@@ -2672,88 +2669,37 @@ if list_integration_archetypes_action:
                 with a reason — equal versions are not evidence of equal code.
         """
         return list_integration_archetypes_action(
-            query=query, tags=tags, expected_recipe_registry=expected_recipe_registry
+            query=query, expected_recipe_registry=expected_recipe_registry
         )
 
     print("[INFO] list_integration_archetypes tool registered successfully")
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def get_integration_archetype(name: str, recipe_version: str = None):
-        """Get an archetype's metadata + machine-readable parameter schema.
+        """Get one executable recipe's descriptor and machine-readable input schema.
 
-        Read-only. Does not call Boomi. Returns describe() output plus a
-        `next_tool` pointer to `build_from_archetype`, and `recipe_descriptor`
-        for archetypes migrated to the typed contribution path (null otherwise).
+        Read-only. Does not call Boomi. Returns the same projection as
+        get_schema_template(schema_name='recipe:<id>@<version>'): `descriptor`,
+        `input_schema`, and — for a recipe that declares the closed
+        component-material channel — `component_material_schema`, with
+        `next_tool` = `build_integration`. Author the recipe as
+        build_integration(action='plan', config={'authoring_request':
+        {'contract_version': '2', 'intent': {'intent_kind': 'recipe', ...}}}).
 
         Args:
-            name: Archetype name (see `list_integration_archetypes`).
-            recipe_version: Optional EXACT version of the EXECUTABLE recipe to
-                pin — the version shown in `recipe_registry.entries`, not the
-                compatibility adapter's. Never falls forward or backward: an
-                unavailable version is RECIPE_VERSION_UNAVAILABLE, and pinning an
-                unmigrated archetype is rejected rather than silently ignored.
-                The response's `recipe_executable_descriptor` reports what the
-                pin resolved to.
+            name: The recipe_id (see `list_integration_archetypes`).
+            recipe_version: Optional EXACT version. Omitted selects the
+                recipe's default. Never falls forward or backward: an empty,
+                unknown or retired version is RECIPE_VERSION_UNAVAILABLE with
+                the available versions listed.
         """
         return get_integration_archetype_action(name=name, recipe_version=recipe_version)
 
     print("[INFO] get_integration_archetype tool registered successfully")
 
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def build_from_archetype(
-        name: str, parameters: dict = None, recipe_version: str = None
-    ):
-        """Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi.
-
-        Read-only. Does not mutate Boomi. The returned `integration_spec`
-        can be passed to `build_integration(action='plan', config=...)` to
-        preview steps before applying.
-
-        Args:
-            name: Archetype name (see `list_integration_archetypes`).
-            parameters: Dict matching the archetype's parameter_schema.
-                None uses archetype defaults.
-            recipe_version: Optional EXACT version of the EXECUTABLE recipe to
-                pin for a migrated archetype — the version shown in
-                `recipe_registry.entries`, not the compatibility adapter's.
-                Validated BEFORE the spec is emitted, so a pin that cannot be
-                honoured never returns a spec, and it is carried through to
-                execution: `recipe_provenance.executable` reports the version
-                that actually ran.
-        """
-        return build_from_archetype_action(
-            name=name, parameters=parameters, recipe_version=recipe_version
-        )
-
-    print("[INFO] build_from_archetype tool registered successfully")
-
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def compose_archetypes(parts: list, options: dict = None):
-        """Compose archetype parts into ONE IntegrationSpecV1 WITHOUT calling Boomi.
-
-        Read-only. Does not mutate Boomi. v1 composes the topology
-        db_source -> transform -> rest_fanout (2..25 REST targets): the shared
-        transform feeds a Branch with one REST target per leg. Links may
-        declare handoff.mode='document_cache' on transform -> rest_target
-        edges (M8.1 / #132): the Branch then stages mapped documents through
-        an auto-emitted in-spec Document Cache (target-less cache_put staging
-        leg + all-documents cache_get before each consuming REST send; keyed
-        retrieval stays gated). Cross-part contract validation (COMPOSITION_*
-        error codes) fails BEFORE any spec is emitted; the returned
-        `integration_spec` deploys through the normal
-        build_integration(action='plan'/'apply') -> orchestrate_deploy path.
-
-        Args:
-            parts: List of part objects {key, kind, label?, parameters}. Kinds:
-                db_source (archetype 'source' payload), transform (archetype
-                'transform' payload), rest_target (archetype 'target' payload).
-            options: {naming: {integration_name, component_prefix, ...},
-                execution?: {...}, links?: [{from_part, to_part, handoff?}]}.
-                See get_schema_template(schema_name='compose_archetypes').
-        """
-        return compose_archetypes_action(parts=parts, options=options)
-
-    print("[INFO] compose_archetypes tool registered successfully")
+    # #159 S3: build_from_archetype and compose_archetypes are retired. No public
+    # route builds a process through an archetype or the legacy composition;
+    # author with build_integration(config.authoring_request).
 
 
 # --- Transformation Review MCP Tool (Issue #46) ---
@@ -3363,7 +3309,7 @@ if get_schema_template_action:
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
             component_type: For component: process, connector-settings, transform.map, etc.
             protocol: For trading_partner protocols: http, as2, ftp, sftp, disk, mllp, oftp
-            schema_name: Authoring schema selector — 'IntegrationSpecV1' (full JSON schema), 'archetype:<name>' (parameter schema + metadata), 'workflow_sequences' (all recommended workflows), 'workflow:<name>' (one workflow).
+            schema_name: Authoring schema selector — 'IntegrationSpecV1' (full JSON schema), 'recipe:<recipe_id>@<version>' (recipe descriptor + input schema; the retired 'archetype:<name>' selectors refuse), 'workflow_sequences' (all recommended workflows), 'workflow:<name>' (one workflow).
                 Issue #146 adds the typed authoring contracts, all generated from the runtime models so they match wrapper validation exactly:
                 'ProcessIRV1', 'SystemTopologySpecV1', 'validation_report',
                 'AuthoringRequestV1', 'AuthoringPlanResultV1', 'AuthoringCompileResultV1',
@@ -3375,7 +3321,7 @@ if get_schema_template_action:
                 the rest remain at '1' — list_capabilities publishes each current version);
                 an unserved version on one of those returns AUTHORING_SCHEMA_VERSION_UNAVAILABLE
                 with the supported list. Every other selector — including 'IntegrationSpecV1',
-                'recipe_contributions' and 'archetype:<name>' — publishes no version and rejects
+                'recipe_contributions' and 'recipe:<recipe_id>' — publishes no version and rejects
                 any '@' suffix with SCHEMA_NAME_UNSUPPORTED. list_capabilities' authoring_contract
                 omits schema_version for exactly those, so a client pinning from the catalog can
                 tell the two apart.
@@ -3410,13 +3356,13 @@ if get_schema_template_action:
             get_schema_template("trading_partner") → overview of all actions/standards
             get_schema_template("trading_partner", "create", standard="x12") → X12 create template
             get_schema_template("trading_partner", protocol="as2") → AS2 protocol fields
-            get_schema_template("process", protocol="database_to_api_sync") → typed process_kind template
+            get_schema_template(schema_name="AuthoringRequestV1") → the canonical authoring request (recipe or ProcessIR units)
             get_schema_template("integration", "plan") → IntegrationSpecV1 planner template
             get_schema_template("component") → overview of component tools
             get_schema_template("monitoring", "execution_records") → execution query template
             get_schema_template("organization", "create") → organization create template
             get_schema_template(schema_name="IntegrationSpecV1") → IntegrationSpecV1 JSON schema
-            get_schema_template(schema_name="archetype:database_to_api_sync") → archetype parameter schema
+            get_schema_template(schema_name="recipe:boomi.archetype.database_to_api_sync@1.0.0") → recipe descriptor + input schema
             get_schema_template(schema_name="workflow_sequences") → recommended workflow sequences
             get_schema_template(schema_name="process_ir_authoring") → facets + state mappings, no entries
             get_schema_template(schema_name="process_ir_authoring", node_kind="branch") → the Branch rules
@@ -3599,7 +3545,7 @@ if list_capabilities_action:
         - Coverage statistics (SDK example coverage)
         - Quick-start hints
         - authoring_contract: the served authoring actions, schema selectors,
-          capability states, archetypes and revisions (issue #146)
+          capability states, the recipe registry identity and revisions (issue #146)
 
         Args:
             expected_capability_revision: Optional. The capability revision you
@@ -3646,7 +3592,7 @@ if plan_integration_design_action:
     ):
         """Read-only assembler that returns a budgeted Boomi integration design brief.
 
-        The brief is a deterministic join over the archetype registry,
+        The brief is a deterministic join over the recipe registry,
         design_doctrine, and account_governance: recommended patterns with their
         capability_status, capability gaps, required user decisions (present in
         archetype mode), and read-only discovery steps. It makes no API calls and
@@ -3654,12 +3600,18 @@ if plan_integration_design_action:
 
         Disambiguation from sibling tools: list_capabilities returns the full tool
         catalog; get_schema_template(schema_name='design_doctrine') returns the raw
-        doctrine catalog; list_integration_archetypes returns the archetype list;
-        get_integration_archetype(name=...) returns one archetype's full schema.
+        doctrine catalog; list_integration_archetypes returns the executable
+        recipe list; get_integration_archetype(name=<recipe_id>) returns one
+        recipe's descriptor and input schema.
         This tool returns the joined brief, not any single source verbatim.
 
         Args:
-            archetype: Optional archetype name (one from list_integration_archetypes).
+            archetype: Optional recipe_id (one from list_integration_archetypes,
+                e.g. 'boomi.archetype.database_to_api_sync'). The brief then
+                carries that recipe's descriptor projection under `recipe` and
+                its exact reference in `recommended_recipes`; an unknown,
+                retired or non-executable id is an error envelope listing the
+                valid ids.
                 When omitted, the result is a pre-selection brief (intent-flag
                 doctrine plus a missing_inputs marker); when supplied, the result is
                 the full brief including parameter-schema-derived required decisions.

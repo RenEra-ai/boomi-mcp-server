@@ -29,6 +29,7 @@ _src = str(_project_root / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 sys.path.insert(0, str(_project_root / "tests" / "patterns"))
+sys.path.insert(0, str(_project_root / "tests"))
 
 from boomi_mcp.errors import RECIPE_CONSTRAINT_FAILED, RECIPE_OUTPUT_NONDETERMINISTIC
 from boomi_mcp.models.integration_models import IntegrationSpecV1
@@ -46,27 +47,107 @@ from boomi_mcp.recipes import (
 )
 from boomi_mcp.recipes.registry import build_test_registry
 from boomi_mcp.recipes import engine as engine_module
-from boomi_mcp.recipes.builtins.catalog import (
-    RECIPE_API_TO_API_SYNC,
-    RECIPE_DB_REST_FANOUT,
+from boomi_mcp.recipes.builtins.catalog import RECIPE_DB_REST_FANOUT
+from boomi_mcp.recipes.builtins.fanout import (
+    ComposeDbRestFanoutInputV1,
+    ComposeDbRestFanoutInputV2,
+    FanoutComponentMaterialV2,
+    emit_db_rest_fanout,
+    prepare_db_rest_fanout_v2,
 )
-from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1
+from boomi_mcp.recipes.builtins.sync import SyncRecipeInputV1, emit_api_to_api_sync
 from boomi_mcp.recipes.contracts import RecipeConflictPolicyV1, RecipeRegistrationV1
-from boomi_mcp.categories.integration_authoring import compose_archetypes_action
-from boomi_mcp.patterns.recipe_bridge import build_catalog, run_fanout_recipe
+from boomi_mcp.patterns.recipe_bridge import build_catalog
 
-from test_archetype_composition import _cache_links, _options, _parts
+from _fanout_v2_support import V2, flagship_v2, oracle
+from test_archetype_composition import _cache_links
 
 _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
 
 def _composed_spec(links=None):
-    options = dict(_options())
-    if links:
-        options["links"] = links
-    response = compose_archetypes_action(parts=_parts(), options=options)
-    assert response["_success"] is True
-    return IntegrationSpecV1.model_validate(response["integration_spec"])
+    """The composed fan-out spec, from the FROZEN flagship oracle.
+
+    #159 S3 retired ``compose_archetypes`` and fan-out 1.0.0, so the spec is no
+    longer composed live: it is the legacy composition captured at cb7034b
+    (``tests/fixtures/issue_159/flagship_fanout_legacy_spec.json``). The tests
+    that use it need a component list and a spec envelope, never the composer.
+    """
+    assert links is None, "the frozen oracle is the document-stream composition"
+    return IntegrationSpecV1.model_validate(oracle()["integration_spec"])
+
+
+def _run_flagship(links=None):
+    """Run the production fan-out (2.0.0, the default) on the flagship.
+
+    The canonical-chain tests used to drive fan-out 1.0.0 through the retired
+    bridge; they now drive the surviving executable, with its trusted preparer's
+    supporting components, through ``run_recipes`` itself.
+    """
+    raw, material = flagship_v2()
+    if links is not None:
+        raw["links"] = links
+    prepared = prepare_db_rest_fanout_v2(
+        ComposeDbRestFanoutInputV2.model_validate(raw),
+        FanoutComponentMaterialV2.model_validate(material),
+        base_catalog={},
+    )
+    from boomi_mcp.authoring.workflow import _connector_metadata_from_components
+
+    return run_recipes(
+        [RecipeRequestV1(RECIPE_DB_REST_FANOUT, "fanout", raw, V2)],
+        catalog=MaterializationCatalog({}),
+        connector_metadata=_connector_metadata_from_components(
+            prepared.supporting_components
+        ),
+        supporting_components=prepared.supporting_components,
+    )
+
+
+#: #159 S3 retired the two slot-based production recipes (fan-out 1.0.0 and the
+#: API->API sync preset). The engine's SLOT machinery (catalog resolution, header
+#: verification, invocation ordering) is unchanged, so these tests drive it with
+#: the same, still-defined executors registered in a TEST registry.
+_SLOT_SYNC_ID = "test.slot.api_to_api_sync"
+_SLOT_FANOUT_ID = "test.slot.db_rest_fanout"
+_SLOT_REGISTRY = build_test_registry(
+    (
+        RecipeRegistrationV1(
+            recipe_id=_SLOT_SYNC_ID,
+            recipe_version="1.0.0",
+            entry_kind="executable_recipe",
+            is_default=True,
+            input_model=SyncRecipeInputV1,
+            executor=emit_api_to_api_sync,
+            output_types=(
+                "component_contribution",
+                "constraint_requirement",
+                "process_ir_patch",
+            ),
+            conflict_policy=RecipeConflictPolicyV1(
+                mode="error_unless_declared",
+                merge_rules=("dedupe_identical_constraint",),
+            ),
+        ),
+        RecipeRegistrationV1(
+            recipe_id=_SLOT_FANOUT_ID,
+            recipe_version="1.0.0",
+            entry_kind="executable_recipe",
+            is_default=True,
+            input_model=ComposeDbRestFanoutInputV1,
+            executor=emit_db_rest_fanout,
+            output_types=(
+                "component_contribution",
+                "constraint_requirement",
+                "process_ir_patch",
+            ),
+            conflict_policy=RecipeConflictPolicyV1(
+                mode="error_unless_declared",
+                merge_rules=("append_root_terminal_leg", "dedupe_identical_constraint"),
+            ),
+        ),
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +189,7 @@ def test_the_canonical_chain_fires_in_order_for_every_process(monkeypatch):
     monkeypatch.setattr(pipeline_module, "compile_process_ir_v1", spy_compile)
     monkeypatch.setattr(emitter_module, "emit_process", spy_emit)
 
-    spec = _composed_spec()
-    run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=spec.components[-1],
-    )
+    _run_flagship()
 
     kinds = [c[0] if isinstance(c, tuple) else c for c in calls]
     assert "parse" in kinds
@@ -142,12 +218,7 @@ def test_compile_is_always_called_with_no_validation_policy(monkeypatch):
     monkeypatch.setattr(pipeline_module, "compile_process_ir_v1", spy)
 
     for links in (None, _cache_links("orders", "billing")):
-        spec = _composed_spec(links)
-        run_fanout_recipe(
-            recipe_id=RECIPE_DB_REST_FANOUT,
-            components=spec.components,
-            process=spec.components[-1],
-        )
+        _run_flagship(links)
 
     assert seen
     assert all(policy is None for policy in seen), seen
@@ -204,13 +275,8 @@ def test_the_recipe_engine_never_imports_the_legacy_policy_registry():
 
 
 def test_the_verifier_runs_and_reports_no_errors():
-    spec = _composed_spec(_cache_links("orders", "billing"))
-    result = run_fanout_recipe(
-        recipe_id=RECIPE_DB_REST_FANOUT,
-        components=spec.components,
-        process=spec.components[-1],
-    )
-    artifact = result.artifact_for(spec.components[-1].key)
+    result = _run_flagship(_cache_links("orders", "billing"))
+    artifact = result.artifact_for("main_process")
     assert artifact.verifier.errors == ()
     assert artifact.verifier.shapes_checked > 0
 
@@ -470,7 +536,10 @@ def _emittable_planner_error_actions():
                 found.update(literals(node.value))
 
     actions = sorted(a for a in found if a.startswith("error_"))
-    assert len(actions) >= 11, f"the AST walk lost sites: {actions}"
+    # Non-vacuity floor. #159 S3 retires the planner's legacy process-body
+    # validation (``error_process_validation``) with the admission refusal, so
+    # the floor is the ten actions that survive it.
+    assert len(actions) >= 10, f"the AST walk lost sites: {actions}"
     return actions
 
 
@@ -486,9 +555,14 @@ def test_a_blocking_planned_step_produces_zero_execute_component_calls(blocking_
     """
     import boomi_mcp.categories.integration_builder as builder
 
-    spec = _composed_spec()
+    # #159 S3: the frozen composition's SUPPORTING components only. Its flat
+    # process carries a legacy body that admission refuses before planning; this
+    # test is about the apply gate's handling of a planned blocking step, so the
+    # spec it hands the (faked) planner must itself be admissible.
+    spec = _composed_spec().model_dump(mode="json")
+    spec["components"] = [c for c in spec["components"] if c["type"] != "process"]
     config = {
-        "integration_spec": spec.model_dump(mode="json"),
+        "integration_spec": spec,
         "conflict_policy": "reuse",
     }
 
@@ -732,7 +806,7 @@ def test_a_compile_failure_is_reported_with_its_canonical_cause_codes():
         run_recipes(
             [
                 RecipeRequestV1(
-                    recipe_id=RECIPE_DB_REST_FANOUT,
+                    recipe_id=_SLOT_FANOUT_ID,
                     invocation_id="i1",
                     raw_input={
                         "version": "1",
@@ -759,6 +833,7 @@ def test_a_compile_failure_is_reported_with_its_canonical_cause_codes():
                 )
             ],
             catalog=catalog,
+            registry=_SLOT_REGISTRY,
             connector_metadata={},  # <- the omission under test
         )
     diagnostic = exc.value.diagnostics[0]
@@ -780,12 +855,13 @@ def test_a_missing_materializer_slot_is_a_contribution_failure():
         run_recipes(
             [
                 RecipeRequestV1(
-                    recipe_id=RECIPE_API_TO_API_SYNC,
+                    recipe_id=_SLOT_SYNC_ID,
                     invocation_id="i1",
                     raw_input=dict(_VALID_INPUT, component_slots=slots),
                 )
             ],
             catalog=empty,
+            registry=_SLOT_REGISTRY,
         )
     assert exc.value.diagnostics[0].target == "materializer_slot"
 
@@ -800,12 +876,13 @@ def test_a_header_mismatch_between_slot_and_catalog_is_rejected():
         run_recipes(
             [
                 RecipeRequestV1(
-                    recipe_id=RECIPE_API_TO_API_SYNC,
+                    recipe_id=_SLOT_SYNC_ID,
                     invocation_id="i1",
                     raw_input=dict(_VALID_INPUT, component_slots=poisoned),
                 )
             ],
             catalog=catalog,
+            registry=_SLOT_REGISTRY,
         )
     assert exc.value.diagnostics[0].target == "materializer_slot_header"
 
@@ -877,12 +954,12 @@ def test_a_duplicate_invocation_id_is_rejected():
     spec = _composed_spec()
     catalog, slots = build_catalog(spec.components)
     request = RecipeRequestV1(
-        recipe_id=RECIPE_API_TO_API_SYNC,
+        recipe_id=_SLOT_SYNC_ID,
         invocation_id="same",
         raw_input=dict(_VALID_INPUT, component_slots=slots),
     )
     with pytest.raises(RecipeError) as exc:
-        run_recipes([request, request], catalog=catalog)
+        run_recipes([request, request], catalog=catalog, registry=_SLOT_REGISTRY)
     assert exc.value.diagnostics[0].target == "duplicate_invocation_id"
 
 

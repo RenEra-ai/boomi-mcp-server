@@ -89,6 +89,52 @@ def _case(name):
 
 
 # ---------------------------------------------------------------------------
+# #159 S3 (cutover decision 1): raw process authoring is refused at admission.
+#
+# A flat process row carrying a BODY (any selector or other body field) is now
+# refused by `authoring/process_admission.py` before normalization, the secret
+# scans, collision resolution or any write. The freeze pins whose subject was a
+# flat process body accepted by `_build_plan` are re-pinned below on the surviving
+# surface: the body payload is refused (value-free, account-independent), and the
+# inert top-level pipeline behaviour is measured on the ADMITTED twin — the same
+# spec whose process rows only BIND an existing process by explicit id.
+# (specs/M12_COMPATIBILITY_INVENTORY.md is the integrator's to update.)
+# ---------------------------------------------------------------------------
+
+from src.boomi_mcp.authoring.process_admission import unit_required_envelope  # noqa: E402
+from src.boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED  # noqa: E402
+
+_BIND_IDS = (
+    "77777777-7777-7777-7777-777777777771",
+    "77777777-7777-7777-7777-777777777772",
+)
+
+
+def _assert_unit_refusal(plan, field=None):
+    assert plan["_success"] is False, plan
+    assert plan["error_code"] == PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED, plan
+    assert set(plan) == set(unit_required_envelope("x")), sorted(plan)
+    assert plan["boomi_mutation"] is False
+    assert "steps" not in plan and "integration_spec" not in plan
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+    if field is not None:
+        assert plan["field"] == field, plan["field"]
+
+
+def _bind_processes(config):
+    """The admitted twin: every flat process row keeps its key and name but only
+    BINDS an existing process by explicit id (no body, no depends_on)."""
+    twin = copy.deepcopy(config)
+    ids = iter(_BIND_IDS)
+    for row in twin["integration_spec"]["components"]:
+        if row.get("type") == "process":
+            row["config"] = {"reference_only": True, "component_id": next(ids)}
+            row["action"] = "create"
+            row.pop("depends_on", None)
+    return twin
+
+
+# ---------------------------------------------------------------------------
 # 1-2. PipelineSpec graph envelope (extra="forbid") vs open StageSpec.config
 #
 # The three ``IntegrationSpecV1`` / ``IntegrationComponentSpec`` envelope pins that
@@ -280,7 +326,11 @@ def test_multi_process_pipeline_secret_rejected_before_mutation():
     """#139A review r-arch (finding 7): the top-level pipeline secret scan runs for
     ZERO-, single-, and MULTI-process specs alike (it precedes cardinality/authority
     logic). A multi-process spec carrying a pipeline secret is rejected the same way.
-    Sentinel is a PLACEHOLDER token (§11), never a real secret."""
+    Sentinel is a PLACEHOLDER token (§11), never a real secret.
+
+    #159 S3: a multi-process spec now reaches that scan only when its process rows
+    are admitted (explicit-id binds); the body form is refused at admission first,
+    value-free, so the sentinel is never echoed on either path."""
     sentinel = "SENTINEL-multi-not-a-real-secret"
     cfg = {
         "integration_spec": {
@@ -292,10 +342,14 @@ def test_multi_process_pipeline_secret_rejected_before_mutation():
             "pipeline": {"stages": [{"key": "s0", "stage_type": "transform", "config": {"access_token": sentinel}}]},
         }
     }
-    plan = _build_plan(MagicMock(), copy.deepcopy(cfg))
+    plan = _build_plan(MagicMock(), _bind_processes(cfg))
     assert plan["_success"] is False
     assert plan["error_code"] == "PLAINTEXT_SECRET_REJECTED"
     assert sentinel not in json.dumps(plan, default=str)
+
+    refused = _build_plan(MagicMock(), copy.deepcopy(cfg))
+    _assert_unit_refusal(refused, field="integration_spec.components.0.config.process_kind")
+    assert sentinel not in json.dumps(refused, default=str)
 
 
 def test_normalize_drops_top_level_pipeline():
@@ -350,48 +404,48 @@ def test_contradictory_pipelines_coexist_and_nested_wins_lowering():
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_contradictory_pipelines_silent_precedence_through_build_plan(mock_pag):
-    """Plan-level freeze of the same silent precedence, through `_build_plan`
-    (the public planning path that #139 will change). Three pins:
+    """Plan-level freeze of the same silent precedence, through `_build_plan`.
 
-    1. A spec carrying BOTH a spec-level pipeline and a disagreeing nested
-       config.pipeline plans clean — no authority-conflict rejection exists.
-    2. The planner consults the NESTED pipeline: corrupting it fails the plan
-       with a SYNC_PIPELINE_* validation error on the main process step.
-    3. The planner never consults spec.pipeline: mutating it changes nothing
-       in the planned steps.
+    #159 S3 re-pin. The three original pins, on the surviving surface:
+
+    1. The contradiction no longer plans: its flat process body is refused at
+       admission (value-free, no steps, no echo) — and no authority conflict is
+       computed either.
+    2. The nested pipeline is no longer a consulted channel: corrupting it (a
+       reserved stage kind) changes nothing — the refusal is byte-identical, no
+       SYNC_PIPELINE_* code is computed, because admission never lowers a body.
+    3. spec.pipeline is still never consulted: on the ADMITTED twin (the process
+       row only binds an existing process by explicit id) rewriting the view
+       leaves every planned step, the order and the warnings identical, and the
+       authored view is echoed inert.
     """
     mock_pag.return_value = []
     case = _case("contradictory_pipelines")
 
-    # Pin 1 — the contradiction plans clean; the inert view is echoed back.
-    plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
-    assert plan["_success"] is True
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step["planned_action"] == "create"
-    assert "validation_error" not in main_step
-    echoed = plan["integration_spec"]["pipeline"]
-    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+    # Pin 1
+    refused = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
+    _assert_unit_refusal(
+        refused, field="integration_spec.components.0.config.process_kind"
+    )
 
-    # Pin 2 — the nested pipeline IS the consulted channel: a reserved stage
-    # kind there fails the plan on the main process step.
+    # Pin 2
     broken = copy.deepcopy(case["config"])
     broken["integration_spec"]["components"][0]["config"]["pipeline"]["stages"][0][
         "kind"
     ] = "lookup"
     plan_broken = _build_plan(MagicMock(), broken)
-    broken_step = next(s for s in plan_broken["steps"] if s["key"] == "main_process")
-    assert broken_step["planned_action"] == "error_process_validation"
-    assert (
-        broken_step["validation_error"]["error_code"]
-        == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
-    )
-    assert (
-        broken_step["validation_error"]["field"] == "pipeline.stages[read_stage].kind"
-    )
+    assert plan_broken == refused
+    assert "SYNC_PIPELINE_" not in json.dumps(plan_broken)
 
-    # Pin 3 — spec.pipeline is never consulted: rewriting it (schema-valid but
-    # semantically different again) leaves every planned step identical.
-    mutated = copy.deepcopy(case["config"])
+    # Pin 3
+    admitted = _bind_processes(case["config"])
+    plan = _build_plan(MagicMock(), copy.deepcopy(admitted))
+    assert plan["_success"] is True
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == "reuse"
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+    mutated = copy.deepcopy(admitted)
     mutated["integration_spec"]["pipeline"]["stages"] = [
         {"key": "solo_stage", "kind": "write", "config": {"primitive": "db_write"}}
     ]
@@ -401,61 +455,50 @@ def test_contradictory_pipelines_silent_precedence_through_build_plan(mock_pag):
     assert plan_mutated["steps"] == plan["steps"]
     assert plan_mutated["execution_order"] == plan["execution_order"]
     assert plan_mutated.get("warnings") == plan.get("warnings")
+    # Every row binds or updates by explicit id: the account is never searched.
+    assert mock_pag.call_count == 0
 
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_collision_reuse_with_top_level_pipeline_plans_clean_and_echoes(mock_pag):
-    """Cardinality freeze (ADR-001 §5). The IDENTICAL authored payload as
-    `test_contradictory_pipelines_silent_precedence_through_build_plan` — which forces
-    NO collision — but here a live same-name process EXISTS, so the lone authored
-    `create` collapses to `planned_action="reuse"`. It still plans clean (no error
-    steps) and still echoes the authored `spec.pipeline` inert.
+    """Cardinality freeze (ADR-001 §5): acceptance does not move when the live
+    account changes, and the authored `spec.pipeline` is echoed inert.
 
-    This is load-bearing for two ADR §5 claims that were previously only INFERRED from
-    the composition of two other tests:
-      - the preserve-inert case's collision-driven-reuse sub-case, and
-      - the account-independence invariant: acceptance does not move when collision
-        resolution changes. Compare against the no-collision pin above — same payload,
-        different live account, same acceptance.
-
-    Note the agree-vs-conflict distinction is invisible TODAY: no code compares
-    `spec.pipeline` to the process config at all (that comparison is #139's future
-    contract). This pin measures the DISAGREEING authored view; the agreeing variant
-    is pinned separately below, so each sub-case ADR §5 names has its own direct
-    measurement even though today both exercise the identical comparison-free echo.
+    #159 S3 re-pin. A collision can no longer turn a flat process BODY into a
+    reuse: the body payload is refused identically whether or not a live
+    same-name process exists (admission runs before collision resolution). The
+    reuse this pin measures is now the explicit-id bind, and its acceptance and
+    inert echo are identical with and without the same-name live process.
     """
     case = _case("collision_reuse_pipeline")
     base = _case("contradictory_pipelines")
+    stub = copy.deepcopy(case["collision_stub_metadata"])
 
-    mock_pag.return_value = [copy.deepcopy(case["collision_stub_metadata"])]
-    plan = _build_plan(MagicMock(), copy.deepcopy(base["config"]))
-
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step["planned_action"] == case["expected_planned_action"]
-    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
-    # The inert authored view is echoed even though the submitted config was discarded.
-    echoed = plan["integration_spec"]["pipeline"]
-    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
-    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+    outcomes = []
+    for existing in ([], [stub]):
+        mock_pag.return_value = list(existing)
+        refused = _build_plan(MagicMock(), copy.deepcopy(base["config"]))
+        _assert_unit_refusal(refused)
+        plan = _build_plan(MagicMock(), _bind_processes(base["config"]))
+        main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert main_step["planned_action"] == case["expected_planned_action"]
+        assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+        echoed = plan["integration_spec"]["pipeline"]
+        assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+        assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+        outcomes.append((refused, plan))
+    assert outcomes[0] == outcomes[1]
 
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes(mock_pag):
-    """Agreeing variant of the collision-reuse pin (ADR-001 §5). The preserve-inert
-    bullet's collision-driven-reuse sub-case is defined over a `spec.pipeline` that
-    does NOT conflict with the process's derived summary; the pin above measures the
-    disagreeing payload (which §5 files under the authority-conflict case, preserved
-    on V1 only until the §9 gate). This pin measures the sub-case as defined: the
-    authored top-level view is a verbatim copy of the nested `config.pipeline` —
-    agreeing by construction under any equality #139 later chooses — and the lone
-    authored `create` collapses to `planned_action="reuse"` against the same live
-    same-name component.
+    """Agreeing variant of the collision-reuse pin (ADR-001 §5): the authored
+    top-level view is a verbatim copy of the nested `config.pipeline`.
 
-    Today the variants are indistinguishable (no code compares the two surfaces; the
-    comparison is #139's future contract), so both pin the identical comparison-free
-    echo. Keeping both measured means #139's V1 surface — which must KEEP accepting
-    the agreeing shape while the disagreeing one is governed by the §9 transition —
-    changes a pinned behavior only where the ADR says it may.
+    #159 S3 re-pin, as above: the body payload is refused whatever the account
+    holds; the admitted twin (explicit-id bind) plans the reuse and echoes the
+    FULL normalized PipelineSpec dump of the authored view, with and without the
+    live same-name process.
     """
     case = _case("collision_reuse_agreeing_pipeline")
     stub = _case("collision_reuse_pipeline")["collision_stub_metadata"]
@@ -465,53 +508,54 @@ def test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes
     )
     config["integration_spec"]["pipeline"] = copy.deepcopy(authored_pipeline)
 
-    mock_pag.return_value = [stub]
-    plan = _build_plan(MagicMock(), config)
+    for existing in ([], [stub]):
+        mock_pag.return_value = list(existing)
+        _assert_unit_refusal(_build_plan(MagicMock(), copy.deepcopy(config)))
+        plan = _build_plan(MagicMock(), _bind_processes(config))
+        main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert main_step["planned_action"] == case["expected_planned_action"]
+        assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+        echoed = plan["integration_spec"]["pipeline"]
+        assert echoed == PipelineSpec(**authored_pipeline).model_dump()
+        assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+        assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
 
-    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
-    assert main_step["planned_action"] == case["expected_planned_action"]
-    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
-    # Echo fidelity is this pin's whole job, so assert the FULL normalized
-    # PipelineSpec dump (defaults expanded, semantics preserved — the zero-process
-    # preserve pin's idiom), not merely the same kinds sequence.
-    echoed = plan["integration_spec"]["pipeline"]
-    assert echoed == PipelineSpec(**authored_pipeline).model_dump()
-    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
-    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+
+def _two_process_config(multi):
+    config = _case("contradictory_pipelines")["config"]
+    second = copy.deepcopy(config["integration_spec"]["components"][0])
+    second["key"] = multi["second_process_key"]
+    second["name"] = multi["second_process_name"]
+    config["integration_spec"]["components"].insert(1, second)
+    return config
 
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_multi_authored_spec_with_top_level_pipeline_accepted_today(mock_pag):
-    """Cardinality freeze (ADR-001 §5, multi-authored bullet). TWO authored process
-    components plus a singular top-level `spec.pipeline` — the shape the ADR calls
-    "ambiguous by construction" because no marker designates which process the single
-    field summarizes — is ACCEPTED today: both processes plan `create`, no error step,
-    no authority-conflict code, and the ambiguous view is echoed back.
+    """Cardinality freeze (ADR-001 §5, multi-authored bullet): TWO process
+    components plus a singular top-level `spec.pipeline`.
 
-    This is the measured evidence for ADR §9's announced-policy-before-removal gate:
-    #139's strict-surface rejection withdraws an acceptance that demonstrably exists,
-    so it cannot ship as a side effect of the cutover. No current archetype writes this
-    shape (§1 measured — multi-process specs keep `pipeline=None`); it is reachable by
-    hand-authoring, which is exactly why the freeze pins it.
+    #159 S3 re-pin. Two flat process BODIES are refused at admission, at the
+    FIRST body row. The multi-process shape with a singular view is still
+    ACCEPTED when its process rows only bind (explicit ids): both plan, no error
+    step, no authority-conflict code, and the view is echoed inert.
     """
     mock_pag.return_value = []
     case = _case("multi_authored_pipeline")
-    config = _case("contradictory_pipelines")["config"]
+    config = _two_process_config(case)
 
-    # Add a SECOND authored process alongside the first (distinct key and name, so it
-    # is a genuinely separate authored component rather than a collision).
-    second = copy.deepcopy(config["integration_spec"]["components"][0])
-    second["key"] = case["second_process_key"]
-    second["name"] = case["second_process_name"]
-    config["integration_spec"]["components"].insert(1, second)
+    _assert_unit_refusal(
+        _build_plan(MagicMock(), copy.deepcopy(config)),
+        field="integration_spec.components.0.config.process_kind",
+    )
 
-    plan = _build_plan(MagicMock(), config)
-
+    plan = _build_plan(MagicMock(), _bind_processes(config))
     proc_steps = [
         next(s for s in plan["steps"] if s["key"] == key)
         for key in ("main_process", case["second_process_key"])
     ]
-    assert [s["planned_action"] for s in proc_steps] == case["expected_planned_actions"]
+    assert [s["planned_action"] for s in proc_steps] == ["reuse", "reuse"]
+    assert [s.get("existing_component_id") for s in proc_steps] == list(_BIND_IDS)
     assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
     echoed = plan["integration_spec"]["pipeline"]
     assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
@@ -520,81 +564,42 @@ def test_multi_authored_spec_with_top_level_pipeline_accepted_today(mock_pag):
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_multi_authored_collision_reuse_keeps_acceptance_and_echo(mock_pag):
-    """Collision variants of the multi-authored pin (ADR-001 §5, multi-authored
-    bullet + determinism note). §5 counts the ambiguity decision over DECLARED
-    authoring actions, so it claims account-independence "even if some or all of
-    those authored processes collapse to collision-driven reuse". This pin
-    measures the baseline for both halves of that claim: the SAME two-authored
-    payload as `test_multi_authored_spec_with_top_level_pipeline_accepted_today`,
-    replanned against a live account where (a) ONE of the two authored creates
-    collides (partial — ["reuse", "create"]) and (b) BOTH collide (full —
-    ["reuse", "reuse"]).
+    """Collision variants of the multi-authored pin (ADR-001 §5 determinism
+    note): partial and full live same-name collisions must not move the
+    accept/reject outcome.
 
-    Today both variants plan clean and echo the ambiguous view — identical to
-    the no-collision pin, since no code counts authored processes or compares
-    surfaces yet. The pins keep #139 honest about WHERE it counts: a cardinality
-    computed AFTER collision resolution would see the full-collision variant as
-    zero-authored (preserve-inert path) and the partial variant as
-    single-authored (conflict/derive path) instead of ambiguous — exactly the
-    account-dependent reject/accept flip §5's determinism note prohibits. On the
-    V1 surface these acceptances persist until an announced §9 deprecation, so
-    the pins are durable, not transition-scoped.
+    #159 S3 re-pin. The two-body payload is refused byte-identically with no,
+    partial and full collisions; the admitted twin is accepted identically under
+    all three, with the full normalized view echoed.
     """
     case = _case("multi_authored_collision_pipeline")
     multi = _case("multi_authored_pipeline")
     main_stub = _case("collision_reuse_pipeline")["collision_stub_metadata"]
-
-    config = _case("contradictory_pipelines")["config"]
-    second = copy.deepcopy(config["integration_spec"]["components"][0])
-    second["key"] = multi["second_process_key"]
-    second["name"] = multi["second_process_name"]
-    config["integration_spec"]["components"].insert(1, second)
-    proc_keys = ("main_process", multi["second_process_key"])
-    # Captured pre-plan: the echo asserts below pin the FULL normalized
-    # PipelineSpec dump (the agreeing-collision pin's idiom), not just kinds.
+    config = _two_process_config(multi)
     authored_pipeline = copy.deepcopy(config["integration_spec"]["pipeline"])
+    proc_keys = ("main_process", multi["second_process_key"])
 
-    # (a) PARTIAL collision — only the first authored process has a live
-    # same-name component; the second stays a genuine create.
-    mock_pag.return_value = [copy.deepcopy(main_stub)]
-    plan_partial = _build_plan(MagicMock(), copy.deepcopy(config))
-    partial_steps = [
-        next(s for s in plan_partial["steps"] if s["key"] == key) for key in proc_keys
-    ]
-    assert [s["planned_action"] for s in partial_steps] == (
-        case["expected_partial_planned_actions"]
-    )
-    assert [
-        s for s in plan_partial["steps"] if str(s["planned_action"]).startswith("error")
-    ] == []
-    echoed_partial = plan_partial["integration_spec"]["pipeline"]
-    assert echoed_partial == PipelineSpec(**authored_pipeline).model_dump()
-    assert [s["kind"] for s in echoed_partial["stages"]] == (
-        case["expected_spec_pipeline_kinds"]
-    )
-    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan_partial)
-
-    # (b) FULL collision — both authored processes collapse to reuse.
-    mock_pag.return_value = [
-        copy.deepcopy(main_stub),
-        copy.deepcopy(case["second_collision_stub_metadata"]),
-    ]
-    plan_full = _build_plan(MagicMock(), copy.deepcopy(config))
-    full_steps = [
-        next(s for s in plan_full["steps"] if s["key"] == key) for key in proc_keys
-    ]
-    assert [s["planned_action"] for s in full_steps] == (
-        case["expected_full_planned_actions"]
-    )
-    assert [
-        s for s in plan_full["steps"] if str(s["planned_action"]).startswith("error")
-    ] == []
-    echoed_full = plan_full["integration_spec"]["pipeline"]
-    assert echoed_full == PipelineSpec(**authored_pipeline).model_dump()
-    assert [s["kind"] for s in echoed_full["stages"]] == (
-        case["expected_spec_pipeline_kinds"]
-    )
-    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan_full)
+    refusals, plans = [], []
+    for existing in (
+        [],
+        [copy.deepcopy(main_stub)],
+        [copy.deepcopy(main_stub), copy.deepcopy(case["second_collision_stub_metadata"])],
+    ):
+        mock_pag.return_value = existing
+        refused = _build_plan(MagicMock(), copy.deepcopy(config))
+        _assert_unit_refusal(refused)
+        refusals.append(refused)
+        plan = _build_plan(MagicMock(), _bind_processes(config))
+        steps = [next(s for s in plan["steps"] if s["key"] == key) for key in proc_keys]
+        assert [s["planned_action"] for s in steps] == ["reuse", "reuse"]
+        assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+        echoed = plan["integration_spec"]["pipeline"]
+        assert echoed == PipelineSpec(**authored_pipeline).model_dump()
+        assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+        assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+        plans.append(plan)
+    assert refusals[0] == refusals[1] == refusals[2]
+    assert plans[0] == plans[1] == plans[2]
 
 
 # ---------------------------------------------------------------------------
@@ -719,10 +724,17 @@ def test_flow_sequence_accepts_single_step_and_ignores_root_extras():
 
 @patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
 def test_flow_sequence_declared_ref_root_extra_ignored_at_plan_layer(mock_pag):
-    """At the _build_plan layer (where depends_on is declared on the component
-    spec), a $ref token declared in depends_on inside an unknown root extra is
-    accepted and ignored like any other extra — identical planned steps — while
-    an undeclared token is rejected on the process step."""
+    """At the _build_plan layer a flow_sequence process body is no longer planned.
+
+    #159 S3 re-pin. The plan-layer leniency this pinned (a declared `$ref` in an
+    unknown root extra accepted, an undeclared one rejected on the step, the
+    update arm alike, and a same-name reuse skipping validation) belonged to the
+    retired flat-body route. Every one of those variants is now refused at
+    admission with the SAME value-free envelope — the root extra, its `$ref`
+    token, the action and the live account change nothing, because admission
+    reads key presence only. The direct-builder leniency stays pinned by
+    `test_flow_sequence_accepts_single_step_and_ignores_root_extras`.
+    """
     mock_pag.return_value = []
     case = _case("flow_sequence_composed")
 
@@ -746,50 +758,17 @@ def test_flow_sequence_declared_ref_root_extra_ignored_at_plan_layer(mock_pag):
             }
         }
 
+    field = "integration_spec.components.0.config.process_kind"
     baseline = _build_plan(MagicMock(), _spec())
-    assert baseline["_success"] is True
-    base_step = next(s for s in baseline["steps"] if s["key"] == "composed_process")
-    assert base_step["planned_action"] == "create"
+    _assert_unit_refusal(baseline, field=field)
 
     declared = _build_plan(MagicMock(), _spec(case["declared_ref_token"]))
-    assert declared["_success"] is True
-    declared_step = next(
-        s for s in declared["steps"] if s["key"] == "composed_process"
-    )
-    assert declared_step["planned_action"] == "create"
-    assert "validation_error" not in declared_step
-    assert declared["steps"] == baseline["steps"]
-    assert declared["execution_order"] == baseline["execution_order"]
-
     undeclared = _build_plan(MagicMock(), _spec(case["bogus_root_ref_value"]))
-    undeclared_step = next(
-        s for s in undeclared["steps"] if s["key"] == "composed_process"
-    )
-    assert undeclared_step["planned_action"] == "error_process_validation"
-    assert (
-        undeclared_step["validation_error"]["error_code"]
-        == case["expected_root_ref_error_code"]
-    )
-
-    # The update path is an authoring action too: the identical undeclared-ref
-    # config with action="update" + component_id is rejected the same way.
     update_spec = _spec(case["bogus_root_ref_value"])
     update_comp = update_spec["integration_spec"]["components"][0]
     update_comp["action"] = "update"
     update_comp["component_id"] = "99999999-9999-9999-9999-999999999999"
     updated = _build_plan(MagicMock(), update_spec)
-    updated_step = next(
-        s for s in updated["steps"] if s["key"] == "composed_process"
-    )
-    assert updated_step["planned_action"] == "error_process_validation"
-    assert (
-        updated_step["validation_error"]["error_code"]
-        == case["expected_root_ref_error_code"]
-    )
-
-    # The rejection is an AUTHORING-action behavior: a same-name match under
-    # the default conflict_policy="reuse" skips builder validation entirely —
-    # the identical undeclared-ref config plans as a clean reuse step.
     mock_pag.return_value = [
         {
             "component_id": "99999999-9999-9999-9999-999999999999",
@@ -804,12 +783,17 @@ def test_flow_sequence_declared_ref_root_extra_ignored_at_plan_layer(mock_pag):
         reused = _build_plan(MagicMock(), _spec(case["bogus_root_ref_value"]))
     finally:
         mock_pag.return_value = []
-    reused_step = next(s for s in reused["steps"] if s["key"] == "composed_process")
-    assert reused["_success"] is True
-    assert reused_step["planned_action"] == "reuse"
-    assert "validation_error" not in reused_step or (
-        reused_step["validation_error"] is None
-    )
+    for plan in (declared, undeclared, updated, reused):
+        assert plan == baseline
+    blob = json.dumps(baseline)
+    for leak in (
+        case["expected_root_ref_error_code"],
+        case["bogus_root_key"],
+        case["process_name"],
+        "missing_sentinel",
+        "DDP_SENTINEL_KEY",
+    ):
+        assert leak not in blob
 
 
 def test_flow_sequence_rejects_branch_leg_and_recursive_step_extras():

@@ -28,7 +28,10 @@ def test_instructions_route_profile_and_archetype_first():
     text = server.SERVER_INSTRUCTIONS
     assert "list_boomi_profiles" in text
     assert "list_integration_archetypes" in text
-    assert "build_from_archetype" in text
+    # #159 S3: recipe-first — the retired build tool is never routed to.
+    assert "build_from_archetype" not in text
+    assert "compose_archetypes" not in text
+    assert "authoring_request" in text
     assert "list_capabilities" in text
     assert "get_schema_template" in text
 

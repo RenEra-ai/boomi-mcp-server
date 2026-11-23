@@ -32,10 +32,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from boomi_mcp.categories.components.builders import ProcessFlowBuilder
-from boomi_mcp.categories.integration_authoring import (
-    compose_archetypes_action,
-    list_integration_archetypes_action,
-)
 from boomi_mcp.categories.integration_builder import _build_plan
 from boomi_mcp.errors import (
     COMPOSITION_COMPONENT_KEY_COLLISION,
@@ -230,6 +226,11 @@ def _options() -> Dict[str, Any]:
 
 
 def _compose(parts=None, options=None) -> Dict[str, Any]:
+    # #159 S3: the compose tool and its action are retired; imported HERE so the
+    # module (and the helpers other modules import from it) still collects once
+    # the action is gone, and only the tests of the retired action fail.
+    from boomi_mcp.categories.integration_authoring import compose_archetypes_action
+
     return compose_archetypes_action(
         parts=parts if parts is not None else _parts(),
         options=options if options is not None else _options(),
@@ -241,167 +242,27 @@ def _compose(parts=None, options=None) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_compose_success_emits_one_coherent_spec():
-    result = _compose()
-    assert result["_success"] is True
-    assert result["raw_xml_exposed"] is False
-    assert result["boomi_mutation"] is False
-    assert "plan" in result["next_steps"]
-    assert result["composition"] == {
-        "topology": "db_source->transform->rest_fanout",
-        "handoff": "document_stream",
-        "fanout_targets": 2,
-    }
-
-    spec = result["integration_spec"]
-    keys = [c["key"] for c in spec["components"]]
-    assert keys == [
-        "source_db_connection",
-        "source_db_read_profile",
-        "source_db_get_operation",
-        "transform_target_profile",
-        "transform_transform_map",
-        "target_rest_connection",
-        "target_rest_operation",
-        "target_billing_rest_connection",
-        "target_billing_rest_operation",
-        "main_process",
-    ]
-    assert spec["validation_rules"]["component_count"] == len(spec["components"])
-    composition = spec["validation_rules"]["composition"]
-    assert composition["first_target_part"] == "orders"
-    assert [p["kind"] for p in composition["parts"]] == [
-        "db_source",
-        "transform",
-        "rest_target",
-        "rest_target",
-    ]
-
-
-def test_compose_success_process_uses_flow_sequence_branch():
-    spec = _compose()["integration_spec"]
-    process = spec["components"][-1]
-    assert process["key"] == "main_process"
-    config = process["config"]
-    assert config["transform"] == {"mode": "passthrough"}
-    assert "reliability" not in config
-    seq = config["flow_sequence"]
-    assert [step["kind"] for step in seq] == ["map_ref", "branch"]
-    assert seq[0]["map_ref"] == "$ref:transform_transform_map"
-    legs = seq[1]["legs"]
-    assert [leg["target"]["operation_id"] for leg in legs] == [
-        "$ref:target_rest_operation",
-        "$ref:target_billing_rest_operation",
-    ]
-    for extra_key in (
-        "target_billing_rest_connection",
-        "target_billing_rest_operation",
-    ):
-        assert extra_key in process["depends_on"]
-
-
-def test_compose_fanout_components_bind_shared_profile_and_labels():
-    spec = _compose()["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    op = by_key["target_billing_rest_operation"]
-    assert op["config"]["request_profile_id"] == "$ref:transform_target_profile"
-    assert op["name"] == "DEMO Billing REST Send"
-    conn = by_key["target_billing_rest_connection"]
-    assert conn["name"] == "DEMO Billing REST Connection"
-    # The first target's label drives the base pair's display names too.
-    assert by_key["target_rest_connection"]["name"] == "DEMO Orders REST Connection"
-    assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
-
-
-def test_first_target_without_label_gets_humanized_key_names():
-    parts = _parts()
-    del parts[2]["label"]  # first target: derived label falls back to the key
-    spec = _compose(parts=parts)["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    assert by_key["target_rest_connection"]["name"] == "DEMO Orders REST Connection"
-    assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
-
-
-def test_explicit_component_name_overrides_beat_derived_labels():
-    options = _options()
-    options["naming"]["component_names"] = {
-        "rest_connection": "Custom First Connection",
-    }
-    spec = _compose(options=options)["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    assert by_key["target_rest_connection"]["name"] == "Custom First Connection"
-    # The non-overridden role still gets the derived-label default.
-    assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
-
-
-def test_invalid_component_name_override_still_fails_validation():
-    """A malformed role-keyed override (non-string) must reach NamingConfig
-    validation and fail — the derived-label default must never overwrite a
-    present caller value (compose behaves like the standalone archetype)."""
-    options = _options()
-    options["naming"]["component_names"] = {"rest_connection": 123}
-    result = _compose(options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-
-@pytest.mark.parametrize("malformed", ["bad", 0, [], ["a"]])
-def test_non_dict_component_names_still_fails_validation(malformed):
-    """A present non-dict component_names must flow verbatim to NamingConfig
-    and fail PARAM_VALIDATION_FAILED — never be silently replaced by derived
-    defaults (0, []) or crash the pre-validation copy ('bad')."""
-    options = _options()
-    options["naming"]["component_names"] = malformed
-    result = _compose(options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-
-def test_emitted_key_component_name_overrides_beat_derived_labels():
-    """The prefixed emitted key ('target_rest_connection') is a documented
-    override fallback (_component_names) — the derived-label default must not
-    shadow it by populating the higher-precedence role key."""
-    options = _options()
-    options["naming"]["component_names"] = {
-        "target_rest_connection": "Emitted-Key Connection Name",
-        "target_rest_operation": "Emitted-Key Operation Name",
-    }
-    spec = _compose(options=options)["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    assert by_key["target_rest_connection"]["name"] == "Emitted-Key Connection Name"
-    assert by_key["target_rest_operation"]["name"] == "Emitted-Key Operation Name"
-
-
-def test_fanout_create_default_headers_recorded_as_deferred_intent():
-    parts = _parts()
-    parts[3]["parameters"]["binding"]["settings"]["default_headers"] = {
-        "<<header name>>": "<<header value>>",
-    }
-    result = _compose(parts=parts)
-    assert result["_success"] is True
-    legs = result["integration_spec"]["validation_rules"]["composition"]["fanout_legs"]
-    deferred = legs[0]["deferred"]["default_headers"]
-    assert deferred["count"] == 1
-    # Counts only — the caller-authored header keys/values are never echoed.
-    assert "<<header name>>" not in json.dumps(deferred)
-
-
 def test_compose_registry_and_archetype_list_unchanged():
+    from boomi_mcp.categories.integration_authoring import (
+        list_integration_archetypes_action,
+    )
+
     listed = list_integration_archetypes_action()
     assert listed["_success"] is True
-    names = {a["name"] for a in listed["archetypes"]}
-    assert "compose_archetypes" not in names
-    assert "database_to_api_sync" in names
-    # #151 (M12.14): the neutral extraction and the removal of composition.py's
-    # `DatabaseToApiSyncArchetype` class binding must not change the catalog.
-    assert names == {
-        "api_to_api_sync",
-        "api_to_database_sync",
-        "database_to_api_sync",
-        "http_listener_to_db",
-        "http_listener_to_rest",
-        "stub_minimal_integration",
+    # #159 S3: discovery is recipe-only — the six default executables
+    # (step-4 decision 1). No composition or adapter entry is listed, and fan-out
+    # is served at its 2.0.0 default.
+    served = {(r["recipe_id"], r["recipe_version"]) for r in listed["recipes"]}
+    assert not any("compose_archetypes" in recipe_id for recipe_id, _v in served)
+    assert served == {
+        ("boomi.archetype.api_to_database_sync", "1.0.0"),
+        ("boomi.archetype.database_to_api_sync", "1.0.0"),
+        ("boomi.archetype.http_listener_to_db", "1.0.0"),
+        ("boomi.archetype.http_listener_to_rest", "1.0.0"),
+        ("boomi.archetype.stub_minimal", "1.0.0"),
+        ("boomi.compose.db_rest_fanout", "2.0.0"),
     }
+    assert listed["count"] == 6
 
 
 def test_composition_no_longer_re_exports_the_scheduled_archetype_class():
@@ -461,29 +322,6 @@ def test_the_neutral_modules_do_not_import_a_deletion_scheduled_archetype():
 # ---------------------------------------------------------------------------
 
 
-def test_composed_spec_plans_clean_and_emits_branch_xml():
-    spec = _compose()["integration_spec"]
-    with patch(_PAGINATE_TARGET, return_value=[]):
-        plan = _build_plan(
-            MagicMock(),
-            {"integration_spec": spec, "conflict_policy": "reuse"},
-        )
-    assert plan.get("_success", True) is not False
-    for step in plan["steps"]:
-        assert "validation_error" not in step, (step["key"], step.get("validation_error"))
-        assert step["planned_action"] in ("create", "reuse")
-
-    process = spec["components"][-1]
-    xml = ProcessFlowBuilder.build(process["config"], name=process["name"])
-    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
-    assert shapes.count("branch") == 1
-    # DB Get source + one REST send per leg.
-    assert shapes.count("connectoraction") == 3
-    # Each Branch leg terminates in its own Stop.
-    assert shapes.count("stop") == 2
-    assert shapes.count("map") == 1
-
-
 def test_golden_example_round_trips():
     payload = _example_payload(_EXAMPLE_PATH)
     # The example's typed recipe request reproduces its components and its direct
@@ -527,73 +365,9 @@ def test_golden_example_plans_clean():
 # ---------------------------------------------------------------------------
 
 
-def test_transform_referencing_undeclared_source_field_is_contract_mismatch():
-    parts = _parts()
-    parts[1]["parameters"]["operations"][0]["source_field"] = "not_declared"
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_CONTRACT_MISMATCH
-    assert "integration_spec" not in result
-
-
-def test_divergent_fanout_payload_profile_is_contract_mismatch():
-    parts = _parts()
-    parts[3]["parameters"]["payload_profile"] = _payload_profile("different_leaf")
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_CONTRACT_MISMATCH
-    assert "integration_spec" not in result
-
-
-def test_unmapped_required_leaf_is_contract_mismatch():
-    parts = _parts()
-    profile = _payload_profile("target_a")
-    profile["root"]["children"].append(
-        {
-            "name": "target_required",
-            "kind": "simple",
-            "data_type": "character",
-            "required": True,
-        }
-    )
-    parts[2]["parameters"]["payload_profile"] = copy.deepcopy(profile)
-    parts[3]["parameters"]["payload_profile"] = copy.deepcopy(profile)
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_CONTRACT_MISMATCH
-
-
 # ---------------------------------------------------------------------------
 # Unsupported topologies
 # ---------------------------------------------------------------------------
-
-
-def test_single_rest_target_is_unsupported_topology():
-    parts = _parts()[:3]
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-    assert "build_from_archetype" in result["suggestion"]
-
-
-def test_more_than_25_rest_targets_is_unsupported_topology():
-    parts = _parts()[:2]
-    template = _parts()[2]
-    for i in range(26):
-        part = copy.deepcopy(template)
-        part["key"] = f"t{i}"
-        part["label"] = f"Leg {chr(ord('A') + i)}"
-        parts.append(part)
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-
-
-def test_missing_transform_part_is_unsupported_topology():
-    parts = [p for p in _parts() if p["kind"] != "transform"]
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
 
 
 def _cache_links(*cache_targets: str) -> List[Dict[str, Any]]:
@@ -605,169 +379,6 @@ def _cache_links(*cache_targets: str) -> List[Dict[str, Any]]:
             link["handoff"] = {"mode": "document_cache"}
         links.append(link)
     return links
-
-
-def test_document_cache_handoff_composes_staged_fanout():
-    """M8.1 (#132): the formerly gated mixed-mode input now composes — the
-    cache-mode target leg re-reads staged documents behind a target-less
-    cache_put staging leg, backed by an auto-emitted in-spec Document Cache."""
-    options = _options()
-    options["links"] = _cache_links("billing")
-    result = _compose(options=options)
-    assert result["_success"] is True
-    assert result["composition"]["handoff"] == "mixed"
-
-    spec = result["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    cache = by_key["handoff_document_cache"]
-    assert cache["type"] == "documentcache"
-    assert cache["config"]["profile_id"] == "$ref:transform_target_profile"
-    assert cache["config"]["profile_type"] == "profile.json"
-    assert cache["depends_on"] == ["transform_target_profile"]
-    indexes = cache["config"]["indexes"]
-    assert indexes and indexes[0]["keys"]
-    # The index key references a REAL generated-profile element key (the
-    # first mappable simple leaf), never an invented constant.
-    key_entry = indexes[0]["keys"][0]
-    assert key_entry["element_key"] == str(key_entry["id"])
-    assert "target_a" in key_entry["name"]
-
-    process = spec["components"][-1]
-    assert process["key"] == "main_process"
-    assert "handoff_document_cache" in process["depends_on"]
-    legs = process["config"]["flow_sequence"][1]["legs"]
-    assert len(legs) == 3
-    # Leg 1: the stream-mode orders target, untouched.
-    assert legs[0] == {
-        "target": {
-            "connector_type": "rest",
-            "action_type": "POST",
-            "connection_id": "$ref:target_rest_connection",
-            "operation_id": "$ref:target_rest_operation",
-        }
-    }
-    # Leg 2: target-less cache_put staging (Add to Cache consumes the stream).
-    assert "target" not in legs[1]
-    assert [s["kind"] for s in legs[1]["steps"]] == ["cache_put"]
-    assert legs[1]["steps"][0]["document_cache_id"] == "$ref:handoff_document_cache"
-    # Leg 3: cache_get before the billing REST send.
-    assert [s["kind"] for s in legs[2]["steps"]] == ["cache_get"]
-    assert legs[2]["steps"][0]["document_cache_id"] == "$ref:handoff_document_cache"
-    assert legs[2]["target"]["operation_id"] == "$ref:target_billing_rest_operation"
-
-    composition = spec["validation_rules"]["composition"]
-    assert composition["handoff"] == "mixed"
-    assert composition["cache_component_key"] == "handoff_document_cache"
-    assert composition["staging_leg"] == 2
-    assert composition["handoff_modes"] == {
-        "orders": "document_stream",
-        "billing": "document_cache",
-    }
-    assert composition["fanout_legs"][0]["leg"] == 3
-    assert composition["fanout_legs"][0]["handoff"] == "document_cache"
-    assert spec["validation_rules"]["component_count"] == len(spec["components"])
-
-
-def test_all_cache_handoff_full_staged_fanout():
-    options = _options()
-    options["links"] = _cache_links("orders", "billing")
-    result = _compose(options=options)
-    assert result["_success"] is True
-    assert result["composition"]["handoff"] == "document_cache"
-
-    spec = result["integration_spec"]
-    legs = spec["components"][-1]["config"]["flow_sequence"][1]["legs"]
-    assert len(legs) == 3
-    # Staging leg first, then BOTH consumers re-read before their sends.
-    assert "target" not in legs[0]
-    assert [s["kind"] for s in legs[0]["steps"]] == ["cache_put"]
-    for leg in legs[1:]:
-        assert [s["kind"] for s in leg["steps"]] == ["cache_get"]
-        assert leg["target"]
-    composition = spec["validation_rules"]["composition"]
-    assert composition["staging_leg"] == 1
-    assert composition["handoff_modes"] == {
-        "orders": "document_cache",
-        "billing": "document_cache",
-    }
-
-
-def test_cache_component_follows_integration_folder_placement():
-    """The handoff cache must land in the SAME folder as every other emitted
-    component — DocumentCacheBuilder emits folderFullPath from
-    config['folder_path'], so dropping it would strand the cache in the
-    account root (Codex review P2)."""
-    options = _options()
-    options["naming"]["folder_path"] = "Integrations/Demo/Fanout"
-    options["links"] = _cache_links("orders", "billing")
-    spec = _compose(options=options)["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    cache_config = by_key["handoff_document_cache"]["config"]
-    assert cache_config["folder_path"] == "Integrations/Demo/Fanout"
-    # Folderless naming stays folderless (the golden example shape).
-    options = _options()
-    options["links"] = _cache_links("orders", "billing")
-    spec = _compose(options=options)["integration_spec"]
-    by_key = {c["key"]: c for c in spec["components"]}
-    assert "folder_path" not in by_key["handoff_document_cache"]["config"]
-
-
-def test_cache_handoff_spec_plans_clean_and_emits_cache_xml():
-    options = _options()
-    options["links"] = _cache_links("orders", "billing")
-    spec = _compose(options=options)["integration_spec"]
-    with patch(_PAGINATE_TARGET, return_value=[]):
-        plan = _build_plan(
-            MagicMock(),
-            {"integration_spec": spec, "conflict_policy": "reuse"},
-        )
-    assert plan.get("_success", True) is not False
-    for step in plan["steps"]:
-        assert "validation_error" not in step, (step["key"], step.get("validation_error"))
-        assert step["planned_action"] in ("create", "reuse")
-
-    process = spec["components"][-1]
-    xml = ProcessFlowBuilder.build(process["config"], name=process["name"])
-    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
-    assert shapes.count("branch") == 1
-    assert shapes.count("doccacheload") == 1  # one staging Add to Cache
-    assert shapes.count("doccacheretrieve") == 2  # one retrieve per consumer
-    # DB Get source + one REST send per consuming leg.
-    assert shapes.count("connectoraction") == 3
-    assert shapes.count("map") == 1
-
-
-def test_document_cache_on_source_link_is_unsupported_topology():
-    options = _options()
-    options["links"] = [
-        {
-            "from_part": "db",
-            "to_part": "shape",
-            "handoff": {"mode": "document_cache"},
-        },
-        {"from_part": "shape", "to_part": "orders"},
-        {"from_part": "shape", "to_part": "billing"},
-    ]
-    result = _compose(options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-    assert "transform -> rest_target" in result["error"]
-    assert "integration_spec" not in result
-
-
-def test_keyed_cache_handoff_fields_stay_gated():
-    for gated_field, value in (
-        ("doc_cache_index", 1),
-        ("cache_key_values", [{"cache_key_id": 2}]),
-    ):
-        options = _options()
-        options["links"] = _cache_links("billing")
-        options["links"][2]["handoff"][gated_field] = value
-        result = _compose(options=options)
-        assert result["_success"] is False
-        assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-        assert "cache_property_authoring" in result["suggestion"]
-        assert "integration_spec" not in result
 
 
 def _many_target_compose(count: int, cache: bool) -> Dict[str, Any]:
@@ -786,50 +397,6 @@ def _many_target_compose(count: int, cache: bool) -> Dict[str, Any]:
     options = _options()
     options["links"] = links
     return _compose(parts=parts, options=options)
-
-
-def test_cache_handoff_with_25_targets_exceeds_leg_budget():
-    result = _many_target_compose(25, cache=True)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-    assert "24" in result["error"]
-    # The same 25 targets compose fine when every handoff streams.
-    assert _many_target_compose(25, cache=False)["_success"] is True
-
-
-def test_cache_handoff_with_24_targets_fits_leg_budget():
-    result = _many_target_compose(24, cache=True)
-    assert result["_success"] is True
-    legs = result["integration_spec"]["components"][-1]["config"][
-        "flow_sequence"
-    ][1]["legs"]
-    assert len(legs) == 25  # staging leg + 24 targets = full Branch budget
-
-
-def test_reversed_cache_legs_fail_before_mutation():
-    """The #123 lineage gate rejects a read-before-write leg order at
-    compose/plan time — a tampered spec never reaches a Boomi mutation."""
-    options = _options()
-    options["links"] = _cache_links("orders", "billing")
-    spec = _compose(options=options)["integration_spec"]
-    process = spec["components"][-1]
-    legs = process["config"]["flow_sequence"][1]["legs"]
-    # Move the cache_put staging leg AFTER both consuming legs.
-    legs.append(legs.pop(0))
-
-    residual = ProcessFlowBuilder.validate_config(
-        process["config"], depends_on=process["depends_on"]
-    )
-    assert residual is not None
-    assert residual.error_code == "PROCESS_LINEAGE_BRANCH_ORDER_INVALID"
-
-    with patch(_PAGINATE_TARGET, return_value=[]):
-        plan = _build_plan(
-            MagicMock(),
-            {"integration_spec": spec, "conflict_policy": "reuse"},
-        )
-    flagged = [s for s in plan["steps"] if s.get("validation_error")]
-    assert flagged, "the tampered process step must carry a validation_error"
 
 
 _CACHE_EXAMPLE_PATH = (
@@ -926,146 +493,14 @@ def test_the_shipped_m8_examples_apply_clean_in_dry_run():
         )
 
 
-def test_explicit_star_links_accepted_and_wrong_links_rejected():
-    options = _options()
-    options["links"] = [
-        {"from_part": "db", "to_part": "shape"},
-        {"from_part": "shape", "to_part": "orders"},
-        {"from_part": "shape", "to_part": "billing"},
-    ]
-    assert _compose(options=options)["_success"] is True
-
-    options["links"] = [
-        {"from_part": "db", "to_part": "orders"},
-        {"from_part": "shape", "to_part": "orders"},
-        {"from_part": "shape", "to_part": "billing"},
-    ]
-    result = _compose(options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-
-
-def test_path_replacements_on_any_target_is_unsupported_topology():
-    parts = _parts()
-    parts[2]["parameters"]["send_request"] = {
-        "method": "POST",
-        "path": "/v1/orders/{orderId}",
-        "path_replacements": [{"name": "orderId", "target_path": "Root/target_a"}],
-    }
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-
-
-def test_watermark_query_parameter_on_fanout_target_is_unsupported_topology():
-    parts = _parts()
-    parts[3]["parameters"]["send_request"] = {
-        "method": "POST",
-        "path": "/v1/billing",
-        "query_parameters": [{"name": "since", "value_source": "watermark"}],
-    }
-    options = _options()
-    options["execution"] = {
-        "trigger": {"mode": "manual"},
-        "watermark": {"field": "source_a", "kind": "timestamp", "persistence": "dpp"},
-    }
-    result = _compose(parts=parts, options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-
-
 # ---------------------------------------------------------------------------
 # Key / name collisions
 # ---------------------------------------------------------------------------
 
 
-def test_duplicate_part_keys_collide():
-    parts = _parts()
-    parts[3]["key"] = parts[2]["key"]
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_COMPONENT_KEY_COLLISION
-
-
-def test_colliding_slug_prefixes_collide():
-    parts = _parts()
-    extra = copy.deepcopy(parts[3])
-    extra["key"] = "billing "  # strips, then slugs identically to 'billing'
-    extra["label"] = "Billing Two"
-    parts.append(extra)
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_COMPONENT_KEY_COLLISION
-
-
-def test_duplicate_labels_collide():
-    parts = _parts()
-    parts[3]["label"] = parts[2]["label"]
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == COMPOSITION_COMPONENT_KEY_COLLISION
-
-
 # ---------------------------------------------------------------------------
 # Parameter validation + envelope hygiene
 # ---------------------------------------------------------------------------
-
-
-def test_malformed_part_parameters_return_field_errors():
-    parts = _parts()
-    del parts[0]["parameters"]["read_operation"]
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-    assert result["field_errors"]
-
-
-def test_unknown_part_kind_rejected():
-    parts = _parts()
-    parts[0]["kind"] = "queue_source"
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-
-def test_reliability_options_are_rejected_not_dropped():
-    options = _options()
-    options["reliability"] = {"retry": {"max_attempts": 3}}
-    result = _compose(options=options)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-
-def test_parts_accepts_json_string_and_rejects_non_array():
-    result = compose_archetypes_action(
-        parts=json.dumps(_parts()), options=json.dumps(_options())
-    )
-    assert result["_success"] is True
-
-    result = compose_archetypes_action(parts='{"not": "an array"}')
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-
-
-def test_secured_create_auth_on_fanout_target_rejected():
-    parts = _parts()
-    parts[3]["parameters"]["binding"]["settings"]["auth_mode"] = "basic"
-    result = _compose(parts=parts)
-    assert result["_success"] is False
-    # RestCreateSettings gates the auth vocabulary at the contract boundary.
-    assert result["error_code"] in (
-        "PARAM_VALIDATION_FAILED",
-        "UNSUPPORTED_REST_AUTH_MODE",
-    )
-
-
-def test_action_never_touches_boomi_or_credentials():
-    with (
-        patch("boomi_mcp.categories.integration_builder.paginate_metadata") as m_paginate,
-    ):
-        result = _compose()
-    assert result["_success"] is True
-    m_paginate.assert_not_called()
 
 
 def test_composition_error_codes_are_in_taxonomy():

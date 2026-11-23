@@ -71,21 +71,19 @@ _AUTHORITY_VERSIONS = {
     "legacy_only_input_forms": ["source_description", "bare_top_level"],
     "v1_deprecated": False,
     "strict_behavior": (
-        "On version='1.1' an authored top-level integration_spec.pipeline is "
-        "validated against the single authored process's normalized semantics. A "
-        "disagreement — or an ambiguous spec that authors two or more processes — "
-        "is rejected at plan time with LEGACY_ADAPTER_AUTHORITY_CONFLICT, before "
-        "collision resolution and before any mutation. The view is withheld "
-        "(echoed as null) when the authored process resolves to reuse of an "
-        "existing component. version='1.1' NEVER makes the top-level pipeline "
-        "executable; the process component's own config remains the only "
-        "executable authority."
+        "Since #159 S3, version='1.1' selects no different behaviour from '1.0': "
+        "the strict pipeline-vs-process authority retired with the legacy "
+        "process builders, so no serving route raises "
+        "LEGACY_ADAPTER_AUTHORITY_CONFLICT any more. An authored top-level "
+        "integration_spec.pipeline is an inert analysis view on both versions "
+        "and is never executable; build_integration authors a process only from a "
+        "canonical ProcessIR unit (integration_spec.processes, or authoring_request "
+        "with intent_kind='process_ir'), its only executable process authority."
     ),
     "legacy_behavior": (
-        "On version='1.0' (the default, and the value every archetype emits) an "
-        "authored top-level pipeline is accepted and preserved as an inert echo "
-        "that drives nothing, exactly as before — including when it contradicts "
-        "the authored process."
+        "On version='1.0' (the default) an authored top-level pipeline is "
+        "accepted and preserved as an inert echo that drives nothing — "
+        "including when it contradicts the authored process."
     ),
 }
 
@@ -582,16 +580,28 @@ _PROCESS_OVERVIEW = {
     "read_only": True,
     "hint": (
         "manage_process is read-only (list/get). Author processes with "
-        "build_from_archetype()/build_integration using a typed "
-        "config.process_kind; use get_schema_template(resource_type='process', "
-        "protocol='database_to_api_sync'|'wrapper_subprocess'|'sync_pipeline') "
-        "for protocol templates."
+        "build_integration using config.authoring_request: a recipe from "
+        "list_integration_archetypes() (intent_kind='recipe') or ProcessIR "
+        "units (intent_kind='process_ir'; get_schema_template("
+        "schema_name='AuthoringRequestV1'). A legacy config.process_kind body "
+        "is refused with PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED."
     ),
 }
 
+#: #159 S3: the three legacy process_kind protocol templates are RETIRED. A
+#: process body is authored only as a canonical unit, so a template teaching a
+#: config.process_kind body would teach a shape admission refuses
+#: (PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED). The names stay addressable so a
+#: caller who asks gets the removal envelope below instead of "unknown".
+_RETIRED_PROCESS_PROTOCOLS: Tuple[str, ...] = (
+    "database_to_api_sync",
+    "wrapper_subprocess",
+    "sync_pipeline",
+)
+
 # Legacy freeform process JSON authoring has been removed. The
 # operation='create' schema now returns removal guidance instead of a
-# shape-graph template, steering callers to typed process_kind authoring.
+# shape-graph template, steering callers to canonical authoring units.
 _PROCESS_CREATE_REMOVED = {
     "resource_type": "process",
     "operation": "create",
@@ -603,21 +613,27 @@ _PROCESS_CREATE_REMOVED = {
     ),
     "use_instead": {
         "archetype_first": (
-            "list_integration_archetypes() → build_from_archetype() → "
-            "build_integration(action='plan'|'apply')"
+            "list_integration_archetypes() → get_integration_archetype() → "
+            "build_integration(action='plan'|'compile'|'apply') with "
+            "config.authoring_request (intent_kind='recipe')"
         ),
         "typed_process_kind": (
-            "Set config.process_kind to one of "
-            "['database_to_api_sync', 'wrapper_subprocess', 'sync_pipeline'] on a "
-            "build_integration process component. See "
-            "get_schema_template(resource_type='process', protocol=...)."
+            "Retired (#159 S3): a config.process_kind (or process_type / "
+            "flow_sequence) body is refused with "
+            "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED. Author the process as "
+            "authoring_request.intent with intent_kind='process_ir' (one unit per "
+            "process: envelope + ProcessIR root), or as a typed unit in "
+            "integration_spec.processes; see get_schema_template("
+            "schema_name='AuthoringRequestV1'). A flat type='process' row may "
+            "only bind an existing process (config.reference_only=true with "
+            "config.component_id)."
         ),
         "raw_xml_escape_hatch": (
             "manage_component (type='component', config.xml) for hand-authored "
             "process XML."
         ),
     },
-    "process_protocols": ["database_to_api_sync", "wrapper_subprocess", "sync_pipeline"],
+    "retired_process_protocols": list(_RETIRED_PROCESS_PROTOCOLS),
 }
 
 _PROCESS_LIST = {
@@ -694,11 +710,15 @@ _INTEGRATION_PLAN = {
         "You can also provide integration_spec directly instead of source_description.",
         "plan is read-only and returns deterministic execution order with endpoint routes.",
         "Dependency tokens in config can reference previous components with $ref:<component_key>.",
-        "Process components require a typed config.process_kind "
-        "(database_to_api_sync / wrapper_subprocess / sync_pipeline) — freeform shape-graph "
-        "process JSON is no longer supported. Author processes with "
-        "build_from_archetype()/build_integration, and inspect the per-kind "
-        "shape via get_schema_template(resource_type='process', protocol=...).",
+        "A process body is authored only as a canonical unit: "
+        "config.authoring_request (a recipe from list_integration_archetypes(), "
+        "or intent_kind='process_ir' units) or a typed unit in "
+        "integration_spec.processes. A flat type='process' row may only bind an "
+        "existing process (config.reference_only=true with config.component_id); "
+        "a config.process_kind / process_type / flow_sequence body, like freeform "
+        "shape-graph process JSON, is refused with "
+        "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED before anything is planned or "
+        "written.",
     ],
 }
 
@@ -785,7 +805,7 @@ _COMPONENT_OVERVIEW = {
 _COMPONENT_CREATE = {
     "resource_type": "component",
     "operation": "create",
-    "note": "Boomi's Component API requires type-specific XML. For processes, prefer build_from_archetype()/build_integration with a typed config.process_kind; use config.xml here only as an explicit raw-XML escape hatch.",
+    "note": "Boomi's Component API requires type-specific XML. For processes, prefer build_integration with config.authoring_request (a recipe from list_integration_archetypes() or ProcessIR units); use config.xml here only as an explicit raw-XML escape hatch.",
     "xml_template": (
         '<Component xmlns="http://api.platform.boomi.com/"\n'
         '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
@@ -803,7 +823,7 @@ _COMPONENT_CREATE = {
         "2. Use query_components get action to retrieve its full XML",
         "3. Modify the XML for your new component",
         "4. Pass modified XML as config.xml to manage_component create action",
-        "   OR for processes: use build_from_archetype()/build_integration with a typed config.process_kind",
+        "   OR for processes: use build_integration with config.authoring_request (a recipe from list_integration_archetypes() or ProcessIR units)",
     ],
 }
 
@@ -6057,9 +6077,9 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
         "create_and_deploy_process": {
             "description": "Author a typed process and deploy it (freeform process JSON authoring has been removed)",
             "steps": [
-                "1. list_integration_archetypes() / get_schema_template(resource_type='process', protocol='database_to_api_sync'|'wrapper_subprocess'|'sync_pipeline') → pick a typed process_kind and inspect its schema",
-                "2. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (or hand-author a process component with config.process_kind)",
-                "3. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the process component(s)",
+                "1. list_integration_archetypes() → pick an executable recipe (recipe_id + exact recipe_version); get_integration_archetype(name='<recipe_id>', recipe_version='<version>') returns its input_schema (or author ProcessIR units against get_schema_template(schema_name='AuthoringRequestV1'))",
+                "2. build_integration(action='compile', config='{\"authoring_request\": {\"contract_version\": \"2\", \"intent\": {\"intent_kind\": \"recipe\", ...}}}') → compile hash + capability revision (no Boomi mutation)",
+                "3. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {..., \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → create the process component(s)",
                 "4. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
                 "5. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
                 "6. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
@@ -6067,7 +6087,7 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             ],
         },
         "build_integration_from_description": {
-            "description": "Author an integration: FIRST consult design_doctrine and select patterns by capability_status, THEN prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
+            "description": "Author an integration: FIRST consult design_doctrine and select patterns by capability_status, THEN prefer an executable recipe; fall back to direct ProcessIR units only when no recipe fits.",
             "steps": [
                 "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
                 # Design-consultation step (issue #86). A parsable
@@ -6078,31 +6098,31 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 # tool is absent rather than advertising an unusable consult.
                 # Routing lives in this response payload, never in a tool
                 # description (MCP-conformance, issue #86).
-                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff). For cache / dynamic-property / state-handoff intents also consult get_schema_template(schema_name='cache_property_authoring') (per-term capability_status + provenance, #124) — plan-time lineage validation rejects unprovable cache/property reads before any mutation.",
-                "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
-                "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
+                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing a recipe; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff). For cache / dynamic-property / state-handoff intents also consult get_schema_template(schema_name='cache_property_authoring') (per-term capability_status + provenance, #124) — plan-time lineage validation rejects unprovable cache/property reads before any mutation.",
+                "3. list_integration_archetypes() → discover the executable recipe catalog: recipe_id + exact recipe_version per row (read-only, no Boomi mutation)",
+                "4. get_integration_archetype(name='<recipe_id>', recipe_version='<version>') → inspect the descriptor (capability_notes, limitations, examples), input_schema and, where declared, component_material_schema",
                 # Connection-reuse discovery (issue #83, M7.3). Interposed BEFORE
-                # build_from_archetype so callers check for an existing secured
-                # connection first and feed the returned reference_only /
-                # conflict_policy='reuse' binding into archetype parameters/spec
-                # authoring — keeping credentials out of the conversation. A
+                # the first build_integration call so callers check for an
+                # existing secured connection first and feed the returned
+                # reference_only / conflict_policy='reuse' binding into the
+                # authoring request — keeping credentials out of the conversation. A
                 # parsable suggest_connection_reuse(...) step so the available_tools
                 # filter tracks it; it is stripped (see below) when that tool is
                 # not registered so the core authoring chain still surfaces.
-                "5. suggest_connection_reuse(profile='...', connector_type='...', endpoint_hint='...') → check for an EXISTING secured connection to reuse (reference_only + conflict_policy='reuse') before authoring a new one; feed any returned reuse binding into the archetype parameters / spec (read-only, no Boomi mutation)",
-                "6. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
-                "7. build_integration(action='plan', config='{\"integration_spec\": <spec from step 6>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "8. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 6>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
-                "9. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 6>, ...}') → execute ordered component creation/update",
+                "5. suggest_connection_reuse(profile='...', connector_type='...', endpoint_hint='...') → check for an EXISTING secured connection to reuse (reference_only + conflict_policy='reuse') before authoring a new one; feed any returned reuse binding into the recipe input (binding_mode='reuse') or the request's base_components (read-only, no Boomi mutation)",
+                "6. build_integration(action='plan', config='{\"authoring_request\": {\"contract_version\": \"2\", \"intent\": {\"intent_kind\": \"recipe\", \"integration_name\": \"...\", \"invocations\": [{\"recipe_id\": \"...\", \"recipe_version\": \"...\", \"invocation_id\": \"...\", \"raw_input\": {...}, \"component_material\": {...}}]}}}') → semantic validation, gaps and the authoring_result.integration_spec_preview (no Boomi mutation)",
+                "7. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <authoring_result.integration_spec_preview from step 6>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+                "8. build_integration(action='compile', config='{\"authoring_request\": <request from step 6>}') → capability revision + compile hash (no Boomi mutation)",
+                "9. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {<request from step 6>, \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → execute ordered component creation/update",
                 "10. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
                 "11. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
             ],
             "fallback": {
-                "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
+                "when": "No recipe fits — e.g., an integration shape not yet covered by the recipe registry.",
                 "steps": [
-                    "F1. get_schema_template(resource_type='integration', operation='plan') → get raw IntegrationSpecV1 template",
-                    "F2. build_integration(action='plan', config='...') → validate the hand-authored spec",
-                    "F3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute",
+                    "F1. get_schema_template(schema_name='AuthoringRequestV1') → the exact request schema; author ProcessIR units (intent_kind='process_ir') against get_schema_template(schema_name='ProcessIRV1')",
+                    "F2. build_integration(action='plan', config='{\"authoring_request\": ...}') → validate the hand-authored units, then action='compile' for the compile hash",
+                    "F3. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {..., \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → execute",
                     "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
                     "F5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview the deploy plan; re-run with dry_run=false to package → deploy → bind runtime → optional schedule/test.",
                 ],
@@ -6112,20 +6132,19 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             "description": (
                 "Compose a multi-target integration (M8 / issue #14): one DB "
                 "source feeding a shared transform that fans out to 2..25 REST "
-                "targets via a Branch — use this when the requested shape "
-                "exceeds one linear archetype preset. Links may stage the "
+                "targets via a Branch — the boomi.compose.db_rest_fanout recipe, "
+                "for a shape that exceeds one linear recipe. Links may stage the "
                 "fan-out through a Document Cache (M8.1 / #132: "
                 "handoff.mode='document_cache' lowers onto M11 cache_put/"
                 "cache_get; write-before-read leg order is validated at "
-                "compose/plan time, before any Boomi mutation)."
+                "plan time, before any Boomi mutation)."
             ),
             "steps": [
-                "1. get_schema_template(schema_name='compose_archetypes') → inspect the part-kind vocabulary, v1 topology, and handoff modes; for document_cache handoffs also consult get_schema_template(schema_name='cache_property_authoring')",
-                "2. get_integration_archetype(name='database_to_api_sync') → inspect the source/transform/target sub-contracts the parts reuse",
-                "3. compose_archetypes(parts=[...], options={...}) → emit ONE coherent IntegrationSpecV1 (no Boomi mutation; invalid contract links fail here)",
-                "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>}') → execute ordered component creation",
-                "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind; re-run with dry_run=false to execute",
+                "1. get_integration_archetype(name='boomi.compose.db_rest_fanout') → inspect the fan-out input_schema (source, transform, targets, links, handoff modes) and its component_material_schema; for document_cache handoffs also consult get_schema_template(schema_name='cache_property_authoring')",
+                "2. build_integration(action='plan', config='{\"authoring_request\": {\"contract_version\": \"2\", \"intent\": {\"intent_kind\": \"recipe\", \"integration_name\": \"...\", \"invocations\": [{\"recipe_id\": \"boomi.compose.db_rest_fanout\", \"recipe_version\": \"2.0.0\", \"invocation_id\": \"...\", \"raw_input\": {...}, \"component_material\": {...}}]}}}') → preview the deterministic plan (invalid contract links fail here, before any Boomi mutation)",
+                "3. build_integration(action='compile', config='{\"authoring_request\": <request from step 2>}') → capability revision + compile hash (no Boomi mutation)",
+                "4. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {<request from step 2>, \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → execute ordered component creation",
+                "5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind; re-run with dry_run=false to execute",
             ],
         },
         "build_and_verify_http_listener": {
@@ -6147,10 +6166,10 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             ),
             "steps": [
                 "1. manage_shared_resources(action='get_server_info', resource_id='<runtime-id>') → read apiType FIRST (it selects the publish pattern) and whether auth requires a Basic token",
-                "2. get_integration_archetype(name='http_listener_to_db') or get_integration_archetype(name='http_listener_to_rest') → inspect the listener parameter contract (objectName, operationType, JSON payload profile, optional inbound_validation, asc_wrapper)",
-                "3. build_from_archetype(name='http_listener_to_db'|'http_listener_to_rest', parameters={...}) → apiType basic/intermediate: default bare WSS; apiType advanced: set asc_wrapper.enabled=true AND a unique asc_wrapper.base_url_path (one deployed ASC serves per base urlPath — a same-base ASC deployed earlier shadows the whole component; emits a typed webservice component routing to the listener process; /ws/rest endpoint recorded in validation_rules.listener)",
-                "4. build_integration(action='plan', config='{\"integration_spec\": <spec>, \"conflict_policy\": \"reuse\"}') → preview the deterministic plan (ASC route dependencies validated here)",
-                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the components",
+                "2. get_integration_archetype(name='boomi.archetype.http_listener_to_db') or get_integration_archetype(name='boomi.archetype.http_listener_to_rest') → inspect the listener recipe's input_schema and component_material_schema (object_name, operation_type, JSON payload profile, optional inbound_validation, publish_mode / api_service)",
+                "3. build_integration(action='plan', config='{\"authoring_request\": {\"contract_version\": \"2\", \"intent\": {\"intent_kind\": \"recipe\", \"integration_name\": \"...\", \"invocations\": [{\"recipe_id\": \"boomi.archetype.http_listener_to_db\", \"recipe_version\": \"1.0.0\", \"invocation_id\": \"...\", \"raw_input\": {...}, \"component_material\": {...}}]}}}') → apiType basic/intermediate: default raw_input.listener.publish_mode='bare_wss'; apiType advanced: set publish_mode='api_service' AND a unique component_material.api_service.base_url_path (one deployed ASC serves per base urlPath — a same-base ASC deployed earlier shadows the whole component); previews the deterministic plan (ASC route dependencies validated here)",
+                "4. build_integration(action='compile', config='{\"authoring_request\": <request from step 3>}') → capability revision + compile hash (no Boomi mutation)",
+                "5. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {<request from step 3>, \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → create the components",
                 "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=false, config='{\"listener_test_payload\": \"<json>\", \"listener_base_url\": \"<override when the runtime url is not reachable from here>\"}') → deploy the process (+ the ASC in api_service mode) + listener_verify (tier preflight, active-deployment checks, collision scan, authenticated probe of the /ws/simple or /ws/rest endpoint, execution-record readback)",
                 "7. monitor_platform(action='execution_records', config='{\"process_id\": \"...\"}') → inspect the triggered execution — an HTTP 2xx ack does NOT imply process success (live-proven: 200 with an ERROR execution)",
             ],
@@ -6236,7 +6255,6 @@ def _valid_schema_names() -> list:
         "process_property",
         "document_cache",
         "api_service",
-        "compose_archetypes",
         # Issue #145 M12.10 — typed recipe contributions.
         "recipe_contributions",
         "recipe_registry",
@@ -6256,29 +6274,16 @@ def _valid_schema_names() -> list:
         pass
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
-    # import-safe, so no try/except guard (unlike the archetype registry
-    # discovery below).
+    # import-safe, so no try/except guard (unlike the recipe registry below).
     names += [f"design_pattern:{name}" for name in valid_design_pattern_names()]
     names += [
         f"governance_pattern:{name}" for name in valid_governance_pattern_names()
     ]
+    # #159 S3: the archetype:<name> selectors retired; nothing here reaches the
+    # archetype pattern registry any more.
     try:
-        # Call-time import — registry discovery imports patterns.archetypes.*,
-        # which imports categories.components.builders; keep meta_tools free of
-        # that import-order constraint. Pass the package MODULE (resolved
-        # relatively), not a hard-coded name, so discovery works from both the
-        # boomi_mcp.* and src.boomi_mcp.* namespaces.
-        from .. import patterns as patterns_pkg
-        from ..patterns import PatternKind, PatternRegistry
-        registry = PatternRegistry.from_package(patterns_pkg)
-        archetypes = registry.list_patterns(kind=PatternKind.ARCHETYPE)
-    except Exception:  # noqa: BLE001 — discovery is advisory here
-        return names
-    names += [f"archetype:{cls.metadata.name}" for cls in archetypes]
-    try:
-        # Same best-effort discipline as the archetype discovery above: a
-        # registry construction failure must not break the error envelope that
-        # calls this function purely to LIST valid names.
+        # Best-effort: a registry construction failure must not break the error
+        # envelope that calls this function purely to LIST valid names.
         from ..recipes import production_registry
 
         names += [
@@ -6299,8 +6304,8 @@ def _valid_schema_names() -> list:
 _SCRIPT_DATAPROCESS_AUTHORING_SCHEMA = {
     "surface": "data_process custom_scripting step (transform.steps[].script)",
     "tool": (
-        "build_integration — a process config.process_kind transform carrying a "
-        "data_process custom_scripting step"
+        "build_integration — a ProcessIR data_process custom_scripting step in "
+        "config.authoring_request"
     ),
     "language": "groovy2",
     "docs": "search_boomi_docs('Boomi Custom Scripting dataContext')",
@@ -6679,6 +6684,22 @@ def _recipe_registry_schema() -> Dict[str, Any]:
     from ..recipes import production_registry
     from ..recipes.contracts import ExpectedRecipeRegistryV1
 
+    snapshot = production_registry().snapshot()
+    # #159 S3: described for exactly the entry kinds the LIVE registry carries.
+    # The compatibility adapters retired, so a hand-kept description of a kind
+    # no registration has would advertise an entry a caller can never see.
+    live_kinds = {str(entry.get("entry_kind", "")) for entry in snapshot.get("entries", ())}
+    entry_kinds = {
+        "executable_recipe": "registered code that may emit any declared contribution type",
+        "constraint_only": "registered code that may emit ConstraintRequirement only",
+        "advisory": (
+            "a doctrine pointer. Registry construction rejects an advisory "
+            "entry that declares an executor, an input schema or outputs, so "
+            "no advisory descriptor a caller can reach carries one — and "
+            "doctrine prose is never parsed into a recipe id"
+        ),
+        "compatibility_adapter": "a legacy surface that projects into an exact recipe version",
+    }
     return {
         "_success": True,
         "schema_name": "recipe_registry",
@@ -6686,18 +6707,10 @@ def _recipe_registry_schema() -> Dict[str, Any]:
         "read_only": True,
         "raw_xml_exposed": False,
         "boomi_mutation": False,
-        "snapshot": production_registry().snapshot(),
+        "snapshot": snapshot,
         "expected_registry_schema": ExpectedRecipeRegistryV1.model_json_schema(),
         "entry_kinds": {
-            "executable_recipe": "registered code that may emit any declared contribution type",
-            "constraint_only": "registered code that may emit ConstraintRequirement only",
-            "advisory": (
-                "a doctrine pointer. Registry construction rejects an advisory "
-                "entry that declares an executor, an input schema or outputs, so "
-                "no advisory descriptor a caller can reach carries one — and "
-                "doctrine prose is never parsed into a recipe id"
-            ),
-            "compatibility_adapter": "a legacy surface that projects into an exact recipe version",
+            kind: text for kind, text in entry_kinds.items() if kind in live_kinds
         },
         "skew_note": (
             "Equal recipe versions are NOT proof of equal code. Supply "
@@ -6735,18 +6748,15 @@ def _recipe_descriptor_schema(reference: str) -> Dict[str, Any]:
         "read_only": True,
         "raw_xml_exposed": False,
         "boomi_mutation": False,
-        "descriptor": descriptor.public_payload(),
     }
-    if descriptor.input_schema_id is not None:
-        registry = production_registry()
-        payload["input_schema"] = registry.input_model_for(
-            descriptor
-        ).model_json_schema()
-        # #159 S1: the closed companion channel's schema, published beside the
-        # input schema of the ONE registration that declares it.
-        preparation = registry.component_preparation_for(descriptor)
-        if preparation is not None:
-            payload["component_material_schema"] = preparation[0].model_json_schema()
+    # #159 S3: ONE projection, shared with get_integration_archetype — the
+    # descriptor, its input schema and (for the registrations that declare the
+    # closed companion channel) the component-material schema.
+    from .integration_authoring import recipe_descriptor_projection
+
+    payload.update(
+        recipe_descriptor_projection(production_registry(), descriptor)
+    )
     return payload
 
 
@@ -7130,135 +7140,6 @@ def _get_authoring_schema_by_name(
             ),
         }
 
-    if schema_name == "compose_archetypes":
-        # Issue #14 (M8): read-only authoring reference for archetype
-        # composition — the compose_archetypes(parts, options) surface.
-        return {
-            "_success": True,
-            "schema_name": "compose_archetypes",
-            "surface": "compose_archetypes(parts, options)",
-            "read_only": True,
-            "raw_xml_exposed": False,
-            "boomi_mutation": False,
-            "topology": (
-                "v1 composes exactly: one db_source part -> one transform "
-                "part -> 2..25 rest_target parts. The shared transform feeds "
-                "a Branch fan-out with one REST target per leg; each leg "
-                "sends the SAME mapped payload, so every rest_target "
-                "payload_profile must declare identical leaf paths, data "
-                "types, and required flags."
-            ),
-            "part_kinds": {
-                "db_source": (
-                    "archetype 'source' payload (DatabaseSource): binding + "
-                    "read_operation with a caller-declared result_schema"
-                ),
-                "transform": (
-                    "archetype 'transform' payload (TransformConfig): typed "
-                    "direct / map_function / map_script operations"
-                ),
-                "rest_target": (
-                    "archetype 'target' payload (RestTarget): binding + "
-                    "send_request + payload_profile; the FIRST rest_target "
-                    "part is Branch leg 1, later parts become legs 2..N with "
-                    "component keys target_<part key>_rest_connection / "
-                    "_rest_operation"
-                ),
-            },
-            "handoff_modes": {
-                "document_stream": (
-                    "executable (default): documents flow down the single "
-                    "process stream (source -> shared map -> branch legs)"
-                ),
-                "document_cache": (
-                    "executable (M8.1 / #132): declared per link on "
-                    "options.links[].handoff.mode for transform -> "
-                    "rest_target edges only. Lowers onto the M11 cache "
-                    "steps: ONE target-less cache_put staging leg (inserted "
-                    "before the first consuming leg — Add to Cache consumes "
-                    "the document stream) writes the mapped documents into "
-                    "an auto-emitted in-spec Document Cache "
-                    "(handoff_document_cache, $ref-bound to the shared "
-                    "transform_target_profile), and each cache-mode target "
-                    "leg re-reads them with an all-documents cache_get "
-                    "before its REST send. Write-before-read leg order is "
-                    "validated at compose time (#123 lineage). The staging "
-                    "leg spends one Branch leg, so at most 24 rest_target "
-                    "parts fit. Keyed retrieval (doc_cache_index / "
-                    "cache_key_values) stays gated (#119 census) — see "
-                    "get_schema_template("
-                    "schema_name='cache_property_authoring')"
-                ),
-            },
-            "error_codes": [
-                "COMPOSITION_CONTRACT_MISMATCH",
-                "COMPOSITION_UNSUPPORTED_TOPOLOGY",
-                "COMPOSITION_COMPONENT_KEY_COLLISION",
-            ],
-            "validation_note": (
-                "Cross-part contract validation (source-field coverage, "
-                "target-leaf resolution, payload-profile leaf equality across "
-                "fanout targets) runs BEFORE any spec is emitted, and the "
-                "composed process config re-runs the same builder validation "
-                "build_integration uses — invalid contract links fail before "
-                "any Boomi mutation."
-            ),
-            "v1_limits": (
-                "Per-target divergent transforms, joins, nested branches, "
-                "dynamic paths (send_request.path_replacements), Try/Catch "
-                "reliability, watermark-sourced query parameters on fanout "
-                "(non-first) targets, keyed cache retrieval "
-                "(doc_cache_index / cache_key_values), and arbitrary graph "
-                "composition are out of scope for v1."
-            ),
-            "example": {
-                "parts": [
-                    {
-                        "key": "db",
-                        "kind": "db_source",
-                        "parameters": "<<archetype source payload>>",
-                    },
-                    {
-                        "key": "shape",
-                        "kind": "transform",
-                        "parameters": "<<archetype transform payload>>",
-                    },
-                    {
-                        "key": "orders",
-                        "kind": "rest_target",
-                        "label": "Orders",
-                        "parameters": "<<archetype target payload>>",
-                    },
-                    {
-                        "key": "billing",
-                        "kind": "rest_target",
-                        "label": "Billing",
-                        "parameters": "<<archetype target payload>>",
-                    },
-                ],
-                "options": {
-                    "naming": {
-                        "integration_name": "<<integration name>>",
-                        "component_prefix": "<<component prefix>>",
-                    },
-                    "links": [
-                        {"from_part": "db", "to_part": "shape"},
-                        {"from_part": "shape", "to_part": "orders"},
-                        {
-                            "from_part": "shape",
-                            "to_part": "billing",
-                            "handoff": {"mode": "document_cache"},
-                        },
-                    ],
-                },
-            },
-            "next_steps": (
-                "Pass the returned integration_spec to build_integration("
-                "action='plan', config=...) to preview, then apply and "
-                "orchestrate_deploy as usual."
-            ),
-        }
-
     if schema_name == "IntegrationSpecV1":
         return {
             "_success": True,
@@ -7269,10 +7150,14 @@ def _get_authoring_schema_by_name(
             "boomi_mutation": False,
             "tool": "build_integration (action='plan' | 'apply')",
             "hint": (
-                "Prefer archetype-first authoring: list_integration_archetypes() → "
-                "get_integration_archetype(...) → build_from_archetype(...) emits a "
-                "valid IntegrationSpecV1 for you. Hand-author this spec only when "
-                "no archetype fits."
+                "Prefer config.authoring_request: a recipe from "
+                "list_integration_archetypes() → get_integration_archetype(...), "
+                "or ProcessIR units (get_schema_template("
+                "schema_name='AuthoringRequestV1')). In this spec a process body "
+                "is authored only as a typed unit in integration_spec.processes; "
+                "a flat type='process' component may only bind an existing "
+                "process, and a config.process_kind body is refused with "
+                "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED."
             ),
         }
 
@@ -7391,35 +7276,22 @@ def _get_authoring_schema_by_name(
         }
 
     if schema_name.startswith("archetype:"):
-        archetype_name = schema_name[len("archetype:"):]
-        # Call-time import — see _valid_schema_names for the rationale (incl.
-        # the module-not-name argument to from_package).
-        from .. import patterns as patterns_pkg
-        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
-        try:
-            registry = PatternRegistry.from_package(patterns_pkg)
-            cls = registry.get(archetype_name, kind=PatternKind.ARCHETYPE)
-        except PatternRegistryError as exc:
-            if exc.error_code == PATTERN_NOT_FOUND:
-                return {
-                    "_success": False,
-                    "error": f"Unknown archetype: {archetype_name}",
-                    "error_code": SCHEMA_NAME_UNSUPPORTED,
-                    "valid_schema_names": _valid_schema_names(),
-                }
-            return {
-                "_success": False,
-                "error": exc.error,
-                "error_code": SCHEMA_LOOKUP_FAILED,
-                "registry_error_code": exc.error_code,
-                "context": exc.context,
-            }
+        # #159 S3: retired with the archetype build route. Value-free: the
+        # requested name is not echoed, and nothing reaches the archetype
+        # pattern registry.
         return {
-            "_success": True,
-            "schema_name": schema_name,
-            **cls.describe(),
-            "raw_xml_exposed": False,
-            "boomi_mutation": False,
+            "_success": False,
+            "error": (
+                "The archetype:<name> selectors are retired: no route authors an "
+                "archetype any more."
+            ),
+            "error_code": SCHEMA_NAME_UNSUPPORTED,
+            "use_instead": (
+                "get_schema_template(schema_name='recipe:<recipe_id>@<version>') "
+                "for an executable recipe's descriptor and input schema; "
+                "list_integration_archetypes() lists the recipe ids and versions."
+            ),
+            "valid_schema_names": _valid_schema_names(),
         }
 
     if schema_name == "script_dataprocess":
@@ -7604,7 +7476,7 @@ def get_schema_template_action(
     """Look up and return the appropriate template.
 
     Two selectors: ``resource_type`` picks a legacy template; ``schema_name``
-    picks an authoring schema (issue #10 — IntegrationSpecV1, archetype:<name>,
+    picks an authoring schema (issue #10 — IntegrationSpecV1, recipe:<recipe_id>,
     workflow_sequences, workflow:<name>). ``schema_name`` takes precedence when
     both are supplied; omitting both returns SCHEMA_SELECTOR_REQUIRED.
 
@@ -7766,1069 +7638,46 @@ def _get_trading_partner_template(operation=None, standard=None, protocol=None, 
     }
 
 
-_PROCESS_FLOW_PROTOCOLS = {
-    "database_to_api_sync": {
-        "resource_type": "process",
-        "operation": "create",
-        "protocol": "database_to_api_sync",
-        "tool": "build_integration (action='plan' | 'apply')",
-        "process_kind": "database_to_api_sync",
-        "description": (
-            "Structured M2.5 process-flow builder that wires a DB Get "
-            "source to a REST send target, with an optional passthrough, "
-            "Message, or map-reference transform. Routed via build_integration "
-            "when an IntegrationSpecV1 component of type='process' carries "
-            "config.process_kind='database_to_api_sync'."
+_PROCESS_PROTOCOL_REMOVED = {
+    "resource_type": "process",
+    "operation": "create",
+    "removed": True,
+    "message": (
+        "The legacy process_kind protocol templates are retired: a "
+        "config.process_kind / process_type / flow_sequence process body is "
+        "refused with PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED before anything "
+        "is planned or written."
+    ),
+    "use_instead": {
+        "authoring_request": (
+            "build_integration(action='plan'|'compile'|'apply', "
+            "config={'authoring_request': ...}) — the request schema is "
+            "get_schema_template(schema_name='AuthoringRequestV1')."
         ),
-        "required_fields": [
-            "source.connector_type",
-            "source.connection_id",
-            "source.operation_id",
-            "source.action_type",
-            "target.connector_type",
-            "target.connection_id",
-            "target.operation_id",
-            "target.action_type",
-        ],
-        "optional_fields": [
-            "folder_name",
-        "folder_id",
-            "description",
-            "transform",
-            "transform.mode",
-            "transform.message_text",
-            "transform.map_ref",
-            # Issue #106 M10.2 / #115 M10.2a: process-level Data Process shape
-            # (transform.mode='dataprocess'). Supports Custom Scripting plus the
-            # profile-driven cardinality operations Split Documents (1->N) and
-            # Combine Documents (N->1). The steps list is ordered; each step
-            # carries the operation + its operation-specific fields.
-            "transform.label",
-            "transform.steps",
-            "transform.steps[].operation",
-            "transform.steps[].script",
-            "transform.steps[].language",
-            "transform.steps[].use_cache",
-            # Split/Combine (#115): bind a JSON/XML profile component + link element.
-            "transform.steps[].profile_type",
-            "transform.steps[].profile_id",
-            "transform.steps[].link_element_key",
-            "transform.steps[].link_element_name",
-            "transform.steps[].combine_into_link_element_key",
-            # Issue #109 M10.5: process-level Document Cache Retrieve shape
-            # (transform.mode='doccacheretrieve'). Pulls documents from a Document
-            # Cache into the current flow (the read half of Document Cache CRUD,
-            # pairing the already-shipped Add to Cache / doccacheload). v1 ships
-            # only the all-document retrieve (load_all_documents=true) with the
-            # recommended 'stopprocess' empty-cache behavior.
-            "transform.document_cache_id",
-            "transform.empty_cache_behavior",
-            "transform.load_all_documents",
-            # Issue #110 M10.6: process-level Document Cache Remove shape
-            # (transform.mode='doccacheremove'). Clears documents from a Document
-            # Cache (the delete half of Document Cache CRUD, completing the set
-            # alongside Add to Cache / doccacheload and Document Cache Retrieve /
-            # doccacheretrieve). v1 ships only the all-document remove
-            # (remove_all_documents=true); transform.document_cache_id is shared
-            # with doccacheretrieve above.
-            "transform.remove_all_documents",
-            "reliability",
-            "reliability.retry_count",
-            # Issue #99 G1: Try/Catch placement scope. "process" (default — the
-            # pre-#99 whole-chain wrapper) or "connector" (a Try/Catch per
-            # connector: source retry 0, target retry N) so a target retry does
-            # not re-run the source read.
-            "reliability.try_catch_scope",
-            "reliability.dlq",
-            "reliability.dlq.mode",
-            # Issue #51 M3.R1a / #88 M4.5.3: DLQ catch-path bindings consumed by
-            # the verified Try/Catch wrapper (retry_count 0..5). Bind via the
-            # *_id field — a literal component id or a $ref:KEY token in
-            # depends_on; the bare *_ref_key variant is not resolvable here.
-            "reliability.dlq.document_cache_id",
-            "reliability.dlq.process_id",
-            # Issue #89 M4.5.4: optional Notify on the wired catch leg
-            # (catch -> notify -> dlq route [-> stop]). Requires a wired DLQ.
-            # #175: the trailing Stop is emitted only for a DOCUMENT-CACHE route;
-            # an error-subprocess route is a Process Call, which ends the path.
-            "reliability.catch_notify",
-            "reliability.catch_notify.message_template",
-            "reliability.catch_notify.level",
-            # Issue #108 M10.4: optional deliberate Exception (Throw) terminal on
-            # the catch leg — the leg ends in a thrown user-defined error (fail or
-            # halt) instead of a bare Stop, and needs no DLQ (bare
-            # catch -> [notify ->] exception). Composes with catch_notify and a
-            # DOCUMENT-CACHE route: [notify ->] [document-cache route ->]
-            # exception. #175: NOT with error_subprocess_ref — that route's
-            # Process Call ends the path, so the Exception is unreachable.
-            "reliability.catch_exception",
-            "reliability.catch_exception.title",
-            "reliability.catch_exception.message_template",
-            "reliability.catch_exception.stop_single_document",
-            "reliability.catch_exception.parameter_source",
-            # Issue #107 M10.3: optional Return Documents terminal. When
-            # return_documents.enabled=true the flow ends in a Return Documents
-            # shape (subprocess return value) instead of a Stop; the optional
-            # label is the Boomi custom label identifying the returned document
-            # type(s). Default (absent) keeps the trailing Stop.
-            "return_documents",
-            "return_documents.enabled",
-            "return_documents.label",
-            # Issue #112 M10.8: optional Branch (N-way forward fan-out). When
-            # branch.enabled is true (default when the block is present), the
-            # post-source document fans to N independent target legs — leg 1 is the
-            # top-level target, legs 2..N are branch.targets[] — each ending in its
-            # own Stop (forward-only, no join/merge; numBranches = 1 + len(targets),
-            # in Boomi's 2..25 range). Each leg target is a REST connector binding
-            # with the same fields as the top-level target. Default (branch absent
-            # or enabled=false) keeps the single-target flow.
-            "branch",
-            "branch.enabled",
-            "branch.targets",
-            "branch.targets[].connector_type",
-            "branch.targets[].connection_id",
-            "branch.targets[].operation_id",
-            "branch.targets[].action_type",
-            "branch.targets[].label",
-            # Issue #113 M10.9: optional Decision (conditional two-path routing).
-            # When decision.enabled is true (default when the block is present), the
-            # post-source document routes down a labelled true/false dragpoint based
-            # on a value comparison. The TRUE leg is the forward success path (the
-            # top-level target -> Stop). The FALSE leg is forward (an optional
-            # false_notify Message -> Stop) or a backward loop (false_next names an
-            # earlier shape; the Message tail — or the false dragpoint when there is
-            # no false_notify — wires back to it). v1 operands: track (DDP/DPP) and
-            # static (literal). Default (decision absent or enabled=false) keeps the
-            # single-target flow. Mutually exclusive with branch in v1.
-            "decision",
-            "decision.enabled",
-            "decision.comparison",
-            "decision.label",
-            "decision.left",
-            "decision.left.value_type",
-            "decision.left.property_id",
-            "decision.left.default_value",
-            "decision.left.property_name",
-            "decision.left.static_value",
-            "decision.right",
-            "decision.right.value_type",
-            "decision.right.property_id",
-            "decision.right.default_value",
-            "decision.right.property_name",
-            "decision.right.static_value",
-            "decision.false_notify",
-            "decision.false_next",
-            # Issue #111 M10.7: optional Flow Control (per-document batching). When
-            # flow_control.enabled is true (default when the block is present), a
-            # Flow Control shape is inserted right after the source (before any
-            # transform) so the whole downstream chain runs in batches of
-            # for_each_count documents. v1 ships ONLY the live-verified per-document
-            # batching mode (chunkStyle=threadOnly, chunks=0, forEachCount=N); true
-            # parallel chunks / multiProcess / combine stay design guidance. Default
-            # (flow_control absent or enabled=false) keeps the unbatched flow.
-            # Mutually exclusive with branch and decision in v1.
-            "flow_control",
-            "flow_control.enabled",
-            "flow_control.for_each_count",
-            "flow_control.label",
-            # Issue #117 M10 follow-up: optional top-level Flow Sequence — an
-            # ordered list of steps that composes 2+ M10 control/transform shapes
-            # in ONE process (where the legacy single-slot blocks above each emit
-            # one shape and mutually exclude). Each step carries a `kind`: a LINEAR
-            # kind (flow_control / message / map_ref / dataprocess / doccacheload /
-            # doccacheretrieve / doccacheremove) inserts one forward shape; a CONTROL
-            # kind (decision / branch) fans out and TERMINALIZES the sequence (v1:
-            # last step only — no post-control join); the TERMINAL `exception` kind
-            # throws. A decision owns true_steps (may be empty -> continue to the
-            # top-level target) + false_steps (required); a branch owns legs (2..25),
-            # each a linear sub-flow + its own target. Per-step body fields mirror the
-            # equivalent legacy single-slot shape's fields. Mutually exclusive with the
-            # legacy single-slot flow_control / branch / decision / non-passthrough
-            # transform / Try-Catch reliability blocks. Default (absent) keeps the
-            # single-shape flow byte-for-byte. return_documents is allowed only on a
-            # purely linear flow_sequence; source/target dynamic_path is not yet
-            # composable with flow_sequence (v1).
-            "flow_sequence",
-            "flow_sequence[].kind",
-            "flow_sequence[].label",
-            "flow_sequence[].message_text",
-            "flow_sequence[].map_ref",
-            "flow_sequence[].for_each_count",
-            "flow_sequence[].document_cache_id",
-            "flow_sequence[].empty_cache_behavior",
-            "flow_sequence[].load_all_documents",
-            "flow_sequence[].remove_all_documents",
-            "flow_sequence[].steps",
-            "flow_sequence[].comparison",
-            "flow_sequence[].left",
-            "flow_sequence[].right",
-            "flow_sequence[].true_steps",
-            "flow_sequence[].false_steps",
-            "flow_sequence[].legs",
-            "flow_sequence[].legs[].steps",
-            "flow_sequence[].legs[].target",
-            "flow_sequence[].title",
-            "flow_sequence[].message_template",
-            "flow_sequence[].stop_single_document",
-            "flow_sequence[].parameter_source",
-            # Issue #121 M11.2: generic DDP/DPP Set Properties steps (set_ddp /
-            # set_dpp). `name` is the bare property name; `source_values` is the
-            # ordered value-source list (static/current/profile/ddp/dpp per the
-            # cache_property_authoring source_value_contract); `persist` is DPP-only.
-            "flow_sequence[].name",
-            "flow_sequence[].source_values",
-            "flow_sequence[].persist",
-            # Issue #122 M11.3: cache_put/cache_get reuse document_cache_id /
-            # empty_cache_behavior above; map-level cache joins are authored on
-            # the transform.map component via config.document_cache_joins.
-
-            # Issue #92 M4.5.7: declare connection fields as per-environment
-            # override points on the deployed process (see notes for the
-            # CREATE-only behavior and the connection_id / fields shape).
-            "process_extensions",
-            "process_extensions.connections",
-        ],
-        # Issue #28 added primitives that PRODUCE these fields as process
-        # fragments (schedule_envelope, run_metadata, dlq_writer,
-        # error_classifier). Issue #29 REPRESENTS them as metadata under
-        # build_from_archetype's validation_rules.operational_intent.
-        # Issue #51 M3.R1a now CONSUMES the dlq_writer fragment: for
-        # retry_count == 0, reliability.dlq.mode in {document_cache_ref,
-        # error_subprocess_ref} emits a verified Try/Catch + DLQ catch-path
-        # (see optional_fields), so reliability.on_failure is no longer
-        # deferred. The remaining fields below are still NOT consumed into
-        # process XML, so they stay deferred (not optional) — promoting them
-        # would repeat the Codex r3 P2 "silently ignored" lie.
-        # `produced_by` names the issue-#28 primitive; `represented_by` names
-        # where #29 surfaces the field as metadata; `tracked_by` names the
-        # issue/milestone that will wire it into the executable process.
-        "deferred_fields": [
-            {
-                "field": "execution.trigger",
-                "produced_by": "schedule_envelope primitive (#28)",
-                "represented_by": "build_from_archetype operational_intent metadata (#29)",
-                "tracked_by": "M3 (deploy + schedule activation)",
-            },
-            {
-                "field": "execution.run_metadata",
-                "produced_by": "run_metadata primitive (#28)",
-                "represented_by": "build_from_archetype operational_intent metadata (#29)",
-                "tracked_by": "#51 (run-metadata / dynamic process-property wiring)",
-            },
-            {
-                "field": "reliability.error_classifier",
-                "produced_by": "error_classifier primitive (#28)",
-                "represented_by": "build_from_archetype operational_intent metadata (#29)",
-                "tracked_by": "#51 follow-up (catch-path classifier wiring)",
-            },
-        ],
-        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"],
-        # #184 amendment 3 §5: an all-document removal emits zero documents, so no
-        # linear position can precede anything; the mode is refused by name.
-        "refused_transform_modes": {
-            "doccacheremove": (
-                "Refused with PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID: Remove from Cache "
-                "hands on no documents, so nothing after it runs. Author the removal as "
-                "a ProcessIR branch-leg cache_remove terminal."
-            ),
-        },
-        "supported_dataprocess_operations": ["custom_scripting", "split_documents", "combine_documents"],
-        "dataprocess_authoring": (
-            "When a dataprocess transform carries a custom_scripting step, call "
-            "get_schema_template(schema_name='script_dataprocess') for the "
-            "Custom Scripting authoring contract — the dataContext loop, the "
-            "storeStream-or-the-document-is-dropped rule, and the dynamic "
-            "document/process property idioms."
+        "recipe": (
+            "list_integration_archetypes() → get_integration_archetype(name="
+            "'<recipe_id>') for a recipe's input schema (intent_kind='recipe')."
         ),
-        # Issue #109 M10.5: the only live-verified Document Cache Retrieve
-        # "If cache is empty" wire value (Stop document execution, recommended).
-        # The backward-compat "fail document with errors" behavior is deferred.
-        "supported_doccache_retrieve_empty_behaviors": ["stopprocess"],
-        # Issue #110 M10.6: the only live-verified Document Cache Remove form
-        # (removeAllDocuments=true — clear all cached documents). Keyed/index
-        # removal (docCacheIndex + populated cacheKeyValues) is deferred.
-        "supported_doccache_remove_modes": ["all_documents"],
-        # Issue #107 M10.3: the flow terminal. "stop" is the default; with
-        # return_documents.enabled=true it is "returndocuments" instead (and no
-        # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
-        "supported_terminal_shapes": ["stop", "returndocuments"],
-        # Issue #112 M10.8 / #113 M10.9 / #111 M10.7: control-flow shapes the
-        # builder can emit. Branch is the N-way forward fan-out; Decision is the
-        # conditional two-path (true/false) router with loop-back; Flow Control is
-        # the per-document batching shape. Route remains design guidance (not yet
-        # builder-emitted).
-        "supported_control_shapes": ["branch", "decision", "flow_control"],
-        # Issue #117 M10 follow-up: the step `kind`s a composed flow_sequence
-        # accepts — LINEAR (flow_control / message / map_ref / dataprocess /
-        # doccacheload / doccacheretrieve), CONTROL (decision / branch,
-        # terminalizing in v1), and the TERMINAL exception throw. #184 amendment 3
-        # withdrew doccacheremove: Remove from Cache hands on no documents, so no
-        # flow_sequence position admits it; a removal is a ProcessIR branch-leg
-        # terminal.
-        "supported_sequence_kinds": [
-            "flow_control",
-            "message",
-            "map_ref",
-            "dataprocess",
-            "doccacheload",
-            "doccacheretrieve",
-            # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
-            "set_ddp",
-            "set_dpp",
-            # Issue #122 M11.3: authored cache write/read steps.
-            "cache_put",
-            "cache_get",
-            "decision",
-            "branch",
-            "exception",
-        ],
-        # Issue #111 M10.7: the only live-verified Flow Control mode the builder
-        # emits — per-document batching (chunkStyle=threadOnly, chunks=0,
-        # forEachCount=N). True parallel chunks (chunks>0), multiProcess, and the
-        # combine variant stay design guidance.
-        "supported_flow_control_modes": ["batching_thread_only"],
-        "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
-        "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
-        "supported_connector_action_bindings": {
-            "database_source": {
-                "connector_type": "database",
-                "action_type": "Get",
-            },
-            "rest_target": {
-                "connector_type": "rest | rest_client | officialboomi-X3979C-rest-prod",
-                "action_type": "GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS | TRACE",
-            },
-        },
-        "structured_errors": [
-            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
-            {"error_code": "PROCESS_KIND_XML_CONFLICT", "field": "config.xml"},
-            {"error_code": "PROCESS_NAME_REQUIRED", "field": "name"},
-            {"error_code": "PROCESS_NAME_CONFLICT", "field": "name"},
-            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "depends_on"},
-            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target|branch.targets[N]|branch.targets[N].connector_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type|transform.steps[N].profile_id|source.dynamic_path.request_profile_id|target.dynamic_path.request_profile_id"},
-            # Issue #96 M5.4a: typed REST runtime bindings (Boomi UI verified — the
-            # REST Client connector step exposes only the 'Path' dynamic operation
-            # property). A PATH runtime binding lowers into the live-proven dynamic_path
-            # block the builder emits; all four value sources emit (static, profile_field,
-            # ddp, dpp — Set Properties segments live-captured). A query_parameter /
-            # request_header binding is REJECTED with REST_RUNTIME_BINDING_INVALID —
-            # REST Client query/header are static operation customProperties (vary a
-            # query param via the path; headers are static). REST_RUNTIME_BINDING_INVALID
-            # is the primitive-layer binding-shape error (rejected query/header binding,
-            # undeclared/duplicate/secret-shaped slot, missing required path slot,
-            # path_replacements+path-binding conflict). PROCESS_RUNTIME_BINDING_UNVERIFIED
-            # gates a raw runtime_bindings block reaching the builder (bypassing the
-            # primitive lowering) and a source.dynamic_path under a connector-scoped
-            # Try/Catch.
-            {"error_code": "REST_RUNTIME_BINDING_INVALID", "field": "runtime_bindings"},
-            {"error_code": "PROCESS_RUNTIME_BINDING_UNVERIFIED", "field": "runtime_bindings|source.runtime_bindings|target.runtime_bindings|source.dynamic_path"},
-            {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
-            {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache|transform.steps[N].profile_type|transform.steps[N].profile_id|transform.steps[N].link_element_key|transform.steps[N].link_element_name|transform.steps[N].combine_into_link_element_key"},
-            {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
-            {"error_code": "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID", "field": "transform|transform.document_cache_id|transform.empty_cache_behavior|transform.load_all_documents|transform.label"},
-            {"error_code": "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID", "field": "transform|transform.document_cache_id|transform.remove_all_documents|transform.label"},
-            {"error_code": "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", "field": "return_documents|return_documents.enabled|return_documents.label"},
-            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
-            {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
-            {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
-            {"error_code": "PROCESS_EXCEPTION_CONFIG_INVALID", "field": "reliability.catch_exception|reliability.catch_exception.message_template|reliability.catch_exception.title|reliability.catch_exception.stop_single_document|reliability.catch_exception.parameter_source"},
-            # #175: an error-subprocess DLQ route emits a Process Call, which ends
-            # the path — so a catch_exception after it is unreachable and the
-            # composition is refused at PLAN time. Published here because a code a
-            # caller can actually receive must be discoverable from the template
-            # that governs the protocol (QA-175-r1-03).
-            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "reliability.catch_exception"},
-            {"error_code": "PROCESS_PATH_REPLACEMENT_INVALID", "field": "target.dynamic_path|target.dynamic_path.ddp_name|target.dynamic_path.segments"},
-            # Issue #112 M10.8: Branch fan-out. BRANCH_OUTPUT_UNSET is the hard error
-            # for an enabled branch with no targets (also the verifier's hard error
-            # for an unset branch output). PROCESS_BRANCH_CONFIG_INVALID covers a
-            # malformed branch block (non-dict / non-bool enabled / unknown key), too
-            # many legs (>25), or an unsupported v1 composition (dynamic_path /
-            # Try-Catch reliability / return_documents alongside Branch). A malformed
-            # branch LEG BINDING (connector_type / connection_id / operation_id /
-            # action_type) reuses PROCESS_CONNECTOR_BINDING_INVALID, and a swapped leg
-            # $ref reuses PROCESS_REF_TYPE_MISMATCH — both field-scoped to
-            # branch.targets[N].* (see those rows above). BRANCH_NUM_BRANCHES_MISMATCH
-            # is a graph-verifier WARNING (numBranches vs dragpoint count), never
-            # produced by the builder, which derives numBranches from the leg count.
-            {"error_code": "BRANCH_OUTPUT_UNSET", "field": "branch.targets"},
-            {"error_code": "PROCESS_BRANCH_CONFIG_INVALID", "field": "branch|branch.enabled|branch.targets|branch.targets[N].dynamic_path|reliability|return_documents|target.dynamic_path"},
-            # Issue #113 M10.9: Decision (conditional two-path routing). A malformed
-            # decision block (non-dict / non-bool enabled / unknown key), an invalid
-            # comparison or operand (value_type / missing track property_id / missing
-            # static static_value), a false_next that does not name an earlier shape,
-            # or an unsupported v1 composition (branch / Try-Catch reliability /
-            # dynamic_path / return_documents alongside decision) all return
-            # PROCESS_DECISION_CONFIG_INVALID. A bare false-leg Stop (no false_notify,
-            # no false_next) is the verifier's CONTROL_BRANCH_BARE_STOP advisory
-            # warning — not a builder error.
-            {"error_code": "PROCESS_DECISION_CONFIG_INVALID", "field": "decision|decision.enabled|decision.comparison|decision.left|decision.right|decision.left.value_type|decision.right.value_type|decision.left.property_id|decision.left.static_value|decision.right.property_id|decision.right.static_value|decision.false_notify|decision.false_next|branch|reliability|return_documents|target.dynamic_path"},
-            # Issue #111 M10.7: Flow Control (per-document batching). A malformed
-            # flow_control block (non-dict / non-bool enabled / unknown key), a
-            # non-positive / non-int for_each_count, a non-string label, or an
-            # unsupported v1 composition (branch / decision alongside flow_control)
-            # all return PROCESS_FLOW_CONTROL_CONFIG_INVALID.
-            {"error_code": "PROCESS_FLOW_CONTROL_CONFIG_INVALID", "field": "flow_control|flow_control.enabled|flow_control.for_each_count|flow_control.label|branch|decision"},
-            # Issue #117 M10 follow-up: Flow Sequence (multi-control-shape
-            # composition). PROCESS_FLOW_SEQUENCE_CONFIG_INVALID covers the sequence
-            # STRUCTURE — a non-list/empty flow_sequence, an unknown step kind, an
-            # unsupported step key, a control/terminal step that is not last (or not
-            # allowed in that position), a malformed branch legs list / leg, a
-            # doccacheload step missing its document_cache_id, an ambiguous legacy
-            # sibling block (flow_control / branch / decision / non-passthrough
-            # transform / Try-Catch reliability) present alongside flow_sequence, a
-            # source/target dynamic_path under flow_sequence, or return_documents on a
-            # non-linear sequence. A malformed step BODY reuses the SAME structured
-            # error code as the equivalent legacy single-slot shape — PROCESS_SHAPE_UNSUPPORTED
-            # (message/map_ref), PROCESS_DATAPROCESS_* / PROCESS_DOCCACHE_* /
-            # PROCESS_FLOW_CONTROL_* (linear cache/dataprocess/batching steps),
-            # PROCESS_DECISION_CONFIG_INVALID (decision comparison/operands),
-            # PROCESS_EXCEPTION_CONFIG_INVALID (exception throw), and
-            # PROCESS_CONNECTOR_BINDING_INVALID / PROCESS_REF_TYPE_MISMATCH (branch leg
-            # target binding / swapped $ref) — all field-scoped to the flow_sequence path.
-            {"error_code": "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID", "field": "flow_sequence|flow_sequence[N].kind|flow_sequence[N].document_cache_id|flow_sequence[N].true_steps|flow_sequence[N].false_steps|flow_sequence[N].legs|flow_sequence[N].legs[M].target|source.dynamic_path|target.dynamic_path|return_documents|flow_control|branch|decision|transform|reliability"},
-            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
-            {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
-            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
-        ],
-        "notes": [
-            "Issue #51 M3.R1a / #88 M4.5.3: retry_count 0..5 with dlq.mode in "
-            "{document_cache_ref, error_subprocess_ref} emits a verified "
-            "Try/Catch wrapper + DLQ catch-path (shape captured from live Boomi "
-            "Try/Catch XML). Bind the catch leg via reliability.dlq.document_cache_id "
-            "(or .process_id) — a literal component id or a $ref:KEY token in "
-            "depends_on; the bare *_ref_key variant is rejected with "
-            "PROCESS_DLQ_BINDING_INVALID on this build path.",
-            "retry_count 1..5 is un-gated (issue #88): Boomi Try/Catch applies "
-            "platform-controlled timing (count 1 retries immediately; 2..5 use "
-            "built-in escalating waits) — there is no caller-selected backoff "
-            "field. retry_count > 0 requires a wired Try/Catch catch path — a "
-            "supported reliability.dlq.mode OR a reliability.catch_exception throw "
-            "terminal (issue #108 M10.4); retry_count outside 0..5 (or > 0 with "
-            "neither a DLQ mode nor a catch_exception) returns "
-            "PROCESS_RETRY_UNVERIFIED.",
-            "Issue #99 G1: reliability.try_catch_scope selects the Try/Catch "
-            "placement. 'process' (default) wraps the whole source -> [transform] "
-            "-> target chain in ONE Try/Catch, so a target (REST) retry re-runs "
-            "the source (DB) read. 'connector' emits a Try/Catch per connector — "
-            "the source in its own Try/Catch with retry 0 and the target in its "
-            "own Try/Catch with the configured retry, separated by the source so "
-            "the target retry does NOT re-execute the source read (keep source "
-            "reads idempotent regardless). Each connector gets its own DLQ (and "
-            "optional Notify) catch leg. The database_to_api_sync archetype emits "
-            "connector scope by default; an unsupported value returns "
-            "PROCESS_RETRY_UNVERIFIED.",
-            "Issue #100 G4: the DLQ document-cache catch leg captures the failed "
-            "document on a best-effort basis — a malformed failed-REST document "
-            "can log 'executed with errors' at the doccacheload step. The failure "
-            "is never silent (the Notify step logs the real caught error durably), "
-            "but for GUARANTEED durable capture of the failed payload use "
-            "reliability.dlq.mode='error_subprocess_ref' (a custom error "
-            "subprocess) — the formalized durable escape hatch. The Document "
-            "Cache is execution-scoped, so cross-run DLQ replay is currently "
-            "manual.",
-            "Issue #100 G2: per-document dynamic REST path replacement (e.g. PATCH "
-            "/clients/{clientId} bound to a mapped field) is supported via "
-            "target.send_request.path_replacements: [{name, target_path}]. The "
-            "REST Client connector cannot declare in-operation URL path "
-            "parameters (that is an HTTP-Client feature), so the path is supplied "
-            "at the process connector step's 'Path' dynamic operation property: a "
-            "Set Properties shape concatenates the static segments with the mapped "
-            "target leaf(s) into a per-endpoint Dynamic Document Property "
-            "(DDP_PATH_<RESOURCE>) — document-scoped so each record in a "
-            "multi-record run keeps its own path — and the connector Path property "
-            "sources it. "
-            "Each {name} token in send_request.path must have a matching "
-            "replacement whose target_path is a declared simple leaf bound by a "
-            "transform output; names must be unique. When path_replacements is "
-            "empty the path is sent verbatim (static), byte-for-byte the prior "
-            "behavior. Grounded in a live REST Client export.",
-            "Issue #89 M4.5.4: reliability.catch_notify (optional) emits a "
-            "verified Notify step at the HEAD of the catch leg. It requires a wired "
-            "catch path — a supported DLQ (document_cache_ref / error_subprocess_ref) "
-            "OR a reliability.catch_exception throw terminal (issue #108 M10.4). The "
-            "leg is one of: notify -> document-cache dlq route -> catch stop; notify -> "
-            "error-subprocess dlq route (TERMINAL - the Process Call ends the path, "
-            "so no catch stop follows it, issue #175); notify -> exception "
-            "(catch_exception, no DLQ); or notify -> document-cache dlq route -> "
-            "exception. An error-subprocess route CANNOT be combined with "
-            "catch_exception - see the #175 note below. message_template "
-            "must reference the platform caught-error property "
-            "(meta.base.catcherrorsmessage) so the Notify logs the real error; "
-            "level is one of supported_notify_levels (INFO/WARNING/ERROR). The "
-            "Notify is log-only — email/SMS notification channels and Notify "
-            "outside catch paths are out of scope; unsupported config returns "
-            "PROCESS_NOTIFY_CONFIG_INVALID.",
-            "Issue #108 M10.4: reliability.catch_exception (optional) ends the "
-            "Try/Catch catch leg in a deliberate Exception (Throw) terminal — a "
-            "user-defined error reported on the Process Reporting page — INSTEAD "
-            "of a bare catch-row Stop (the Boomi docs: a Stop is a successful "
-            "conclusion; an error path uses an Exception). It needs no DLQ (a bare "
-            "catcherrors -> exception is the live 'fail/halt' shape) and composes "
-            "with catch_notify: [notify ->] exception. It does NOT compose with a "
-            "DOCUMENT-CACHE DLQ route (#184 amendment 3): Add to Cache hands on no "
-            "documents, so the Exception after the cache write would never run - the "
-            "combination returns PROCESS_EXCEPTION_CONFIG_INVALID on field "
-            "reliability.catch_exception, at PLAN time. Nor does it compose with "
-            "dlq.mode='error_subprocess_ref' (issue #175): that route emits a "
-            "Process Call, a call ends the path it is on, and the Exception would "
-            "be unreachable - the combination returns PROCESS_CALL_CONFIG_INVALID "
-            "on field reliability.catch_exception, at PLAN time, before anything "
-            "is created. It also un-gates retry_count > 0 without a DLQ. "
-            "message_template carries the {1} placeholder bound by parameter_source "
-            "(caught_error = the platform Try/Catch error message; current_document "
-            "= the current document). parameter_source 'none' is refused: the "
-            "platform rejects an Exception with no parameter block. "
-            "stop_single_document=true fails only the reaching document (others "
-            "continue); false (default) halts the whole process. The optional title "
-            "is the alert subject / process-log title. The Exception is terminal — "
-            "no Stop follows it, so the catch leg stays CONTROL_BRANCH_BARE_STOP-"
-            "clean. Malformed config returns PROCESS_EXCEPTION_CONFIG_INVALID. "
-            "Live-verified against a real work-account process export.",
-            "Issue #28 primitives schedule_envelope, run_metadata, and "
-            "error_classifier PRODUCE execution/reliability fragments that "
-            "ProcessFlowBuilder does not yet consume — see deferred_fields. The "
-            "dlq_writer fragment IS now consumed (above).",
-            "Map components are referenced by id or $ref token only; map creation "
-            "is tracked by issue #26.",
-            "Issue #106 M10.2 / #115 M10.2a: transform.mode='dataprocess' inserts "
-            "a process-level Data Process shape between source and target, carrying "
-            "an ordered transform.steps list. Supported operations: Custom "
-            "Scripting (transform.steps[].operation='custom_scripting', language "
-            "'groovy2', use_cache true) and the two native, profile-driven "
-            "cardinality operations split_documents (1->N) and combine_documents "
-            "(N->1). Split/Combine each bind a JSON/XML profile component via "
-            "transform.steps[].profile_id (a literal id or $ref:KEY in depends_on) "
-            "with transform.steps[].profile_type ('json'|'xml') plus the "
-            "link_element_key / link_element_name captured from the profile "
-            "(combine also takes an optional combine_into_link_element_key, default "
-            "'null'); the profile_id $ref is type-checked at plan time "
-            "(PROCESS_REF_TYPE_MISMATCH for a wrong-kind/swapped ref). Every other "
-            "documented Data Process operation (Search/Replace, Zip, Unzip, Base64 "
-            "encode/decode, character encoding) is rejected "
-            "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until it has a "
-            "byte-accurate live capture; malformed step config returns "
-            "PROCESS_DATAPROCESS_CONFIG_INVALID. Prefer native operations "
-            "(including Split/Combine) over custom scripts.",
-            "Issue #107 M10.3: return_documents.enabled=true ends the flow in a "
-            "Return Documents terminal shape (the subprocess return value — it "
-            "returns the current documents to the calling source point: the parent "
-            "process via a Process Call/Route, or a web-service client) INSTEAD of "
-            "the default Stop. No Stop is emitted after Return Documents (the graph "
-            "verifier enforces RETURN_DOCS_STOP_EXCLUSIVE: a Return Documents path "
-            "must never reach a Stop). The optional return_documents.label is the "
-            "Boomi custom label identifying the returned document type(s), used for "
-            "Process Call/Route return-path mapping; it is optional (empty in the "
-            "live capture). Default (return_documents absent) keeps the trailing "
-            "Stop byte-for-byte. Malformed config returns "
-            "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID. Live-verified against a real "
-            "work-account process export.",
-            "Issue #109 M10.5: transform.mode='doccacheretrieve' inserts a "
-            "process-level Document Cache Retrieve shape between source and target "
-            "that pulls documents from a Document Cache into the current flow — the "
-            "READ half of Document Cache CRUD, pairing the already-shipped Add to "
-            "Cache (doccacheload) on the DLQ catch leg. It is a normal linear "
-            "non-terminal step. Required transform.document_cache_id binds the "
-            "Document Cache component (a literal id or a $ref:KEY token in "
-            "depends_on). v1 ships ONLY the live-observed all-document retrieve: "
-            "transform.load_all_documents must be true (keyed/index retrieval is "
-            "deferred pending a byte-accurate live capture) and "
-            "transform.empty_cache_behavior defaults to 'stopprocess' (Stop "
-            "document execution — the recommended, sole live-verified value; the "
-            "backward-compat 'fail document with errors' option is deferred). "
-            "Malformed config returns PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID. "
-            "Runtime note (live-verified): all-document retrieve initializes only "
-            "when the bound Document Cache enforces one index entry per document; "
-            "against a cache without that setting the process fails at graph init "
-            "('Retrieve all is only supported for document caches which are set to "
-            "enforce single document') — a cache-configuration requirement, not a "
-            "builder/XML defect. Live-verified against a real work-account process "
-            "export and a renera deploy+execute round-trip.",
-            "Issue #110 M10.6: transform.mode='doccacheremove' inserts a "
-            "process-level Document Cache Remove shape between source and target "
-            "that clears documents from a Document Cache — the DELETE half of "
-            "Document Cache CRUD, completing the set alongside Add to Cache "
-            "(doccacheload, write) and Document Cache Retrieve (doccacheretrieve, "
-            "read, #109). It is a normal linear non-terminal step. Required "
-            "transform.document_cache_id binds the Document Cache component (a "
-            "literal id or a $ref:KEY token in depends_on). v1 ships ONLY the "
-            "live-observed all-document remove: transform.remove_all_documents must "
-            "be true (keyed/index removal is deferred pending a byte-accurate live "
-            "capture). Unlike doccacheretrieve, the remove shape carries no "
-            "empty_cache_behavior / load_all_documents (those are retrieve-only). "
-            "Malformed config returns PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID. "
-            "Live-verified against a real work-account process export "
-            "('[CDS] Initialize Caches').",
-            "Issue #112 M10.8: an optional branch block fans the post-source "
-            "document out to N independent forward legs (an unconditional Branch — "
-            "use a Decision/Route for value-comparing selection). Leg 1 is the "
-            "top-level target; branch.targets[] are legs 2..N, each a REST connector "
-            "binding with the same fields as the top-level target. numBranches is "
-            "derived as 1 + len(branch.targets) and must stay in Boomi's 2..25 "
-            "range; each leg ends in its own Stop with no join/merge, and the legs "
-            "run in sequence (each completes before the next begins — never truly "
-            "parallel). An enabled branch with no targets returns BRANCH_OUTPUT_UNSET; "
-            "a malformed branch, >25 legs, or an unsupported v1 composition "
-            "(dynamic_path, Try/Catch reliability, or return_documents alongside "
-            "branch) returns PROCESS_BRANCH_CONFIG_INVALID. BRANCH_NUM_BRANCHES_MISMATCH "
-            "is a graph-verifier warning only — the builder always derives numBranches "
-            "from the leg count, so it never emits a mismatch. Default (branch absent "
-            "or enabled=false) keeps the single-target flow byte-for-byte. "
-            "Live-verified against a real work-account process export.",
-            "Issue #113 M10.9: an optional decision block emits a Decision shape — "
-            "Boomi's if/then — that routes the post-source document down a labelled "
-            "true or false dragpoint based on a value comparison (binary, both "
-            "outcomes explicit; no fall-through). comparison is one of equals / "
-            "greaterthaneq / lessthaneq / greaterthan / lessthan / regex / wildcard; "
-            "left and right are operands, each track (a DDP/DPP via property_id) or "
-            "static (a literal static_value, which may be empty for the 'is empty' "
-            "check) in v1. The TRUE leg is the forward success path (the top-level "
-            "target -> Stop). The FALSE leg is forward — an optional false_notify "
-            "Message before its own Stop — or a backward loop: false_next names an "
-            "earlier shape (start/source/[transform], e.g. 'shape2') and the false "
-            "dragpoint (or the false_notify Message's tail) wires back to it, the "
-            "live shape31 false->shape32->shape27 loop pattern; the verifier's "
-            "reachability pass tolerates the back-edge. A false leg wired straight to "
-            "a bare Stop (no false_notify, no false_next) fires the verifier's "
-            "CONTROL_BRANCH_BARE_STOP advisory WARNING — not a builder error; add "
-            "false_notify to keep it traceable. Decision is mutually exclusive with "
-            "branch in v1, and does not compose with Try/Catch reliability, "
-            "target.dynamic_path, or return_documents — each returns "
-            "PROCESS_DECISION_CONFIG_INVALID. Default (decision absent or "
-            "enabled=false) keeps the single-target flow byte-for-byte. Live-verified "
-            "via a companion capture and a work-profile decision export.",
-            "Issue #92 M4.5.7: process_extensions declares connection fields as "
-            "per-environment override points so the DEPLOYED process exposes them "
-            "via manage_environments(get_extensions) / update_extensions — without "
-            "embedding a credential in the connection component. Shape: "
-            "{\"connections\": [{\"connection_id\": <same id/$ref the connector "
-            "shape binds>, \"connector_type\": \"database\", \"fields\": [{\"id\": "
-            "\"password\", \"label\": \"Password\", \"xpath\": <connection-field "
-            "xpath>}]}]}. The declaration is emitted on CREATE only: the builder "
-            "leaves the override element unowned so UI-populated per-environment "
-            "override VALUES survive structured updates. A field is overrideable "
-            "at runtime only because the process declares it; a partial_update "
-            "success from update_extensions is not proof a field exists as an "
-            "override point — verify via get_extensions after deploy. Malformed "
-            "shapes return PROCESS_EXTENSIONS_INVALID.",
-            "Issue #117 M10 follow-up: flow_sequence composes MULTIPLE M10 "
-            "control/transform shapes in one process (the legacy single-slot "
-            "flow_control / branch / decision / transform blocks each emit ONE shape "
-            "and mutually exclude). It is an ordered list of {kind, ...} steps: LINEAR "
-            "kinds (flow_control / message / map_ref / dataprocess / doccacheload / "
-            "doccacheretrieve / doccacheremove) chain forward; a CONTROL kind (decision "
-            "/ branch) fans out and is the LAST step of its sequence in v1 (no "
-            "post-control join); the TERMINAL exception kind throws. A decision owns "
-            "true_steps (may be empty -> continue to the top-level target, the success "
-            "path) + false_steps (required, the reject path) and each leg may end in a "
-            "nested branch or exception; a branch owns 2..25 legs, each a linear "
-            "sub-flow + its own target -> Stop. The cache-CRUD census sequence "
-            "(doccacheload -> doccacheretrieve -> doccacheremove) is a purely linear "
-            "flow_sequence. flow_sequence is mutually exclusive with the legacy "
-            "single-slot flow_control / branch / decision / non-passthrough transform / "
-            "Try-Catch reliability blocks (each returns "
-            "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID); return_documents is allowed only on "
-            "a purely linear flow_sequence; source/target dynamic_path does not yet "
-            "compose with flow_sequence (v1). The legacy single-slot blocks themselves "
-            "stay single-shape and mutually exclusive — rich composition is expressed "
-            "ONLY via flow_sequence. Default (flow_sequence absent) keeps the "
-            "single-shape flow byte-for-byte. Each composed shape reuses its "
-            "byte-accurate single-shape emitter; the verifier (build_integration "
-            "action='verify') confirms the composed graph wiring.",
-            "Schedule activation, deployment, and execution remain M3 scope.",
-        ],
-        "example_component_spec": {
-            "key": "main_process",
-            "type": "process",
-            "action": "create",
-            "name": "<<Integration Process Name>>",
-            "depends_on": [
-                "db_connection",
-                "db_query_operation",
-                "target_rest_connection",
-                "target_rest_operation",
-                "dlq_document_cache",
-            ],
-            "config": {
-                "process_kind": "database_to_api_sync",
-                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
-                "folder_id": "<<optional folder id; the ONE spelling that places>>",
-                "description": "<<optional description>>",
-                "source": {
-                    "connector_type": "database",
-                    "connection_id": "$ref:db_connection",
-                    "operation_id": "$ref:db_query_operation",
-                    "action_type": "Get",
-                    "label": "<<DB extract label>>",
-                },
-                "transform": {"mode": "passthrough"},
-                "target": {
-                    "connector_type": "rest",
-                    "connection_id": "$ref:target_rest_connection",
-                    "operation_id": "$ref:target_rest_operation",
-                    "action_type": "PATCH",
-                    "label": "<<REST send label>>",
-                },
-                # Wired DLQ + optional Notify (#51 / #89): the catch leg logs the
-                # caught error then routes failed documents to the DLQ cache. The
-                # message_template references the platform caught-error property.
-                # try_catch_scope='connector' (#99 G1) gives each connector its
-                # own Try/Catch so a target retry does not re-run the source read.
-                "reliability": {
-                    "retry_count": 0,
-                    "try_catch_scope": "connector",
-                    "dlq": {
-                        "mode": "document_cache_ref",
-                        "document_cache_id": "$ref:dlq_document_cache",
-                    },
-                    "catch_notify": {
-                        "level": "ERROR",
-                        "message_template": "<<caller-authored notify message referencing meta.base.catcherrorsmessage>>",
-                    },
-                },
-                # Issue #92 M4.5.7: declare the DB connection credential fields
-                # as per-environment override points (no embedded credential).
-                # connection_id reuses the same $ref the source binds, so the
-                # override targets the one DB connection; it must appear in
-                # depends_on. The archetype emits this by default for create-mode
-                # username_password DB sources.
-                "process_extensions": {
-                    "connections": [
-                        {
-                            "connection_id": "$ref:db_connection",
-                            "connector_type": "database",
-                            "fields": [
-                                {
-                                    "id": "username",
-                                    "label": "User",
-                                    "xpath": "DatabaseConnectionSettings/@username",
-                                },
-                                {
-                                    "id": "password",
-                                    "label": "Password",
-                                    "xpath": "DatabaseConnectionSettings/@password",
-                                },
-                            ],
-                        }
-                    ]
-                },
-            },
-        },
-    },
-    "wrapper_subprocess": {
-        "resource_type": "process",
-        "operation": "create",
-        "protocol": "wrapper_subprocess",
-        "process_kind": "wrapper_subprocess",
-        "summary": (
-            "A thin wrapper-parent ('facade') process: start -> Process Call "
-            "(issue #90 M4.5.5). EXACTLY ONE call, and the call ENDS the process "
-            "- no trailing Stop, because whether execution continues past a call "
-            "is decided by the called process, which hands control back only "
-            "through the return-document steps it declares (issue #175). The "
-            "parent runs a child process (the logic unit) authored in the SAME "
-            "IntegrationSpecV1 and referenced by key "
-            "(subprocess_ref='$ref:KEY'), or an existing Boomi component "
-            "referenced by id (process_id). No connector source/target of its "
-            "own. To run several children, author one wrapper per child."
+        "process_unit": (
+            "intent_kind='process_ir': one unit per process (envelope + ProcessIR "
+            "root); the root schema is get_schema_template(schema_name='ProcessIRV1') "
+            "and the behavioural contract "
+            "get_schema_template(schema_name='process_ir_authoring')."
         ),
-        "required_fields": [
-            "process_kind",
-            "process_calls",
-        ],
-        "optional_fields": [
-            "folder_name",
-        "folder_id",
-            "description",
-            "process_calls[].subprocess_ref",
-            "process_calls[].process_id",
-            "process_calls[].wait",
-            "process_calls[].abort_on_error",
-            "process_calls[].label",
-            # Issue #99 G3: connection env-extension override points surfaced on
-            # the wrapper-deployed package. Usually HOISTED automatically from a
-            # called child's process_extensions; may also be declared directly.
-            "process_extensions",
-            "process_extensions.connections",
-            # Issue #107 M10.3, GATED by #175: the block is still accepted, but
-            # `enabled: true` is refused - a Return Documents terminal after the
-            # parent's own call needs the child's return paths (#176).
-            "return_documents",
-            "return_documents.enabled",
-            "return_documents.label",
-        ],
-        "supported_terminal_shapes": ["processcall"],
-        "field_notes": {
-            "process_calls": "EXACTLY ONE entry (#175): one standalone Process Call to a child process. A call ends the path it is on, so calls cannot be chained - author one wrapper per child. More than one entry returns PROCESS_CALL_CONFIG_INVALID on field process_calls.",
-            "process_calls[].subprocess_ref": "$ref:KEY of an in-spec process component (the child). EXACTLY ONE of subprocess_ref / process_id per entry.",
-            "process_calls[].process_id": "Component id of an EXISTING Boomi process (no in-spec child required).",
-            "process_calls[].wait": "Wait for the child to finish before the parent's own run completes (default true). Nothing follows the call — it ends the path (#175) — so this decides whether the parent waits, not what executes next.",
-            "process_calls[].abort_on_error": "Abort the parent if the child fails (default false — the parent run finishes normally instead of failing, matching the live wrapper exemplar). Since the call ends the path (#175), this decides the parent's OUTCOME, not which shape runs after it.",
-            "process_extensions": "Issue #99 G3: same shape as the database_to_api_sync process_extensions (connections[].connection_id + fields[].{id,label,xpath}). The integration builder HOISTS a called child's process_extensions onto the wrapper automatically so a wrapper-deployed package surfaces the child override points via get_extensions; you rarely declare it by hand.",
-            "return_documents": "GATED (#175). Optional {enabled: bool, label?: str}; enabled=false or absent is the only accepted form. enabled=true returns PROCESS_CALL_CONFIG_INVALID on field return_documents.enabled: the wrapper’s Process Call ends the path, so no terminal can follow it, and routing past a call requires binding the CALLED process’s return-document shapes (the gated capability process_call_return_path_binding). Have the child return its documents instead. A malformed block still returns PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID.",
-        },
-        "structured_errors": [
-            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
-            {"error_code": "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", "field": "return_documents|return_documents.enabled|return_documents.label"},
-            {"error_code": "PROCESS_REF_MISSING", "field": "process_calls|process_calls[N]"},
-            {"error_code": "PROCESS_REF_AMBIGUOUS", "field": "process_calls[N]"},
-            {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},
-            {"error_code": "PROCESS_REF_NOT_FOUND", "field": "process_calls[N].subprocess_ref"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref|process_extensions.connections[N].connection_id"},
-            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls|process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error|return_documents.enabled"},
-            {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
-            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "process_extensions"},
-            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
-            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
-        ],
-        "notes": [
-            "Author the parent and its children as separate process components in "
-            "ONE IntegrationSpecV1. The parent's process_calls reference children "
-            "by $ref:KEY; the integration builder applies children FIRST (an "
-            "implicit parent->child dependency edge is synthesized, so depends_on "
-            "need not list them) and substitutes $ref->created id before building "
-            "the parent.",
-            "Standalone Process Call is transcribed from a live wrapper exemplar: "
-            "it runs the child as a separate process and waits for it (wait=true), "
-            "and by default does NOT abort the parent on a child failure "
-            "(abort_on_error=false).",
-            "Parent-redeploy implication: the parent is the release boundary — when "
-            "a child subprocess changes, repackage and redeploy the parent so the "
-            "deployed wrapper references the intended child implementation.",
-            "Issue #99 G3: a called child's connection env-extension overrides "
-            "(#92 process_extensions) do NOT surface through a wrapper Process "
-            "Call deployment on their own — they only surface when the declaring "
-            "process is deployed directly. The integration builder therefore "
-            "HOISTS the child's process_extensions.connections onto the wrapper at "
-            "plan time (deduped by connection+field; a wrapper-declared override "
-            "wins) and adds the connection $ref to the wrapper's depends_on, so a "
-            "wrapper-deployed package exposes the override points through "
-            "get_extensions / update_extensions. Verify via get_extensions after "
-            "deploy — a partial_update success is not proof the override exists.",
-            "Invalid references fail at plan time before any Boomi mutation: a "
-            "missing/ambiguous target, a self-reference, a key not present in the "
-            "spec, or a non-process target each return a structured PROCESS_REF_* "
-            "error.",
-            "Branch shape and cross-part document-handoff contracts are out of "
-            "scope (Branch stays gated; #14 owns composed fanout).",
-            "Issue #175: a Process Call ends the path it is on. Boomi projects a "
-            "call's outbound connection from the CALLED process's return-document "
-            "shapes, so a call whose child returns nothing has no outgoing "
-            "connection at all - the wrapper emits start -> Process Call and "
-            "stops there. Two shapes this protocol accepted before now return "
-            "PROCESS_CALL_CONFIG_INVALID before anything is created: more than "
-            "one entry in process_calls, and return_documents.enabled=true. "
-            "Both need the child's return paths bound to the call, which is "
-            "published as the gated capability process_call_return_path_binding.",
-        ],
-        "example_component_spec": {
-            "key": "wrapper_parent",
-            "type": "process",
-            "action": "create",
-            "name": "<<Wrapper Parent Process Name>>",
-            "depends_on": ["main_logic"],
-            "config": {
-                "process_kind": "wrapper_subprocess",
-                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
-                "folder_id": "<<optional folder id; the ONE spelling that places>>",
-                "process_calls": [
-                    {
-                        "subprocess_ref": "$ref:main_logic",
-                        "wait": True,
-                        "abort_on_error": False,
-                        "label": "<<invoke main-logic subprocess>>",
-                    },
-                ],
-            },
-        },
-        "example_child_note": (
-            "Author the child (e.g. a database_to_api_sync process) as its own "
-            "process component keyed 'main_logic' in the same spec; the parent "
-            "references it via subprocess_ref='$ref:main_logic'."
-        ),
-    },
-    "sync_pipeline": {
-        "resource_type": "process",
-        "operation": "create",
-        "protocol": "sync_pipeline",
-        "tool": "build_integration (action='plan' | 'apply')",
-        "process_kind": "sync_pipeline",
-        "description": (
-            "Verified-linear process builder (issue #70 M5.2). Takes a semantic "
-            "M5.1 PipelineSpec (issue #69) stage graph and lowers the all-"
-            "'ordering' linear subset — read(db_read) | fetch(rest_fetch) -> [map] "
-            "-> send(rest_send) -> stop, or (M5.8 #74) fetch(rest_fetch) -> [map] "
-            "-> write(db_write) -> stop — into the proven database_to_api_sync "
-            "source/transform/target config. The source is a DB Get (read) or a "
-            "REST GET (fetch, M5.4 #72); the target is a REST send or a database "
-            "Send/write (write, M5.8 #74, via the #32 write-profile / Send-operation "
-            "builders); it adds NO new shape. Routed via build_integration when a "
-            "type='process' component carries config.process_kind='sync_pipeline'."
-        ),
-        "required_fields": [
-            "process_kind",
-            "pipeline",
-            "pipeline.stages",
-            "pipeline.stages[].key",
-            "pipeline.stages[].kind",
-            "pipeline.stages[].config",
-            "pipeline.stages[].config.primitive",
-        ],
-        "optional_fields": [
-            "name",
-            "folder_name",
-        "folder_id",
-            "description",
-            "process_extensions",
-            "pipeline.dependencies",
-            "pipeline.stages[].config.connector_type",
-            "pipeline.stages[].config.action_type",
-            "pipeline.stages[].config.connection_id",
-            "pipeline.stages[].config.operation_id",
-            "pipeline.stages[].config.map_ref",
-            "pipeline.stages[].config.label",
-        ],
-        "supported_stage_kinds": ["read", "fetch", "listener", "map", "send", "write"],
-        "supported_edge_kinds": ["ordering"],
-        "supported_terminal_shapes": ["stop"],
-        "reserved_stage_kinds": {
-            "lookup": "reserved (modeled in M5.1 #69, no emitter yet).",
-            "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
-            "flow_control": "no PipelineSpec lowering; Flow Control shape emittable via process_config.flow_control block (M10.7, issue #111).",
-            "branch": "no PipelineSpec lowering; Branch shape owned by M10.8 (#112).",
-            "decision": "no PipelineSpec lowering; Decision shape emittable via process_config.decision block (M10.9, issue #113).",
-            "dataprocess": "no PipelineSpec lowering; Data Process owned by M10.2 (#106).",
-            "exception": "no PipelineSpec lowering; Exception/Throw owned by M10.4 (#108).",
-            "doccacheretrieve": "no PipelineSpec lowering; Document Cache Retrieve owned by M10.5 (#109).",
-            "doccacheremove": "no PipelineSpec lowering; Document Cache Remove owned by M10.6 (#110).",
-        },
-        "field_notes": {
-            "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
-            "pipeline.stages[].kind": "One of read/fetch/listener/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), fetch(soap_fetch) (SOAP EXECUTE, #126), or listener(wss_listen) (inbound WSS Listen, M6 #12); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch/listener source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
-            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'wss_listen' for a listener stage (M6 #12), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
-            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); a bare route is called by input type (" + BARE_METHOD_RULE + "). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim), and its method: " + ASC_METHOD_RULE + "; " + ASC_GET_WITH_INPUT_RULE + ". Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
-            "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
-            "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
-            "send": "A send stage is a REST target (config.primitive='rest_send') carrying an explicit HTTP method, or a SOAP Client EXECUTE target (config.primitive='soap_send', #126) which lowers to connectorType='wssoapclientsdk' with action_type defaulting to (and required to be) 'EXECUTE'.",
-            "write": "A write stage (config.primitive='db_write') is a database Send/write target (M5.8 #74, api_to_database_sync) — supported only from a fetch source. It lowers to a database connector binding (connectorType='database', actionType='Send'); action_type defaults to 'Send'. The write profile + Send operation are built by the confirmed #32 builders, so unconfirmed write-profile statement_type variants (e.g. 'upsert') are rejected (UNSUPPORTED_DB_STATEMENT_TYPE) when the components are built.",
-            "pipeline.stages[].config.map_ref": "The map component id or a $ref:KEY token. Its reachability is enforced (MISSING_PROCESS_DEPENDENCY if the $ref key is not in depends_on), but its component TYPE is not type-checked at plan time — matching database_to_api_sync's transform.map_ref. A shared map-ref role check is a future concern.",
-            "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
-            "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
-            "multi_shape_composition": "Issue #117 M10 follow-up: a multi-shape M10 graph (chained routing/batching/cache/throw) is authored via database_to_api_sync.flow_sequence, NOT through sync_pipeline reserved-stage lowering — sync_pipeline stays verified-linear (read -> [map] -> send). The reserved combine/flow_control/branch/decision/dataprocess/exception/doccache stage kinds above remain unlowered.",
-        },
-        "structured_errors": [
-            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
-            {"error_code": "SYNC_PIPELINE_CONFIG_INVALID", "field": "config|pipeline|pipeline.stages|pipeline.stages[KEY].config|pipeline.stages[KEY].config.primitive|pipeline.stages[KEY].config.map_ref|pipeline.stages[KEY].component_ref"},
-            {"error_code": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED", "field": "pipeline.dependencies|pipeline.stages"},
-            {"error_code": "SYNC_PIPELINE_STAGE_UNSUPPORTED", "field": "pipeline.stages[KEY].kind|pipeline.stages[KEY].config.primitive"},
-            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source.*|target.*"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id"},
-            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "source|transform|target"},
-            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
-            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
-        ],
-        "notes": [
-            "sync_pipeline is the M5.2 foundation: it proves the database_to_api_sync "
-            "linear core (DB Get source -> optional map -> REST send target -> stop) "
-            "can be expressed as a semantic stage graph and lowered to the SAME XML. "
-            "As of M5.3 (#71) the database_to_api_sync archetype derives its linear "
-            "core through this sync_pipeline lowering internally while preserving its "
-            "legacy process output (process_kind stays 'database_to_api_sync', the "
-            "returned spec keeps pipeline=null, and no audit sink or reliability shell "
-            "is injected); standalone sync_pipeline remains verified-linear and still "
-            "gates reliability/dynamic path — database_to_api_sync stays the public "
-            "archetype for those legacy features.",
-            "Every binding $ref:KEY token (source/target connection_id + operation_id, "
-            "the map map_ref) must be reachable via the component's depends_on, exactly "
-            "as for database_to_api_sync — the lowered config funnels through the same "
-            "ref-type and reachability checks.",
-            "Reserved stage kinds and gated blocks fail at PLAN time before any Boomi "
-            "mutation, each with a hint naming the owning issue (M10/#103 for control "
-            "flow). The write (db_write) DB target is supported as of M5.8 (#74).",
-            "A fetch source (rest_fetch) models the REST operation param/header/path "
-            "SLOTS only; the runtime process-step binding that fills those slots with "
-            "per-document values via dynamicProperties is owned by #96 (M5.4a) and is "
-            "NOT emitted from a sync_pipeline fetch stage — the source connectoraction "
-            "emits an empty request document.",
-        ],
-        "example_component_spec": {
-            "key": "sync_pipeline_process",
-            "type": "process",
-            "action": "create",
-            "name": "<<Sync Pipeline Process Name>>",
-            "depends_on": ["db_conn", "db_op", "field_map", "rest_conn", "rest_op"],
-            "config": {
-                "process_kind": "sync_pipeline",
-                "folder_name": "<<optional exact folder NAME — not a path; metadata only, this platform ignores it on create>>",
-                "folder_id": "<<optional folder id; the ONE spelling that places>>",
-                "pipeline": {
-                    "stages": [
-                        {
-                            "key": "source",
-                            "kind": "read",
-                            "config": {
-                                "primitive": "db_read",
-                                "connection_id": "$ref:db_conn",
-                                "operation_id": "$ref:db_op",
-                            },
-                        },
-                        {
-                            "key": "transform",
-                            "kind": "map",
-                            "config": {
-                                "primitive": "map",
-                                "map_ref": "$ref:field_map",
-                            },
-                        },
-                        {
-                            "key": "target",
-                            "kind": "send",
-                            "config": {
-                                "primitive": "rest_send",
-                                "action_type": "<<HTTP method, e.g. POST>>",
-                                "connection_id": "$ref:rest_conn",
-                                "operation_id": "$ref:rest_op",
-                            },
-                        },
-                    ],
-                    "dependencies": [
-                        {"from_stage": "source", "to_stage": "transform"},
-                        {"from_stage": "transform", "to_stage": "target"},
-                    ],
-                },
-            },
-        },
-        "fetch_source_stage_example": {
-            "_description": (
-                "Alternate REST source: swap the read(db_read) source stage above "
-                "for a fetch(rest_fetch) source stage to build an API-sourced sync "
-                "(M5.4 #72). The send target + map stages are unchanged. action_type "
-                "defaults to (and must be) 'GET'."
-            ),
-            "key": "source",
-            "kind": "fetch",
-            "config": {
-                "primitive": "rest_fetch",
-                "action_type": "GET",
-                "connection_id": "$ref:rest_src_conn",
-                "operation_id": "$ref:rest_src_op",
-            },
-        },
     },
 }
 
 
 def _get_process_template(operation=None, protocol=None, **_):
     if protocol:
-        tpl = _PROCESS_FLOW_PROTOCOLS.get(protocol)
-        if not tpl:
+        if protocol not in _RETIRED_PROCESS_PROTOCOLS:
             return {
                 "_success": False,
                 "error": f"Unknown process protocol: {protocol}",
-                "valid_protocols": list(_PROCESS_FLOW_PROTOCOLS.keys()),
+                "valid_protocols": list(_RETIRED_PROCESS_PROTOCOLS),
             }
-        return {"_success": True, **tpl}
+        # Value-free: the same removal envelope for every retired protocol.
+        return {"_success": True, **_PROCESS_PROTOCOL_REMOVED}
 
     if not operation:
         return {"_success": True, **_PROCESS_OVERVIEW}
@@ -9002,10 +7851,10 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
             result["recommendation"] = (
-                "For processes, prefer build_from_archetype()/build_integration "
-                "with a typed config.process_kind "
-                "(database_to_api_sync / wrapper_subprocess / sync_pipeline); use config.xml here "
-                "only as an explicit raw-XML escape hatch."
+                "For processes, prefer build_integration with "
+                "config.authoring_request (a recipe from "
+                "list_integration_archetypes() or ProcessIR units); use config.xml "
+                "here only as an explicit raw-XML escape hatch."
             )
         return result
 
@@ -9382,6 +8231,10 @@ PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
         "recommended_recipes": {
             "type": "array", "items": {"$ref": "#/$defs/recipe_ref"}
         },
+        # #159 S3: recipe mode only — the same recipe_descriptor_projection
+        # get_integration_archetype serves (descriptor, input_schema and, where
+        # declared, component_material_schema). Schemas and documentation only.
+        "recipe": {"type": "object", "additionalProperties": True},
         "required_user_decisions": {
             "type": "array", "items": {"$ref": "#/$defs/decision"}
         },
@@ -9541,15 +8394,14 @@ def _plan_intent_keywords(flags: list) -> set:
     return keywords
 
 
-def _plan_archetype_keywords(cls: Any) -> set:
-    """Tokens drawn from archetype metadata — generic, registry-sourced."""
+def _plan_recipe_keywords(descriptor: Dict[str, Any]) -> set:
+    """Tokens drawn from a recipe descriptor — generic, registry-sourced."""
     keywords: set = set()
-    md = cls.metadata
     sources = (
-        list(md.tags)
-        + list(md.use_cases)
-        + list(getattr(cls, "capability_notes", []))
-        + list(getattr(cls, "limitations", []))
+        [str(descriptor.get("recipe_id", "")).replace(".", " ")]
+        + list(descriptor.get("capability_notes") or [])
+        + list(descriptor.get("limitations") or [])
+        + list(descriptor.get("not_for") or [])
     )
     for item in sources:
         keywords.update(_plan_tokenize(str(item)))
@@ -9750,8 +8602,9 @@ def _plan_discovery_steps(profile: Optional[str], pre_selection: bool) -> list:
         steps.append({
             "tool": "list_integration_archetypes",
             "purpose": (
-                "Browse archetypes, pick one, then call plan_integration_design "
-                "again with archetype set for the full brief."
+                "Browse the executable recipes, pick one, then call "
+                "plan_integration_design again with archetype set to its "
+                "recipe_id for the full brief."
             ),
             "arguments": {},
         })
@@ -9986,7 +8839,7 @@ def plan_integration_design_action(
 ) -> Dict[str, Any]:
     """Deterministically assemble a budgeted integration design brief.
 
-    A read-only JOIN over the archetype registry, ``design_doctrine`` (#86), and
+    A read-only JOIN over the recipe registry, ``design_doctrine`` (#86), and
     ``account_governance`` (#93), plus a static discovery catalog. Parses no free
     text, calls no LLM/Boomi, infers no archetype.
 
@@ -10053,25 +8906,42 @@ def plan_integration_design_action(
 
     keywords = _plan_intent_keywords(flags)
 
-    # --- Archetype mode: resolve + schema-derived decisions ------------------
+    # --- Recipe mode: resolve + schema-derived decisions ---------------------
+    # #159 S3: `archetype` names an executable recipe_id (the archetype pattern
+    # registry retired from every served surface). The brief serves the same
+    # recipe_descriptor_projection get_integration_archetype serves.
     schema_decisions: list = []
-    cls = None
+    recipe_projection: Optional[Dict[str, Any]] = None
+    descriptor = None
     if archetype_provided:
-        # Call-time import — see _valid_schema_names for the rationale.
-        from .. import patterns as patterns_pkg
-        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
-        registry = PatternRegistry.from_package(patterns_pkg)
+        from ..recipes import RecipeError, production_registry
+        from .integration_authoring import (
+            list_integration_archetypes_action,
+            recipe_descriptor_projection,
+        )
+
+        listed = list_integration_archetypes_action()
+        valid = [row["recipe_id"] for row in listed.get("recipes", ())]
         try:
-            cls = registry.get(archetype, kind=PatternKind.ARCHETYPE)
-        except PatternRegistryError as exc:
-            valid = [c.metadata.name for c in registry.list_patterns(kind=PatternKind.ARCHETYPE)]
+            registry = production_registry()
+            descriptor = registry.resolve(archetype.strip())
+        except RecipeError as exc:
             return _plan_error_envelope(
-                f"Unknown archetype: {archetype}",
-                exc.error_code or PATTERN_NOT_FOUND,
-                archetype, flags, profile, valid_archetypes=valid,
+                "Unknown recipe_id: pass one returned by "
+                "list_integration_archetypes().",
+                exc.primary_code, archetype, flags, profile, valid_archetypes=valid,
             )
-        keywords |= _plan_archetype_keywords(cls)
-        schema_decisions = _plan_schema_decisions(cls.parameter_schema())
+        if descriptor.recipe_id not in valid:
+            return _plan_error_envelope(
+                "Not an executable recipe: pass a recipe_id returned by "
+                "list_integration_archetypes().",
+                INVALID_INPUT, archetype, flags, profile, valid_archetypes=valid,
+            )
+        recipe_projection = recipe_descriptor_projection(registry, descriptor)
+        keywords |= _plan_recipe_keywords(recipe_projection["descriptor"])
+        schema_decisions = _plan_schema_decisions(
+            recipe_projection.get("input_schema") or {}
+        )
 
     # --- Join over design_doctrine + account_governance ----------------------
     doctrine_catalog = get_design_doctrine_catalog()
@@ -10141,7 +9011,7 @@ def plan_integration_design_action(
         missing_inputs = ["archetype"]
         required_user_decisions = [{
             "field": None,
-            "description": "select an archetype (see list_integration_archetypes)",
+            "description": "select an archetype: a recipe_id from list_integration_archetypes()",
             "from": "missing_input:archetype",
         }]
         discovery_steps = _plan_discovery_steps(profile, pre_selection=True)
@@ -10178,28 +9048,14 @@ def plan_integration_design_action(
     # actually routes through a migrated recipe gets a reference — an unmigrated
     # one is reported honestly by its absence.
     recommended_recipes: list = []
-    if archetype_provided and cls is not None:
-        try:
-            from ..categories.integration_authoring import _ARCHETYPE_ADAPTERS
-            from ..recipes import production_registry
-
-            adapter_id = _ARCHETYPE_ADAPTERS.get(cls.metadata.name)
-            if adapter_id is not None:
-                adapter = production_registry().resolve(adapter_id)
-                recommended_recipes = [
-                    {
-                        "recipe_id": adapter.recipe_id,
-                        "recipe_version": adapter.recipe_version,
-                        "entry_kind": adapter.entry_kind,
-                        "adapter_target": (
-                            adapter.adapter_target.model_dump(mode="json")
-                            if adapter.adapter_target is not None
-                            else None
-                        ),
-                    }
-                ]
-        except Exception:  # noqa: BLE001 — advisory, never load-bearing
-            recommended_recipes = []
+    if descriptor is not None:
+        recommended_recipes = [
+            {
+                "recipe_id": descriptor.recipe_id,
+                "recipe_version": descriptor.recipe_version,
+                "entry_kind": descriptor.entry_kind,
+            }
+        ]
 
     # --- Typed hand-off (issue #146) -----------------------------------------
     # ADVISORY ONLY. This names the exact schema selector and action a caller
@@ -10278,6 +9134,7 @@ def plan_integration_design_action(
         "revision_binding": revision_binding,
         "typed_next_steps": typed_next_steps,
         "recommended_recipes": recommended_recipes,
+        **({"recipe": recipe_projection} if recipe_projection is not None else {}),
         "archetype": archetype if archetype_provided else None,
         "intent_flags": flags,
         "profile": profile,
@@ -10690,7 +9547,7 @@ def list_capabilities_action(
         # === Category 4: Execution ===
         "manage_process": {
             "category": "Execution",
-            "description": "Read-only process component inspection (list/get). Process authoring is typed: use build_from_archetype()/build_integration with config.process_kind.",
+            "description": "Read-only process component inspection (list/get). Process authoring is typed: use build_integration with config.authoring_request (a recipe from list_integration_archetypes() or ProcessIR units).",
             "actions": ["list", "get"],
             "read_only": True,
             "parameters": {
@@ -10706,82 +9563,37 @@ def list_capabilities_action(
                 'manage_process(profile="prod", action="get", process_id="<component-id>")',
             ],
         },
-        # === Category 4a: Integration Authoring (3 tools — V3 archetypes, no Boomi mutation) ===
+        # === Category 4a: Integration Authoring (recipe discovery — #159 S3; no Boomi mutation) ===
         "list_integration_archetypes": {
             "category": "Integration Authoring",
-            "description": "List V3 integration archetypes from the local pattern registry. Read-only, no Boomi mutation.",
-            "actions": ["(single action — lists archetype metadata)"],
+            "description": "List the default executable recipes from the typed recipe registry (one descriptor per recipe_id with its exact recipe_version), plus the registry snapshot and an optional skew comparison. Read-only, no Boomi mutation.",
+            "actions": ["(single action — lists executable recipe descriptors)"],
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
                 # #146 amendment: advertised, not only accepted.
                 "expected_recipe_registry": "dict (optional) — the recipe-registry snapshot OBJECT you expect (the wrapper declares an object; a JSON string is rejected by schema validation before the action runs); supplying it turns recipe_registry_skew into a real comparison instead of not_requested",
-                "query": "str (optional) — case-insensitive substring filter over name/description/tags/use_cases/not_for",
-                "tags": "list[str] (optional) — tags the archetype must include (subset match)",
+                "query": "str (optional) — case-insensitive substring filter over recipe_id",
             },
             "examples": [
                 'list_integration_archetypes()',
-                'list_integration_archetypes(query="stub")',
-                'list_integration_archetypes(tags=["safe", "no-boomi-mutation"])',
+                'list_integration_archetypes(query="listener")',
             ],
         },
         "get_integration_archetype": {
             "category": "Integration Authoring",
-            "description": "Get an archetype's metadata, parameter_schema, capability_notes, limitations, and non-template examples. Read-only, no Boomi mutation.",
-            "actions": ["(single action — returns enriched describe() payload)"],
+            "description": "Get one executable recipe by recipe_id (and optional exact recipe_version): its descriptor, input_schema and, where declared, component_material_schema — the same projection as get_schema_template(schema_name='recipe:<id>@<version>'). next_tool is build_integration. Read-only, no Boomi mutation.",
+            "actions": ["(single action — returns the recipe descriptor projection)"],
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
                 # #146 amendment: advertised, not only accepted.
-                "recipe_version": "str (optional) — pin the archetype's recipe version; omit for the registry default",
-                "name": "str (required) — archetype name from list_integration_archetypes()",
+                "recipe_version": "str (optional) — EXACT version to pin; omit for the recipe's default. An empty, unknown or retired version is RECIPE_VERSION_UNAVAILABLE",
+                "name": "str (required) — recipe_id from list_integration_archetypes()",
             },
             "examples": [
-                'get_integration_archetype(name="stub_minimal_integration")',
-            ],
-        },
-        "build_from_archetype": {
-            "category": "Integration Authoring",
-            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps. The database_to_api_sync archetype emits executable component specs (DB source, JSON transform, REST target, structured process), including a verified Try/Catch + DLQ catch path with platform-timed retry and an optional log-only Notify step (#51/#88/#89); deployment and scheduling remain M3.",
-            "actions": ["(single action — emits an IntegrationSpecV1 only)"],
-            "read_only": True,
-            "no_boomi_mutation": True,
-            "parameters": {
-                # #146 amendment: advertised, not only accepted.
-                "recipe_version": "str (optional) — pin the archetype's recipe version; omit for the registry default",
-                "name": "str (required) — archetype name from list_integration_archetypes()",
-                "parameters": "dict (optional) — values matching the archetype's parameter_schema",
-            },
-            "examples": [
-                'build_from_archetype(name="stub_minimal_integration", parameters={"integration_name": "demo"})',
-                'build_from_archetype(name="database_to_api_sync", parameters={...}) → executable spec for build_integration(action=\'plan\')',
-            ],
-        },
-        "compose_archetypes": {
-            "category": "Integration Authoring",
-            "description": (
-                "Compose archetype parts into ONE coherent IntegrationSpecV1 WITHOUT calling Boomi "
-                "(M8 / issue #14). v1 topology: one db_source -> one shared transform -> 2..25 "
-                "rest_target parts lowered onto a verified Branch fan-out. Links may declare "
-                "handoff.mode='document_cache' per transform->rest_target edge (M8.1 / #132): the "
-                "composed Branch stages mapped documents through an auto-emitted in-spec Document "
-                "Cache (target-less cache_put staging leg + all-documents cache_get before each "
-                "consuming REST send; keyed retrieval stays gated per #119). Cross-part contract "
-                "validation (COMPOSITION_* error codes) fails before any spec is emitted; the "
-                "composed spec deploys through build_integration(plan/apply) -> orchestrate_deploy. "
-                "Use this after inspecting the standalone archetypes when the requested shape "
-                "exceeds one linear preset."
-            ),
-            "actions": ["(single action — emits an IntegrationSpecV1 only)"],
-            "read_only": True,
-            "no_boomi_mutation": True,
-            "parameters": {
-                "parts": "list (required) — part objects {key, kind: db_source|transform|rest_target, label?, parameters}",
-                "options": "dict (optional) — {naming: {integration_name, component_prefix, ...}, execution?, links?}",
-            },
-            "examples": [
-                "compose_archetypes(parts=[{\"key\": \"db\", \"kind\": \"db_source\", \"parameters\": {...}}, {\"key\": \"shape\", \"kind\": \"transform\", \"parameters\": {...}}, {\"key\": \"orders\", \"kind\": \"rest_target\", \"parameters\": {...}}, {\"key\": \"billing\", \"kind\": \"rest_target\", \"parameters\": {...}}], options={\"naming\": {\"integration_name\": \"demo\", \"component_prefix\": \"DEMO\"}})",
-                "# Inspect the contract first: get_schema_template(schema_name='compose_archetypes')",
+                'get_integration_archetype(name="boomi.archetype.stub_minimal")',
+                'get_integration_archetype(name="boomi.compose.db_rest_fanout", recipe_version="2.0.0")',
             ],
         },
         "review_transformation": {
@@ -11114,14 +9926,11 @@ def list_capabilities_action(
             },
             "authority_versions": _AUTHORITY_VERSIONS,
             "examples": [
-                'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"process_kind":"wrapper_subprocess","process_calls":[{"process_id":"<existing-process-uuid>"}]}}]}\')',
-                'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
+                'build_integration(profile="prod", action="plan", config=\'{"authoring_request":{"contract_version":"2","intent":{"intent_kind":"recipe","integration_name":"Order Sync","invocations":[{"recipe_id":"<recipe_id from list_integration_archetypes>","recipe_version":"<exact version>","invocation_id":"main","raw_input":{...},"component_material":{...}}]}}}\')',
+                'build_integration(profile="prod", action="compile", config=\'{"authoring_request":{...same request...}}\')',
+                'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"authoring_request":{...same request..., "expected_capability_revision":"sha256:...","expected_compile_hash":"sha256:..."}}\')',
                 'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
-                '# Strict authority surface (#139D): opt in with version="1.1" on the EXPLICIT integration_spec form.',
-                '# A top-level "pipeline" that disagrees with the single authored process is then rejected at plan',
-                '# time with LEGACY_ADAPTER_AUTHORITY_CONFLICT instead of being silently ignored. version="1.0" is',
-                '# unchanged and is NOT deprecated.',
-                'build_integration(profile="prod", action="plan", config=\'{"integration_spec":{"version":"1.1","name":"Order Sync","pipeline":{"stages":[...],"dependencies":[...]},"components":[{"key":"main_process","type":"process","action":"create","name":"Order Process","config":{"process_kind":"sync_pipeline","pipeline":{"stages":[...],"dependencies":[...]}}}]}}\')',
+                '# A flat process row only binds an existing process: {"key":"p1","type":"process","action":"create","config":{"reference_only":true,"component_id":"<existing-process-uuid>"}}',
                 '# After apply returns build_id: orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',
             ],
         },
@@ -11425,7 +10234,7 @@ def list_capabilities_action(
                 "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
                 "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
                 "schema_name": "str (optional) — authoring schema selector: 'IntegrationSpecV1' | "
-                               "'archetype:<name>' | 'workflow_sequences' | 'workflow:<name>' | "
+                               "'recipe:<recipe_id>@<version>' | 'workflow_sequences' | 'workflow:<name>' | "
                                "'design_doctrine' | 'design_pattern:<name>' | "
                                "'account_governance' | 'governance_pattern:<name>' | "
                                "'script_dataprocess' | 'script_mapping'. "
@@ -11445,11 +10254,11 @@ def list_capabilities_action(
             },
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
-                'get_schema_template(resource_type="process", protocol="database_to_api_sync")',
+                'get_schema_template(schema_name="AuthoringRequestV1")',
                 'get_schema_template(resource_type="integration", operation="plan")',
                 'get_schema_template(resource_type="trading_partner", protocol="http")',
                 'get_schema_template(schema_name="IntegrationSpecV1")',
-                'get_schema_template(schema_name="archetype:database_to_api_sync")',
+                'get_schema_template(schema_name="recipe:boomi.archetype.database_to_api_sync@1.0.0")',
                 'get_schema_template(schema_name="workflow_sequences")',
                 'get_schema_template(schema_name="account_governance")',
                 'get_schema_template(schema_name="governance_pattern:descriptive_unique_component_names")',
@@ -11494,7 +10303,7 @@ def list_capabilities_action(
             "category": "Knowledge / Design",
             "description": (
                 "Assemble a budgeted, read-only design brief by joining the "
-                "archetype registry, design_doctrine, and account_governance. "
+                "recipe registry, design_doctrine, and account_governance. "
                 "Returns recommended patterns with capability_status, capability "
                 "gaps, required user decisions (archetype mode), and discovery "
                 "steps. Deterministic — no LLM, no Boomi, no free-text parsing."
@@ -11503,14 +10312,14 @@ def list_capabilities_action(
             "read_only": True,
             "no_boomi_mutation": True,
             "parameters": {
-                "archetype": "str (optional) — archetype name from list_integration_archetypes(); omit for the pre-selection brief",
+                "archetype": "str (optional) — a recipe_id from list_integration_archetypes() (e.g. boomi.archetype.database_to_api_sync); omit for the pre-selection brief",
                 "intent_flags": "list[str] (optional) — short tokens like retry, dlq, incremental, bidirectional, notify (no free text)",
                 "profile": "str (optional) — echoed into the suggested discovery-step arguments; no account call is made",
                 "authoring_mode": "str (optional) — 'process_ir' returns the direct ProcessIR brief and requires no archetype; must be requested explicitly, intent_flags never selects it",
             },
             "examples": [
                 'plan_integration_design(intent_flags=["incremental", "retry"])',
-                'plan_integration_design(archetype="database_to_api_sync", intent_flags=["incremental", "dlq"])',
+                'plan_integration_design(archetype="boomi.archetype.database_to_api_sync", intent_flags=["incremental", "dlq"])',
             ],
         },
         "list_capabilities": {
@@ -11781,9 +10590,9 @@ def list_capabilities_action(
     if available_tools is None or "list_integration_archetypes" in available_tools:
         hints["prefer_archetypes"] = (
             "For NEW or migrated integration creation, start with "
-            "list_integration_archetypes() before "
-            "get_schema_template(resource_type='integration') or direct "
-            "build_integration authoring."
+            "list_integration_archetypes() (the executable recipe catalog) "
+            "before authoring ProcessIR units directly in "
+            "build_integration(config.authoring_request)."
         )
     # Issue #83 (M7.3): upgrade the generic reuse hint to name the discovery tool
     # only when it is actually registered — otherwise keep the tool-agnostic form.
@@ -11805,10 +10614,11 @@ def list_capabilities_action(
             "account-scoped call."
         ),
         "archetype_first": (
-            "For component/integration creation, route through archetypes: "
+            "For component/integration creation, route through recipes: "
             "list_integration_archetypes → get_integration_archetype → "
-            "build_from_archetype → build_integration(plan/apply). Hand-author "
-            "IntegrationSpecV1 only when no archetype fits."
+            "build_integration(plan/compile/apply) with config.authoring_request "
+            "(intent_kind='recipe'). Author ProcessIR units "
+            "(intent_kind='process_ir') only when no recipe fits."
         ),
         "typed_tools_before_raw": (
             "Prefer typed tools over invoke_boomi_api. Reaching for the raw API "

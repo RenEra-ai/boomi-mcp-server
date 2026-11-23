@@ -1210,23 +1210,26 @@ def test_a_malformed_process_extension_block_is_refused_not_emptied():
     The strict typed models never saw the bad data, so apply emitted a process
     WITHOUT the environment overrides the caller asked for — a successful-looking
     build of the wrong component.
-    """
-    from boomi_mcp.authoring.workflow import (
-        AuthoringWorkflowError,
-        _extension_bindings_from_config,
-    )
 
-    assert _extension_bindings_from_config(None).connections == ()
+    #159 S3: the legacy extension translation retired with the #153 lift; a
+    direct unit's ``process_extensions`` are the strict typed model, which is
+    now the only authority — it refuses every malformed block outright.
+    """
+    from pydantic import ValidationError
+
+    from boomi_mcp.models.process_component import ProcessExtensionBindingsV1 as Bindings
+
+    assert Bindings.model_validate({}).connections == ()
 
     for bad in ("not-an-object", 42, ["connections"]):
-        with pytest.raises(AuthoringWorkflowError):
-            _extension_bindings_from_config(bad)
+        with pytest.raises(ValidationError):
+            Bindings.model_validate(bad)
 
-    with pytest.raises(AuthoringWorkflowError):
-        _extension_bindings_from_config({"connections": ["not-an-object"]})
+    with pytest.raises(ValidationError):
+        Bindings.model_validate({"connections": ["not-an-object"]})
 
-    with pytest.raises(AuthoringWorkflowError):
-        _extension_bindings_from_config(
+    with pytest.raises(ValidationError):
+        Bindings.model_validate(
             {"connections": [{"connection_id": "$ref:conn", "fields": ["bad"]}]}
         )
 
@@ -1322,18 +1325,20 @@ def test_recipe_extension_normalization_matches_the_legacy_authority():
     reader refuses — so a caller's environment overrides were silently dropped
     and the process deployed without them. Both are gone because the question is
     now asked of `extension_bindings_from_legacy_config` itself.
+
+    #159 S3: the legacy reader is no longer consulted — the #153 lift and its
+    extension translation retired, so a direct unit's typed model is the one
+    authority. Its no-ops stay no-ops, every shape the legacy reader refused is
+    refused, and it is STRICTER where the legacy reader normalized: padded ids
+    are refused rather than stripped (nothing is silently rewritten).
     """
-    from boomi_mcp.authoring.workflow import (
-        AuthoringWorkflowError,
-        _extension_bindings_from_config,
-    )
+    from pydantic import ValidationError
 
-    # Legacy-accepted no-ops stay no-ops.
-    for benign in (None, {}, [], {"connections": []}):
-        assert _extension_bindings_from_config(benign).connections == ()
+    from boomi_mcp.models.process_component import ProcessExtensionBindingsV1 as Bindings
 
-    # Legacy-refused shapes are refused — including the three F3 named, which
-    # the hand-written version coalesced to empty bindings.
+    for benign in ({}, {"connections": []}):
+        assert Bindings.model_validate(benign).connections == ()
+
     for bad in (
         "not-an-object",
         42,
@@ -1343,18 +1348,19 @@ def test_recipe_extension_normalization_matches_the_legacy_authority():
         {"connections": ["not-an-object"]},
         {"connections": [{"connection_id": "$ref:conn", "fields": ["bad"]}]},
         {"connections": [{"connection_id": "  ", "fields": [{"id": "u", "label": "l"}]}]},
+        {"connections": [{"connection_id": " $ref:conn ", "fields": [{"id": " u ", "label": "L"}]}]},
     ):
-        with pytest.raises(AuthoringWorkflowError):
-            _extension_bindings_from_config(bad)
+        with pytest.raises(ValidationError):
+            Bindings.model_validate(bad)
 
-    # ...and a well-formed block still normalizes.
-    good = _extension_bindings_from_config(
-        {"connections": [{"connection_id": " $ref:conn ", "fields": [{"id": " u ", "label": "L"}]}]}
+    # ...and a well-formed block is accepted with its exact bytes.
+    good = Bindings.model_validate(
+        {"connections": [{"connection_id": "$ref:conn", "fields": [{"id": "u", "label": " L "}]}]}
     )
     assert good.connections[0].connection_id == "$ref:conn"
     assert good.connections[0].fields[0].id == "u"
     # `label` is NOT stripped — the renderer emits its exact bytes.
-    assert good.connections[0].fields[0].label == "L"
+    assert good.connections[0].fields[0].label == " L "
 
 
 def test_an_update_attests_the_folder_id_the_platform_received():
@@ -1544,22 +1550,25 @@ def test_a_malformed_extension_path_is_a_json_pointer():
     `/process_extensions/connections[0]/fields[0]`, so a consumer following the
     pointer looked for a key literally named `connections[0]`.
     """
-    from boomi_mcp.authoring.workflow import (
-        AuthoringWorkflowError,
-        _extension_bindings_from_config,
-        _json_pointer,
-    )
+    from pydantic import ValidationError
+
+    from boomi_mcp.authoring.workflow import _json_pointer
+    from boomi_mcp.models.process_component import ProcessExtensionBindingsV1 as Bindings
 
     assert _json_pointer("process_extensions.connections[0].fields[0]") == (
         "/process_extensions/connections/0/fields/0"
     )
 
-    with pytest.raises(AuthoringWorkflowError) as excinfo:
-        _extension_bindings_from_config(
+    # #159 S3: the typed model is the authority now; its refusal locates the
+    # field by a structural path, never a bracketed one.
+    with pytest.raises(ValidationError) as excinfo:
+        Bindings.model_validate(
             {"connections": [{"connection_id": "$ref:conn", "fields": [{"id": ""}]}]}
         )
-    paths = [d.path for d in excinfo.value.diagnostics]
+    paths = [_json_pointer(".".join(str(p) for p in ("process_extensions", *e["loc"])))
+             for e in excinfo.value.errors()]
     assert paths and all("[" not in p and "]" not in p for p in paths), paths
+    assert "/process_extensions/connections/0/fields/0/id" in paths
 
 
 def test_a_platform_renamed_component_is_reported_as_renamed():
@@ -3379,9 +3388,38 @@ def test_every_registered_process_component_code_has_a_reachable_producer():
 
     wrapper_source = inspect.getsource(_ib._reject_invalid_typed_request)
 
+    # #159 S3: or the served boundary is OBSERVED emitting it. The admission
+    # refusal (`PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED`) is produced by
+    # `authoring/process_admission.py`, not by the typed-request wrapper, so it is
+    # witnessed by EXECUTING the registered entry with a raw process body on each
+    # served intake — plan and apply on the raw route, plan on the typed route —
+    # rather than exempted by name.
+    raw_body = {"integration_spec": {"name": "witness", "components": [
+        {"key": "p", "type": "process", "name": "P",
+         "config": {"process_kind": "database_to_api_sync"}}]}}
+    typed_body = {"authoring_request": {"intent": {
+        "intent_kind": "integration_spec",
+        "integration_spec": raw_body["integration_spec"]}}}
+    observed = set()
+    for action, config in (
+        ("plan", raw_body),
+        ("apply", dict(raw_body, dry_run=False)),
+        ("plan", typed_body),
+    ):
+        with patch(_EXECUTE) as execute, patch(_CREATE) as create:
+            result = build_integration_action(
+                MagicMock(), _PROFILE, action, config=dict(config))
+        assert execute.call_count == 0 and create.call_count == 0, action
+        codes = _all_cause_codes(result)
+        assert result["_success"] is False, (action, result)
+        assert _errors.PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED in codes, (action, codes)
+        observed.update(codes)
+    witnessed = {code for code in registered.values() if code in observed}
+    assert _errors.PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED in witnessed, observed
+
     unreachable = sorted(
         code for name, code in registered.items()
-        if code not in served and code not in wrapper_source
+        if code not in served and code not in wrapper_source and code not in witnessed
     )
     assert unreachable == [], (
         "registered with no reachable producer at the served boundary: "

@@ -123,8 +123,12 @@ def test_the_retired_spelling_authority_and_the_record_index_agree_both_ways(rec
 
 
 def test_the_legacy_chain_at_head_still_reproduces_every_record():
-    """Valid until #160 deletes the legacy producers; a drift here is a #160-owned event."""
-    assert retire.check() == []
+    """Valid until the legacy chain left HEAD. #159 S3 retired the archetype
+    action the replay drove, so the frozen records are the oracle and the HEAD
+    replay fails at exactly that retired import (the chain is gone, not unused)."""
+    assert retire.load_records()
+    with pytest.raises(RuntimeError, match="cannot import name 'build_from_archetype_action'"):
+        retire.replay_at_head()
 
 
 # ---------------------------------------------------------------------------

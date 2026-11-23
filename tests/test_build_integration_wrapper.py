@@ -72,9 +72,43 @@ _MINIMAL_PAYLOAD = {
 
 
 def _emit_spec():
-    result = server.build_from_archetype("database_to_api_sync", _MINIMAL_PAYLOAD)
-    assert result["_success"] is True, result
-    return result["integration_spec"]
+    """A raw component plan the wrapper routes: one database connection the plan
+    AUTHORS, and the process it feeds bound by explicit id (#159 S3: a flat process
+    row only binds an existing process; the archetype emitter that produced this
+    spec retired with `build_from_archetype`). The connection settings are the same
+    synthetic sentinels `_MINIMAL_PAYLOAD` carries."""
+    return {
+        "version": "1.0",
+        "name": "demo-sync",
+        "components": [
+            {
+                "key": "source_db_connection",
+                "type": "connector-settings",
+                "action": "create",
+                "name": "DEMO Source DB",
+                "config": {
+                    "connector_type": "database",
+                    "driver_id": "sqlserver",
+                    "auth_mode": "username_password",
+                    "component_name": "DEMO Source DB",
+                    "folder_name": "Process Library",
+                    "host": "db.internal",
+                    "port": 1433,
+                    "dbname": "AppDB",
+                    "username": "svc_sync",
+                    "credential_ref": "credential://db/svc_sync",
+                },
+            },
+            {
+                "key": "main_process",
+                "type": "process",
+                "action": "create",
+                "name": "DEMO Sync",
+                "config": {"reference_only": True, "component_id": "id-main_process"},
+                "depends_on": ["source_db_connection"],
+            },
+        ],
+    }
 
 
 def _patch_creds():
@@ -141,14 +175,6 @@ def test_non_object_json_config_returns_structured_failure_without_boomi():
 # ---------------------------------------------------------------------------
 # Plan + dry-run apply route through the wrapper with mocked creds
 # ---------------------------------------------------------------------------
-
-
-def test_build_from_archetype_wrapper_for_database_to_api_sync():
-    result = server.build_from_archetype("database_to_api_sync", _MINIMAL_PAYLOAD)
-    assert result["_success"] is True
-    assert result["boomi_mutation"] is False
-    assert result["raw_xml_exposed"] is False
-    assert "main_process" in {c["key"] for c in result["integration_spec"]["components"]}
 
 
 def test_plan_through_wrapper_succeeds_with_mocked_creds():

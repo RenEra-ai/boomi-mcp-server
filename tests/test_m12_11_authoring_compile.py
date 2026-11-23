@@ -172,13 +172,24 @@ def test_no_raw_xml_or_artifact_body_appears_in_the_response(spy):
 
 
 def test_the_integration_spec_intent_compiles_with_its_gap_reported(spy):
-    """No ProcessIR root means no process artifact — said out loud, not implied."""
-    result = _compile(integration_spec_request())
-    assert result.mutation_performed is False
-    assert result.artifact_fingerprints == ()
-    assert [g.capability_id for g in result.capability_gaps] == [
-        "authoring.integration_spec_intent.wrapper_subprocess"
-    ]
+    """No ProcessIR root means no process artifact — said out loud, not implied.
+
+    #159 S3 (cutover decision 1): the flat process body this gap was reported for
+    is refused at typed intake — never compiled into a gap — with the
+    unit-required code at a static, value-free pointer, and no mutation."""
+    from boomi_mcp.errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+
+    with pytest.raises(AuthoringWorkflowError) as refused:
+        _compile(integration_spec_request())
+    assert refused.value.code == PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+    assert [(d.code, d.path) for d in refused.value.diagnostics] == [(
+        PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED,
+        "/intent/integration_spec/components/0/config/process_kind",
+    )]
+    assert "wrapper_subprocess" not in str(
+        [d.model_dump(mode="json") for d in refused.value.diagnostics]
+    )
+    assert spy.calls == []
 
 
 def test_artifact_fingerprints_are_sorted(spy):

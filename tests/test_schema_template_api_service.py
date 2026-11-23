@@ -111,6 +111,10 @@ def test_listener_workflow_reads_apitype_first_and_branches():
     steps = workflow["steps"]
     # get_server_info is step 1 — the apiType selects the publish pattern.
     assert "get_server_info" in steps[0]
-    assert "asc_wrapper" in " ".join(steps)
+    # #159 S3: the listener presets are recipes; the advanced-apiType branch is
+    # `publish_mode='api_service'` (the retired archetype spelled it `asc_wrapper`).
+    joined = " ".join(steps)
+    assert "publish_mode='api_service'" in joined and "apiType advanced" in joined
+    assert "asc_wrapper" not in joined
     # ListenerStatus is explicitly named a non-signal for WSS/ASC routes.
     assert "ListenerStatus" in workflow["description"]

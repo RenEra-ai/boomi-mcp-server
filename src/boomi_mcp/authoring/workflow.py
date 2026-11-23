@@ -467,6 +467,41 @@ def _reparsed_unit(unit):
     return unit.model_copy(update={"process_ir": reparsed})
 
 
+def _refuse_flat_process_rows(components, pointer: str, conflict_policy: str) -> None:
+    """Raise the unit-required refusal for the first flat process row admission
+    refuses (``process_admission.first_flat_process_refusal``), value-free.
+
+    One rule for every typed intake: a flat ``type="process"`` row is admitted only
+    as a body-less create binding an explicit existing process id that apply
+    reuses; a body, an update, a write, or a name-only row is refused before any
+    preview, lookup or write.
+    """
+    from ..authoring.process_admission import (
+        UNIT_REQUIRED_HINT,
+        UNIT_REQUIRED_MESSAGE,
+        first_flat_process_refusal,
+    )
+    from ..errors import PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED
+
+    field = first_flat_process_refusal(components, pointer, conflict_policy)
+    if field is None:
+        return
+    raise AuthoringWorkflowError(
+        PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED,
+        (
+            _diag(
+                PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED,
+                "error",
+                message=UNIT_REQUIRED_MESSAGE,
+                path="/" + field.replace(".", "/"),
+                subject_kind="process",
+                subject_id="",
+                remediation=UNIT_REQUIRED_HINT,
+            ),
+        ),
+    )
+
+
 def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
     intent = request.intent
     kind = intent.intent_kind
@@ -493,32 +528,19 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         # REPARSE ONLY, never sort: the caller authored this spec and the
         # semantic-hash payload dumps it wholesale, so reordering would move the
         # hash for any multi-root spec authored out of key order.
+        # #159 S3 (cutover decision 1, step-4 decision 4): a raw process row is
+        # refused HERE, before any preview, echo or diagnostic can carry its config.
+        # A flat process row may only BIND an existing process by explicit id.
+        _refuse_flat_process_rows(
+            spec.components, "intent.integration_spec.components", intent.conflict_policy
+        )
         if spec.processes:
             spec = spec.model_copy(update={
                 "processes": tuple(_reparsed_unit(unit) for unit in spec.processes)
             })
-        gaps = tuple(
-            CapabilityGapV1(
-                capability_id=(
-                    "authoring.integration_spec_intent."
-                    + str((component.config or {}).get("process_kind") or "unknown")
-                ),
-                state="unsupported",
-                path=f"/intent/integration_spec/components/{component.key}",
-                reason_code="PROCESS_IR_ROOT_NOT_DERIVABLE",
-                detail=(
-                    "This process is planned and previewed from the component "
-                    "plan, but its ProcessIR root is not derivable, so canonical "
-                    "compilation produces no artifact fingerprint for it. Author "
-                    "the process with intent_kind='process_ir' to compile it."
-                ),
-            )
-            for component in spec.components
-            if component.type == "process"
-        )
         return _NormalizedIntent(
             integration_spec=spec,
-            gaps=gaps,
+            gaps=(),
             connector_metadata=_connector_metadata_from_components(spec.components),
         )
 
@@ -543,6 +565,11 @@ def _normalize_intent(request: AuthoringRequestV1) -> _NormalizedIntent:
         # the connection binding contract, and assembles the recorded intents —
         # all BEFORE the spec below exists, so every fingerprint covers final
         # resolved governance and never an unexpanded knob.
+        # #159 S3: the supporting component plan admits a flat process row only as
+        # an explicit-id bind, exactly as the other two intakes do.
+        _refuse_flat_process_rows(
+            intent.components, "intent.components", intent.conflict_policy
+        )
         resolution = _resolve_governance(
             tuple(_reparsed_unit(unit) for unit in intent.units),
             list(intent.components),
@@ -869,8 +896,8 @@ def _normalize_recipe_intent(
     #159 S1: a registration that declares the component-material channel has
     its trusted preparer run first; the specs it generates join the run as
     ``supporting_components``. A recipe-emitted PROCESS UNIT carries its own
-    envelope and bypasses the interim lift; only bare ``set_process_root``
-    roots are lifted, exactly as before.
+    envelope. #159 S3: the interim #153 lift is retired — a bare
+    ``set_process_root`` root is refused, never paired with a legacy component.
     """
     from ..models.process_component import (
         ProcessAuthoringUnitAuthoredV1,
@@ -908,6 +935,10 @@ def _normalize_recipe_intent(
                 ),
             )
         first_position[component.key] = position
+    # #159 S3 (step-4 decision 4): a base row a recipe may SELECT is admitted on the
+    # same rule as a raw or typed slot — a flat process row only as an explicit-id
+    # bind apply reuses.
+    _refuse_flat_process_rows(intent.base_components, "intent.base_components", conflict_policy)
     catalog_entries = {
         component.key: component for component in intent.base_components
     }
@@ -993,9 +1024,57 @@ def _normalize_recipe_intent(
                 ),
             ),
         )
-    supporting, authored_units = _lift_recipe_roots_into_units(
-        components, roots, envelopes
-    )
+    # #159 S3: the #153 interim lift is gone — every surviving executable emits a
+    # process UNIT (root + envelope). A bare `set_process_root` root has no
+    # envelope to materialize from, so it is refused rather than silently dropped
+    # or re-paired with a legacy process component.
+    for root_key, _root in roots:
+        raise AuthoringWorkflowError(
+            AUTHORING_COMPILE_BLOCKED,
+            (
+                _diag(
+                    AUTHORING_COMPILE_BLOCKED,
+                    "error",
+                    message=(
+                        "A recipe composed a process root without a process unit; "
+                        "a root materializes only from a unit carrying its envelope."
+                    ),
+                    subject_kind="process",
+                    subject_id=root_key,
+                    remediation=(
+                        "Invoke a recipe version that emits a process_unit "
+                        "contribution (list_integration_archetypes lists them)."
+                    ),
+                    cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,),
+                ),
+            ),
+        )
+    # An envelope naming no unit has nothing to govern (the unit case was refused
+    # above as a second source).
+    from ..errors import GOVERNANCE_ENVELOPE_UNMATCHED
+
+    for envelope_key in sorted(set(envelopes) - unit_keys):
+        raise AuthoringWorkflowError(
+            GOVERNANCE_ENVELOPE_UNMATCHED,
+            (
+                _diag(
+                    GOVERNANCE_ENVELOPE_UNMATCHED,
+                    "error",
+                    message=(
+                        "A per-root envelope names a component key that no "
+                        "composed process root carries."
+                    ),
+                    path="/intent/process_envelopes",
+                    subject_kind="process",
+                    subject_id=envelope_key,
+                    remediation=(
+                        "Name a root the invoked recipes compose, or drop "
+                        "the envelope."
+                    ),
+                ),
+            ),
+        )
+    supporting = list(components)
     direct_units = tuple(
         ProcessAuthoringUnitAuthoredV1(
             envelope=ProcessComponentEnvelopeAuthoredV1(
@@ -1018,7 +1097,7 @@ def _normalize_recipe_intent(
         for contribution in result.recorded_intents
     )
     resolution = _resolve_governance(
-        tuple(authored_units) + direct_units,
+        direct_units,
         list(supporting) + list(result.supporting_components),
         extra_recorded_intents=recipe_records,
         deferred_query_parameter_names=deferred_names,
@@ -1031,13 +1110,10 @@ def _normalize_recipe_intent(
     return _NormalizedIntent(
         integration_spec=spec,
         gaps=(),
-        # Connector metadata is derived from the components the recipe emitted,
-        # INCLUDING the process entries that were just lifted into units: the
-        # projection keys on component type, and a lifted process contributes no
-        # connector family, so passing the full list keeps the mapping identical
-        # to what it was before the lift. Governance moves no connector family
-        # or action, so the resolved components project identically. The
-        # prepared supporting specs (#159 S1) join it.
+        # Connector metadata is derived from the components the recipe emitted.
+        # Governance moves no connector family or action, so the resolved
+        # components project identically. The prepared supporting specs (#159 S1)
+        # join it.
         connector_metadata=_connector_metadata_from_components(
             components + list(result.supporting_components)
         ),
@@ -1499,8 +1575,7 @@ def _leg_provenance_records(result, projection_facts) -> Tuple[Any, ...]:
     unit to; its recipe id and version are the REGISTRY-resolved ones from the
     run's own invocation provenance. Ordered by process key, then ordinal.
 
-    A unit without trusted facts — fan-out 1.0.0's lifted root, every direct
-    intent — has no recipe-assembled leg identity to report and gets none, the
+    A unit without trusted facts — every direct intent — has no recipe-assembled leg identity to report and gets none, the
     same trigger the served route rows use. Informational only: no plan or
     compile hash reads ``recipe_diagnostics``.
     """
@@ -1560,332 +1635,6 @@ def _json_pointer(dotted: str) -> str:
     return "/" + "/".join(
         part for part in _re.split(r"[.\[\]]+", str(dotted)) if part
     )
-
-
-def _extension_bindings_from_config(raw):
-    """Legacy recipe extension config -> the typed ``ProcessExtensionBindingsV1``.
-
-    The NORMALIZATION BOUNDARY between the legacy reader's tolerance and the
-    typed models' strictness — and it DELEGATES the tolerance question rather
-    than answering it.
-
-    ``extension_bindings_from_legacy_config`` is the authority on which shapes
-    are acceptable, and it already normalizes them: it strips a padded
-    ``connection_id``/``id``/``xpath``, leaves ``label`` byte-exact because the
-    renderer emits it verbatim, and refuses twelve distinct malformed shapes with
-    ``PROCESS_EXTENSIONS_INVALID``.
-
-    An earlier version of this function hand-wrote a SUBSET of those refusals,
-    and Codex round 2 found both halves of what that costs: it rejected
-    ``process_extensions=[]``, which the legacy reader accepts as an explicit
-    no-op, and it accepted ``{"connection": [...]}`` / ``{"connections": null}``
-    / ``{"connections": {}}``, which the legacy reader refuses — so a misspelled
-    key still silently dropped every requested environment override and deployed
-    a successful-looking process without them. A hand-copy of an authority is
-    wrong in both directions at once; asking the authority is not.
-    """
-    from ..categories.components.process_component_materializer import (
-        extension_bindings_from_legacy_config,
-    )
-    from ..models.process_component import (
-        ProcessConnectionOverrideV1,
-        ProcessExtensionBindingsV1,
-        ProcessOverrideFieldV1,
-    )
-
-    try:
-        normalized = extension_bindings_from_legacy_config({"process_extensions": raw})
-    except Exception as exc:  # noqa: BLE001 — re-raised as an authoring diagnostic
-        raise AuthoringWorkflowError(
-            AUTHORING_COMPILE_BLOCKED,
-            (
-                _diag(
-                    AUTHORING_COMPILE_BLOCKED,
-                    "error",
-                    message=(
-                        "The process extension bindings are malformed and would "
-                        "otherwise be dropped silently."
-                    ),
-                    path=_json_pointer(
-                        getattr(exc, "field", "") or "process_extensions"
-                    ),
-                    subject_kind="process",
-                    remediation=(
-                        'Shape: {"connections": [{"connection_id": "...", '
-                        '"fields": [{"id": "...", "label": "..."}]}]}.'
-                    ),
-                    cause_codes=(str(getattr(exc, "error_code", "") or ""),),
-                ),
-            ),
-        ) from None
-
-    connections = []
-    for entry in normalized:
-        fields = tuple(
-            ProcessOverrideFieldV1(
-                **{k: v for k, v in field.items() if k in ("id", "label", "xpath")}
-            )
-            for field in entry.get("fields") or ()
-        )
-        kwargs = {"connection_id": entry["connection_id"], "fields": fields}
-        if entry.get("connector_type"):
-            kwargs["connector_type"] = entry["connector_type"]
-        connections.append(ProcessConnectionOverrideV1(**kwargs))
-    return ProcessExtensionBindingsV1(connections=tuple(connections))
-
-
-def _lift_recipe_roots_into_units(components, roots, envelopes=None):
-    """Pair each composed ProcessIR root with the process component describing it.
-
-    An interim bridge, and deliberately labelled one: #159 migrates recipe /
-    composition authoring to author units directly. Until then a recipe still
-    emits its process as an ``IntegrationComponentSpec`` alongside a composed
-    root, and this is where those two halves become the single AUTHORED
-    :class:`ProcessAuthoringUnitAuthoredV1` that governance then resolves into
-    the strict unit the canonical chain requires.
-
-    Returns ``(supporting_components, authored_units)``. The lifted process
-    entries are REMOVED from the component list: leaving them in both places
-    would put one process in two tuples of one shared key namespace, which the
-    spec validator correctly rejects — and, worse, would make it ambiguous which
-    of the two descriptions apply should build from.
-
-    ``process_kind`` is never read. That is the whole point of the milestone: a
-    recipe's process is materialized from its ProcessIR root through the
-    canonical chain, not by resolving a legacy dialect.
-
-    **#157 — typed per-root envelopes.** ``envelopes`` maps a composed root key
-    to the caller's :class:`RecipeProcessEnvelopeV1`. When one is present it is
-    the ONLY governance authority for that root: the lifted component may then
-    author ``action``, ``component_id`` and ``depends_on`` (which stay its) but
-    none of the governance fields the envelope owns — a lifted ``name``,
-    ``description``, ``folder_name`` or ``process_extensions`` beside a typed
-    envelope is ``GOVERNANCE_SOURCE_CONFLICT``, never a silent second copy. A
-    root with no typed envelope lifts exactly as before. An envelope naming a
-    key no composed root has is ``GOVERNANCE_ENVELOPE_UNMATCHED``.
-    """
-    from ..errors import GOVERNANCE_ENVELOPE_UNMATCHED, GOVERNANCE_SOURCE_CONFLICT
-    from ..models.authoring_workflow import RecipeProcessEnvelopeV1
-    from ..models.process_component import (
-        ProcessAuthoringUnitAuthoredV1,
-        ProcessComponentEnvelopeAuthoredV1,
-    )
-
-    #: Config keys promoted onto the typed envelope. An ALLOWLIST, not a
-    #: passthrough: every other config key belongs to the legacy component
-    #: surface and must not silently become envelope contract.
-    _ENVELOPE_CONFIG_KEYS = ("description", "folder_name", "process_extensions")
-    #: The governance fields a typed envelope and the lift could BOTH supply —
-    #: derived from the envelope model's own field set, never a second list.
-    _CONFLICT_FIELDS = tuple(
-        name
-        for name in RecipeProcessEnvelopeV1.governance_fields()
-        if name in _ENVELOPE_CONFIG_KEYS or name == "name"
-    )
-
-    envelopes = dict(envelopes or {})
-    root_keys = {component_key for component_key, _ir in roots}
-    for envelope_key in sorted(envelopes):
-        if envelope_key not in root_keys:
-            raise AuthoringWorkflowError(
-                GOVERNANCE_ENVELOPE_UNMATCHED,
-                (
-                    _diag(
-                        GOVERNANCE_ENVELOPE_UNMATCHED,
-                        "error",
-                        message=(
-                            "A per-root envelope names a component key that no "
-                            "composed process root carries."
-                        ),
-                        path="/intent/process_envelopes",
-                        subject_kind="process",
-                        subject_id=envelope_key,
-                        remediation=(
-                            "Name a root the invoked recipes compose, or drop "
-                            "the envelope."
-                        ),
-                    ),
-                ),
-            )
-
-    by_key = {}
-    for component in components:
-        if component.type == "process":
-            by_key.setdefault(component.key, []).append(component)
-
-    units = []
-    lifted_keys = set()
-    for component_key, ir in roots:
-        matches = by_key.get(component_key, ())
-        # Reference-only entries describe an EXISTING component to reuse; they
-        # author no XML, so they are not a root's envelope and must stay in
-        # `components`.
-        authored = [
-            component
-            for component in matches
-            if not (component.config or {}).get("reference_only")
-        ]
-        if len(authored) != 1:
-            raise AuthoringWorkflowError(
-                AUTHORING_COMPILE_BLOCKED,
-                (
-                    _diag(
-                        AUTHORING_COMPILE_BLOCKED,
-                        "error",
-                        message=(
-                            "A composed process root must correspond to exactly "
-                            "one authored process component with the same key."
-                        ),
-                        subject_kind="process",
-                        subject_id=component_key,
-                        remediation=(
-                            "The recipe emitted "
-                            f"{len(authored)} authored process components for this "
-                            "root. Emit exactly one."
-                        ),
-                        cause_codes=(
-                            PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
-                        ),
-                    ),
-                ),
-            )
-        component = authored[0]
-        config = component.config or {}
-        typed = envelopes.get(component_key)
-
-        # `action` must be CALLER-AUTHORED, checked via `model_fields_set` (§6
-        # review AR1-08; plan §8 verbatim: "inspect `model_fields_set` rather
-        # than accepting the default silently"). The previous version honoured
-        # the model's `action="create"` default, so a recipe that authored none
-        # still lifted into a unit whose REQUIRED envelope field nobody wrote.
-        authored_fields = component.model_fields_set
-        if "action" not in authored_fields:
-            raise AuthoringWorkflowError(
-                AUTHORING_COMPILE_BLOCKED,
-                (
-                    _diag(
-                        AUTHORING_COMPILE_BLOCKED,
-                        "error",
-                        message=(
-                            "A composed process root must author its own "
-                            "'action'; the model default is not accepted."
-                        ),
-                        subject_kind="process",
-                        subject_id=component_key,
-                        remediation=(
-                            "Set action='create' or action='update' explicitly "
-                            "on the process component this root belongs to."
-                        ),
-                        cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
-                    ),
-                ),
-            )
-
-        envelope_kwargs = {
-            "component_key": component_key,
-            # Caller-authored, verified above via `model_fields_set`.
-            "action": component.action,
-            "depends_on": tuple(component.depends_on or ()),
-        }
-        if component.component_id:
-            envelope_kwargs["component_id"] = component.component_id
-
-        if typed is not None:
-            # ONE authority per root. Any governance the lifted component also
-            # carries is refused by name rather than merged or overridden.
-            supplied = []
-            if "name" in authored_fields and component.name and str(component.name).strip():
-                supplied.append("name")
-            for key in _CONFLICT_FIELDS:
-                if key == "name":
-                    continue
-                if config.get(key) not in (None, "", {}, []):
-                    supplied.append(key)
-            if supplied:
-                raise AuthoringWorkflowError(
-                    GOVERNANCE_SOURCE_CONFLICT,
-                    (
-                        _diag(
-                            GOVERNANCE_SOURCE_CONFLICT,
-                            "error",
-                            message=(
-                                "A typed per-root envelope and the lifted process "
-                                "component both supply governance for one root."
-                            ),
-                            path=(
-                                "/intent/base_components/{0}/{1}".format(
-                                    component_key,
-                                    supplied[0]
-                                    if supplied[0] == "name"
-                                    else "config/" + supplied[0],
-                                )
-                            ),
-                            subject_kind="process",
-                            subject_id=component_key,
-                            remediation=(
-                                "Author name, description, folder_name and "
-                                "process_extensions on the typed envelope only."
-                            ),
-                        ),
-                    ),
-                )
-            for key in RecipeProcessEnvelopeV1.governance_fields():
-                envelope_kwargs[key] = getattr(typed, key)
-        else:
-            # The pre-#157 lift, byte-for-byte: name REQUIRED from the
-            # component (`config.component_name` never regains authority), the
-            # allowlisted config keys promoted.
-            name = component.name if "name" in authored_fields else None
-            if not name or not str(name).strip():
-                raise AuthoringWorkflowError(
-                    AUTHORING_COMPILE_BLOCKED,
-                    (
-                        _diag(
-                            AUTHORING_COMPILE_BLOCKED,
-                            "error",
-                            message=(
-                                "A composed process root needs a component name to "
-                                "materialize; the recipe supplied none."
-                            ),
-                            subject_kind="process",
-                            subject_id=component_key,
-                            remediation=(
-                                "Emit a non-blank 'name' on the process component "
-                                "this root belongs to, or supply a typed "
-                                "per-root envelope for it."
-                            ),
-                            cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID,),
-                        ),
-                    ),
-                )
-            envelope_kwargs["name"] = str(name)
-            for key in _ENVELOPE_CONFIG_KEYS:
-                value = config.get(key)
-                if value in (None, "", {}, []):
-                    continue
-                if key == "process_extensions":
-                    envelope_kwargs[key] = _extension_bindings_from_config(value)
-                else:
-                    envelope_kwargs[key] = value
-
-        units.append(
-            ProcessAuthoringUnitAuthoredV1(
-                envelope=ProcessComponentEnvelopeAuthoredV1(**envelope_kwargs),
-                process_ir=ir,
-            )
-        )
-        lifted_keys.add(component_key)
-
-    supporting = [
-        component
-        for component in components
-        if not (
-            component.type == "process"
-            and component.key in lifted_keys
-            and not (component.config or {}).get("reference_only")
-        )
-    ]
-    return supporting, units
 
 
 # ---------------------------------------------------------------------------

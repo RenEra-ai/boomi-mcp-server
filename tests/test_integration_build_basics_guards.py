@@ -77,14 +77,13 @@ def _rest_conn(key, name, **overrides):
 
 
 def _process(key, name, **cfg_overrides):
-    cfg = {
-        "name": name,
-        "process_kind": "wrapper_subprocess",
-        "process_calls": [{"process_id": "99999999-9999-9999-9999-999999999999"}],
-        "folder_name": "Process Library",
-    }
-    cfg.update(cfg_overrides)
-    return {"key": key, "type": "process", "action": "create", "name": name, "config": cfg}
+    """A flat process row. #159 S3: such a row only BINDS an existing process by
+    explicit id (here a top-level component_id under conflict_policy='reuse'), so
+    the name lints still see it; any body override makes it a refused raw process
+    body (PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED)."""
+    cfg = dict(cfg_overrides)
+    return {"key": key, "type": "process", "action": "create", "name": name,
+            "component_id": "99999999-9999-9999-9999-999999999999", "config": cfg}
 
 
 def _plan(components, naming=None):
@@ -403,23 +402,6 @@ def test_bracketed_connection_env_in_name_flagged():
 # D2 — property-naming lint (warning)
 # ---------------------------------------------------------------------------
 
-def test_ddp_name_non_conformant_flagged_under_target():
-    # The builder consumes config.target.dynamic_path.ddp_name (Codex review).
-    plan = _plan([_process("p1", "Proc", target={"dynamic_path": {"ddp_name": "rest.path"}})])
-    assert _has_warn(plan, "PROPERTY_NAMING")
-
-
-def test_ddp_name_non_conformant_flagged_top_level_fallback():
-    # A hand-authored top-level config.dynamic_path is still linted (fallback).
-    plan = _plan([_process("p1", "Proc", dynamic_path={"ddp_name": "rest.path"})])
-    assert _has_warn(plan, "PROPERTY_NAMING")
-
-
-def test_ddp_name_conformant_clean():
-    plan = _plan([_process("p1", "Proc", target={"dynamic_path": {"ddp_name": "DDP_REST_PATH"}})])
-    assert not _has_warn(plan, "PROPERTY_NAMING")
-
-
 # ---------------------------------------------------------------------------
 # E1 — folder-on-create lint (warning, never blocks)
 # ---------------------------------------------------------------------------
@@ -652,7 +634,8 @@ def test_the_canonical_warning_names_the_process_component_and_is_byte_identical
     ]}]}
     canonical = _naming_warnings(_ir_plan(body, key="p1"))[0]
 
-    legacy = _naming_warnings(
-        _plan([_process("p1", "Proc", target={"dynamic_path": {"ddp_name": "rest.path"}})])
-    )[0]
-    assert canonical == legacy
+    # #159 S3: the legacy dynamic-path route retired with the process builder
+    # dispatch; the one definition is the shared helper both routes called.
+    from boomi_mcp.categories.integration_builder import _property_naming_warning
+
+    assert canonical == _property_naming_warning("p1", "rest.path")

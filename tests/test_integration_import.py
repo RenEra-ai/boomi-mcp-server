@@ -976,3 +976,29 @@ def test_both_rest_shapes_hold_the_shared_rest_boundary(factory, mutation, field
     assert "authoring_request_draft" not in r
     assert any(g["field"].endswith("target." + field_tail) for g in r["gaps"]), r["gaps"]
     assert "s3cr3t" not in json.dumps(r["gaps"]) and "abc.def.ghi" not in json.dumps(r["gaps"])
+
+
+def test_every_drafted_recipe_pin_is_listed_and_fetchable():
+    """The importer -> discovery join: every pin a served draft can carry is a
+    row of list_integration_archetypes and resolves through get by that exact
+    pin, and a ready draft's invocation carries one of those rows."""
+    from boomi_mcp.categories.integration_authoring import (
+        get_integration_archetype_action,
+        list_integration_archetypes_action,
+    )
+    from boomi_mcp.categories.integration_import import _PRESET_RECIPES
+
+    listed = {
+        (row["recipe_id"], row["recipe_version"])
+        for row in list_integration_archetypes_action()["recipes"]
+    }
+    for preset, pin in _PRESET_RECIPES.items():
+        assert pin in listed, preset
+        got = get_integration_archetype_action(pin[0], recipe_version=pin[1])
+        assert got["_success"] is True, preset
+        assert got["next_tool"] == "build_integration"
+
+    r = act("generic_integration_description", _listener_to_rest_artifact())
+    assert r["ready_for_build"] is True, r["gaps"]
+    (invocation,) = r["authoring_request_draft"]["intent"]["invocations"]
+    assert (invocation["recipe_id"], invocation["recipe_version"]) in listed

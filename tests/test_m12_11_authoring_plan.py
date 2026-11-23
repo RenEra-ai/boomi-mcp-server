@@ -87,21 +87,6 @@ def test_a_process_ir_plan_validates_and_previews_without_mutating(spy):
     assert spy.calls == []
 
 
-def test_an_integration_spec_plan_reports_its_capability_gap_honestly(spy):
-    """A ProcessIR root is not derivable from every legacy process_kind.
-
-    The honest answer is a named gap plus a working preview — not a silent
-    success that implies the process was semantically validated when it was not.
-    """
-    result = _plan(integration_spec_request())
-    assert result.mutation_performed is False
-    gaps = [gap.capability_id for gap in result.capability_gaps]
-    assert gaps == ["authoring.integration_spec_intent.wrapper_subprocess"]
-    assert result.capability_gaps[0].state == "unsupported"
-    assert result.capability_gaps[0].reason_code == "PROCESS_IR_ROOT_NOT_DERIVABLE"
-    assert spy.calls == []
-
-
 def test_a_topology_adjunct_is_validated_but_never_deployed(spy):
     from boomi_mcp.models.system_topology import parse_system_topology_v1
 

@@ -342,8 +342,9 @@ def _compute_merged_xml(
     Returns {"_success": True, "merged_xml": str, "update_mode": str, "layout":
     report-or-None} or a structured error envelope. Deterministic for a given
     (current, patch, layout_mode) so the prepare preview and the apply write
-    produce byte-identical XML. A body patch on a process is arranged here
-    (#188), once, after the merge; a metadata patch keeps the live geometry.
+    produce byte-identical XML. A metadata patch keeps the live geometry. A body
+    patch on a process is REFUSED here (#159 S3): a process body is edited only
+    through the canonical arm, which arranges once after its merge (#188).
     """
     current_xml = current["xml"]
     config_keys = set(config.keys())
@@ -377,6 +378,23 @@ def _compute_merged_xml(
             "layout": layout_report_for(merged_xml),
         }
 
+    # #159 S3 (cutover decision 2): a legacy BODY patch on a process is refused —
+    # no process builder is dispatched. The body is edited only through the
+    # canonical arm (patch.authoring_request). Value-free: nothing of `config` is read
+    # beyond its key set above.
+    if component_type == "process":
+        from ...authoring.process_admission import unit_required_envelope
+
+        envelope = unit_required_envelope("config")
+        envelope["hint"] = (
+            "Edit a process body through patch.authoring_request: an AuthoringRequestV1 "
+            "with intent_kind='process_ir' and ONE unit whose envelope has "
+            "action='update' and this component_id (see this tool's CANONICAL PROCESS "
+            "UPDATE). A metadata-only patch (name, description, folder) stays on "
+            "patch.config."
+        )
+        return envelope
+
     # Body patch -> structured builder + #45/#50 preservation merge. The builder
     # rebuilds its owned subtree from `config`, so `config` must be the COMPLETE
     # structured config that builder requires (incl. the type discriminator such
@@ -395,9 +413,7 @@ def _compute_merged_xml(
     payload = dict(config)
     payload.setdefault("component_type", component_type)
     if comp.name:
-        if component_type == "process":
-            payload.setdefault("name", comp.name)
-        elif component_type in ("connector-settings", "connector-action"):
+        if component_type in ("connector-settings", "connector-action"):
             payload.setdefault("component_name", comp.name)
             payload.setdefault("name", comp.name)
         else:

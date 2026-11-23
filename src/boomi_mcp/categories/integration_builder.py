@@ -9,7 +9,6 @@ This module provides a single action router that can:
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import ipaddress
 import re
@@ -143,7 +142,6 @@ from boomi.models import (
 )
 
 from ..models.integration_models import (
-    STRICT_PIPELINE_VERSION,
     IntegrationComponentSpec,
     IntegrationSpecV1,
 )
@@ -176,24 +174,16 @@ from .components.builders import (
     SoapClientConnectionBuilder,
     SoapClientOperationBuilder,
     WssListenerOperationBuilder,
-    ProcessFlowBuilder,
-    WrapperSubprocessBuilder,
-    SyncPipelineBuilder,
     CONNECTOR_ACTION_BUILDERS,
     PROFILE_BUILDERS,
-    PROCESS_FLOW_BUILDERS,
     get_connector_action_builder,
     get_connector_builder,
-    get_process_flow_builder,
     get_profile_builder,
 )
 from .components.builders.connector_builder import (
     _resolve_rest_connector_type,
     _resolve_soap_client_connector_type,
     _resolve_wss_connector_type,
-)
-from .components.builders.process_flow_builder import (
-    _extract_process_extension_connections,
 )
 from .components.builders.json_profile_builder import JSONGeneratedProfileBuilder
 from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
@@ -208,7 +198,6 @@ from .components.builders.profile_generation import (
     index_existing_profile_xml,
     validate_supplied_profile_index,
 )
-from .components.builders.cache_property_lineage import validate_config_lineage
 from .components.builders.api_service_builder import (
     ApiServiceBuilder,
     get_api_service_builder,
@@ -250,7 +239,6 @@ from ..errors import (
     INTEGRATION_DEPENDENCY_NOT_FOUND,
     INTEGRATION_DEPENDENCY_REQUIRED,
     INVALID_INPUT,
-    LEGACY_ADAPTER_AUTHORITY_CONFLICT,
     PROCESS_MATERIALIZATION_FINGERPRINT_MISMATCH,
     ERROR_TAXONOMY,
     PROCESS_MATERIALIZATION_INTERNAL_ERROR,
@@ -569,282 +557,18 @@ def _synthesize_script_function_wrappers(spec: IntegrationSpecV1) -> None:
     spec.components.extend(new_wrappers)
 
 
-def _synthesize_wrapper_subprocess_edges(spec: IntegrationSpecV1) -> None:
-    """Add implicit parent->child depends_on edges for wrapper_subprocess (#90).
-
-    A wrapper parent's processcall ``subprocess_ref: "$ref:KEY"`` is a real
-    dependency on the in-spec child KEY. Appending KEY to the parent's
-    ``depends_on`` (when absent) makes the existing topo-sort apply children
-    BEFORE the parent even when the spec lists the parent first.
-
-    Only edges to OTHER in-spec components are synthesized. A self-reference or
-    a ref to a non-existent KEY is deliberately NOT added — adding it would make
-    the topo-sort raise a generic cycle / unknown-dependency error before the
-    per-component preflight can surface the precise PROCESS_REF_SELF_REFERENCE /
-    PROCESS_REF_NOT_FOUND. A literal ``process_id`` targets an out-of-spec
-    component and creates no edge.
-    """
-    components_by_key = {comp.key: comp for comp in spec.components}
-    for comp in spec.components:
-        cfg = comp.config or {}
-        if (
-            str(cfg.get("process_kind") or cfg.get("process_type") or "").strip().lower()
-            != WrapperSubprocessBuilder.PROCESS_KIND
-        ):
-            continue
-        calls = cfg.get("process_calls")
-        if not isinstance(calls, list):
-            continue
-        for call in calls:
-            if not isinstance(call, dict):
-                continue
-            sref = call.get("subprocess_ref")
-            if isinstance(sref, str) and sref.startswith("$ref:"):
-                key = sref[len("$ref:"):]
-                if (
-                    key
-                    and key != comp.key
-                    and key in components_by_key
-                    and key not in comp.depends_on
-                ):
-                    comp.depends_on.append(key)
-
-
 def _is_malformed_ref_token(value: Any) -> bool:
     """True if ``value`` is a $ref token that is whitespace-padded or empty-key.
 
     ``_resolve_dependency_tokens`` only substitutes a value that starts with
     ``$ref:`` at byte 0 with a non-empty key, so ``" $ref:x "`` or ``"$ref:"``
     never resolve and would leak unresolved. Such shapes must be REJECTED by
-    validation, never deduped away — so synthesis leaves them for
-    WrapperSubprocessBuilder.validate_config (whose reachability check raises
-    MISSING_PROCESS_DEPENDENCY) rather than folding them into a canonical twin.
+    validation (the API Service route check does), never silently normalized.
     """
     if not isinstance(value, str):
         return False
     stripped = value.strip()
     return stripped.startswith("$ref:") and (value != stripped or stripped == "$ref:")
-
-
-def _override_entry_is_valid(entry: Any) -> bool:
-    """True if a single ``process_extensions`` connection entry is structurally
-    valid per the shape authority :func:`_extract_process_extension_connections`
-    (non-empty connection_id, a non-empty fields list, each field carrying a
-    non-empty id/label/xpath).
-
-    Used to decide whether a seed/hoisted entry is safe to dedup (valid) or must
-    be PRESERVED raw for validate_config to reject (malformed) — so dedup never
-    silently drops a malformed entry/field that canonicalizes onto a valid twin.
-    This is the only validation a REUSE child's process_extensions receives (the
-    reuse path skips the child's own validate_config), so the hoist must not mask
-    its malformed declarations.
-    """
-    try:
-        _extract_process_extension_connections(
-            {"process_extensions": {"connections": [entry]}}
-        )
-        return True
-    except BuilderValidationError:
-        return False
-
-
-def _merge_override_connection(
-    index: Dict[str, Dict[str, Any]],
-    ordered: List[Dict[str, Any]],
-    entry: Dict[str, Any],
-) -> None:
-    """Merge one connection-override entry into ``ordered``/``index``, deduping by
-    ``(connection_id, field.id)`` (issue #99 G3).
-
-    The first entry seen for a connection_id wins its slot and base fields; later
-    entries — a duplicate among the wrapper's OWN declarations, or a hoisted
-    child entry — contribute only the fields not already present (in order). A
-    deep copy is stored so the merged result never aliases the caller's input.
-    Shared by the wrapper-seed and child-hoist passes so dedup is uniform.
-
-    Dedup keys (connection_id and field id) are the STRIPPED values, matching the
-    canonicalization _extract_process_extension_connections / the builder apply
-    at emission — so a whitespace-padded duplicate (e.g. ``"abc"`` vs ``" abc "``,
-    or fields ``"host"`` vs ``" host "``) collapses here instead of emitting two
-    ConnectionOverride / field elements with the same canonical id.
-
-    ONLY a structurally-valid entry (per :func:`_override_entry_is_valid`) with a
-    well-formed connection_id (not a padded / empty-key $ref — see
-    :func:`_is_malformed_ref_token`) is deduped. Anything else is PRESERVED raw
-    (appended, never folded into a canonical twin) so it always reaches
-    WrapperSubprocessBuilder.validate_config, which rejects it
-    (PROCESS_EXTENSIONS_INVALID for a bad shape, MISSING_PROCESS_DEPENDENCY for a
-    malformed $ref). This holds uniformly for the wrapper's own seed entries AND
-    hoisted child entries — a REUSE child's process_extensions is otherwise never
-    validated, so dedup must not silently drop its malformed entries/fields.
-    """
-    def _id_key(value: Any) -> Any:
-        return value.strip() if isinstance(value, str) else value
-
-    cid = entry.get("connection_id")
-    if not _override_entry_is_valid(entry) or _is_malformed_ref_token(cid):
-        # Not safe to dedup — preserve raw for validate_config to reject.
-        ordered.append(copy.deepcopy(entry))
-        return
-    cid_key = cid.strip()
-    if cid_key not in index:
-        new_entry = copy.deepcopy(entry)
-        # Dedup the entry's OWN fields by canonical id too — a single entry may
-        # declare the same field id twice (e.g. fields=[host, host]); copying the
-        # list wholesale would emit duplicate <field> elements for one connection.
-        seen_fids: set = set()
-        deduped_fields: List[Any] = []
-        for f in (new_entry.get("fields") if isinstance(new_entry.get("fields"), list) else []):
-            fid_key = _id_key(f.get("id")) if isinstance(f, dict) else f
-            if fid_key in seen_fids:
-                continue
-            seen_fids.add(fid_key)
-            deduped_fields.append(f)
-        new_entry["fields"] = deduped_fields
-        index[cid_key] = {"entry": new_entry, "field_ids": seen_fids}
-        ordered.append(new_entry)
-        return
-    rec = index[cid_key]
-    existing_fields = rec["entry"].get("fields")
-    if not isinstance(existing_fields, list):
-        return
-    for field in (entry.get("fields") or []):
-        if not isinstance(field, dict):
-            continue
-        fid_key = _id_key(field.get("id"))
-        if fid_key in rec["field_ids"]:
-            continue
-        existing_fields.append(copy.deepcopy(field))
-        rec["field_ids"].add(fid_key)
-
-
-def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
-    """Hoist a called child's connection env-extension declarations onto the
-    wrapper parent (issue #99 G3).
-
-    #92 writes ``<ConnectionOverride>`` override points into the DECLARING
-    process's ``processOverrides``. But when that process is invoked as a
-    subprocess via a #90 wrapper Process Call and the WRAPPER is the deployed
-    package, ``get_extensions`` / ``query_extensions`` returned 0 connections —
-    the override points only surfaced when the declaring process was deployed
-    DIRECTLY (#91 capstone gap G3). To make a wrapper-deployed package surface
-    the child override points, copy each called in-spec child's
-    ``process_extensions.connections`` onto the wrapper. The child keeps its own
-    copy so it stays independently deployable.
-
-    Merge rules (architect plan):
-      * dedup by ``(connection_id, field.id)``; a wrapper-DECLARED override for
-        the same connection+field wins (the wrapper's own intent is
-        authoritative), so wrapper entries are kept first;
-      * a connection_id already on the wrapper gains only the child fields it is
-        missing (wrapper fields first, then the missing child fields, in order);
-      * each hoisted connection ``$ref:KEY`` is added to the wrapper's
-        ``depends_on`` so apply-time substitution + topo-sort resolve it on the
-        wrapper.
-
-    Runs after :func:`_synthesize_wrapper_subprocess_edges` so the parent->child
-    edges already exist; adds only parent->connection edges (no new components,
-    so the component_count stays in sync).
-    """
-    components_by_key = {comp.key: comp for comp in spec.components}
-    for comp in spec.components:
-        cfg = comp.config
-        if not isinstance(cfg, dict):
-            continue
-        if (
-            str(cfg.get("process_kind") or cfg.get("process_type") or "").strip().lower()
-            != WrapperSubprocessBuilder.PROCESS_KIND
-        ):
-            continue
-        calls = cfg.get("process_calls")
-        if not isinstance(calls, list):
-            continue
-
-        # The wrapper's OWN declared process_extensions must be structurally valid
-        # BEFORE synthesis transforms it. Synthesis runs ahead of
-        # WrapperSubprocessBuilder.validate_config, and hoisting/dedup can rewrite
-        # a malformed hand-authored block into a valid-looking one — masking the
-        # error (a malformed top-level block, OR a malformed duplicate entry that
-        # dedup silently drops; Codex §6 review). Gate on the single shape
-        # authority, _extract_process_extension_connections: if the wrapper's
-        # declared block is malformed in ANY way, skip synthesis for this wrapper
-        # and leave it for validate_config to reject (PROCESS_EXTENSIONS_INVALID).
-        # None / {} / [] are valid no-ops (a wrapper with no declared block can
-        # still RECEIVE hoisted child overrides).
-        try:
-            _extract_process_extension_connections(cfg)
-        except BuilderValidationError:
-            continue
-        raw_pe = cfg.get("process_extensions")
-        wrapper_pe = raw_pe if isinstance(raw_pe, dict) else {}
-        # NB: a malformed $ref connection_id (padded / empty-key) from EITHER the
-        # wrapper's own block OR a hoisted child is preserved (not deduped) by
-        # _merge_override_connection so it reaches validate_config's reachability
-        # check — see that helper. Malformed SHAPE in the wrapper's own block is
-        # rejected by the _extract gate above (skip -> validate_config rejects).
-
-        ordered: List[Dict[str, Any]] = []
-        index: Dict[str, Dict[str, Any]] = {}  # connection_id -> {entry, field_ids}
-        # Seed with the wrapper's own declared overrides (wrapper wins), deduped
-        # by (connection_id, field.id) via _merge_override_connection — so even
-        # duplicate entries AMONG the wrapper's own declarations collapse rather
-        # than emitting two ConnectionOverrides for the same connection (Codex §6
-        # finding 2).
-        for entry in (wrapper_pe.get("connections") or []):
-            if isinstance(entry, dict):
-                _merge_override_connection(index, ordered, entry)
-
-        # Hoist each called in-spec child's declared overrides (same merge path).
-        for call in calls:
-            if not isinstance(call, dict):
-                continue
-            sref = call.get("subprocess_ref")
-            if not (isinstance(sref, str) and sref.startswith("$ref:")):
-                continue
-            child = components_by_key.get(sref[len("$ref:"):])
-            if child is None or child is comp:
-                continue
-            child_cfg = child.config if isinstance(child.config, dict) else {}
-            child_pe = child_cfg.get("process_extensions")
-            if child_pe in (None, {}, []):
-                continue  # nothing declared — valid no-op
-            # A REUSE child's process_extensions gets no other validation (the
-            # reuse path skips its own validate_config), so a malformed shape must
-            # be SURFACED on the wrapper (validate_config rejects it) rather than
-            # silently dropped. Merge a list of connections entry-by-entry (the
-            # merge helper preserves malformed entries incl. padded $refs); a
-            # non-dict block / non-list connections is surfaced via a sentinel that
-            # validate_config's _extract rejects (PROCESS_EXTENSIONS_INVALID).
-            child_conns = child_pe.get("connections") if isinstance(child_pe, dict) else None
-            if isinstance(child_conns, list):
-                for centry in child_conns:
-                    if isinstance(centry, dict):
-                        _merge_override_connection(index, ordered, centry)
-                    else:
-                        ordered.append(centry)  # non-dict entry -> _extract rejects
-            else:
-                ordered.append({"connection_id": "", "fields": []})  # malformed block -> _extract rejects
-
-        if ordered:
-            merged_pe = dict(wrapper_pe)
-            merged_pe["connections"] = ordered
-            cfg["process_extensions"] = merged_pe
-            # Every connection the wrapper now references (seeded by the wrapper
-            # itself OR hoisted from a child) that is an in-spec $ref:KEY must be
-            # applied before the wrapper, so add the dependency edge — gated on
-            # in-spec keys, matching _synthesize_wrapper_subprocess_edges. An
-            # out-of-spec / unreachable $ref is caught by validate_config's
-            # process_extensions reachability check (a clean structured error),
-            # not silently emitted as an unresolved token.
-            for entry in ordered:
-                if not isinstance(entry, dict):
-                    continue  # preserved malformed (non-dict) entry — validate_config rejects
-                cid = entry.get("connection_id")
-                if not (isinstance(cid, str) and cid.startswith("$ref:")):
-                    continue
-                ckey = cid[len("$ref:"):]
-                if ckey and ckey != comp.key and ckey in components_by_key and ckey not in comp.depends_on:
-                    comp.depends_on.append(ckey)
 
 
 def _build_auto_wrapper_spec(
@@ -1409,17 +1133,10 @@ def _resolve_preservation_policy(
         # Raw-XML escape hatch bypasses the structured builder entirely.
         return None
     if comp.type == "process":
-        process_kind = (
-            str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
-            .strip()
-            .lower()
-        )
-        if not process_kind:
-            # No process_kind is rejected at plan time (PROCESS_KIND_REQUIRED);
-            # there is no structured builder to resolve a policy from.
-            return None
-        builder_cls = get_process_flow_builder(process_kind)
-        return getattr(builder_cls, "PRESERVATION_POLICY", None) if builder_cls else None
+        # #159 S3: a flat process row only binds (it is never written), and a
+        # canonical unit's update takes PROCESS_PRESERVATION_POLICY in
+        # `_execute_canonical_process`. No legacy process builder resolves a policy.
+        return None
     if comp.type == "connector-settings":
         if _is_connector_metadata_only_update(raw_config):
             return None  # smart-merge metadata path
@@ -2072,6 +1789,10 @@ def _check_wss_operation_dependencies(
 def _process_config_has_wss_listen(process_config: Any) -> bool:
     """True when a LEGACY process config enters on a WSS Listen binding.
 
+    #159 S3: no planner path asks this any more (a flat process row only binds, so
+    its config describes no entry); kept for the #158 recognizer parity witnesses
+    until #160's deletion pass.
+
     #158: delegates to the one entry-recognition authority
     (``authoring.process_entry``), which the deployment recognizer consults too.
     The private alias set that stood here was a second copy of the WSS builder's
@@ -2093,11 +1814,12 @@ def _check_api_service_route_dependencies(
 
     Every ``$ref:KEY`` route process must appear in ``depends_on`` (so the
     topological order applies the process BEFORE the ASC and the token
-    resolves to a real component id), must resolve to an in-spec ``process``
-    component, and that process's config must carry a WSS Listen source
-    binding — an ASC route to a non-listener process deploys clean and 404s
-    at runtime. Literal component-id routes are outside-spec and validated at
-    analyze/orchestration time where live XML is readable.
+    resolves to a real component id), and must resolve to an in-spec canonical
+    root (``spec.processes``) whose COMPILER-derived entry is a listener — an ASC
+    route to a non-listener process deploys clean and 404s at runtime. A flat
+    process row only binds an existing process (#159 S3) and describes no entry,
+    so a ``$ref`` to one is refused; literal component-id routes are outside-spec
+    and validated at analyze/orchestration time where live XML is readable.
     """
     depends_on = set(comp.depends_on or [])
     routes = raw_config.get("routes")
@@ -2205,525 +1927,28 @@ def _check_api_service_route_dependencies(
                 ),
                 details={"ref_key": ref_key, "actual_role": actual_role},
             )
-        if not _process_config_has_wss_listen(target.config):
-            return BuilderValidationError(
-                f"{field} $ref target {ref_key!r} is a process without a WSS "
-                "Listen source binding",
-                error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
-                field=field,
-                hint=(
-                    "Every ASC route process needs a Web Services Server "
-                    "Listen start (a sync_pipeline 'listener' stage or a "
-                    "source with connector_type='wss', action_type='Listen') "
-                    "— routing to a non-listener deploys clean but 404s at "
-                    "runtime."
-                ),
-                details={"ref_key": ref_key},
-            )
+        # #159 S3: an in-spec flat process row only BINDS an existing process by its
+        # explicit id (admission refuses anything else), so its config describes no
+        # entry and nothing here can show it listens. Refused as before the cutover
+        # (a bind's config never carried a listener entry); a route to an existing
+        # process names it by literal id, which is checked where its live XML is
+        # readable.
+        return BuilderValidationError(
+            f"{field} $ref target {ref_key!r} is a flat process binding, which "
+            "carries no entry this plan can classify as a WSS Listen start",
+            error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
+            field=field,
+            hint=(
+                "Route an existing listener process by its literal component id "
+                "(validated at analyze/orchestration time against its live XML), "
+                "or author the route process as a canonical ProcessIR unit whose "
+                "first step is a listener entry (see get_schema_template("
+                "schema_name='process_ir_authoring', node_kind='listener'))."
+            ),
+            details={"ref_key": ref_key},
+        )
 
     return None
-
-
-def _check_process_flow_ref_types(
-    comp: IntegrationComponentSpec,
-    raw_config: Dict[str, Any],
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Type-check $ref:KEY tokens in a structured process-flow config (issue #49).
-
-    Returns None when all in-spec refs match the expected role for their slot.
-    Direct UUID / literal component-id values are skipped (outside-spec —
-    cannot be classified locally per the issue #49 non-goals).
-
-    Runs only after ``ProcessFlowBuilder.validate_config`` has already
-    confirmed the structural shape and depends_on reachability. Any padded
-    ``" $ref:KEY "`` variants were rejected upstream as MISSING_PROCESS_DEPENDENCY,
-    so this helper only needs to handle exact ``"$ref:KEY"`` strings.
-    """
-    source = raw_config.get("source") if isinstance(raw_config.get("source"), dict) else {}
-    target = raw_config.get("target") if isinstance(raw_config.get("target"), dict) else {}
-    reliability = (
-        raw_config.get("reliability")
-        if isinstance(raw_config.get("reliability"), dict)
-        else {}
-    )
-    dlq = reliability.get("dlq") if isinstance(reliability.get("dlq"), dict) else {}
-    dlq_mode = str(dlq.get("mode") or "").strip().lower()
-
-    # The source is a database (db_read) OR — for an API-sourced sync_pipeline
-    # fetch stage (M5.4 #72) — a REST Client GET (rest_fetch). Dispatch the two
-    # source slot rules on source.connector_type so a REST fetch source's $refs are
-    # type-checked against REST Client roles, not the DB roles. database_to_api_sync
-    # only ever emits a database source, so its source stays DB-checked.
-    # M5.10 #126: a sync_pipeline fetch source can also be a SOAP Client
-    # (soap_fetch) — dispatch its $refs against the SOAP Client roles before the
-    # REST/DB fallbacks.
-    source_is_soap = _resolve_soap_client_connector_type(source.get("connector_type")) is not None
-    source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
-    # M6 (#12): a sync_pipeline listener source is a WSS Listen binding — one
-    # operation ref, NO connection (the listener binds inside the start shape).
-    source_is_wss = _resolve_wss_connector_type(source.get("connector_type")) is not None
-    if source_is_wss:
-        source_rules = [
-            ("source.operation_id", source.get("operation_id"), "WSS Server connector-action"),
-        ]
-    elif source_is_soap:
-        source_rules = [
-            ("source.connection_id", source.get("connection_id"), "SOAP Client connector-settings"),
-            ("source.operation_id", source.get("operation_id"), "SOAP Client connector-action"),
-        ]
-    elif source_is_rest:
-        source_rules = [
-            ("source.connection_id", source.get("connection_id"), "REST Client connector-settings"),
-            ("source.operation_id", source.get("operation_id"), "REST Client connector-action"),
-        ]
-    else:
-        source_rules = [
-            ("source.connection_id", source.get("connection_id"), "database connector-settings"),
-            ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
-        ]
-    # The target is a REST Client (rest_send) OR — for an API-to-DB sync_pipeline
-    # write stage (M5.8 #74) — a database Send (db_write). Dispatch the two target
-    # slot rules on target.connector_type so a DB write target's $refs are
-    # type-checked against the database roles, not the REST roles. A REST target
-    # (database_to_api_sync, api_to_api_sync) stays REST-checked.
-    # M5.10 #126: a sync_pipeline send target can also be a SOAP Client
-    # (soap_send) — dispatch its $refs against the SOAP Client roles first.
-    target_is_soap = _resolve_soap_client_connector_type(target.get("connector_type")) is not None
-    target_is_rest = _resolve_rest_connector_type(target.get("connector_type")) is not None
-    if target_is_soap:
-        target_rules = [
-            ("target.connection_id", target.get("connection_id"), "SOAP Client connector-settings"),
-            ("target.operation_id", target.get("operation_id"), "SOAP Client connector-action"),
-        ]
-    elif target_is_rest:
-        target_rules = [
-            ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
-            ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
-        ]
-    else:
-        target_rules = [
-            ("target.connection_id", target.get("connection_id"), "database connector-settings"),
-            ("target.operation_id", target.get("operation_id"), "database connector-action Send"),
-        ]
-    slot_rules = source_rules + target_rules
-    # Issue #51 M3.R1a: the DLQ catch-leg bindings are $ref-resolvable too, so
-    # type-check them with the same discipline as source/target. Gate each rule
-    # on the active dlq.mode — a stray cross-mode binding (e.g. a process_id set
-    # under document_cache_ref) is never consumed by the emitter, so
-    # type-checking it would surprise-reject an otherwise-valid config.
-    if dlq_mode == "document_cache_ref":
-        slot_rules.append(
-            ("reliability.dlq.document_cache_id", dlq.get("document_cache_id"), "Document Cache")
-        )
-    elif dlq_mode == "error_subprocess_ref":
-        slot_rules.append(
-            ("reliability.dlq.process_id", dlq.get("process_id"), "error subprocess")
-        )
-    # Issue #92 M4.5.7: process_extensions connection-override ids are
-    # $ref-resolvable too. The override declares connection FIELDS, so each id
-    # must resolve to a connection (connector-settings) component — never a map,
-    # profile, or process. Without this, a hand-authored spec could declare an
-    # override against a non-connection in-spec component, pass planning, and
-    # apply-time substitution would emit a <ConnectionOverride> that can never
-    # expose those fields. The archetype always sets the source DB connection,
-    # so this guards the hand-authored path.
-    process_extensions = (
-        raw_config.get("process_extensions")
-        if isinstance(raw_config.get("process_extensions"), dict)
-        else {}
-    )
-    pe_connections = process_extensions.get("connections")
-    if isinstance(pe_connections, list):
-        for i, pe_conn in enumerate(pe_connections):
-            if not isinstance(pe_conn, dict):
-                continue
-            slot_rules.append((
-                f"process_extensions.connections[{i}].connection_id",
-                pe_conn.get("connection_id"),
-                "connector-settings",
-            ))
-    # Issue #109 M10.5 / #110 M10.6: the Document Cache Retrieve/Remove binding
-    # (transform.document_cache_id) is $ref-resolvable too. It must resolve to a
-    # Document Cache component — the same discipline as the DLQ document_cache_id
-    # catch-leg binding — so a swapped connector/profile/process ref is rejected at
-    # plan time instead of emitting an invalid docCache that fails only when Boomi
-    # loads the process. Gate it on the active transform.mode (both doccacheretrieve
-    # and doccacheremove bind a Document Cache) so a stray document_cache_id under
-    # another mode (never consumed by the emitter) is not surprise-rejected.
-    transform = raw_config.get("transform") if isinstance(raw_config.get("transform"), dict) else {}
-    transform_mode = str(transform.get("mode") or "").strip().lower()
-    if transform_mode in {"doccacheretrieve", "doccacheremove"}:
-        slot_rules.append(
-            ("transform.document_cache_id", transform.get("document_cache_id"), "Document Cache")
-        )
-    # Issue #115 M10.2a: a Data Process Split/Combine Documents step binds a
-    # JSON/XML profile component via transform.steps[i].profile_id ($ref-resolvable).
-    # The profile_type (json|xml) declares which profile component kind the ref must
-    # resolve to, so a swapped connector/map/process — or a json-typed split pointing
-    # at a profile.xml component — is rejected at plan time instead of emitting an
-    # invalid <documentsplit>/<dataprocesscombine> that fails only when Boomi loads
-    # the process. The link_element_key/link_element_name are opaque UI-captured
-    # tokens (no structured profile index to cross-check), so only the profile-ref
-    # TYPE is gated here. Gate on the active transform.mode so a stray profile_id
-    # under another mode (never consumed by the emitter) is not surprise-rejected.
-    elif transform_mode == "dataprocess":
-        steps = transform.get("steps")
-        if isinstance(steps, list):
-            for i, step in enumerate(steps):
-                if not isinstance(step, dict):
-                    continue
-                operation = str(step.get("operation") or "").strip()
-                if operation not in {"split_documents", "combine_documents"}:
-                    continue
-                profile_type = str(step.get("profile_type") or "").strip().lower()
-                if profile_type == "json":
-                    expected_role = "profile.json"
-                elif profile_type == "xml":
-                    expected_role = "profile.xml"
-                else:
-                    continue
-                slot_rules.append(
-                    (f"transform.steps[{i}].profile_id", step.get("profile_id"), expected_role)
-                )
-    # Issue #96 M5.4a: a source/target dynamic_path (a runtime path binding lowered
-    # into a Set Properties DDP, or the #100 path_replacements path) carries a
-    # request_profile_id that may be a $ref to an in-spec profile. The Set Properties
-    # emitter writes it into <profileelement profileId=...>, so it must resolve to a
-    # profile.json/profile.xml component (per dynamic_path.profile_type) — a swapped
-    # connector/map/process ref would emit invalid XML that fails only when Boomi
-    # loads the process. Gate the ref TYPE here (the segment element ids are opaque
-    # UI-captured tokens, not cross-checked).
-    for binding_path, binding in (("source", source), ("target", target)):
-        dyn = binding.get("dynamic_path") if isinstance(binding.get("dynamic_path"), dict) else None
-        if not dyn:
-            continue
-        ptype = str(dyn.get("profile_type") or "profile.json").strip().lower()
-        expected_profile_role = ptype if ptype in ("profile.json", "profile.xml") else "profile.json"
-        slot_rules.append((
-            f"{binding_path}.dynamic_path.request_profile_id",
-            dyn.get("request_profile_id"),
-            expected_profile_role,
-        ))
-    slot_rules = tuple(slot_rules)
-
-    target_op_ref_component: Optional[IntegrationComponentSpec] = None
-    source_op_ref_component: Optional[IntegrationComponentSpec] = None
-
-    for field_path, raw_value, expected_role in slot_rules:
-        if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
-            continue
-        ref_key = raw_value[5:]
-        if not ref_key:
-            continue
-        target_comp = components_by_key.get(ref_key)
-        if target_comp is None:
-            continue
-
-        if expected_role == "database connector-settings":
-            ok = _classify_connector_settings(target_comp) == expected_role
-        elif expected_role == "database connector-action Get":
-            role, _ = _classify_connector_action(target_comp)
-            ok = role == expected_role
-        elif expected_role == "database connector-action Send":
-            # Issue #74 M5.8: the db_write target operation_id must resolve to a
-            # database Send connector-action (a swapped REST op / write profile /
-            # connection is rejected). The REST-only method/action_type consistency
-            # capture below only fires in the REST branch, so a DB Send target
-            # correctly skips the HTTP-method check.
-            role, _ = _classify_connector_action(target_comp)
-            ok = role == expected_role
-        elif expected_role == "REST Client connector-settings":
-            ok = _classify_connector_settings(target_comp) == expected_role
-        elif expected_role == "REST Client connector-action":
-            role, _ = _classify_connector_action(target_comp)
-            ok = role == expected_role
-            if ok:
-                # Capture source vs target separately so the source REST fetch op
-                # (M5.4 #72) does not clobber the target op used by the method/
-                # action_type consistency check below.
-                if field_path == "source.operation_id":
-                    source_op_ref_component = target_comp
-                else:
-                    target_op_ref_component = target_comp
-        elif expected_role == "SOAP Client connector-settings":
-            ok = _classify_connector_settings(target_comp) == expected_role
-        elif expected_role == "SOAP Client connector-action":
-            # SOAP Client is EXECUTE-only, so there is no HTTP-method/action_type
-            # consistency capture (unlike REST) — the role check is sufficient.
-            role, _ = _classify_connector_action(target_comp)
-            ok = role == expected_role
-        elif expected_role == "WSS Server connector-action":
-            # M6 (#12): the listener source is Listen-only — no HTTP method on
-            # the operation (derived from inputType), so the role check suffices.
-            role, _ = _classify_connector_action(target_comp)
-            ok = role == expected_role
-        elif expected_role == "Document Cache":
-            # Issue #51: the DLQ document-cache catch leg must point at a
-            # Document Cache component (type "documentcache"), never a swapped
-            # connector/profile ref.
-            ok = _effective_component_type(target_comp) == "documentcache"
-        elif expected_role == "error subprocess":
-            # Issue #51: the DLQ error-subprocess catch leg must point at a
-            # process component.
-            ok = _effective_component_type(target_comp) == "process"
-        elif expected_role == "connector-settings":
-            # Issue #92: a process_extensions connection-override ref must
-            # resolve to a connection (connector-settings) of any connector
-            # family — DB or REST. A map/profile/process is rejected.
-            ok = _classify_connector_settings(target_comp) is not None
-        elif expected_role in ("profile.json", "profile.xml"):
-            # Issue #115: a Data Process Split/Combine profile_id must resolve to
-            # a profile component of the kind its profile_type declares (json|xml).
-            # A swapped connector/map/process — or a profile of the wrong kind — is
-            # rejected. _classify_profile returns "profile.json"/"profile.xml"/None.
-            ok = _classify_profile(target_comp) == expected_role
-        else:
-            ok = True
-
-        if not ok:
-            actual_role = _format_actual_role(target_comp)
-            return BuilderValidationError(
-                f"{field_path} {raw_value!r} must reference a {expected_role} "
-                f"component (got {actual_role})",
-                error_code="PROCESS_REF_TYPE_MISMATCH",
-                field=field_path,
-                hint=(
-                    "Point this $ref at a component whose declared role "
-                    "matches the expected_role; swapped refs and unrelated "
-                    "component types are rejected at plan time."
-                ),
-                details={
-                    "ref_key": ref_key,
-                    "expected_role": expected_role,
-                    "actual_role": actual_role,
-                },
-            )
-
-    # Optional method/action_type consistency check (issue #49): when
-    # target.operation_id resolves to an in-spec REST operation that
-    # carries a declared method, target.action_type must match it
-    # uppercased. Skip silently when the referenced operation has no
-    # declared method (cannot compare against unknown).
-    if target_op_ref_component is not None:
-        _, declared_method = _classify_connector_action(target_op_ref_component)
-        declared_action_type = target.get("action_type")
-        declared_action_upper = (
-            declared_action_type.strip().upper()
-            if isinstance(declared_action_type, str) and declared_action_type.strip()
-            else None
-        )
-        if (
-            declared_method is not None
-            and declared_action_upper is not None
-            and declared_method != declared_action_upper
-        ):
-            target_op_raw = target.get("operation_id")
-            target_op_ref_key = (
-                target_op_raw[5:]
-                if isinstance(target_op_raw, str) and target_op_raw.startswith("$ref:")
-                else ""
-            )
-            return BuilderValidationError(
-                f"target.action_type {declared_action_upper!r} does not match "
-                f"the method {declared_method!r} declared on the referenced "
-                f"REST operation",
-                error_code="PROCESS_REF_TYPE_MISMATCH",
-                field="target.action_type",
-                hint=(
-                    "Align target.action_type with the HTTP method declared "
-                    "on the referenced REST connector-action, or change the "
-                    "referenced operation to one whose method matches."
-                ),
-                details={
-                    "ref_key": target_op_ref_key,
-                    "expected_role": declared_method,
-                    "actual_role": declared_action_upper,
-                },
-            )
-
-    # Issue #72 M5.4: the same method/action_type consistency check for a REST
-    # fetch SOURCE — when source.operation_id resolves to an in-spec REST
-    # operation carrying a declared method, source.action_type ('GET') must match
-    # it uppercased. Skip silently when the referenced operation has no declared
-    # method (cannot compare against unknown).
-    if source_op_ref_component is not None:
-        _, declared_method = _classify_connector_action(source_op_ref_component)
-        declared_action_type = source.get("action_type")
-        declared_action_upper = (
-            declared_action_type.strip().upper()
-            if isinstance(declared_action_type, str) and declared_action_type.strip()
-            else None
-        )
-        if (
-            declared_method is not None
-            and declared_action_upper is not None
-            and declared_method != declared_action_upper
-        ):
-            source_op_raw = source.get("operation_id")
-            source_op_ref_key = (
-                source_op_raw[5:]
-                if isinstance(source_op_raw, str) and source_op_raw.startswith("$ref:")
-                else ""
-            )
-            return BuilderValidationError(
-                f"source.action_type {declared_action_upper!r} does not match "
-                f"the method {declared_method!r} declared on the referenced "
-                f"REST operation",
-                error_code="PROCESS_REF_TYPE_MISMATCH",
-                field="source.action_type",
-                hint=(
-                    "Align source.action_type with the HTTP method declared "
-                    "on the referenced REST connector-action, or change the "
-                    "referenced operation to one whose method matches."
-                ),
-                details={
-                    "ref_key": source_op_ref_key,
-                    "expected_role": declared_method,
-                    "actual_role": declared_action_upper,
-                },
-            )
-
-    # Issue #112 M10.8: type-check the Branch fan-out leg targets with the same
-    # discipline as the top-level target. Done in its own pass (not via the
-    # slot_rules loop above) so the top-level target's connector-action capture for
-    # the method/action_type check is not clobbered by a leg's operation_id ref.
-    branch_err = _check_branch_target_ref_types(raw_config, components_by_key)
-    if branch_err is not None:
-        return branch_err
-
-    # Issue #117 M10 follow-up: type-check $refs nested in a composed flow_sequence
-    # (branch leg targets + Data Process Split/Combine profile_id) with the same
-    # discipline as their top-level equivalents.
-    flow_sequence_err = _check_flow_sequence_ref_types(raw_config, components_by_key)
-    if flow_sequence_err is not None:
-        return flow_sequence_err
-
-    return None
-
-
-def _check_branch_target_ref_types(
-    raw_config: Dict[str, Any],
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Type-check $ref:KEY tokens in a Branch fan-out's leg targets (issue #112 M10.8).
-
-    Each ``branch.targets[i]`` is a REST target like the top-level target:
-    ``connection_id`` must reference a REST Client connector-settings,
-    ``operation_id`` a REST Client connector-action, and ``action_type`` (when the
-    referenced operation declares a method) must match it. Direct UUID / literal ids
-    are skipped (outside-spec, like the top-level target). Disabled branches and
-    non-list ``targets`` are no-ops.
-    """
-    branch = raw_config.get("branch")
-    if not isinstance(branch, dict) or branch.get("enabled", True) is False:
-        return None
-    legs = branch.get("targets")
-    if not isinstance(legs, list):
-        return None
-
-    for i, leg in enumerate(legs):
-        if not isinstance(leg, dict):
-            continue
-        leg_err = _check_rest_target_ref_types(leg, f"branch.targets[{i}]", components_by_key)
-        if leg_err is not None:
-            return leg_err
-    return None
-
-
-def _check_rest_target_ref_types(
-    leg: Dict[str, Any],
-    prefix: str,
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Type-check one REST leg target's $ref:KEY tokens (issue #112 M10.8 / #117).
-
-    ``connection_id`` must reference a REST Client connector-settings, ``operation_id``
-    a REST Client connector-action, and ``action_type`` (when the referenced operation
-    declares a method) must match it. Direct UUID / literal ids are skipped
-    (outside-spec, like the top-level target). Shared by the Branch fan-out leg check
-    and the flow_sequence branch-leg check.
-    """
-    # connection_id -> REST Client connector-settings
-    conn_raw = leg.get("connection_id")
-    if isinstance(conn_raw, str) and conn_raw.startswith("$ref:") and conn_raw[5:]:
-        conn_comp = components_by_key.get(conn_raw[5:])
-        if conn_comp is not None and (
-            _classify_connector_settings(conn_comp) != "REST Client connector-settings"
-        ):
-            return _process_ref_type_mismatch(
-                f"{prefix}.connection_id", conn_raw, "REST Client connector-settings",
-                conn_comp, conn_raw[5:],
-            )
-
-    # operation_id -> REST Client connector-action (captured for the action check)
-    op_comp: Optional[IntegrationComponentSpec] = None
-    op_raw = leg.get("operation_id")
-    if isinstance(op_raw, str) and op_raw.startswith("$ref:") and op_raw[5:]:
-        candidate = components_by_key.get(op_raw[5:])
-        if candidate is not None:
-            role, _ = _classify_connector_action(candidate)
-            if role != "REST Client connector-action":
-                return _process_ref_type_mismatch(
-                    f"{prefix}.operation_id", op_raw, "REST Client connector-action",
-                    candidate, op_raw[5:],
-                )
-            op_comp = candidate
-
-    # action_type must match the referenced operation's declared method.
-    if op_comp is not None:
-        _, declared_method = _classify_connector_action(op_comp)
-        declared_action_type = leg.get("action_type")
-        declared_action_upper = (
-            declared_action_type.strip().upper()
-            if isinstance(declared_action_type, str) and declared_action_type.strip()
-            else None
-        )
-        if (
-            declared_method is not None
-            and declared_action_upper is not None
-            and declared_method != declared_action_upper
-        ):
-            op_ref_key = op_raw[5:] if isinstance(op_raw, str) and op_raw.startswith("$ref:") else ""
-            return BuilderValidationError(
-                f"{prefix}.action_type {declared_action_upper!r} does not match "
-                f"the method {declared_method!r} declared on the referenced "
-                f"REST operation",
-                error_code="PROCESS_REF_TYPE_MISMATCH",
-                field=f"{prefix}.action_type",
-                hint=(
-                    "Align the leg action_type with the HTTP method "
-                    "declared on the referenced REST connector-action, or change "
-                    "the referenced operation to one whose method matches."
-                ),
-                details={
-                    "ref_key": op_ref_key,
-                    "expected_role": declared_method,
-                    "actual_role": declared_action_upper,
-                },
-            )
-    return None
-
-
-def _check_flow_sequence_ref_types(
-    raw_config: Dict[str, Any],
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Type-check $ref:KEY tokens nested in a composed ``flow_sequence`` (issue #117).
-
-    Walks the flow_sequence (and decision true/false legs) for nested branch leg
-    targets — applying the SAME per-leg REST checks as the top-level Branch fan-out
-    (``_check_rest_target_ref_types``) — and nested Data Process Split/Combine
-    ``profile_id`` refs (the SAME profile-kind check the top-level transform applies).
-    Direct UUID / literal ids are skipped. ``document_cache_id`` / ``map_ref`` are not
-    type-checked (the top-level path does not type-check those either). Reachability +
-    apply-time $ref substitution for every nested token are already handled generically
-    by the builder's tree-walker, so only ref TYPE parity is added here.
-    """
-    seq = raw_config.get("flow_sequence")
-    if not isinstance(seq, list):
-        return None
-    return _check_flow_sequence_steps_ref_types(seq, "flow_sequence", components_by_key)
 
 
 def _check_document_cache_profile_ref(
@@ -2767,232 +1992,6 @@ def _check_document_cache_profile_ref(
                 "target_component_type": actual_type,
             },
         )
-    return None
-
-
-def _check_flow_sequence_steps_ref_types(
-    steps: Any,
-    field: str,
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Recursively type-check nested $refs in a flow_sequence step list (issue #117)."""
-    if not isinstance(steps, list):
-        return None
-    for i, step in enumerate(steps):
-        if not isinstance(step, dict):
-            continue
-        kind = str(step.get("kind") or "").strip()
-        step_field = f"{field}[{i}]"
-        if kind in ("doccacheload", "doccacheretrieve", "doccacheremove", "cache_put", "cache_get"):
-            # A cache step's document_cache_id $ref must resolve to a Document Cache
-            # component — the SAME discipline the top-level doccacheretrieve/remove
-            # binding and the DLQ catch-leg cache binding enforce.
-            cache_raw = step.get("document_cache_id")
-            if isinstance(cache_raw, str) and cache_raw.startswith("$ref:") and cache_raw[5:]:
-                cache_comp = components_by_key.get(cache_raw[5:])
-                if cache_comp is not None and _effective_component_type(cache_comp) != "documentcache":
-                    return _process_ref_type_mismatch(
-                        f"{step_field}.document_cache_id",
-                        cache_raw,
-                        "Document Cache",
-                        cache_comp,
-                        cache_raw[5:],
-                    )
-        elif kind == "branch":
-            legs = step.get("legs")
-            if isinstance(legs, list):
-                for j, leg in enumerate(legs):
-                    if not isinstance(leg, dict):
-                        continue
-                    leg_err = _check_rest_target_ref_types(
-                        leg.get("target") if isinstance(leg.get("target"), dict) else {},
-                        f"{step_field}.legs[{j}].target",
-                        components_by_key,
-                    )
-                    if leg_err is not None:
-                        return leg_err
-                    # A branch leg is a linear sub-flow — recurse so a nested
-                    # dataprocess profile_id / cache document_cache_id $ref inside the
-                    # leg is type-checked too (not just the leg target).
-                    leg_steps_err = _check_flow_sequence_steps_ref_types(
-                        leg.get("steps"), f"{step_field}.legs[{j}].steps", components_by_key
-                    )
-                    if leg_steps_err is not None:
-                        return leg_steps_err
-        elif kind == "decision":
-            for side in ("true_steps", "false_steps"):
-                sub_err = _check_flow_sequence_steps_ref_types(
-                    step.get(side), f"{step_field}.{side}", components_by_key
-                )
-                if sub_err is not None:
-                    return sub_err
-        elif kind == "dataprocess":
-            dp_steps = step.get("steps")
-            if isinstance(dp_steps, list):
-                for k, dp_step in enumerate(dp_steps):
-                    if not isinstance(dp_step, dict):
-                        continue
-                    operation = str(dp_step.get("operation") or "").strip()
-                    if operation not in {"split_documents", "combine_documents"}:
-                        continue
-                    profile_type = str(dp_step.get("profile_type") or "").strip().lower()
-                    if profile_type == "json":
-                        expected_role = "profile.json"
-                    elif profile_type == "xml":
-                        expected_role = "profile.xml"
-                    else:
-                        continue
-                    profile_raw = dp_step.get("profile_id")
-                    if not (isinstance(profile_raw, str) and profile_raw.startswith("$ref:") and profile_raw[5:]):
-                        continue
-                    profile_comp = components_by_key.get(profile_raw[5:])
-                    if profile_comp is not None and _classify_profile(profile_comp) != expected_role:
-                        return _process_ref_type_mismatch(
-                            f"{step_field}.steps[{k}].profile_id",
-                            profile_raw,
-                            expected_role,
-                            profile_comp,
-                            profile_raw[5:],
-                        )
-    return None
-
-
-def _process_ref_type_mismatch(
-    field_path: str,
-    raw_value: str,
-    expected_role: str,
-    target_comp: IntegrationComponentSpec,
-    ref_key: str,
-) -> BuilderValidationError:
-    """Build the shared PROCESS_REF_TYPE_MISMATCH error (issue #112 M10.8)."""
-    actual_role = _format_actual_role(target_comp)
-    return BuilderValidationError(
-        f"{field_path} {raw_value!r} must reference a {expected_role} "
-        f"component (got {actual_role})",
-        error_code="PROCESS_REF_TYPE_MISMATCH",
-        field=field_path,
-        hint=(
-            "Point this $ref at a component whose declared role matches the "
-            "expected_role; swapped refs and unrelated component types are "
-            "rejected at plan time."
-        ),
-        details={
-            "ref_key": ref_key,
-            "expected_role": expected_role,
-            "actual_role": actual_role,
-        },
-    )
-
-
-def _check_wrapper_subprocess_ref_types(
-    comp: IntegrationComponentSpec,
-    raw_config: Dict[str, Any],
-    components_by_key: Dict[str, IntegrationComponentSpec],
-) -> Optional[BuilderValidationError]:
-    """Cross-component ref checks for a wrapper_subprocess parent (issue #90).
-
-    Runs after ``WrapperSubprocessBuilder.validate_config`` (which already
-    enforced per-entry MISSING/AMBIGUOUS and depends_on reachability). For each
-    processcall whose ``subprocess_ref`` is an in-spec ``$ref:KEY``:
-      * PROCESS_REF_SELF_REFERENCE — KEY is the wrapper's own key.
-      * PROCESS_REF_NOT_FOUND — KEY is not a component in this spec (declared in
-        depends_on but absent — validate_config catches undeclared refs first).
-      * PROCESS_REF_TYPE_MISMATCH — the in-spec target is not a process.
-    A literal ``process_id`` (not a ``$ref``) targets an out-of-spec component
-    and is skipped, like the source/target helper.
-    """
-    calls = raw_config.get("process_calls")
-    if not isinstance(calls, list):
-        return None
-    for i, call in enumerate(calls):
-        if not isinstance(call, dict):
-            continue
-        raw_value = call.get("subprocess_ref")
-        if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
-            continue
-        ref_key = raw_value[5:]
-        if not ref_key:
-            continue
-        field_path = f"process_calls[{i}].subprocess_ref"
-        if ref_key == comp.key:
-            return BuilderValidationError(
-                f"{field_path} {raw_value!r} references the wrapper itself; a "
-                "parent cannot call itself.",
-                error_code="PROCESS_REF_SELF_REFERENCE",
-                field=field_path,
-                hint="Point subprocess_ref at a child process component, not the parent.",
-                details={"ref_key": ref_key},
-            )
-        target_comp = components_by_key.get(ref_key)
-        if target_comp is None:
-            return BuilderValidationError(
-                f"{field_path} {raw_value!r} does not resolve to an in-spec component.",
-                error_code="PROCESS_REF_NOT_FOUND",
-                field=field_path,
-                hint=(
-                    "subprocess_ref must target a process component declared in "
-                    "the same IntegrationSpecV1; use process_id for an existing "
-                    "Boomi component."
-                ),
-                details={"ref_key": ref_key},
-            )
-        if _effective_component_type(target_comp) != "process":
-            actual_role = _format_actual_role(target_comp)
-            return BuilderValidationError(
-                f"{field_path} {raw_value!r} must reference a process component "
-                f"(got {actual_role}).",
-                error_code="PROCESS_REF_TYPE_MISMATCH",
-                field=field_path,
-                hint="A wrapper Process Call can only invoke a process/subprocess component.",
-                details={
-                    "ref_key": ref_key,
-                    "expected_role": "process",
-                    "actual_role": actual_role,
-                },
-            )
-
-    # Issue #99 G3: a wrapper may carry hoisted/declared process_extensions
-    # connection overrides. Each in-spec connection_id $ref must resolve to a
-    # connector-settings (DB or REST) — a map/profile/process is rejected (same
-    # discipline as the #92 process-flow check). Hoisted refs are always valid
-    # (copied from in-spec children); this guards the hand-authored wrapper path.
-    process_extensions = (
-        raw_config.get("process_extensions")
-        if isinstance(raw_config.get("process_extensions"), dict)
-        else {}
-    )
-    pe_connections = process_extensions.get("connections")
-    if isinstance(pe_connections, list):
-        for i, pe_conn in enumerate(pe_connections):
-            if not isinstance(pe_conn, dict):
-                continue
-            raw_value = pe_conn.get("connection_id")
-            if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
-                continue
-            ref_key = raw_value[5:]
-            if not ref_key:
-                continue
-            target_comp = components_by_key.get(ref_key)
-            if target_comp is None:
-                continue
-            if _classify_connector_settings(target_comp) is None:
-                field_path = f"process_extensions.connections[{i}].connection_id"
-                actual_role = _format_actual_role(target_comp)
-                return BuilderValidationError(
-                    f"{field_path} {raw_value!r} must reference a connector-settings "
-                    f"component (got {actual_role}).",
-                    error_code="PROCESS_REF_TYPE_MISMATCH",
-                    field=field_path,
-                    hint=(
-                        "A process_extensions override declares connection FIELDS, "
-                        "so it must target a connection (connector-settings) component."
-                    ),
-                    details={
-                        "ref_key": ref_key,
-                        "expected_role": "connector-settings",
-                        "actual_role": actual_role,
-                    },
-                )
     return None
 
 
@@ -3431,49 +2430,13 @@ def build_structured_update_xml(
     them from).
     """
     if comp.type == "process":
-        process_kind = str(
-            payload.get("process_kind") or payload.get("process_type") or ""
-        ).strip().lower()
-        if not process_kind:
-            return {
-                "_success": False,
-                "error_code": "PROCESS_KIND_REQUIRED",
-                "field": "config.process_kind",
-                "error": (
-                    "Process components must set config.process_kind; legacy "
-                    "freeform process JSON authoring has been removed."
-                ),
-                "hint": (
-                    "Set process_kind to one of "
-                    f"{sorted(PROCESS_FLOW_BUILDERS)}, or use manage_component "
-                    "with raw XML as an explicit escape hatch."
-                ),
-            }
-        builder_cls = get_process_flow_builder(process_kind)
-        if builder_cls is None:
-            return {
-                "_success": False,
-                "error_code": "PROCESS_KIND_UNSUPPORTED",
-                "error": (
-                    f"process_kind {process_kind!r} is not supported "
-                    f"by the structured process-flow builder."
-                ),
-                "field": "process_kind",
-                "hint": f"Supported process_kind values: {sorted(PROCESS_FLOW_BUILDERS)}.",
-            }
-        try:
-            built_xml = builder_cls.build(
-                payload,
-                name=payload.get("name") or comp.name,
-                folder_name=payload.get("folder_name"),
-            )
-        except BuilderValidationError as exc:
-            return _builder_validation_envelope(exc)
-        return {
-            "_success": True,
-            "built_xml": built_xml,
-            "policy": getattr(builder_cls, "PRESERVATION_POLICY", None),
-        }
+        # #159 S3 (cutover decision 1, defensive): no legacy process builder is
+        # dispatched here any more. A process body is authored only as a canonical
+        # unit; safe edit's canonical arm and ``_execute_canonical_process`` never
+        # reach this function with a process.
+        from ..authoring.process_admission import unit_required_envelope
+
+        return unit_required_envelope("config")
 
     if comp.type in ("connector-settings", "connector-action"):
         rest_canonical = _resolve_rest_connector_type(payload.get("connector_type"))
@@ -3833,103 +2796,14 @@ def _execute_component(
             payload.setdefault("component_name", comp.name)
 
     if comp.type == "process":
-        # process_kind=... selects the structured process-flow builder
-        # (issue #25). _build_plan has already validated config + depends_on
-        # for create/create_clone/update, rejected the process_kind + raw xml
-        # combination via PROCESS_KIND_XML_CONFLICT, and rejected the
-        # no-process_kind case via PROCESS_KIND_REQUIRED, so by the time we
-        # land here process_kind is set and we build the XML. The no-kind
-        # branch below is a defensive guard only.
-        process_kind = str(
-            payload.get("process_kind") or payload.get("process_type") or ""
-        ).strip().lower()
-        if process_kind:
-            builder_cls = get_process_flow_builder(process_kind)
-            if builder_cls is None:
-                return {
-                    "_success": False,
-                    "error_code": "PROCESS_KIND_UNSUPPORTED",
-                    "error": (
-                        f"process_kind {process_kind!r} is not supported "
-                        f"by the structured process-flow builder."
-                    ),
-                    "field": "process_kind",
-                    "hint": (
-                        f"Supported process_kind values: "
-                        f"{sorted(PROCESS_FLOW_BUILDERS)}."
-                    ),
-                }
-            try:
-                # payload["name"] takes precedence so _apply_clone_suffix's
-                # "<name>-clone" suffix actually reaches the emitted XML.
-                # _apply_clone_suffix writes the suffixed name into
-                # config["name"] (which becomes payload["name"]); if we
-                # consulted comp.name first the original unsuffixed name
-                # would win and the clone would emit as a name-duplicate.
-                # Codex review r3 P2 (clone bypass).
-                #
-                # No comp.key fallback: plan-time PROCESS_NAME_REQUIRED
-                # (codex review r6 P2.1) guarantees one of these two is
-                # set before we get here. Falling back to comp.key would
-                # silently rename the Boomi-side process to the user's
-                # internal dependency token on update.
-                xml = builder_cls.build(
-                    payload,
-                    name=payload.get("name") or comp.name,
-                    folder_name=payload.get("folder_name"),
-                )
-            except BuilderValidationError as exc:
-                return {
-                    "_success": False,
-                    "error_code": exc.error_code,
-                    "error": str(exc),
-                    "field": exc.field,
-                    "hint": exc.hint,
-                }
-            if comp.action == "create":
-                return create_component(
-                    boomi_client, profile, {"xml": xml}, folder_id=folder_id,
-                    layout_mode=layout_mode,
-                )
-            if not target_id:
-                return {
-                    "_success": False,
-                    "error": f"Missing process_id for update of component '{comp.key}'",
-                }
-            # Issue #45: read-merge-write update so bns:processOverrides
-            # and any UI-added unknown XML survive the builder's owned
-            # subtree replacement.
-            return _apply_structured_update(
-                boomi_client,
-                profile,
-                target_id,
-                comp,
-                xml,
-                getattr(builder_cls, "PRESERVATION_POLICY", None),
-                layout_mode=layout_mode,
-            )
+        # #159 S3 (cutover decision 3): the legacy process-builder branch is gone.
+        # Canonical units reach ``_execute_canonical_process`` through the
+        # canonical materialization marker; a flat process row may only bind, and
+        # ``_build_plan`` refuses one that would write. Directly callable, so any
+        # flat process body that still arrives here is refused, never built.
+        from ..authoring.process_admission import unit_required_envelope
 
-        # No process_kind: legacy freeform process JSON authoring has been
-        # removed. _build_plan rejects this at plan time with
-        # PROCESS_KIND_REQUIRED (planned_action="error_process_validation"),
-        # so apply never legitimately reaches here. _execute_component is
-        # directly callable, so guard defensively with the same contract
-        # instead of routing to the deleted create_process/update_process.
-        return {
-            "_success": False,
-            "error_code": "PROCESS_KIND_REQUIRED",
-            "field": "config.process_kind",
-            "error": (
-                "Process components must set config.process_kind; legacy "
-                "freeform process JSON authoring has been removed."
-            ),
-            "hint": (
-                "Use list_integration_archetypes()/build_from_archetype(), "
-                "or set process_kind to one of "
-                f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
-                "manage_component with raw XML only as an explicit escape hatch."
-            ),
-        }
+        return unit_required_envelope("config")
 
     if comp.type in _CONNECTOR_COMPONENT_TYPES:
         # Normalize local-alias connector_types to their canonical Boomi form
@@ -4592,40 +3466,16 @@ def _process_models_error_handling(comp: Any) -> bool:
 
     Conservative by design — returns True on ANY positive signal so the
     no-error-handling plan warning never fires on a process that does handle
-    errors:
-      * structured route (process_kind/process_type set): a config that
-        ProcessFlowBuilder._should_emit_try_catch accepts — i.e. retry_count
-        0..5 with a supported DLQ mode OR a reliability.catch_exception throw
-        terminal (#108 M10.4), the configurations that actually emit a Try/Catch
-        wrapper (#51 M3.R1a for retry 0; #88 M4.5.3 for 1..5; #108 for a
-        deliberate Exception catch leg). Delegating to that classmethod keeps
-        this predicate in exact lockstep with the builder (no duplicated /
-        drifting retry+DLQ logic);
-      * raw evidence: a Try/Catch or a deliberate Exception (Throw) shape evident
-        in raw process XML, or a catch-typed entry in a ``config.shapes`` list
-        (defensive — these surfaces no longer reach a successful plan now that
-        process_kind is required, but the predicate stays conservative and is
-        exercised directly by unit tests).
+    errors: a Try/Catch or a deliberate Exception (Throw) shape evident in raw
+    process XML, or a catch-typed entry in a ``config.shapes`` list.
 
-    The ``config.reliability`` block is only honored when a structured
-    process_kind is set; an unknown reliability block on a config without
-    process_kind would otherwise wrongly suppress the warning, so gate it on
-    process_kind. Codex review P2.
-
-    A retry_count outside 0..5, the wrong type, or retry_count > 0 without a
-    supported DLQ mode is NOT error-handling evidence: _should_emit_try_catch
-    rejects it (no Try/Catch emitted), so the warning still fires. Codex review
-    (architect, findings 2 + round 2; #88 un-gate).
+    #159 S3: the structured-route signal (the legacy process-flow builder's
+    ``_should_emit_try_catch`` over ``config.reliability``) is gone with the
+    builder dispatch. A flat process row only binds, so the plan lint never asks
+    about one; a canonical root models its error handling in its ProcessIR, which
+    the canonical advisory reads. A ``reliability`` block is not evidence here.
     """
     config = comp.config if isinstance(comp.config, dict) else {}
-
-    process_kind = str(
-        config.get("process_kind") or config.get("process_type") or ""
-    ).strip()
-    if process_kind and ProcessFlowBuilder._should_emit_try_catch(
-        config.get("reliability")
-    ):
-        return True
 
     raw_xml = config.get("xml")
     if isinstance(raw_xml, str):
@@ -5828,105 +4678,9 @@ def _scan_top_level_pipeline_secrets(
     pipeline = spec_payload.get("pipeline")
     if not isinstance(pipeline, (dict, list)):
         return None
-    return ProcessFlowBuilder.scan_forbidden_secret_fields(
-        pipeline, _path_prefix="pipeline."
-    )
+    from ..authoring.process_admission import scan_secret_shaped_fields
 
-
-def _authority_rejection(disposition: str) -> Dict[str, Any]:
-    """Build the value-free rejection envelope for one authority disposition.
-
-    Issue #139D. All three share the stable ``LEGACY_ADAPTER_AUTHORITY_CONFLICT``
-    code — callers key on that — but each gets its OWN remediation, because
-    "make the view match" is unsatisfiable advice for a process that has no
-    linear representation at all, and misleading for a merely ambiguous spec.
-    Deliberately value-free: a stable code, the authored JSON path, a safe
-    remediation, and no payload values (ADR-001 §7).
-    """
-    from ..compiler.process_ir.legacy_adapters.authority import (
-        AMBIGUOUS,
-        DISAGREE,
-        NOT_REPRESENTABLE,
-    )
-
-    table = {
-        AMBIGUOUS: (
-            "Strict pipeline authority is ambiguous because the spec declares "
-            "multiple authored process components.",
-            "Remove integration_spec.pipeline, or submit exactly one authored "
-            "process for a singular pipeline view.",
-        ),
-        DISAGREE: (
-            "Strict pipeline authority conflicts with the normalized submitted "
-            "process configuration.",
-            "Remove integration_spec.pipeline, or make it semantically identical "
-            "to the single authored process; no authored pipeline copy takes "
-            "precedence.",
-        ),
-        NOT_REPRESENTABLE: (
-            "Strict pipeline authority cannot describe the single authored "
-            "process: it is valid, but has no representation as a singular linear "
-            "pipeline view.",
-            "Remove integration_spec.pipeline. No value of it can match this "
-            "process — a singular linear view describes only a "
-            "source -> [map] -> target chain, so a wrapper_subprocess, a "
-            "flow_sequence, or any richer block (Try/Catch, DLQ, Notify, flow "
-            "control) has no such view. Authoring the same linear integration as "
-            "process_kind='sync_pipeline' makes the view expressible.",
-        ),
-    }
-    message, hint = table[disposition]
-    return {
-        "_success": False,
-        "error_code": LEGACY_ADAPTER_AUTHORITY_CONFLICT,
-        "error": message,
-        "field": "integration_spec.pipeline",
-        "hint": hint,
-    }
-
-
-def _authored_process_validation_error(
-    spec: IntegrationSpecV1, authored_key: Optional[str]
-) -> Optional[BuilderValidationError]:
-    """The authored process's validation error, computed ACCOUNT-INDEPENDENTLY.
-
-    Issue #139D — ADR-001 §5's clean-plan gate. An authority conflict must never
-    MASK the actionable error the process itself would produce.
-
-    This delegates to :func:`_process_component_preflight`, the planner's OWN
-    validation, rather than re-checking anything here. Four successive defects
-    came from the gate knowing a *subset* of the planner's passes — lower-time,
-    then ``validate_config``-time, then ``$ref``-type-time, then the name/xml
-    preflights — each fix closing one instance and missing the next. Sharing one
-    implementation is what ends that: a pass added to the planner is in the gate
-    the moment it is written.
-
-    It asks the question for a fresh ``"create"``. That is the no-collision case,
-    so the answer is a pure function of the authored payload — which is required,
-    because reading the planned step instead made the strict verdict flip on live
-    account contents (the plan gates some passes on ``planned_action``, so reuse
-    skipped them). ADR-001 §5 forbids exactly that.
-    """
-    if not authored_key:
-        return None
-    comp = next((c for c in spec.components if c.key == authored_key), None)
-    if comp is None:
-        return None
-    raw_config = comp.config if isinstance(comp.config, dict) else {}
-    process_kind = (
-        str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
-        .strip()
-        .lower()
-    )
-    # A defensive copy: the planner's preflight redacts secrets in place on some
-    # paths, and this gate must never mutate the caller's payload.
-    return _process_component_preflight(
-        comp,
-        copy.deepcopy(raw_config),
-        process_kind,
-        "create",
-        {c.key: c for c in spec.components},
-    )
+    return scan_secret_shaped_fields(pipeline, _path_prefix="pipeline.")
 
 
 def canonical_component_id(value) -> Optional[str]:
@@ -6480,362 +5234,20 @@ def _authored_step_will_reuse(
     return False
 
 
-def _process_component_preflight(
-    comp: IntegrationComponentSpec,
-    raw_config: Dict[str, Any],
-    process_kind: str,
-    planned_action: str,
-    components_by_key: Dict[str, IntegrationComponentSpec],
-    db_err=None,
-    rest_err=None,
-) -> Optional[BuilderValidationError]:
-    """Every ACCOUNT-INDEPENDENT validation the planner runs for one process.
-
-    Extracted verbatim from ``_build_plan``'s component loop so it has exactly ONE
-    implementation. Issue #139D needs to ask "would this process validate?" from
-    the strict-authority clean-plan gate, and answering that with a second copy of
-    these checks is what produced four successive masked-error defects (lower-time,
-    ``validate_config``-time, ``$ref``-type-time, then the name/xml preflights):
-    each fix closed one instance and missed the next.
-
-    Pure: a function of the authored payload alone. ``planned_action`` is a
-    parameter rather than a closure read, which is what makes the gate's use
-    account-INDEPENDENT — it asks the question for a fresh ``"create"``, the
-    no-collision case, so live account contents cannot change the answer. The
-    loop passes its real ``planned_action`` instead, so plan behaviour is
-    unchanged (in particular ``validate_config`` still does not run for a reuse
-    step, which would otherwise newly reject payloads that plan clean today).
-    """
-    process_flow_err: Optional[BuilderValidationError] = None
-    # Legacy freeform process JSON authoring has been removed: a process
-    # component that will be AUTHORED (create/create_clone/update emits or
-    # rebuilds process XML) must declare a structured process_kind. Reject
-    # the untyped authoring case before any mutation, routing the caller to
-    # the typed path. Non-authoring actions (reuse / error_* / pure
-    # reference of an existing process) do not emit XML, so they do not
-    # require process_kind — mirrors how every other builder gates its
-    # validation on the authoring actions.
-    if comp.type == "process" and not process_kind:
-        # Scan the untyped config for plaintext secrets FIRST, regardless
-        # of planned_action: the plan echoes comp.config via
-        # spec.model_dump(), so a secret must never leak even on the
-        # reuse / reference / rejection paths. A forbidden secret returns
-        # PLAINTEXT_SECRET_REJECTED (redacted at the block tail below);
-        # otherwise an authoring action is rejected for the missing
-        # process_kind. Mirrors the process_kind block's secret discipline.
-        process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
-        if process_flow_err is None and planned_action in (
-            "create",
-            "create_clone",
-            "update",
-        ):
-            process_flow_err = BuilderValidationError(
-                "Process components must set config.process_kind; legacy "
-                "freeform process JSON authoring has been removed.",
-                error_code="PROCESS_KIND_REQUIRED",
-                field="config.process_kind",
-                hint=(
-                    "Use list_integration_archetypes()/build_from_archetype(), "
-                    "or set process_kind to one of "
-                    f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
-                    "manage_component with raw XML only as an explicit escape hatch."
-                ),
-            )
-    if (
-        comp.type == "process"
-        and process_kind
-        and db_err is None
-        and rest_err is None
-    ):
-        # Run the secret scan unconditionally. The xml-conflict check
-        # below short-circuits early, so without scanning first a
-        # process config like {process_kind, xml, password} would
-        # surface PROCESS_KIND_XML_CONFLICT while leaving the
-        # plaintext password in raw_config (== comp.config), which
-        # then echoes through spec.model_dump(). Codex review r2 Q3.
-        process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
-        # Codex review r6 P2.1: require an explicit name. Without
-        # this, _execute_component used to fall back to comp.key as
-        # the emitted XML name attribute, which on update silently
-        # renamed the existing process to its internal dependency
-        # key (e.g. "main_process"). Reject at plan-time so the
-        # caller must supply a real display name.
-        if process_flow_err is None:
-            config_name = raw_config.get("name")
-            comp_name_clean = (
-                comp.name.strip()
-                if isinstance(comp.name, str) else ""
-            )
-            config_name_clean = (
-                config_name.strip()
-                if isinstance(config_name, str) else ""
-            )
-            effective_name = comp_name_clean or config_name_clean
-            if not effective_name:
-                process_flow_err = BuilderValidationError(
-                    "process component name is required for structured "
-                    "process_kind components; without one the emitted "
-                    "XML would carry the internal dependency key as "
-                    "the display name (silent rename on update).",
-                    error_code="PROCESS_NAME_REQUIRED",
-                    field="name",
-                    hint=(
-                        "Set IntegrationComponentSpec.name or "
-                        "config.name to the human-readable display "
-                        "name the process should carry in Boomi."
-                    ),
-                )
-            # Codex review r8 F1: when BOTH surfaces are set and
-            # they differ, plan-time collision lookup uses comp.name
-            # but _execute_component's build() call prefers
-            # payload["name"] (the r3 clone-suffix precedence).
-            # That mismatch creates a duplicate on create / silently
-            # renames on update because Boomi gets a different name
-            # than the metadata search resolved. Reject the conflict
-            # explicitly. (Apply-time _apply_clone_suffix intentionally
-            # introduces a "-clone" difference; that path mutates
-            # config["name"] AFTER plan, so this plan-time check
-            # never sees it.)
-            elif (
-                comp_name_clean
-                and config_name_clean
-                and comp_name_clean != config_name_clean
-            ):
-                process_flow_err = BuilderValidationError(
-                    f"top-level name {comp_name_clean!r} and "
-                    f"config.name {config_name_clean!r} disagree; "
-                    f"collision lookup uses the top-level name but "
-                    f"the emitted XML would use config.name.",
-                    error_code="PROCESS_NAME_CONFLICT",
-                    field="name",
-                    hint=(
-                        "Either drop config.name or make it match "
-                        "the top-level IntegrationComponentSpec.name. "
-                        "Pick one surface so plan-time collision "
-                        "detection and apply-time XML emission agree."
-                    ),
-                )
-        xml_override = bool(raw_config.get("xml"))
-        # Codex review C4: process_kind + raw xml is ambiguous —
-        # _execute_component cannot honor both. Reject the conflict
-        # explicitly so callers must pick one. (A process component
-        # carrying config.xml without process_kind is separately rejected
-        # with PROCESS_KIND_REQUIRED, so raw process XML now lives only on
-        # the manage_component / type="component" escape hatch.)
-        if process_flow_err is None and xml_override:
-            process_flow_err = BuilderValidationError(
-                "process_kind and config.xml are mutually exclusive.",
-                error_code="PROCESS_KIND_XML_CONFLICT",
-                field="config.xml",
-                hint=(
-                    "Choose one: set process_kind for the structured "
-                    "process-flow builder, OR drop the process_kind and "
-                    "author raw process XML through manage_component "
-                    '(type="component", config.xml) instead.'
-                ),
-            )
-        # Codex review r9: enum-membership check is a contract
-        # assertion about the spec, not about the apply step. Run it
-        # unconditionally so a typo like process_kind="bad" surfaces
-        # even when conflict_policy=reuse finds an existing match
-        # (planned_action="reuse" used to skip the whole block).
-        builder_cls: Optional[type] = None
-        if process_flow_err is None:
-            builder_cls = get_process_flow_builder(process_kind)
-            if builder_cls is None:
-                process_flow_err = BuilderValidationError(
-                    f"process_kind {process_kind!r} is not supported.",
-                    error_code="PROCESS_KIND_UNSUPPORTED",
-                    field="process_kind",
-                    hint=(
-                        f"Supported process_kind values: "
-                        f"{sorted(PROCESS_FLOW_BUILDERS)}."
-                    ),
-                )
-
-        # Codex review C2: process update also re-invokes the builder
-        # (_execute_component → update_component({"xml": built_xml})),
-        # unlike DB/REST whose update paths bypass the builder. So
-        # full config validation runs on every mutating action; for
-        # reuse / error_* the enum check above is enough — we won't
-        # emit XML so source/target bindings don't matter.
-        will_invoke_process_flow_builder = (
-            process_flow_err is None
-            and builder_cls is not None
-            and planned_action in ("create", "create_clone", "update")
-        )
-        if will_invoke_process_flow_builder:
-            process_flow_err = builder_cls.validate_config(
-                raw_config,
-                depends_on=comp.depends_on,
-            )
-            # Issue #49: after the local structural validator passes,
-            # type-check every in-spec $ref:KEY against components_by_key.
-            # Gated on builder_cls is ProcessFlowBuilder because the
-            # source/target shape this helper reads is specific to the
-            # database_to_api_sync structured process; future process_kind
-            # builders will add their own ref-type helpers when they land.
-            if process_flow_err is None and builder_cls is ProcessFlowBuilder:
-                process_flow_err = _check_process_flow_ref_types(
-                    comp, raw_config, components_by_key
-                )
-            # Issue #90: the wrapper_subprocess parent has its own ref-type
-            # helper (processcall subprocess_ref → in-spec process child).
-            # WrapperSubprocessBuilder is a ProcessFlowBuilder subclass, so
-            # the identity check above is False for it — branch explicitly.
-            elif process_flow_err is None and builder_cls is WrapperSubprocessBuilder:
-                process_flow_err = _check_wrapper_subprocess_ref_types(
-                    comp, raw_config, components_by_key
-                )
-            # Issue #70 M5.2: a sync_pipeline config carries a `pipeline` stage
-            # graph, not the source/target/transform blocks _check_process_flow_ref_types
-            # reads. SyncPipelineBuilder is a ProcessFlowBuilder subclass (so the
-            # identity check above is False for it too) — lower the pipeline to the
-            # equivalent database_to_api_sync config first, then run the SAME
-            # ref-type check on the lowered config so every $ref protection (source
-            # DB connection/action, map, target REST connection/action, REST method)
-            # applies unchanged. validate_config already lowered+passed, so this
-            # re-derivation cannot newly fail in practice; the try/except keeps it total.
-            elif process_flow_err is None and builder_cls is SyncPipelineBuilder:
-                try:
-                    lowered_config = SyncPipelineBuilder.lower_config(raw_config)
-                except BuilderValidationError as exc:
-                    process_flow_err = exc
-                else:
-                    process_flow_err = _check_process_flow_ref_types(
-                        comp, lowered_config, components_by_key
-                    )
-                    # Scoped re-review P2: a sync_pipeline map stage lowers
-                    # to the legacy transform.mode='map_ref' — run the
-                    # context lineage pass on the LOWERED config (like the
-                    # ref-type check above) so an in-spec joined map cannot
-                    # plan clean against a never-written cache.
-                    if process_flow_err is None:
-                        lowered_transform = lowered_config.get("transform")
-                        if (
-                            isinstance(lowered_transform, dict)
-                            and str(lowered_transform.get("mode") or "").strip()
-                            == "map_ref"
-                        ):
-                            process_flow_err = validate_config_lineage(
-                                lowered_config, components_by_key
-                            )
-
-            # Companion review P2 (#123 follow-up) + QA Bug #145: re-run
-            # the lineage pass WITH component context on composed configs
-            # AND on legacy configs whose transform slot references a map
-            # — an in-spec map's document_cache_joins are cache READS,
-            # which the process-local pass (no components_by_key) cannot
-            # see. On the legacy surface no in-process writer is even
-            # possible (transform excludes flow_sequence in v1), so a
-            # joined cache there must declare external_writer: true.
-            # Gated to the base builder (#125 review): transform /
-            # flow_sequence are executed fields only on
-            # database_to_api_sync — wrapper_subprocess ignores them in
-            # validate_config and build, so lineage-checking a stray copy
-            # there rejects a plan whose emitted XML never runs the map;
-            # sync_pipeline is covered by the lowered-config pass above
-            # (its validate_config rejects these keys at top level).
-            legacy_transform = raw_config.get("transform")
-            legacy_map_ref = (
-                isinstance(legacy_transform, dict)
-                and str(legacy_transform.get("mode") or "").strip() == "map_ref"
-            )
-            if (
-                process_flow_err is None
-                and builder_cls is ProcessFlowBuilder
-                and (
-                    (
-                        isinstance(raw_config.get("flow_sequence"), list)
-                        and raw_config.get("flow_sequence")
-                    )
-                    or legacy_map_ref
-                )
-            ):
-                process_flow_err = validate_config_lineage(
-                    raw_config, components_by_key
-                )
-
-    # --- #143 M12.8: unified ProcessIR semantic validation ------------------
-    # Runs LAST, and only when every legacy check above passed. The ordering is
-    # load-bearing, not stylistic: existing public error codes must keep
-    # winning, so a payload that fails a legacy check still reports the legacy
-    # code it has always reported. This gate can only ADD a rejection the legacy
-    # path missed — it can never rename one the legacy path already made.
-    #
-    # Gated to the AUTHORING actions for the same reason validate_config is: a
-    # reuse / reference step emits no process XML, so validating it would newly
-    # reject payloads that plan clean today.
-    if (
-        process_flow_err is None
-        and comp.type == "process"
-        and planned_action in ("create", "create_clone", "update")
-    ):
-        process_flow_err = _process_ir_semantic_error(process_kind, raw_config)
-
-    return process_flow_err
-
-
-def _process_ir_semantic_error(
-    process_kind: str, raw_config: Dict[str, Any]
-) -> Optional[BuilderValidationError]:
-    """The first blocking ProcessIR semantic finding, as a builder error.
-
-    Returns ``None`` for a dialect that is not migrated to ProcessIR, for a
-    config that cannot be projected, and for a report with no errors. Warnings
-    and advisories deliberately do not block — only ``report.errors`` does.
-
-    The message carries the stable CODE and the authored JSON pointer and
-    nothing else. Findings are value-free by construction (#143's redaction
-    boundary), so there is no authored text available to interpolate even if a
-    future edit wanted to.
-    """
-    from ..compiler.process_ir.diagnostics import ProcessIRCompileError
-    from ..compiler.process_ir.semantic_validation.legacy_bridge import (
-        validate_legacy_process_config,
-    )
-    from ..errors import PROCESS_IR_COMPILE_INTERNAL
-
-    try:
-        report = validate_legacy_process_config(process_kind, raw_config)
-    except ProcessIRCompileError as exc:
-        # A COMPILER defect, not an authoring error. It still blocks: the bridge
-        # used to swallow this and return None, which reads here as "nothing
-        # blocks" and let an UNVALIDATED process be built. The code stays in the
-        # compiler's own family — #143 reuses it rather than minting one, per
-        # ADR-001 §7 — and the message says plainly whose bug it is.
-        first = exc.diagnostics[0] if getattr(exc, "diagnostics", None) else None
-        return BuilderValidationError(
-            "ProcessIR semantic validation could not complete for this process.",
-            error_code=getattr(first, "code", PROCESS_IR_COMPILE_INTERNAL),
-            field="config",
-            hint=getattr(
-                first,
-                "remediation",
-                "This is a compiler defect, not a payload error. Please report it.",
-            ),
-            details={"codes": [getattr(first, "code", PROCESS_IR_COMPILE_INTERNAL)]},
-        )
-
-    if report is None or not report.errors:
-        return None
-
-    first = report.errors[0]
-    return BuilderValidationError(
-        "ProcessIR semantic validation rejected this process at {0}.".format(
-            first.path or "<root>"
-        ),
-        error_code=first.code,
-        field="config",
-        hint=first.remediation,
-        details={
-            "codes": [item.code for item in report.errors],
-            "path": first.path,
-        },
-    )
-
-
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
+    # #159 S3 (cutover decision 1): raw process authoring is refused FIRST — before
+    # normalization (a model error could echo a value), any secret scan, preview,
+    # echo, live lookup or write, and whatever the account holds. The refusal reads
+    # key presence only and returns nothing the caller submitted.
+    from ..authoring.process_admission import (
+        raw_components_pointer,
+        raw_process_refusal,
+        unit_required_envelope,
+    )
+
+    _unit_refusal = raw_process_refusal(config)
+    if _unit_refusal is not None:
+        return _unit_refusal
     # Issue #139 M12.4 (ADR-001 §11): reject a plaintext secret in the top-level
     # integration_spec.pipeline BEFORE normalization (so a malformed stage cannot
     # leak the value through a pydantic ValidationError), and before any synthesis,
@@ -6867,76 +5279,25 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "error": str(pipeline_secret_err),
         }
     spec = _normalize_to_spec(config)
-    # Issue #139D M12.4 (ADR-001 §5): strict-surface pipeline authority. Runs on
-    # the AUTHORED payload only — before wrapper synthesis, before collision
-    # resolution, before any live lookup, and before any mutation — so the
-    # accept-vs-reject outcome can never depend on live account contents. It is a
-    # no-op unless the caller explicitly opted in with version="1.1" AND authored
-    # a top-level pipeline; version="1.0" keeps its frozen inert-echo behaviour.
-    #
-    # #159 S1 (D8): GATED on the authored top-level pipeline. The authority
-    # decides NOT_APPLICABLE for every spec that carries none (whatever its
-    # version — pinned by `test_the_pipeline_authority_gate_matches_the_authority`),
-    # so importing the legacy-adapter package for such a spec decided nothing
-    # and only kept a module #160 deletes on every canonical plan's import path.
-    #
-    # ARCH-r1-09: gated on the STRICT version too. The authority decides
-    # NOT_APPLICABLE for any other version (a 1.0 spec with a populated
-    # pipeline is the frozen inert echo), so importing it there decided nothing.
-    authority_agreed_key = None
-    authority_agrees = False
-    if spec.pipeline is not None and spec.version == STRICT_PIPELINE_VERSION:
-        # Imported lazily on purpose: a module-level import would pull the ProcessIR
-        # compiler package into the server's import graph, breaking the M12
-        # dark-shipping invariant that `import server` never imports the compiler
-        # (tests/test_process_ir_compiler_surface.py).
-        from ..compiler.process_ir.legacy_adapters.authority import (
-            AGREE as AUTHORITY_AGREE,
-            AMBIGUOUS as AUTHORITY_AMBIGUOUS,
-            DISAGREE as AUTHORITY_DISAGREE,
-            NOT_REPRESENTABLE as AUTHORITY_NOT_REPRESENTABLE,
-            evaluate_pipeline_authority,
-        )
+    # #159 S3 (step-4 decision 4): a flat process row BINDS an existing process by its
+    # explicit id, or it is refused — decided from the request alone, before the
+    # conflict-policy check below can return and before any synthesis, collision
+    # lookup or write, so no account state moves a row across this boundary. The
+    # strict-pipeline adapter comparison (#139D) is gone with the adapters: a
+    # top-level `pipeline` is an inert analysis view, secret-scanned above.
+    from ..authoring.process_admission import first_flat_process_refusal
 
-        authority = evaluate_pipeline_authority(spec)
-        # AMBIGUITY is structural: ADR-001 §5 counts declared authoring actions, so it
-        # needs no process semantics and "stands even when a process's semantics are
-        # unavailable". It can therefore reject right here, before any live lookup.
-        #
-        # The CONFLICT dispositions are different — they need the process's semantics,
-        # so they are subject to the clean-plan gate and are decided at the end of the
-        # plan instead (see _authored_step_has_validation_error). The decision itself
-        # is already computed, here, from the authored payload alone, so deferring
-        # only WHEN it is reported — never WHETHER — and account contents still cannot
-        # move a payload across the accept/reject boundary.
-        if authority.disposition == AUTHORITY_AMBIGUOUS:
-            return _authority_rejection(authority.disposition)
-        # The conflict dispositions additionally honour the clean-plan gate: if the
-        # authored process would fail its own validation, THAT error is what the
-        # caller needs and an authority conflict must not mask it. Computed
-        # account-independently (see _authored_process_validation_error), so this
-        # whole decision still lands before collision resolution, before any live
-        # lookup, and before any mutation — and no unrelated later plan exit can
-        # suppress an already-computed conflict.
-        if authority.disposition in (AUTHORITY_DISAGREE, AUTHORITY_NOT_REPRESENTABLE):
-            if _authored_process_validation_error(spec, authority.authored_key) is None:
-                return _authority_rejection(authority.disposition)
-        authority_agrees = authority.disposition == AUTHORITY_AGREE
-        authority_agreed_key = authority.authored_key
+    _admission_policy = str(config.get("conflict_policy") or "reuse").lower()
+    _flat_refusal = first_flat_process_refusal(
+        spec.components, raw_components_pointer(config), _admission_policy
+    )
+    if _flat_refusal is not None:
+        return unit_required_envelope(_flat_refusal)
     # Issue #41 r3: inject transform.function wrappers between any
     # transform.map (map_type='script') and the script.mapping it
     # references. Live Boomi requires the indirection — see
     # _synthesize_script_function_wrappers docstring.
     _synthesize_script_function_wrappers(spec)
-    # Issue #90: a wrapper_subprocess parent's processcall $ref:KEY children are
-    # implicit dependencies — synthesize the edges so the topo-sort applies
-    # children before the parent regardless of input order.
-    _synthesize_wrapper_subprocess_edges(spec)
-    # Issue #99 G3: hoist a called child's connection env-extension overrides onto
-    # the wrapper so a wrapper-deployed package surfaces them through
-    # get_extensions (the #90 facade + #92 env-ext composition). Runs after the
-    # edges so parent->child links exist; adds parent->connection edges only.
-    _synthesize_wrapper_subprocess_extensions(spec)
     # Wrapper synthesis can add components (a transform.function per script-route
     # map), so keep an archetype-authored validation_rules.component_count in
     # sync with the planned component list. Otherwise the dumped plan spec is
@@ -7186,22 +5547,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             elif len(candidates) == 0:
                 planned_action = "error_missing_target"
 
-        # Process components MUST set config.process_kind (or process_type)
-        # to select a structured process-flow builder (issue #25, M2.5).
-        # Legacy freeform JSON-to-XML authoring has been removed; a process
-        # component without process_kind is rejected at plan time below with
-        # PROCESS_KIND_REQUIRED.
-        raw_config = comp.config or {}
-        # str() coercion guards against non-string process_kind (e.g. 123)
-        # before .strip(). The builder's validate_config does the same; this
-        # site runs FIRST for route selection so it has to coerce too.
-        # Codex review L1 / QA bug #128.
-        process_kind = (
-            str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
-            .strip()
-            .lower()
-        ) if comp.type == "process" else ""
-
+        # #159 S3: a flat process row reaching this loop was admitted before it
+        # (``first_flat_process_refusal``) as an explicit-id bind apply reuses; it
+        # carries no body, so it has nothing to validate here.
         route = (
             "process_flow_xml"
             if comp.type == "process"
@@ -7686,43 +6034,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     ),
                 }
 
-        # Process-flow builder preflight (issue #25, M2.5). Two-tier like
-        # the database / REST blocks above:
-        #   (a) scan_forbidden_secret_fields runs whenever process_kind is
-        #       set, even on update/reuse paths — so a stray plaintext
-        #       credential in process config cannot leak through the plan
-        #       echo.
-        #   (b) validate_config runs only when the apply path will
-        #       actually invoke the builder (create / create_clone, and
-        #       no raw-XML override). Unknown process_kind always fails
-        #       so a typo cannot silently fall through to the legacy
-        #       linear path.
-        process_flow_err = _process_component_preflight(
-            comp,
-            raw_config,
-            process_kind,
-            planned_action,
-            components_by_key,
-            db_err=db_err,
-            rest_err=rest_err,
-        )
-        if process_flow_err is not None:
-            planned_action = "error_process_validation"
-            validation_error = {
-                "error_code": process_flow_err.error_code,
-                "error": str(process_flow_err),
-                "field": process_flow_err.field,
-                "hint": process_flow_err.hint,
-            }
-            if process_flow_err.details is not None:
-                validation_error["details"] = process_flow_err.details
-            # Scrub plaintext secrets from comp.config before the spec is
-            # echoed back via spec.model_dump(). Mirrors the DB/REST blocks
-            # at lines ~860 and ~943 — without this, a flagged value still
-            # leaks through the plan response. Codex review C1.
-            if process_flow_err.error_code == "PLAINTEXT_SECRET_REJECTED":
-                ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(raw_config)
-
         # Issue #26 (M2.6): generated profile.json / profile.xml / transform.map
         # preflight. Mirrors the DB/REST/process blocks above — two-tier
         # secret scan + validate_config gated on apply path.
@@ -7757,7 +6068,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             gen_profile_scanner_cls is not None
             and db_err is None
             and rest_err is None
-            and process_flow_err is None
         ):
             # (a) Secret scan runs unconditionally so reuse/update/raw-XML
             #     configs cannot leak plaintext into the plan echo.
@@ -8288,22 +6598,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     warnings.extend(_lint_script_bodies(spec))
 
     spec_dump = spec.model_dump()
-    # Issue #139D (ADR-001 §5, view-faithfulness). On the STRICT surface an
-    # authored top-level pipeline may only be presented as a view of a process
-    # this request actually authors AND materializes. When the single authored
-    # process resolves to reuse of an existing component, the submitted config is
-    # discarded and the reused component's own definition executes — so keeping
-    # the authored summary would present discarded intent as a description of a
-    # component it never built. Withhold the view instead.
-    #
-    # This touches ONLY the inert view. Accept-vs-reject was settled structurally
-    # above, before any account lookup, so live account contents can move the
-    # echoed view between the normalized pipeline and null but can NEVER move a
-    # payload across the reject boundary (ADR-001 §5 determinism note).
-    if authority_agrees and _authored_step_will_reuse(
-        steps, authority_agreed_key, conflict_policy
-    ):
-        spec_dump["pipeline"] = None
     result = {
         "_success": True,
         "integration_spec": spec_dump,

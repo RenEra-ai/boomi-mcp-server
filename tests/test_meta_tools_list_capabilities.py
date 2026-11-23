@@ -1,7 +1,8 @@
 """Tests for list_capabilities_action V3 archetype discoverability (Issue #20).
 
 Validates that the static MCP capability catalog:
-- Exposes the three V3 authoring tools under the "Integration Authoring" category.
+- Exposes the two recipe discovery tools under the "Integration Authoring"
+  category (#159 S3 retired build_from_archetype and compose_archetypes).
 - Marks them as read-only and no-Boomi-mutation.
 - Surfaces an archetype-first workflow for integration creation with a fallback
   for the direct IntegrationSpecV1 path.
@@ -17,8 +18,10 @@ from boomi_mcp.categories.meta_tools import list_capabilities_action
 AUTHORING_TOOLS = (
     "list_integration_archetypes",
     "get_integration_archetype",
-    "build_from_archetype",
 )
+
+#: Retired in #159 S3 (with their dispatchers): never advertised again.
+RETIRED_AUTHORING_TOOLS = ("build_from_archetype", "compose_archetypes")
 
 DOC_TOOLS = (
     "search_boomi_docs",
@@ -37,6 +40,17 @@ def test_list_capabilities_includes_three_authoring_tools():
     for name in AUTHORING_TOOLS:
         assert name in tools, f"{name} missing from list_capabilities tools"
         assert tools[name]["category"] == "Integration Authoring"
+    for name in RETIRED_AUTHORING_TOOLS:
+        assert name not in tools, f"{name} is retired but still advertised"
+    # The served parameter surface matches the wrappers (#159 S3: no tags).
+    assert set(tools["list_integration_archetypes"]["parameters"]) == {
+        "query",
+        "expected_recipe_registry",
+    }
+    assert set(tools["get_integration_archetype"]["parameters"]) == {
+        "name",
+        "recipe_version",
+    }
 
 
 def test_authoring_tools_marked_read_only_and_no_boomi_mutation():
@@ -141,7 +155,7 @@ def test_account_governance_in_capabilities_and_survives_filtering():
 
 
 def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
-    """Profile → archetype discovery → get → build_from → build_integration(action='plan')."""
+    """Profile → recipe discovery → get → reuse check → build_integration(action='plan')."""
     wf = list_capabilities_action()["workflows"]["build_integration_from_description"]
     steps = wf["steps"]
 
@@ -153,21 +167,22 @@ def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
         if m:
             referenced.append(m.group(1))
 
-    # Profile first, then the design_doctrine consult (issue #86), the archetype
+    # Profile first, then the design_doctrine consult (issue #86), the recipe
     # discovery/get pair, then the connection-reuse check (issue #83) interposed
-    # BEFORE build_from_archetype.
+    # BEFORE the first build_integration call (#159 S3: no build_from_archetype).
     assert referenced[:6] == [
         "list_boomi_profiles",
         "get_schema_template",
         "list_integration_archetypes",
         "get_integration_archetype",
         "suggest_connection_reuse",
-        "build_from_archetype",
+        "build_integration",
     ], (
-        f"workflow must run profile → design_doctrine consult → archetype "
-        f"discovery/get → connection-reuse check → build_from_archetype, "
+        f"workflow must run profile → design_doctrine consult → recipe "
+        f"discovery/get → connection-reuse check → build_integration, "
         f"got: {referenced[:6]!r}"
     )
+    assert not any(name in " ".join(steps) for name in RETIRED_AUTHORING_TOOLS)
     # At least one downstream step must hand off to build_integration(action='plan').
     assert any(
         "build_integration" in s and "plan" in s for s in steps
@@ -336,7 +351,6 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
         "get_schema_template",
         "list_integration_archetypes",
         "get_integration_archetype",
-        "build_from_archetype",
         "build_integration",
         "review_transformation",
         "orchestrate_deploy",
@@ -396,7 +410,6 @@ def test_authoring_workflow_keeps_reuse_step_when_registered():
         "list_integration_archetypes",
         "get_integration_archetype",
         "suggest_connection_reuse",
-        "build_from_archetype",
         "build_integration",
         "review_transformation",
         "orchestrate_deploy",
@@ -408,10 +421,10 @@ def test_authoring_workflow_keeps_reuse_step_when_registered():
     assert len(reuse_steps) == 1, (
         "reuse step must be present when the tool is registered"
     )
-    # The reuse check must precede build_from_archetype.
+    # The reuse check must precede the first build_integration call.
     reuse_idx = next(i for i, s in enumerate(steps) if "suggest_connection_reuse(" in s)
-    build_idx = next(i for i, s in enumerate(steps) if "build_from_archetype(" in s)
-    assert reuse_idx < build_idx, "reuse check must come before build_from_archetype"
+    build_idx = next(i for i, s in enumerate(steps) if "build_integration(" in s)
+    assert reuse_idx < build_idx, "reuse check must come before build_integration"
 
 
 def test_authoring_workflow_strips_reuse_step_when_not_registered():
@@ -422,7 +435,6 @@ def test_authoring_workflow_strips_reuse_step_when_not_registered():
         "get_schema_template",
         "list_integration_archetypes",
         "get_integration_archetype",
-        "build_from_archetype",
         "build_integration",
         "review_transformation",
         "orchestrate_deploy",
@@ -435,7 +447,7 @@ def test_authoring_workflow_strips_reuse_step_when_not_registered():
     assert all("suggest_connection_reuse" not in s for s in steps), (
         "reuse step must be stripped when the tool is not registered"
     )
-    assert any("build_from_archetype(" in s for s in steps)
+    assert any("build_integration(action='plan'" in s for s in steps)
 
 
 def test_reuse_doctrine_and_hint_name_the_tool():
@@ -475,7 +487,6 @@ def test_workflow_dropped_when_schema_template_absent():
         "list_boomi_profiles",
         "list_integration_archetypes",
         "get_integration_archetype",
-        "build_from_archetype",
         "build_integration",
         "review_transformation",
         "orchestrate_deploy",
@@ -494,7 +505,6 @@ def test_workflow_fallback_preserved_when_all_referenced_tools_present():
         "list_boomi_profiles",
         "list_integration_archetypes",
         "get_integration_archetype",
-        "build_from_archetype",
         "build_integration",
         "review_transformation",
         "get_schema_template",
@@ -699,14 +709,12 @@ def test_safe_edit_workflow_preserved_when_all_tools_present():
 
 
 def test_compose_archetypes_in_capabilities():
+    """#159 S3: compose_archetypes retired (tombstone candidate); the fan-out is
+    discovered as a recipe and the catalog names it in the get examples."""
     tools = list_capabilities_action()["tools"]
-    assert "compose_archetypes" in tools
-    entry = tools["compose_archetypes"]
-    assert entry["category"] == "Integration Authoring"
-    assert entry["read_only"] is True
-    assert entry["no_boomi_mutation"] is True
-    assert "parts" in entry["parameters"]
-    assert "options" in entry["parameters"]
+    assert "compose_archetypes" not in tools
+    entry = tools["get_integration_archetype"]
+    assert any("boomi.compose.db_rest_fanout" in e for e in entry["examples"])
 
 
 def test_compose_workflow_routes_through_compose_to_orchestrate_deploy():
@@ -718,13 +726,14 @@ def test_compose_workflow_routes_through_compose_to_orchestrate_deploy():
         if m:
             referenced.append(m.group(1))
     assert referenced == [
-        "get_schema_template",
         "get_integration_archetype",
-        "compose_archetypes",
+        "build_integration",
         "build_integration",
         "build_integration",
         "orchestrate_deploy",
     ]
+    assert "boomi.compose.db_rest_fanout" in steps[0]
+    assert "compose_archetypes" not in " ".join(steps)
 
 
 def test_compose_workflow_leaves_description_chain_untouched():
@@ -735,23 +744,22 @@ def test_compose_workflow_leaves_description_chain_untouched():
 
 
 def test_compose_workflow_dropped_when_compose_tool_absent():
+    """The fan-out workflow now hangs on get_integration_archetype: without it
+    the workflow is dropped."""
     only = {
         "list_boomi_profiles",
         "get_schema_template",
-        "get_integration_archetype",
         "build_integration",
         "orchestrate_deploy",
     }
     catalog = list_capabilities_action(available_tools=only)
-    assert "compose_archetypes" not in catalog["tools"]
+    assert "get_integration_archetype" not in catalog["tools"]
     assert "compose_multi_target_integration" not in catalog["workflows"]
 
 
 def test_compose_workflow_preserved_when_all_referenced_tools_present():
     only = {
-        "get_schema_template",
         "get_integration_archetype",
-        "compose_archetypes",
         "build_integration",
         "orchestrate_deploy",
     }

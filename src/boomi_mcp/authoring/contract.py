@@ -12,9 +12,9 @@ dispatcher and the workflow docs cannot advertise different contracts, because
 there is only one to advertise, and a parity test asserts they all agree.
 
 **Revisions are DERIVED, never declared.** ``capability_revision`` is a hash of
-the manifest the server can actually serve — built from the live archetype
-registry, the live recipe registry snapshot, and the runtime models' own JSON
-Schemas. A hand-maintained version string would drift from behavior exactly the
+the manifest the server can actually serve — built from the live recipe
+registry snapshot and the runtime models' own JSON Schemas (#159 S3 retired the
+archetype registry from it). A hand-maintained version string would drift from behavior exactly the
 way the four-vs-six catalog did.
 
 **Comparison is honest or absent.** ``compare_capability_revision(None)`` returns
@@ -172,7 +172,7 @@ AUTHORING_CAPABILITY_REGISTRY: Mapping[str, Tuple[str, str, str]] = MappingProxy
             "topology_planner",
         ),
         "authoring.recipe_contributions": ("supported", "1", "recipe_registry"),
-        "authoring.integration_spec": ("supported", "2", "archetype_registry"),
+        "authoring.integration_spec": ("supported", "2", "recipe_registry"),
         "authoring.compile": ("supported", "2", "canonical_compiler"),
         "authoring.revision_binding": ("supported", "2", "runtime_schema_registry"),
         # #146 amendment. Published so a caller can discover, before authoring
@@ -416,47 +416,6 @@ def supported_schema_versions(selector: str) -> Tuple[str, ...]:
     return (version,) if version else ()
 
 
-def list_archetype_registry() -> Tuple[Dict[str, Any], ...]:
-    """The archetypes THIS runtime can actually build, sorted by name.
-
-    Derived from the live package scan, never a literal list: a hard-coded six
-    would have reported six on the deployment that could only serve four, which
-    is precisely the failure this manifest exists to make visible.
-
-    Uses the package MODULE rather than the string ``"boomi_mcp.patterns"`` —
-    the string form breaks under the ``src.boomi_mcp`` namespace.
-    """
-    from .. import patterns as patterns_pkg
-    from ..patterns import PatternKind, PatternRegistry
-
-    registry = PatternRegistry.from_package(patterns_pkg)
-    entries = []
-    for cls in registry.list_patterns(kind=PatternKind.ARCHETYPE):
-        metadata = cls.metadata
-        entries.append(
-            {
-                "name": metadata.name,
-                "version": getattr(metadata, "version", "") or "",
-                "migrated": _archetype_is_migrated(metadata.name),
-            }
-        )
-    return tuple(sorted(entries, key=lambda entry: entry["name"]))
-
-
-def _archetype_is_migrated(name: str) -> bool:
-    """Whether this archetype runs through the typed recipe path.
-
-    An unmigrated archetype is reported as ``migrated: false``, never omitted —
-    hiding it would recreate the four-vs-six blindness inside the manifest.
-    """
-    try:
-        from ..categories.integration_authoring import _ARCHETYPE_ADAPTERS
-
-        return name in _ARCHETYPE_ADAPTERS
-    except Exception:  # noqa: BLE001 — advisory metadata only
-        return False
-
-
 def _recipe_registry_block() -> Dict[str, Any]:
     """Registry identity only — entries stay on the recipe surface that owns them."""
     from ..recipes import production_registry
@@ -509,8 +468,9 @@ _INHERITED_SCHEMA_SELECTORS: Tuple[str, ...] = (
 
 
 #: Envelope keys that actually carry a SCHEMA. Different surfaces use different
-#: names — ``archetype:<name>`` answers with ``parameter_schema``, the rest with
-#: ``json_schema`` — and there is deliberately no fallback to the whole envelope.
+#: names — the retired ``archetype:<name>`` answered with ``parameter_schema``,
+#: the rest with ``json_schema`` — and there is deliberately no fallback to the
+#: whole envelope.
 #:
 #: The fallback is what made this wrong: hashing the envelope pulled in
 #: ``examples``, ``limitations`` and ``capability_notes``, so a documentation-only
@@ -572,6 +532,19 @@ def _inherited_schema_digest(selector: str) -> str:
         raise KeyError("cache_property_authoring published no contract body")
 
     payload = get_schema_template_action(schema_name=selector)
+    if selector.startswith("recipe:"):
+        # #159 S3: a recipe's ACCEPTED input is its input schema plus, where
+        # declared, its closed component-material schema. Both, and nothing
+        # else: the descriptor's prose (limitations, examples, notes) must not
+        # move the schema revision.
+        body = {
+            key: payload[key]
+            for key in ("input_schema", "component_material_schema")
+            if payload.get(key)
+        }
+        if body:
+            return sha256_fingerprint(body)
+        raise KeyError(f"{selector!r} published no input schema")
     for key in _SCHEMA_BODY_KEYS:
         body = payload.get(key)
         if body:
@@ -652,7 +625,10 @@ def authoring_workflow_contract() -> Dict[str, Any]:
             },
             {
                 "step": 4,
-                "call": "build_from_archetype(...) or author ProcessIR / recipes",
+                "call": (
+                    "list_integration_archetypes() / get_integration_archetype(...) "
+                    "for a recipe, or author ProcessIR units"
+                ),
                 "purpose": "Produce typed semantic intent.",
                 "mutates_boomi": False,
             },
@@ -910,7 +886,7 @@ def _schema_bundle() -> Dict[str, str]:
     be told WHICH schema moved, not merely that something did.
 
     Covers the selectors this contract owns AND the served authoring selectors it
-    inherits, plus the live archetype parameter surface — because the revision's
+    inherits — because the revision's
     job is to describe the whole authoring contract a client binds to, not only
     the part #146 introduced.
     """
@@ -926,21 +902,25 @@ def _schema_bundle() -> Dict[str, str]:
             bundle[selector] = _inherited_schema_digest(selector)
         except Exception:  # noqa: BLE001
             bundle[selector] = "unavailable"
-    # Each archetype's PARAMETER schema, under its own REAL selector. A changed
-    # archetype input is a changed contract even when the archetype list is
-    # identical, which a name-and-version list cannot show.
-    #
-    # Published per archetype rather than as one aggregate: an aggregate told a
-    # client that something moved without telling it WHICH archetype moved, and
-    # `archetype_parameters` was not a selector `get_schema_template` served at
-    # all — so a client traversing the advertised catalog could neither fetch nor
-    # verify it. Everything in this bundle is now fetchable under its own name.
+    # #159 S3: the per-archetype ``archetype:<name>`` digests retired with the
+    # selectors themselves. Their job — a changed authoring INPUT moves the
+    # revision, under a real selector that names what moved — is now done per
+    # discoverable recipe, under the ``recipe:<recipe_id>`` selector
+    # ``get_schema_template`` serves (each discoverable recipe is its id's
+    # default, so the unpinned selector names exactly the listed row).
     try:
-        archetypes = list_archetype_registry()
+        from ..categories.integration_authoring import (
+            list_integration_archetypes_action,
+        )
+
+        recipe_ids = [
+            row["recipe_id"]
+            for row in list_integration_archetypes_action().get("recipes", ())
+        ]
     except Exception:  # noqa: BLE001
-        archetypes = ()
-    for entry in archetypes:
-        selector = f"archetype:{entry['name']}"
+        recipe_ids = []
+    for recipe_id in recipe_ids:
+        selector = f"recipe:{recipe_id}"
         try:
             bundle[selector] = _inherited_schema_digest(selector)
         except Exception:  # noqa: BLE001
@@ -1049,14 +1029,9 @@ def _build_authoring_contract_manifest() -> Mapping[str, Any]:
         "compiler_revision": _compiler_revision(),
     }
 
-    # Discovery of the two live registries is best-effort and reported as such.
+    # Discovery of the live recipe registry is best-effort and reported as such.
     # A registry that fails to build must not take the whole capability response
-    # down — the same discipline meta_tools already applies to archetype scan.
-    try:
-        manifest["archetypes"] = [dict(entry) for entry in list_archetype_registry()]
-    except Exception:  # noqa: BLE001
-        manifest["archetypes"] = []
-        manifest["archetype_discovery"] = "unavailable"
+    # down. #159 S3: the archetype list retired — discovery is recipe-only.
     try:
         manifest["recipe_registry"] = _recipe_registry_block()
     except Exception:  # noqa: BLE001
@@ -4015,7 +3990,6 @@ __all__ = [
     "build_authoring_contract_manifest",
     "compare_capability_revision",
     "get_authoring_revisions",
-    "list_archetype_registry",
     "reset_manifest_cache",
     "schema_builder",
     "schema_version_for",

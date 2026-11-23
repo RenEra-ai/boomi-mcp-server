@@ -74,6 +74,8 @@ COMPONENT_EDIT_TARGET_MISMATCH = "COMPONENT_EDIT_TARGET_MISMATCH"
 COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED = "COMPONENT_EDIT_SUPPORTING_WRITE_REFUSED"
 COMPONENT_EDIT_BINDING_REQUIRED = "COMPONENT_EDIT_BINDING_REQUIRED"
 COMPONENT_EDIT_DEPENDENCY_UNVERIFIED = "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED"
+# #159 S3 (cutover decision 1): a raw process body at any entry.
+PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED = "PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED"
 
 # --- ProcessIRV1 model/codec boundary (M12.1 / issue #136; ADR-001 §7) --------
 # First codes of the PROCESS_IR_SCHEMA_* / PROCESS_IR_REFERENCE_* /
@@ -1069,6 +1071,20 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             owner="#97",
         ),
         ErrorCodeSpec(
+            code=PROCESS_COMPONENT_AUTHORING_UNIT_REQUIRED,
+            category="authoring",
+            retryable=False,
+            summary=(
+                "A process body was submitted as a raw process component (a "
+                "process_kind / process_type selector, flow_sequence or any other "
+                "body field, or a process row apply would write). Process bodies are "
+                "authored only as canonical ProcessIR units (authoring_request.intent "
+                "intent_kind='process_ir', or integration_spec.processes); a flat "
+                "process row may only bind an existing process. Nothing is written."
+            ),
+            owner="#159",
+        ),
+        ErrorCodeSpec(
             code=COMPONENT_EDIT_AUTHORING_REQUEST_INVALID,
             category="component_edit",
             retryable=False,
@@ -1301,8 +1317,10 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "an authored top-level pipeline view either disagrees with the "
                 "normalized semantics of the single authored process, or is "
                 "ambiguous because the spec authors two or more processes. "
-                "Rejected at plan time, before collision resolution and before "
-                "any mutation (#139D / ADR-001 §5)."
+                "Was rejected at plan time (#139D / ADR-001 §5). Retired from "
+                "every serving route at #159 S3 with the legacy process builders: "
+                "build_integration no longer emits it, and a top-level pipeline "
+                "is an inert view on every version."
             ),
             owner="#139",
         ),
