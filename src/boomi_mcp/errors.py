@@ -1353,7 +1353,8 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
                 "carry a profile other than the one that step requires — a reused "
                 "or reference-only document cache requires the profile its stored "
                 "component declares — a required profile is absent or unknown (its "
-                "component is submitted as raw config.xml, or a reused cache's stored "
+                "component is submitted as raw config.xml, a reused cache's stored "
+                "profile could not be read, or a reused map or REST operation's stored "
                 "profile could not be read), or an operation's profile reference "
                 "names no profile component."
             ),

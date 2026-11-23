@@ -10610,6 +10610,7 @@ def _apply_plan(
         build_connector_resolution_snapshot as _build_resolution,
         live_cache_profiles_for_unwritten_caches,
     )
+    from ..authoring.stored_profile_bindings import stored_profile_bindings_for_unwritten_components
     from ..authoring.workflow import _connector_metadata_from_components
 
     # CLASSIFIED, like every other pre-write refusal. Hoisting this build out of
@@ -10626,6 +10627,15 @@ def _apply_plan(
             # Gated with the connector reading: only a compiled root consumes it.
             cache_profiles=(
                 live_cache_profiles_for_unwritten_caches(
+                    boomi_client, spec.components, conflict_policy, existing_ids=existing_ids,
+                    reads=_apply_reads)
+                if _roots_to_compile else ()
+            ),
+            # #159 S3: the stored profile links of every map and REST operation apply does not
+            # write, read fresh through the phase budget. Gated with the connector reading: only a
+            # compiled root consumes it.
+            profile_bindings=(
+                stored_profile_bindings_for_unwritten_components(
                     boomi_client, spec.components, conflict_policy, existing_ids=existing_ids,
                     reads=_apply_reads)
                 if _roots_to_compile else ()

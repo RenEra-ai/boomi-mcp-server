@@ -286,3 +286,52 @@ def test_the_public_safe_edit_applies_the_canonical_mapped_both_sides_update(mon
         CAPTURED_PATCH_REQUEST_PROFILE
     }
     assert_live_process_preserved(pushed)
+
+
+def test_the_public_typed_apply_writes_the_captured_bound_profile_update_once(monkeypatch):
+    """#159 S3 (lane S3b apply hunk): the same captured all-bound request, through the
+    REGISTERED `build_integration` compile then confirmed apply. Apply reads the stored
+    profile links of the map and both REST operations it does not write through its own
+    phase budget, so the map's profile continuity is judged on fresh stored bytes and the
+    apply writes exactly one component — the named process — and nothing else.
+
+    Same-case control (measured at b998588, before the hunk): this apply refused
+    `PROCESS_IR_SEMANTIC_PROFILE_MISMATCH` at `/body/steps/2/map_ref` with zero writes,
+    while compile of the same request succeeded."""
+    import json
+
+    import server
+    from test_component_safe_edit import (
+        CANONICAL_PROCESS_ID,
+        CAPTURED_GET_RESPONSE_PROFILE,
+        CAPTURED_MAP,
+        CAPTURED_PATCH_REQUEST_PROFILE,
+        CanonicalAccount,
+        captured_bound_profiles_patch,
+        captured_bound_profiles_store,
+    )
+    from test_component_safe_edit_wrapper import _payload, _run_async
+
+    account = CanonicalAccount(captured_bound_profiles_store())
+    monkeypatch.setattr(server, "get_current_user", lambda: "tester")
+    monkeypatch.setattr(server, "get_secret", lambda *a, **k: {
+        "account_id": account.account_id, "username": "u", "password": "pw"})
+    monkeypatch.setattr(server, "Boomi", lambda **kw: account)
+
+    def call(action, request, **extra):
+        return _payload(_run_async(server.mcp.call_tool("build_integration", {
+            "profile": "p", "action": action,
+            "config": json.dumps(dict({"authoring_request": request}, **extra))})))
+
+    request = captured_bound_profiles_patch()["authoring_request"]
+    compiled = call("compile", request)
+    assert compiled["_success"] is True, compiled
+    assert account.component.pushed == []
+    binding = compiled["authoring_result"]["revision_binding"]
+    applied = call("apply", dict(
+        request, expected_compile_hash=binding["compile_hash"],
+        expected_capability_revision=binding["capability_revision"]), dry_run=False)
+    assert applied["_success"] is True, applied
+    assert [cid for cid, _ in account.component.pushed] == [CANONICAL_PROCESS_ID]
+    assert {CAPTURED_MAP, CAPTURED_GET_RESPONSE_PROFILE, CAPTURED_PATCH_REQUEST_PROFILE} <= set(
+        account.component.reads)

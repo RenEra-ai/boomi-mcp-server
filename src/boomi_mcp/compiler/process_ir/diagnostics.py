@@ -332,8 +332,14 @@ _REMEDIATION = {
         "profile every cache write reaching the read stored: writes of different profiles "
         "or of documents whose profile nothing states, and a read that authors "
         "external_writer, satisfy none of them. An operation's profile "
-        "reference must name a profile component. A map or operation named only by reference "
-        "states no profile of its own, so declare the configuration apply writes into it. "
+        "reference must name a profile component. A map or REST operation apply reuses or "
+        "names only by reference declares the profiles its stored component links — a "
+        "map's source and destination profile, an operation's request and response "
+        "profile — read from the account on every route that holds one, each linked "
+        "profile verified by its own id and type, before any write. One whose stored link "
+        "could not be read or verified has an unknown profile, and on a route with no "
+        "account it declares none. Any other operation named only by reference states no "
+        "profile of its own, so declare the configuration apply writes into it. "
         "A document cache apply reuses or names only by reference declares the profile its "
         "stored component holds, read from the account on every route that holds one — the "
         "typed plan, compile and apply — before any write; a stored cache proved unprofiled "
@@ -542,8 +548,9 @@ _MESSAGES = {
     PROCESS_IR_SEMANTIC_PROFILE_MISMATCH: (
         "the documents reaching a map, a cache write, a profile source, a connector call's "
         "declared input or a process call carry a profile other than the one it requires "
-        "or one nothing states, or one a component submitted as raw config.xml or a reused "
-        "document cache whose stored profile could not be read leaves unknown, or an "
+        "or one nothing states, or one a component submitted as raw config.xml, a reused "
+        "document cache whose stored profile could not be read, or a reused map or REST "
+        "operation whose stored profile could not be read leaves unknown, or an "
         "operation's profile reference names no profile component"
     ),
     PROCESS_IR_SEMANTIC_CARDINALITY_MISMATCH: (
