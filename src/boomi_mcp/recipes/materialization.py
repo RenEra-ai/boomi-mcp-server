@@ -378,9 +378,9 @@ def _stored_binding_profile_facts(component, snapshot, facts):
             continue
         refs.append(None)
     # CDX-159-S3-r1-02: ``profiles_unknown`` is read as what the component ACCEPTS (a call's
-    # ``input_unknown``), so only the INPUT side sets it. An unknown OUTPUT side already fails
-    # closed without it: it states no profile, so a call's output flows on as an undeclared
-    # stream and a map's absent target is a mismatch at the map.
+    # ``input_unknown``), so only the INPUT side sets it. An unknown OUTPUT side states no
+    # profile, so it is treated like an absent one: it does NOT fail closed everywhere — a
+    # later profile source can admit what a readable read would refuse (#201, deferred).
     unknown = reading.input.state == "unknown"
     # Built, not copied: a map or operation states no cache profile.
     return _ProfileFacts(refs[0], refs[1], None, unknown=unknown), tuple(stored)

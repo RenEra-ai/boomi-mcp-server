@@ -2682,3 +2682,32 @@ def test_the_plan_advises_a_canonical_root_that_models_no_error_handling():
         for literal in getattr(model.model_fields["kind"].annotation, "__args__", ())
     }
     assert _ERROR_HANDLING_IR_KINDS <= declared, sorted(_ERROR_HANDLING_IR_KINDS - declared)
+
+
+def test_the_plan_does_not_advise_a_listener_root_that_cannot_hold_error_handling():
+    """#159 arch-r1 #10 follow-through: a canonical listener root may hold neither a
+    Try/Catch nor an Exception (``listener_root_verdict``), so the advisory to add one is
+    not served for it; the same root without a listener still is."""
+    import sys as _sys
+    from unittest.mock import MagicMock, patch
+
+    _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import test_integration_builder as tib
+    from boomi_mcp.categories import integration_builder as ib
+
+    comps = [tib._asc_wss_op_comp()] + [
+        ib.IntegrationComponentSpec.model_validate(c) for c in tib._asc_rest_target_comps()
+    ]
+    with patch.object(ib, "paginate_metadata", return_value=[]):
+        plan = ib._build_plan(MagicMock(), tib._asc_config(comps))
+    assert plan["_success"] is True, plan
+    assert [w for w in plan.get("warnings", []) if _ADVISORY in w] == []
+
+    from boomi_mcp.models.process_ir import ProcessIRV1
+
+    plain = ProcessIRV1.model_validate(_doc([
+        {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"},
+        {"kind": "message", "text": "hello"},
+        {"kind": "return_documents"},
+    ]))
+    assert ib._root_admits_error_handling(plain) is True

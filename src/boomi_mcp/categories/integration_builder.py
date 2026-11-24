@@ -3566,8 +3566,32 @@ def _step_models_error_handling(step, components_by_key, process_units_by_key) -
         unit = (process_units_by_key or {}).get(step.get("key"))
         # A root the plan stamped canonical always has its unit; none is no evidence of
         # a missing handler, so it is not flagged.
-        return unit is None or _process_ir_models_error_handling(unit.process_ir)
+        return (
+            unit is None
+            or _process_ir_models_error_handling(unit.process_ir)
+            or not _root_admits_error_handling(unit.process_ir)
+        )
     return _process_models_error_handling(_step_component(step, components_by_key))
+
+
+def _root_admits_error_handling(process_ir: Any) -> bool:
+    """Whether a canonical root could hold ANY error-handling kind at all.
+
+    Asked of the listener placement authority (``listener_root_verdict``), not
+    restated: each error-handling kind is placed before the root's terminal step
+    and the root is admissible only if the authority accepts some such placement.
+    A listener root refuses every one, so advising it to add one would be advice
+    nobody can act on.
+    """
+    from boomi_mcp.models.process_ir import listener_root_verdict
+
+    kinds = [getattr(step, "kind", None) for step in process_ir.body.steps]
+    if listener_root_verdict(kinds) is not None:
+        return True  # an already-refused root is not this advisory's business
+    return any(
+        listener_root_verdict(kinds[:-1] + [kind] + kinds[-1:]) is None
+        for kind in _ERROR_HANDLING_IR_KINDS
+    )
 
 
 def _governance_primary_name(comp: Any) -> Optional[str]:

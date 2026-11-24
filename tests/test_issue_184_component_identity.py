@@ -4193,7 +4193,8 @@ def test_an_unknown_stored_profile_link_marks_the_symbols_profiles_unknown():
 def test_an_unknown_response_profile_does_not_make_a_call_s_input_unknown():
     """CDX-159-S3-r1-02: the GET operation declares NO request profile; its response profile cannot
     be read. Its input stays absent — not unknown — so a call fed by a document cache is not refused
-    for a response it never consumes; the map that reads that response still sees an unknown source."""
+    for a response it never consumes; the map that reads that response still sees an unknown source.
+    An unknown output side is otherwise read like an absent one (not fail-closed): #201."""
     cap, rows, store = _s3b_captured()
     del store[cap.CAPTURED_GET_RESPONSE_PROFILE]
     readings, _reads = _s3b_read(rows, store)
