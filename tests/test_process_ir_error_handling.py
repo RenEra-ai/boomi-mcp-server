@@ -2617,3 +2617,68 @@ def test_a_chain_relocates_across_account_bindings_unchanged():
     for bound in (b"ACCOUNT-A-COMPONENT", b"ACCOUNT-B-COMPONENT",
                   b"ACCOUNT-A-FOLDER", b"ACCOUNT-B-FOLDER"):
         assert bound not in a[1]
+
+
+# ---------------------------------------------------------------------------
+# #159 arch-r1 #10: the plan's error-handling advisory reads a canonical root's ProcessIR
+# ---------------------------------------------------------------------------
+#
+# FIXTURE PROVENANCE: the Try/Catch root is the frozen `issue154/try_data_process.json`
+# (its `$ref:GETOP` re-pointed at this spec's operation); the supporting connection and
+# operation are `_m12_11_support.APPLIABLE_CONN/APPLIABLE_OP`; the two linear roots use
+# only node kinds the ProcessIR schema defines. Nothing is derived from the plan's output.
+
+_ADVISORY = "model no error handling"
+
+
+def _advisory_plan(process_ir):
+    import json as _json
+    import sys as _sys
+    from unittest.mock import MagicMock, patch
+
+    _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from _m12_11_support import APPLIABLE_CONN, APPLIABLE_OP
+    from boomi_mcp.categories import integration_builder as ib
+
+    spec = {"name": "Advisory", "components": [copy.deepcopy(APPLIABLE_CONN), copy.deepcopy(APPLIABLE_OP)],
+            "processes": [{"envelope": {"component_key": "proc", "name": "Advisory Process",
+                                        "action": "create", "depends_on": ["conn", "op"]},
+                           "process_ir": process_ir}]}
+    with patch.object(ib, "paginate_metadata", return_value=[]):
+        plan = ib._build_plan(MagicMock(), {"integration_spec": _json.loads(_json.dumps(spec))})
+    assert plan["_success"] is True, plan
+    return [w for w in plan.get("warnings", []) if _ADVISORY in w]
+
+
+def test_the_plan_advises_a_canonical_root_that_models_no_error_handling():
+    """Cutover decision: the error-handling advisory is KEPT, based on the actual ProcessIR.
+    A canonical root with no Try/Catch and no Exception is advised (it was skipped, so a
+    migrated process lost the advice its legacy spelling got on dev ``ed17dde``); a Try/Catch
+    root or an Exception throw is evidence and is not."""
+    import json as _json
+
+    source = {"kind": "source", "connection_ref": "$ref:conn", "operation_ref": "$ref:op"}
+    unhandled = _doc([source, {"kind": "message", "text": "hello"}, {"kind": "return_documents"}])
+    advised = _advisory_plan(unhandled)
+    assert len(advised) == 1 and "['proc']" in advised[0], advised
+
+    thrown = _doc([source, {"kind": "exception", "message_template": "failed: {1}",
+                            "parameter_source": "current_document"}])
+    assert _advisory_plan(thrown) == []
+    fixture = pathlib.Path(__file__).resolve().parent / "fixtures/process_ir/issue154/try_data_process.json"
+    caught = _json.loads(fixture.read_text(encoding="utf-8"))
+    caught["body"]["steps"][0]["try_body"]["steps"][0]["operation_ref"] = "$ref:op"
+    assert _advisory_plan(caught) == []
+
+    # The evidence kinds are real ProcessIR node discriminators (not a misspelling that
+    # could never match): each names a node model's `kind` literal.
+    from boomi_mcp.categories.integration_builder import _ERROR_HANDLING_IR_KINDS
+    from boomi_mcp.models import process_ir as pir
+
+    declared = {
+        literal
+        for model in vars(pir).values()
+        if isinstance(model, type) and issubclass(model, pir.BaseModel) and "kind" in model.model_fields
+        for literal in getattr(model.model_fields["kind"].annotation, "__args__", ())
+    }
+    assert _ERROR_HANDLING_IR_KINDS <= declared, sorted(_ERROR_HANDLING_IR_KINDS - declared)

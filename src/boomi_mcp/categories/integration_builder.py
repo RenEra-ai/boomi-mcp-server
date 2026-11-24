@@ -3530,6 +3530,46 @@ def _process_models_error_handling(comp: Any) -> bool:
     return False
 
 
+#: #159 arch-r1 #10: the ProcessIR node kinds that are error-handling evidence for the
+#: plan advisory — the IR spellings of the two shapes the legacy predicate above accepts
+#: (a Try/Catch, which emits ``catcherrors``, and a deliberate Exception throw). The
+#: advisory's own policy, not a fact derived elsewhere; pinned against the ProcessIR
+#: node models' ``kind`` discriminators by test.
+_ERROR_HANDLING_IR_KINDS = frozenset({"try_catch", "exception"})
+
+
+def _process_ir_models_error_handling(node: Any) -> bool:
+    """True when a canonical root's ProcessIR holds an error-handling node at any depth.
+
+    Walks the typed model's own fields (every nested model and sequence), so a node
+    inside a branch leg, a decision arm or a Try/Catch body is seen without naming
+    the slots that can hold one.
+    """
+    from pydantic import BaseModel
+
+    if isinstance(node, BaseModel):
+        if getattr(node, "kind", None) in _ERROR_HANDLING_IR_KINDS:
+            return True
+        return any(
+            _process_ir_models_error_handling(getattr(node, name, None))
+            for name in type(node).model_fields
+        )
+    if isinstance(node, (list, tuple)):
+        return any(_process_ir_models_error_handling(item) for item in node)
+    return False
+
+
+def _step_models_error_handling(step, components_by_key, process_units_by_key) -> bool:
+    """The advisory's question for ONE process step: its canonical root's ProcessIR,
+    or a legacy process component's config (:func:`_process_models_error_handling`)."""
+    if step.get("materialization") == CANONICAL_PROCESS_MATERIALIZATION:
+        unit = (process_units_by_key or {}).get(step.get("key"))
+        # A root the plan stamped canonical always has its unit; none is no evidence of
+        # a missing handler, so it is not flagged.
+        return unit is None or _process_ir_models_error_handling(unit.process_ir)
+    return _process_models_error_handling(_step_component(step, components_by_key))
+
+
 def _governance_primary_name(comp: Any) -> Optional[str]:
     """The display name the create path will actually emit for ``comp``.
 
@@ -6522,21 +6562,17 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # design_doctrine entries. Routing lives in this response payload, never in a
     # tool description (MCP-conformance).
     #
-    # The component is resolved through `_step_component`, which returns None for
-    # a canonical ProcessIR root. QA-153-r2-02: this lookup was written when
-    # every process step came from `spec.components`, and the r1 fix that added
-    # `planned_action` to the canonical step is what ACTIVATED it — the guard had
-    # been False by accident, never by design, so every spec whose roots reached
-    # here died with `KeyError: '<process key>'`. A canonical root models its
-    # error handling in the IR, which this legacy config lint cannot read, so the
-    # honest answer is to skip it rather than to guess from an empty config.
+    # QA-153-r2-02: a canonical ProcessIR root has no entry in `components_by_key`,
+    # so it is never looked up as a component (that was a `KeyError`). #159 arch-r1
+    # #10 (cutover decision: keep the advisory, based on actual ProcessIR): a
+    # canonical root is judged on its own IR (`_step_models_error_handling`), not
+    # skipped — a migrated process with no Try/Catch or Exception is advised too.
     processes_missing_error_handling = [
         step["key"]
         for step in steps
         if step.get("type") == "process"
         and step.get("planned_action") in _PROCESS_AUTHORING_ACTIONS
-        and (comp := _step_component(step, components_by_key)) is not None
-        and not _process_models_error_handling(comp)
+        and not _step_models_error_handling(step, components_by_key, process_units_by_key)
     ]
     if processes_missing_error_handling:
         warnings.append(
