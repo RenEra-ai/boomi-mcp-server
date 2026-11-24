@@ -7080,6 +7080,12 @@ def test_every_typed_intake_admits_only_an_explicit_id_process_bind(mock_pag):
         assert refused.diagnostics[0].path == pointer + "config/process_kind"
         text = repr(refused.diagnostics)
         assert "CANARY_KIND" not in text and "CANARY_SECRET" not in text
+        # #159 arch-r1 #9: a casing variant of the type is the same process row the raw
+        # route normalizes, so it is refused at the same pointer (it was admitted).
+        for spelling in ("Process", " PROCESS "):
+            refused = _typed_refusal(build(dict(with_body, type=spelling)))
+            assert refused.code == _UNIT_REQUIRED, spelling
+            assert refused.diagnostics[0].path == pointer + "config/process_kind", spelling
         # The explicit-id bind passes admission (a later, unrelated gate may still
         # speak about the rest of the request — never with the unit-required code).
         try:

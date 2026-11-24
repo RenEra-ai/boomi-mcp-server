@@ -184,7 +184,10 @@ def flat_process_refusal_field(comp: Any, base: str, conflict_policy: str) -> Op
     Answered from the request alone (``declared_only``): no account is consulted, so
     the same row is admitted or refused identically on every route.
     """
-    if getattr(comp, "type", None) != "process":
+    # The raw route's own type normalization (``_is_process_type``), not an exact
+    # compare: a typed intake's row is never normalized, so ``"Process"`` read as
+    # "not a process" there and skipped the admission the raw route applies.
+    if not _is_process_type(getattr(comp, "type", None)):
         return None
     config = comp.config if isinstance(getattr(comp, "config", None), dict) else {}
     body = _body_field(config, base) or _bind_value_field(config, base)
