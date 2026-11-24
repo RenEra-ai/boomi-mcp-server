@@ -287,8 +287,16 @@ def stored_profile_bindings_for_unwritten_components(
             # Fail closed for every component this reader scopes: a map, or an operation REST by
             # its request OR by the answered bytes — the shared connector resolver may still read
             # them as REST, and recording nothing would leave its input undeclared, not unknown
-            # (CDX-159-S3-r2-01).
-            if component_type == _MAP_TYPE or _declares_rest(component) or _reads_as_rest(key, stored_xml):
+            # (CDX-159-S3-r2-01). Since #159 ARCH-r1 #1 the one read FAILS an answer naming another
+            # id, so no bytes arrive at all: bytes that are not the bound component's settle no
+            # family, so an operation the request does not declare as another family stays in
+            # scope (``_family_unsettled_in_scope`` with no bytes).
+            if (
+                component_type == _MAP_TYPE
+                or _declares_rest(component)
+                or _reads_as_rest(key, stored_xml)
+                or _family_unsettled_in_scope(component, None)
+            ):
                 readings.append(unknown_reading)
             continue
         if component_type == _MAP_TYPE:
