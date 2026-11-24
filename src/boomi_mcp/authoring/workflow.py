@@ -1614,6 +1614,7 @@ def build_integration_spec_preview(
     reused_keys: Any = None,
     final_names: Any = None,
     existing_ids: Any = None,
+    conflict_policy: Optional[str] = None,
 ) -> IntegrationSpecV1:
     """The ComponentPlan preview — explicitly an ``IntegrationSpecV1``.
 
@@ -1661,6 +1662,7 @@ def build_integration_spec_preview(
         reused_keys=reused_keys,
         final_names=final_names,
         existing_ids=existing_ids,
+        conflict_policy=conflict_policy,
     )
 
 
@@ -1680,6 +1682,7 @@ def _as_served_preview(
     reused_keys: Any = None,
     final_names: Any = None,
     existing_ids: Any = None,
+    conflict_policy: Optional[str] = None,
 ):
     """The served preview SHAPE for this intent (#157).
 
@@ -1700,6 +1703,10 @@ def _as_served_preview(
         reused_keys=reused_keys,
         final_names=final_names,
         existing_ids=existing_ids,
+        # #159 arch r1 finding 4: the request's policy, the one apply binds
+        # with — so a fact read off candidate config is served exactly when
+        # apply writes that config (a clone is written, a reuse is not).
+        conflict_policy=conflict_policy,
         projection_facts=normalized.recipe_projection_facts,
         recorded_intents=normalized.recorded_intents,
     )
@@ -3376,6 +3383,7 @@ def plan_authoring_request_v1(
             reused_keys=_reused_for_preview,
             final_names=_names_for_preview,
             existing_ids=planned_existing_ids(component_plan),
+            conflict_policy=request.intent.conflict_policy,
         )
 
     # The LEGACY component-plan lint, reused. It supplies the redacted spec echo
@@ -3455,6 +3463,7 @@ def plan_authoring_request_v1(
                     reused_keys=_reused_for_preview,
                     final_names=_names_for_preview,
                     existing_ids=planned_existing_ids(component_plan),
+                    conflict_policy=request.intent.conflict_policy,
                 )
         # The planner's own warning strings. The advisory arm this used to
         # accumulate is gone with the `process_ir` exemption above: an

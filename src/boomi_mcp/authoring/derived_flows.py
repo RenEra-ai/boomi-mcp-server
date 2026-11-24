@@ -299,16 +299,24 @@ def _source_token_for(feeder: Any, by_key: Mapping[str, Any], metadata: Mapping[
             # An operation-only node (a WSS listener's operation has no
             # connection): its family, through the resolver the builders route
             # on, so an alias such as `web_services` names the same family as `wss`.
-            family = str(op_config.get("connector_type") or "") or None
-            if family:
-                from ..categories.components.builders.connector_builder import (
-                    connector_family_of,
-                )
-
-                resolved = connector_family_of(family) or family.strip().lower()
-                return SOURCE_TOKEN_BY_FAMILY.get(resolved, "")
+            return SOURCE_TOKEN_BY_FAMILY.get(_operation_family(operation) or "", "")
     family = (metadata.get(conn_key) or (None, None))[0] if conn_key else None
-    return SOURCE_TOKEN_BY_FAMILY.get(str(family).lower(), "") if family else ""
+    return SOURCE_TOKEN_BY_FAMILY.get(_resolved_family(family) or "", "")
+
+
+def _resolved_family(connector_type: Any) -> Optional[str]:
+    """A declared ``connector_type`` -> its canonical family, or None.
+
+    THE one resolution every family-keyed table here is read through:
+    ``connector_family_of``, the resolver the builders route on. Lowercasing the
+    raw spelling instead read a supported alias (``rest_client``, the canonical
+    REST subtype) as a family no table names, so its route lost every connector
+    row and endpoint (#159 architect review r1, finding 8). Every family the
+    tables key on is one this resolver returns; anything else resolves to None.
+    """
+    from ..categories.components.builders.connector_builder import connector_family_of
+
+    return connector_family_of(connector_type) if connector_type else None
 
 
 def _leaves_summary(index: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
@@ -764,7 +772,7 @@ def _family_of(component: Optional[IntegrationComponentSpec], metadata) -> Optio
     family = (metadata.get(component.key) or (None, None))[0]
     if not family:
         family = (component.config or {}).get("connector_type")
-    return str(family).lower() if family else None
+    return _resolved_family(family)
 
 
 def _endpoint_row(
@@ -913,7 +921,7 @@ def _with_hints(row: Any, facts: Any) -> Any:
 
 def _route_projection(
     unit, by_key, metadata, facts, transform_rows, watermarked, reused_keys=frozenset(),
-    existing_ids=None,
+    existing_ids=None, conflict_policy=None,
 ):
     """``(rows, endpoints, summary)`` for one fact-carrying unit, or None.
 
@@ -1012,7 +1020,8 @@ def _route_projection(
     endpoints = [
         _endpoint_row(
             source_token, "source", source_connection, source_family,
-            reused=source_connection.key in reused_keys,
+            reused=_apply_writes(source_connection, reused_keys, existing_ids, conflict_policy)
+            is False,
             existing_ids=existing_ids,
         )
     ]
@@ -1020,6 +1029,10 @@ def _route_projection(
     modes: Dict[str, str] = {}
     binding_modes: Dict[str, str] = {}
     for index, (target, connection, operation) in enumerate(target_components):
+        # The method is read off the operation's CANDIDATE config: derivable
+        # only when apply writes that config (``_apply_writes``).
+        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
+            return None
         method = (operation.config or {}).get("method")
         endpoint = _endpoint_row(
             target_token if index == 0 else "{0}_{1}".format(target_token, slugify(target.part_key)),
@@ -1027,7 +1040,7 @@ def _route_projection(
             connection,
             target_family,
             method=method,
-            reused=connection.key in reused_keys,
+            reused=_apply_writes(connection, reused_keys, existing_ids, conflict_policy) is False,
             existing_ids=existing_ids,
         )
         endpoints.append(endpoint)
@@ -1080,12 +1093,7 @@ def _operation_family(operation: Optional[IntegrationComponentSpec]) -> Optional
     """An operation-only step's family, through the resolver the builders route on."""
     if operation is None:
         return None
-    family = str((operation.config or {}).get("connector_type") or "") or None
-    if not family:
-        return None
-    from ..categories.components.builders.connector_builder import connector_family_of
-
-    return connector_family_of(family) or family.strip().lower()
+    return _resolved_family((operation.config or {}).get("connector_type"))
 
 
 def _connector_node_index(nodes: Sequence[Any], operation_key: str) -> Optional[int]:
@@ -1189,10 +1197,45 @@ def _schema_summary_row(row: Any, map_component, by_key, reused) -> Optional[Any
     return DerivedTransformFlowV1.model_validate(out)
 
 
+def _apply_writes(
+    component: IntegrationComponentSpec, reused_keys, existing_ids, conflict_policy
+) -> Optional[bool]:
+    """Whether apply WRITES this component's own configuration: True, False, or
+    None when the answer depends on a conflict policy the caller did not hand in.
+
+    Asked of apply's own predicate (``apply_writes_component_config``) with the
+    component plan's resolved ids (``existing_ids``): a create matched by name
+    under ``reuse`` is bound as it stands and its candidate configuration is
+    discarded. A key the caller already answered as reused (``reused_keys``) is
+    not written. Without a policy, the predicate is asked under EVERY policy the
+    recipe intent accepts, and only a unanimous answer is an answer.
+    """
+    from ..categories.integration_builder import apply_writes_component_config
+
+    if component.key in (reused_keys or ()):
+        return False
+    if conflict_policy is not None:
+        policies: Tuple[str, ...] = (conflict_policy,)
+    else:
+        from typing import get_args
+
+        from ..models.authoring_workflow import RecipeAuthoringIntentV1
+
+        policies = get_args(RecipeAuthoringIntentV1.model_fields["conflict_policy"].annotation)
+    answers = {
+        bool(apply_writes_component_config(component, policy, existing_ids=existing_ids))
+        for policy in policies
+    }
+    return answers.pop() if len(answers) == 1 else None
+
+
 def _listener_endpoint_extra(
     operation: IntegrationComponentSpec,
     components: Sequence[IntegrationComponentSpec],
     process_key: str,
+    reused_keys=frozenset(),
+    existing_ids=None,
+    conflict_policy=None,
 ) -> Optional[Dict[str, Any]]:
     """A WSS listener's served method and path, from the listener operation and
     — when one routes to this process — its API Service component.
@@ -1201,6 +1244,14 @@ def _listener_endpoint_extra(
     deploy-time ``listener_verify`` probe uses). Behind an API Service:
     ``effective_api_service_route`` over that component's route and the linked
     operation, served with ``publish_mode: api_service``.
+
+    Both are read off CANDIDATE configuration, so each is served only when apply
+    WRITES that configuration (:func:`_apply_writes`). An API Service apply
+    binds without writing keeps its existing routes — the route read off the
+    candidate names nothing apply wires (#159 architect review r1, finding 4) —
+    and a listener operation apply binds without writing keeps its existing
+    object and type. Either way the endpoint cannot be derived: None, and the
+    bare-WSS formula is never offered in its place.
     """
     from ..categories.components.builders._api_service_paths import (
         effective_api_service_route,
@@ -1208,6 +1259,8 @@ def _listener_endpoint_extra(
     )
     from ..patterns.primitives.wss_listen import compute_wss_endpoint
 
+    if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
+        return None
     op_config = dict(operation.config or {})
     wanted = REF_PREFIX + process_key
     services = []
@@ -1217,11 +1270,14 @@ def _listener_endpoint_extra(
         config = component.config or {}
         for route in mapping_entries(config.get("routes")):
             if isinstance(route, Mapping) and route.get("process") == wanted:
-                services.append((config, route))
+                services.append((component, route))
     if len(services) > 1:
         return None
     if services:
-        config, route = services[0]
+        service, route = services[0]
+        if _apply_writes(service, reused_keys, existing_ids, conflict_policy) is not True:
+            return None
+        config = service.config or {}
         resolved = effective_api_service_route(
             config.get("base_url_path"), dict(route), op_config
         )
@@ -1254,21 +1310,24 @@ def _linear_endpoint(
     process_key: str,
     reused_keys,
     existing_ids,
+    conflict_policy=None,
 ):
     """One linear endpoint row, or None when a served key cannot be derived."""
     from ..models.derived_flows import DerivedEndpointRowV1
 
     op_config = operation.config or {}
     if family == "wss":
-        extra = _listener_endpoint_extra(operation, components, process_key)
+        extra = _listener_endpoint_extra(
+            operation, components, process_key, reused_keys, existing_ids, conflict_policy
+        )
         if extra is None:
             return None
-        reuse = bool(op_config.get("reference_only")) or operation.key in reused_keys
+        # Served only for an operation apply writes, so the binding is a create.
         return DerivedEndpointRowV1(
             key=token,
             type="wss",
             direction=direction,
-            binding_mode="reuse" if reuse else "create",
+            binding_mode="create",
             executable=False,
             **extra,
         )
@@ -1277,6 +1336,10 @@ def _linear_endpoint(
     extra: Dict[str, Any] = {}
     method = None
     if family == "rest":
+        # Read off the operation's CANDIDATE config: served only when apply
+        # writes it (``_apply_writes``), else the endpoint is not derivable.
+        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
+            return None
         method = op_config.get("method")
         if fact.expected_status_codes is not None:
             extra["expected_status_codes"] = tuple(fact.expected_status_codes)
@@ -1284,6 +1347,13 @@ def _linear_endpoint(
         profile = by_key.get(_ref_key(op_config.get("write_profile_id")) or "")
         spelling = DB_WRITE_OPERATION_SPELLINGS.get(str(op_config.get("operation_mode") or ""))
         if not _is_write_profile(profile) or spelling is None:
+            return None
+        # Both read off CANDIDATE config: served only when apply writes the
+        # operation and the write profile (``_apply_writes``).
+        if any(
+            _apply_writes(component, reused_keys, existing_ids, conflict_policy) is not True
+            for component in (operation, profile)
+        ):
             return None
         extra["operation"] = spelling
         extra["statement_type"] = (profile.config or {}).get("statement_type")
@@ -1293,7 +1363,7 @@ def _linear_endpoint(
         connection,
         family,
         method=method,
-        reused=connection.key in reused_keys,
+        reused=_apply_writes(connection, reused_keys, existing_ids, conflict_policy) is False,
         existing_ids=existing_ids,
         extra=extra,
     )
@@ -1301,7 +1371,7 @@ def _linear_endpoint(
 
 def _linear_route_projection(
     unit, by_key, components, metadata, facts, transform_rows, watermarked,
-    reused_keys=frozenset(), existing_ids=None,
+    reused_keys=frozenset(), existing_ids=None, conflict_policy=None,
 ):
     """``(rows, endpoints)`` for one linear-facts unit, or None.
 
@@ -1340,7 +1410,7 @@ def _linear_route_projection(
             return None
         endpoint = _linear_endpoint(
             direction, token, family, connection, operation, fact, by_key, components,
-            unit.envelope.component_key, reused_keys, existing_ids,
+            unit.envelope.component_key, reused_keys, existing_ids, conflict_policy,
         )
         if endpoint is None:
             return None
@@ -1525,6 +1595,7 @@ def derive_recipe_projection(
     projection_facts: Optional[Mapping[str, Any]] = None,
     recorded_intents: Sequence[Any] = (),
     existing_ids: Optional[Mapping[str, Any]] = None,
+    conflict_policy: Optional[str] = None,
 ) -> RecipeProjection:
     """The whole served projection, per unit in key order (#159 S1, C8).
 
@@ -1535,6 +1606,11 @@ def derive_recipe_projection(
     one composition summary keyed by its process key. The facts are the
     trigger and name the parts; every served value is derived from the root
     and components. Without facts the result is exactly the pre-#159 one.
+
+    ``conflict_policy`` is the request's policy, the one apply binds with. A
+    served value read off candidate configuration apply may discard is served
+    only when apply writes it under that policy — or, when it is not handed in,
+    under every policy (see :func:`_apply_writes`).
     """
     facts_by_key = dict(projection_facts or {})
     metadata = dict(connector_metadata or {})
@@ -1570,7 +1646,7 @@ def derive_recipe_projection(
                 facts = infer_stub_facts(unit)
         route = _project_unit_route(
             unit, by_key, components, metadata, facts, transform_rows, key in watermarked,
-            frozenset(reused_keys or ()), existing_ids,
+            frozenset(reused_keys or ()), existing_ids, conflict_policy,
         )
         projected.append((key, transform_rows, route))
 
@@ -1610,7 +1686,7 @@ def derive_recipe_projection(
 
 def _project_unit_route(
     unit, by_key, components, metadata, facts, transform_rows, watermarked,
-    reused_keys, existing_ids,
+    reused_keys, existing_ids, conflict_policy=None,
 ):
     """``(rows, endpoints, summary-or-None)`` for one unit, dispatched on its
     facts' TYPE; None when it has none (or they do not resolve)."""
@@ -1623,12 +1699,12 @@ def _project_unit_route(
     if isinstance(facts, RecipeUnitProjectionFactsV1):
         return _route_projection(
             unit, by_key, metadata, facts, transform_rows, watermarked,
-            reused_keys, existing_ids,
+            reused_keys, existing_ids, conflict_policy,
         )
     if isinstance(facts, LinearRouteProjectionFactsV1):
         linear = _linear_route_projection(
             unit, by_key, components, metadata, facts, transform_rows, watermarked,
-            reused_keys, existing_ids,
+            reused_keys, existing_ids, conflict_policy,
         )
         return None if linear is None else (linear[0], linear[1], None)
     if isinstance(facts, StubRouteProjectionFactsV1):
