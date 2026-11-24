@@ -808,6 +808,55 @@ class TestTypedListenerPresets:
             }
             assert ("api_service" in required) is published
 
+    def test_the_advertised_route_follows_the_requests_conflict_policy(self, listener_preset_registry):
+        """#159 architect review r1, finding 4, through the PUBLIC planner: an API
+        Service of the same name already exists. Under ``reuse`` apply binds it
+        without writing its routes, so no listener route is advertised; under
+        ``clone`` apply writes the clone with this process's route, so the frozen
+        listener row is served again. The policy reaches the projection from the
+        request itself."""
+        import _issue_157_flows_accounting as acct
+        from boomi_mcp.authoring.workflow import plan_authoring_request_v1
+        from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+        case_id = "http_listener_to_db/advanced_runtime"
+        # the namesake's name comes from the legacy oracle, not the preset
+        (service_name,) = [
+            c.name for c in _legacy_spec(case_id).components if c.type == "webservice"
+        ]
+        rows = dict(acct.replay_identity_names())
+        rows["<<namesake api service>>"] = {
+            "component_id": "existing-api-service-id", "id": "existing-api-service-id",
+            "name": service_name, "folder_name": "", "type": "webservice", "version": 1,
+            "current_version": True, "deleted": False,
+        }
+        (frozen,) = [
+            row["payload"]
+            for row in acct.load_cases()[case_id].endpoint_rows
+            if row["payload"].get("type") == "wss"
+        ]
+
+        def listener_rows(policy):
+            payload = _canonical(case_id)
+            payload["intent"]["conflict_policy"] = policy
+            with patch(acct._GET_XML, acct.replay_component_get_xml()), patch(
+                acct._PAGINATE, acct.replay_paginate_metadata(rows)
+            ):
+                result, _internals = plan_authoring_request_v1(
+                    AuthoringRequestV1.model_validate(payload),
+                    boomi_client=MagicMock(),
+                    profile="issue-157-replay",
+                )
+            assert "existing-api-service-id" in json.dumps(result.model_dump(mode="json"))
+            return [
+                row.model_dump(mode="json", exclude_unset=True)
+                for row in result.integration_spec_preview.endpoints
+                if row.type == "wss"
+            ]
+
+        assert listener_rows("reuse") == []
+        assert listener_rows("clone") == [frozen]
+
     def test_the_preset_modules_import_no_legacy_producer(self):
         """The presets may never reach the retiring archetypes or the bridge."""
         import ast
