@@ -5,7 +5,7 @@ Provides XML-based component retrieval and parsing used across
 query_components, manage_component, and analyze_component modules.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import os
 import re
 import contextvars
@@ -364,6 +364,32 @@ def component_get_xml(
         'description': _extract_description(root),
         'xml': raw_xml,
     }
+
+
+def read_after_write(
+    boomi_client: Boomi, component_id: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Re-read a component AFTER a write that already succeeded; never raises.
+
+    Mutation accounting (#159 S3 CDX fix-only r1): once Boomi accepted the
+    write, no failure of the verification read (an identity mismatch, a
+    deadline, an API error, an unparseable answer) may turn the result into a
+    failure — a caller that retries would write again. Returns
+    ``(meta, None)`` on a verified read, else ``(None, verification)`` where
+    ``verification`` is a value-free record to serve beside the write.
+    """
+    try:
+        return component_get_xml(boomi_client, component_id), None
+    except Exception as exc:  # noqa: BLE001 — the write is done; nothing may mask it
+        return None, {
+            "verified": False,
+            "reason": type(exc).__name__,
+            "hint": (
+                "The write succeeded but re-reading the component failed. "
+                "Read it with query_components before retrying; do not "
+                "repeat the write."
+            ),
+        }
 
 
 def parse_component_xml(raw_xml: str, fallback_id: str = '') -> Dict[str, Any]:

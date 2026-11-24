@@ -2093,7 +2093,7 @@ rather than aspirational.
 | LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2265 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4425 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2404 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 971 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 977 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1117 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3404 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-020c9559 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 7 | 4684 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2286,9 +2286,9 @@ above says what each location means; this one says exactly where the calls are.
 
 | Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
 |---|---|---|---|---|---|---|---|
-| LG-4e092c94 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _create_component_raw | 1 | 616 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. |
-| LG-c7a85e57 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _update_component_xml | 1 | 648 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. |
-| LG-08665fc8 | component_xml_write | src/boomi_mcp/categories/components/analyze_component.py | merge_versions | 1 | 718 | #160 | WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target. |
+| LG-4e092c94 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _create_component_raw | 1 | 642 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. |
+| LG-c7a85e57 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _update_component_xml | 1 | 674 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. |
+| LG-08665fc8 | component_xml_write | src/boomi_mcp/categories/components/analyze_component.py | merge_versions | 1 | 719 | #160 | WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target. |
 | LG-b091f264 | component_xml_write | src/boomi_mcp/categories/components/connectors.py | create_connector | 3 | 400 | #160 | WRT-connector-typed-build: unchanged — the content guard never matches a connector root. · WRT-manage-connector-create: content-based refusal on a process XML root. |
 | LG-91d77b6a | component_xml_write | src/boomi_mcp/categories/components/connectors.py | update_connector | 2 | 590 | #160 | WRT-manage-connector-metadata: semantic-body identity under the shared projection. · WRT-manage-connector-update: two-sided payload-OR-live-target refusal. |
 | LG-eb7e27c9 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | clone_component | 1 | 447 | #160 | WRT-manage-component-clone: process-typed clone REJECTED; non-process clone preserved. |

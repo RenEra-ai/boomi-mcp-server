@@ -1329,3 +1329,45 @@ def test_canonical_target_read_timeout_still_serves_the_deadline_code(monkeypatc
         assert res["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED", res
         assert res["retryable"] is True
     assert client.component.pushed == []
+
+
+class _VerifyFailsApi(_AnsweringApi):
+    """Answers A's own envelope until the write lands; the post-write verification read then
+    answers B's envelope (``mode="foreign"``) or fails outright (``mode="error"``)."""
+
+    def __init__(self, mode):
+        super().__init__(_A_ID)
+        self.mode = mode
+
+    def get_component(self, component_id):
+        if self.pushed:
+            self.reads.append(component_id)
+            if self.mode == "error":
+                raise RuntimeError("verification read failed")
+            return _db_conn_named(_B_ID).encode("utf-8")
+        return super().get_component(component_id)
+
+
+class _VerifyFailsClient:
+    def __init__(self, mode):
+        self.component = _VerifyFailsApi(mode)
+
+
+@pytest.mark.parametrize("mode", ["foreign", "error"])
+@pytest.mark.parametrize("route", [_route_folders, _route_merge_versions],
+                         ids=["folders_move_component", "merge_versions"])
+def test_a_failed_verification_read_never_reports_a_landed_write_as_failed(route, mode, monkeypatch):
+    """Mutation accounting (#159 S3 fix-only r1): when the write succeeded and only the post-write
+    verification read fails (another component's envelope, or an error), the route reports the
+    write as done (`boomi_mutation`), says verification failed, writes once, and echoes no id."""
+    from boomi_mcp.categories.components import analyze_component
+
+    monkeypatch.setattr(analyze_component, "compare_versions", lambda *a, **k: {"_success": True})
+    client = _VerifyFailsClient(mode)
+    res = route(client)
+    assert res.get("_success") is True, res
+    assert res.get("boomi_mutation") is True, res
+    assert res["verification"]["verified"] is False
+    assert [cid for cid, _ in client.component.pushed] == [_A_ID]
+    assert _B_ID not in _json.dumps(res)
+    assert "verification read failed" not in _json.dumps(res)

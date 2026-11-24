@@ -82,7 +82,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 616,
+      "evidence_line": 642,
       "form": "component.create_component(...)",
       "path": "src/boomi_mcp/categories/components/_shared.py",
       "row_id": "WR-2e3f1036",
@@ -91,7 +91,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 648,
+      "evidence_line": 674,
       "form": "component.update_component(...)",
       "path": "src/boomi_mcp/categories/components/_shared.py",
       "row_id": "WR-0972716f",
@@ -100,7 +100,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 718,
+      "evidence_line": 719,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "WR-ab01f1b9",
@@ -919,7 +919,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 971,
+      "evidence_line": 977,
       "form": "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]",
       "path": "src/boomi_mcp/categories/components/analyze_component.py",
       "row_id": "LT-5cb7e6d8",
@@ -3214,7 +3214,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller.",
-      "evidence_line": 616,
+      "evidence_line": 642,
       "forms": [
         "component.create_component(...)"
       ],
@@ -3227,7 +3227,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted.",
-      "evidence_line": 648,
+      "evidence_line": 674,
       "forms": [
         "component.update_component(...)"
       ],
@@ -3240,7 +3240,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target.",
-      "evidence_line": 718,
+      "evidence_line": 719,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -3787,7 +3787,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 971,
+      "evidence_line": 977,
       "forms": [
         "merge_versions(...) [legacy-bearing, src/boomi_mcp/categories/components/analyze_component.py]"
       ],

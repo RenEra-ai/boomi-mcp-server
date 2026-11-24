@@ -306,7 +306,7 @@ def _action_move_component(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         return {"_success": False, "error": "target_folder_id is required for 'move_component' action"}
 
     # Import from _shared.py
-    from boomi_mcp.categories.components._shared import component_get_xml
+    from boomi_mcp.categories.components._shared import component_get_xml, read_after_write
 
     # Step 1: Get current component XML
     current = component_get_xml(sdk, component_id)
@@ -323,18 +323,23 @@ def _action_move_component(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     # Step 3: Update component with modified XML
     sdk.component.update_component_raw(component_id, modified_xml)
 
-    # Step 4: Verify
-    verify = component_get_xml(sdk, component_id)
-    new_folder_id = verify.get('folder_id', '')
-    new_folder_name = verify.get('folder_name', '')
+    # Step 4: Verify. The write is done: a failed verification read must not
+    # report it as failed (mutation accounting) — it is served beside the success.
+    verify, verification = read_after_write(sdk, component_id)
+    new_folder_id = verify.get('folder_id', '') if verify else ''
+    new_folder_name = verify.get('folder_name', '') if verify else ''
 
-    return {
+    result = {
         "_success": True,
+        "boomi_mutation": True,
         "component_id": component_id,
         "component_name": component_name,
         "old_folder": {"id": old_folder_id, "name": old_folder_name},
         "new_folder": {"id": new_folder_id, "name": new_folder_name},
     }
+    if verification is not None:
+        result["verification"] = verification
+    return result
 
 
 def _action_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:

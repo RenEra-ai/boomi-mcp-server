@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15046, "minimum_collected": 15046, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15050, "minimum_collected": 15050, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16027,3 +16027,7 @@
 {"kind": "test", "id": "pytest-016026", "node_id": "tests/test_issue_184_component_identity.py::test_a_stored_operation_of_a_settled_or_declared_other_family_stays_unrecorded[declared_another_family]", "state": "active"}
 {"kind": "test", "id": "pytest-016027", "node_id": "tests/test_process_ir_error_handling.py::test_the_plan_advises_a_canonical_root_that_models_no_error_handling", "state": "active"}
 {"kind": "test", "id": "pytest-016028", "node_id": "tests/test_process_ir_error_handling.py::test_the_plan_does_not_advise_a_listener_root_that_cannot_hold_error_handling", "state": "active"}
+{"kind": "test", "id": "pytest-016029", "node_id": "tests/test_component_safe_edit.py::test_a_failed_verification_read_never_reports_a_landed_write_as_failed[folders_move_component-foreign]", "state": "active"}
+{"kind": "test", "id": "pytest-016030", "node_id": "tests/test_component_safe_edit.py::test_a_failed_verification_read_never_reports_a_landed_write_as_failed[folders_move_component-error]", "state": "active"}
+{"kind": "test", "id": "pytest-016031", "node_id": "tests/test_component_safe_edit.py::test_a_failed_verification_read_never_reports_a_landed_write_as_failed[merge_versions-foreign]", "state": "active"}
+{"kind": "test", "id": "pytest-016032", "node_id": "tests/test_component_safe_edit.py::test_a_failed_verification_read_never_reports_a_landed_write_as_failed[merge_versions-error]", "state": "active"}

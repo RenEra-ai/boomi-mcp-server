@@ -29,6 +29,7 @@ from boomi.models import (
 from boomi.net.transport.api_error import ApiError
 from ._shared import (
     component_get_xml,
+    read_after_write,
     _extract_api_error_msg,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
@@ -719,21 +720,26 @@ def merge_versions(
 
         # Verify the update (always read the updated head, not an immutable version snapshot)
         verify_id = f"{component_id}~{target_branch}" if target_branch else component_id
-        verify = component_get_xml(boomi_client, verify_id)
+        # The write is done: a failed verification read must not report it as
+        # failed (mutation accounting) — it is served beside the success.
+        verify, verification = read_after_write(boomi_client, verify_id)
 
         result = {
             "_success": True,
+            "boomi_mutation": True,
             "component_id": component_id,
             "component_name": target_meta.get('name', ''),
             "source": source_label,
             "target": target_label,
-            "new_version": verify.get('version', ''),
+            "new_version": verify.get('version', '') if verify else '',
             "diff_lines": len(diff),
             "diff_preview": ''.join(diff[:50]) if diff else "No differences found",
             "profile": profile,
             "note": f"Source ({source_label}) content merged onto target ({target_label}). Component version incremented.",
         }
 
+        if verification is not None:
+            result["verification"] = verification
         if source_branch:
             result["source_branch"] = source_branch
             result["target_branch"] = target_branch or "main"
