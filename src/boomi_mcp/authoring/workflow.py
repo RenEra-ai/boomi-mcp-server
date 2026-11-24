@@ -1301,9 +1301,21 @@ class BudgetedComponentReads:
         self._budget = float(_shared._component_get_deadline_seconds())
         self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
-    def fetch(self, component_id, *, refetch: bool = False) -> Optional[Dict[str, Any]]:
+    def fetch(
+        self, component_id, *, refetch: bool = False, raise_deadline: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """``refetch=True`` skips the cache (a freshness check), still charged
-        to the budget; the fresh answer replaces the cached one."""
+        to the budget; the fresh answer replaces the cached one.
+
+        ``raise_deadline=True`` (#159 ARCH-r1 #11): a read that TIMED OUT re-raises
+        its ``ComponentGetDeadlineExceeded`` (after charging the budget and caching
+        the miss), so a caller serving the read's own failure — canonical safe edit's
+        target read — keeps serving ``COMPONENT_GET_DEADLINE_EXCEEDED``. Every other
+        failure still answers ``None``.
+
+        An answer whose envelope names another component (``_shared.
+        ComponentGetIdentityMismatch``, raised by the one read) is a failed read
+        here like any other: ``None``, never a reading (#159 ARCH-r1 #1)."""
         import time as _time
 
         from ..categories.integration_builder import canonical_component_id
@@ -1319,6 +1331,7 @@ class BudgetedComponentReads:
             from ..categories.components import _shared
 
             started = _time.monotonic()
+            timed_out = None
             try:
                 # B18-1: the POSITIVE FRACTIONAL remainder is the read's own
                 # deadline. The GET deadline is a ``threading.Event.wait``
@@ -1339,6 +1352,9 @@ class BudgetedComponentReads:
                     "xml": unparseable.raw_xml or "",
                     "unparseable": True,
                 }
+            except _shared.ComponentGetDeadlineExceeded as exc:
+                fetched = None
+                timed_out = exc
             except Exception:  # noqa: BLE001 - an unreadable component answers nothing
                 fetched = None
             finally:
@@ -1348,6 +1364,9 @@ class BudgetedComponentReads:
                 or (isinstance(fetched.get("xml"), str) and fetched["xml"])
             ):
                 result = fetched
+            if timed_out is not None and raise_deadline:
+                self._cache[wanted] = result
+                raise timed_out
         self._cache[wanted] = result
         return result
 

@@ -1008,10 +1008,12 @@ def _envelope_fault(xml_text, fault, own_id):
 
 
 def _refused_unwritten(res, client, *, field="component_id"):
+    """Refused, value-free, nothing written. Another id fails at the ONE read (a failed read);
+    a root that is no envelope, or a missing id on the canonical arm, at safe edit's own check."""
     assert res["_success"] is False, res
     assert res["boomi_mutation"] is False
-    assert res["field"] == field, res
-    assert "envelope" in res["error"], res
+    if field is not None:
+        assert res["field"] == field, res
     assert _ANOTHER_ID not in _json.dumps(res)
     assert client.component.pushed == []
 
@@ -1043,24 +1045,36 @@ def test_canonical_update_refuses_a_target_answer_that_is_not_its_own_envelope(f
 def test_canonical_update_refuses_a_dependency_answer_that_is_not_its_own_envelope(fault, monkeypatch):
     """ARCH-r1 #1 (CRITICAL, supporting bindings): the bound GET connection's id answers with the
     same captured bytes under another envelope. Before the fix the type check passed and the
-    update was written against a dependency the account never answered for. Now prepare refuses
-    COMPONENT_EDIT_DEPENDENCY_UNVERIFIED at that row, and apply after a clean prepare too."""
+    update was written against a dependency the account never answered for. Now: another id is a
+    FAILED READ at the one read, so the compile's connector identity is unavailable and it refuses;
+    a root that is no envelope, or no id, refuses COMPONENT_EDIT_DEPENDENCY_UNVERIFIED at that row.
+    The same at apply after a clean prepare. Nothing is written."""
     _spy_compare(monkeypatch)
     pointer = "authoring_request.intent.components.0"
+
+    def _assert_refused(res, client):
+        if fault == "another_id":
+            _refused_unwritten(res, client, field=None)
+            assert res["error_code"] == "AUTHORING_COMPILE_BLOCKED", res
+            codes = {d.get("code") for d in res.get("authoring_diagnostics") or ()}
+            assert "CONNECTOR_REPLAY_IDENTITY_UNAVAILABLE" in codes, res
+        else:
+            _refused_unwritten(res, client, field=pointer)
+            assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+
     store = canonical_account_store()
     store["RCONN"] = _envelope_fault(store["RCONN"], fault, "RCONN")
     client = CanonicalAccount(store)
-    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, canonical_patch())
-    _refused_unwritten(res, client, field=pointer)
-    assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+    _assert_refused(prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, canonical_patch()),
+                    client)
 
     client = CanonicalAccount(canonical_account_store())
     patch = canonical_patch()
     token = _canonical_prepare(client, patch)["confirmation_token"]
     client.component.store["RCONN"] = _envelope_fault(client.component.store["RCONN"], fault, "RCONN")
-    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
-    _refused_unwritten(res, client, field=pointer)
-    assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+    _assert_refused(
+        apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True),
+        client)
 
 
 def test_canonical_update_never_previews_bytes_that_name_another_component(monkeypatch):
@@ -1090,14 +1104,18 @@ def test_legacy_edit_refuses_a_target_answer_naming_another_component(fault, mon
     faulty = _envelope_fault(own, fault, COMPONENT_ID)
     patch = {"config": {"name": "conn-renamed"}}
 
+    # Another id is a failed READ (the legacy arm's read-failure envelope names no field).
+    field = None if fault == "another_id" else "component_id"
     client = _FakeClient(faulty)
-    _refused_unwritten(prepare_component_edit_action(client, "prof", COMPONENT_ID, patch), client)
+    _refused_unwritten(prepare_component_edit_action(client, "prof", COMPONENT_ID, patch), client,
+                       field=field)
 
     client = _FakeClient(own)
     token = _prepare_then_token(client, patch)
     client.component._xml = faulty
     res = apply_component_edit_action(client, "prof", COMPONENT_ID, patch, token, confirm_apply=True)
-    _refused_unwritten(res, client)
+    _refused_unwritten(res, client, field=field)
+    assert res.get("error_code") != "COMPONENT_EDIT_DRIFT_DETECTED", res
 
     # Controls: the component's own id, and no id at all, still edit.
     for live in (own, _CURRENT_DB_CONN):
@@ -1154,4 +1172,156 @@ def test_captured_mapped_update_refuses_a_linked_profile_that_is_no_component_en
     assert res["_success"] is False, res
     assert res["boomi_mutation"] is False
     assert _profile_mismatch_at_the_map(res), res
+    assert client.component.pushed == []
+
+
+# ---------------------------------------------------------------------------
+# #159 ARCH-r1 #1, the STRUCTURAL fix: the one read (`_shared.component_get_xml`)
+# fails an answer whose envelope names another component, for every caller.
+# ---------------------------------------------------------------------------
+
+_A_ID = "11111111-aaaa-4bbb-8ccc-000000000001"
+_B_ID = "22222222-aaaa-4bbb-8ccc-000000000002"
+
+
+def _db_conn_named(component_id):
+    return _CURRENT_DB_CONN.replace(
+        "<bns:Component ", f'<bns:Component componentId="{component_id}" version="3" ', 1)
+
+
+class _AnsweringApi:
+    """Answers EVERY GET with the envelope of ``answered_id`` (B answering for A, or A for A),
+    whatever was requested, and records every write."""
+
+    def __init__(self, answered_id):
+        self.answered_id = answered_id
+        self.reads, self.pushed = [], []
+
+    def get_component(self, component_id):
+        self.reads.append(component_id)
+        return _db_conn_named(self.answered_id).encode("utf-8")
+
+    def update_component_raw(self, component_id, xml_text):
+        self.pushed.append((component_id, xml_text))
+        return b"<updated/>"
+
+
+class _AnsweringClient:
+    def __init__(self, answered_id):
+        self.component = _AnsweringApi(answered_id)
+
+
+@pytest.mark.parametrize("requested", [_A_ID, _A_ID.upper(), f" {_A_ID} ", f"{_A_ID}~dev-branch", f"{_A_ID}~7"])
+def test_the_one_read_fails_an_answer_naming_another_component(requested):
+    """Non-vacuity at the authority: B's envelope answering a request for A (bare, any case,
+    padded, or in the `~branch` / `~version` forms merge_versions sends) is a READ FAILURE,
+    value-free; A's own envelope reads; an envelope stating no id keeps the requested-id fallback."""
+    from boomi_mcp.categories.components import _shared
+
+    with pytest.raises(_shared.ComponentGetIdentityMismatch) as refused:
+        _shared.component_get_xml(_AnsweringClient(_B_ID), requested)
+    assert not isinstance(refused.value, ET.ParseError)  # a failed read, never "unparseable"
+    assert _A_ID not in str(refused.value) and _B_ID not in str(refused.value)
+
+    assert _shared.component_get_xml(_AnsweringClient(_A_ID), requested)["id"] == _A_ID
+    no_id = _FakeClient(_CURRENT_DB_CONN)
+    assert _shared.component_get_xml(no_id, requested)["component_id"] == requested
+
+
+def test_a_budgeted_read_of_another_components_answer_reads_nothing():
+    """The phase budget (`workflow.BudgetedComponentReads`) reads through the one read: an answer
+    naming another component is an unread component there (None), not a reading of it."""
+    from boomi_mcp.authoring.workflow import BudgetedComponentReads
+
+    assert BudgetedComponentReads(_AnsweringClient(_B_ID)).fetch(_A_ID) is None
+    assert BudgetedComponentReads(_AnsweringClient(_A_ID)).fetch(_A_ID)["id"] == _A_ID
+
+
+def _route_manage_component(client):
+    from boomi_mcp.categories.components.manage_component import update_component
+
+    return update_component(client, "p", _A_ID, {"name": "renamed"})
+
+
+def _route_connectors(client):
+    from boomi_mcp.categories.components.connectors import update_connector
+
+    return update_connector(client, "p", _A_ID, {"name": "renamed"})
+
+
+def _route_folders(client):
+    from boomi_mcp.categories.folders import _action_move_component
+
+    try:
+        return _action_move_component(client, "p", component_id=_A_ID, target_folder_id="F9")
+    except Exception as exc:  # this route lets a failed read propagate to the tool layer
+        return {"_success": False, "raised": type(exc).__name__}
+
+
+def _route_merge_versions(client):
+    from boomi_mcp.categories.components.analyze_component import merge_versions
+
+    return merge_versions(client, "p", _A_ID, {"source_branch": "dev", "target_branch": "main"})
+
+
+def _route_apply_structured_update(client):
+    from boomi_mcp.categories.integration_builder import _apply_structured_update
+
+    from boomi_mcp.models.integration_models import IntegrationComponentSpec
+
+    comp = IntegrationComponentSpec(key="db", type="connector-settings", name="conn-renamed",
+                                    action="update", component_id=_A_ID,
+                                    config={"connector_type": "database"})
+    return _apply_structured_update(client, "p", _A_ID, comp, _DESIRED_DB_CONN, _DB_POLICY)
+
+
+@pytest.mark.parametrize("route", [
+    _route_manage_component, _route_connectors, _route_folders, _route_merge_versions,
+    _route_apply_structured_update,
+], ids=["manage_component_update", "manage_connector_update", "folders_move_component",
+        "merge_versions", "build_integration_apply_structured_update"])
+def test_read_merge_write_routes_never_write_another_components_bytes(route, monkeypatch):
+    """Every read-merge-write route outside safe edit: when the account answers A's read with B's
+    envelope, the route used to write B's bytes to A (measured on ed17dde and 1a5a3fc). Now the read
+    fails and nothing is written; with A's own envelope the same route writes A."""
+    _spy_compare(monkeypatch)
+    from boomi_mcp.categories.components import analyze_component
+
+    monkeypatch.setattr(analyze_component, "compare_versions", lambda *a, **k: {"_success": True})
+    foreign = _AnsweringClient(_B_ID)
+    res = route(foreign)
+    assert res.get("_success") is not True, res
+    assert foreign.component.pushed == [], foreign.component.pushed
+    assert _B_ID not in _json.dumps(res)
+
+    own = _AnsweringClient(_A_ID)
+    res = route(own)
+    assert res.get("_success") is True, res
+    assert [cid for cid, _ in own.component.pushed] == [_A_ID]
+
+
+def test_canonical_target_read_timeout_still_serves_the_deadline_code(monkeypatch):
+    """ARCH-r1 #11 keeps the served code: the canonical target is now read through the call's ONE
+    budget, and a target read that times out still serves COMPONENT_GET_DEADLINE_EXCEEDED (as the
+    standalone read did), at prepare and at apply; nothing is written."""
+    from boomi_mcp.categories.components import _shared
+
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    real = _shared.component_get_xml
+
+    def _stalled_target(c, component_id, deadline_seconds=None):
+        if component_id == CANONICAL_PROCESS_ID:
+            raise _shared.ComponentGetDeadlineExceeded(component_id, deadline_seconds, 0.0)
+        return real(c, component_id, deadline_seconds=deadline_seconds)
+
+    monkeypatch.setattr(_shared, "component_get_xml", _stalled_target)
+    for res in (
+        prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch),
+        apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True),
+    ):
+        assert res["_success"] is False, res
+        assert res["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED", res
+        assert res["retryable"] is True
     assert client.component.pushed == []

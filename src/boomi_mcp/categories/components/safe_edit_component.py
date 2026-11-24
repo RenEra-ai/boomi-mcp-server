@@ -638,8 +638,9 @@ def _verified_dependencies(boomi_client: Boomi, request, reads=None) -> Dict[str
             )
         if not _envelope_names(fetched.get("xml"), bound, id_required=True):
             # ARCH-r1 #1: the reading must be the BOUND component's own envelope — a
-            # verified type, version and digest of another component bind nothing.
-            # Value-free: neither id is echoed.
+            # verified type, version and digest of another component bind nothing. The
+            # one read already fails another id (the read-failure refusal above); this
+            # adds the platform root and the id's presence. Value-free.
             return _canonical_refusal(
                 COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
                 "The account answered a supporting component's read with a document that "
@@ -810,6 +811,11 @@ def _envelope_names(component_xml: Any, component_id: str, *, id_required: bool)
     platform's ``Component``) reads the root itself. A write of these bytes to ``component_id``
     when they name another component would overwrite ``component_id`` with that component.
 
+    The one read (``_shared.component_get_xml``) already fails an answer naming another id, for
+    every caller. This adds only what the read does not: the platform ``Component`` root, the
+    id's PRESENCE where required, and the same judgment of bytes no read produced — the
+    previewed and the written XML.
+
     ``id_required``: a root stating NO id names nothing, and fails when required (every read the
     canonical arm judges, and its write). The legacy arms tolerate a missing id — it names no OTHER
     component, and their pre-S3 fixtures omit it — but never another id.
@@ -849,11 +855,20 @@ def _read_target(boomi_client: Boomi, component_id: str, reads=None):
     the whole prepare or apply call. The target is its first read, so the target, the compile, the
     dependency verification and apply's final re-read all spend one budget; without it the target
     was read under a standalone deadline and the budget started afresh after it. A read the budget
-    could not make, that failed, or did not parse refuses, value-free. The legacy arms read as
-    before (``component_get_xml`` under its own deadline, with its deadline envelope).
+    could not make, that failed, or did not parse refuses, value-free; one that timed out serves
+    ``COMPONENT_GET_DEADLINE_EXCEEDED`` as before. The legacy arms read as before
+    (``component_get_xml`` under its own deadline, with its deadline envelope).
+
+    The one read itself refuses an answer naming ANOTHER component
+    (``_shared.ComponentGetIdentityMismatch``, a failed read on both arms). What this adds on
+    top, through ``_envelope_names``: the root must be the platform's ``Component`` envelope,
+    and on the canonical arm it must state its id at all.
     """
     if reads is not None:
-        current = reads.fetch(component_id)
+        try:
+            current = reads.fetch(component_id, raise_deadline=True)
+        except ComponentGetDeadlineExceeded as exc:
+            return None, component_get_deadline_envelope(exc)
         if not isinstance(current, dict) or current.get("unparseable"):
             return None, {
                 "_success": False,
