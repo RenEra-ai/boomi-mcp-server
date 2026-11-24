@@ -7269,3 +7269,80 @@ def test_an_asc_ref_route_to_a_flat_process_bind_is_refused(mock_pag):
     plan = _build_plan(MagicMock(), _build_config([literal]))
     step = next(s for s in plan["steps"] if s["key"] == "api_service")
     assert step["planned_action"] == "create", step.get("validation_error")
+
+
+# ---------------------------------------------------------------------------
+# #159 arch-r1 #2: a REST operation reused BY NAME gives compile its verb and its
+# profile from the SAME stored operation, as an operation bound by explicit id does.
+# ---------------------------------------------------------------------------
+#
+# FIXTURE PROVENANCE: `test_component_safe_edit.captured_bound_profiles_*` — the
+# `replay_identity/cap159-s3-bound-profiles/` captures (executed green, their
+# PROVENANCE.md), served verbatim except the PATCH operation's stored
+# `customOperationType`, which the contradiction case sets to POST (the platform's
+# own attribute, read by the one identity reader). Only the account transport and
+# the metadata name query are faked.
+
+
+def _name_reused_operation_validation(stored_verb, bound_by):
+    """``(identity diagnostic codes, component GETs)`` of typed validation for the captured
+    mapped request whose PATCH operation is bound ``bound_by`` ("name" or "id") and stores
+    ``stored_verb``."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_component_safe_edit as cap
+    from boomi_mcp.authoring import workflow as wf
+    from boomi_mcp.categories import integration_builder as ib
+    from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
+
+    store = cap.captured_bound_profiles_store()
+    stored = store[cap.CAPTURED_PATCH_OP]
+    assert stored.count('customOperationType="PATCH"') == 1
+    store[cap.CAPTURED_PATCH_OP] = stored.replace(
+        'customOperationType="PATCH"', 'customOperationType="%s"' % stored_verb)
+    raw = cap.captured_bound_profiles_patch()["authoring_request"]
+    intent = raw["intent"]
+    operation = next(row for row in intent["components"] if row["key"] == "OP")
+    assert operation["config"]["method"] == "PATCH"
+    if bound_by == "name":
+        operation.pop("component_id")
+    envelope = intent["units"][0]["envelope"]
+    envelope["action"] = "create"
+    envelope.pop("component_id", None)
+
+    def _by_name(_client, query_config, show_all=False):
+        if query_config.query_filter.expression.argument[0] == "connector-action":
+            return [{"component_id": cap.CAPTURED_PATCH_OP, "name": "OP",
+                     "type": "connector-action", "folder_name": "f", "folder_id": "F"}]
+        return []
+
+    client = cap.CanonicalAccount(store)
+    request = AuthoringRequestV1.model_validate(raw)
+    normalized = wf._normalize_intent(request)
+    with patch.object(ib, "paginate_metadata", side_effect=_by_name):
+        reads = wf.BudgetedComponentReads(client)
+        component_plan = wf._legacy_plan_echo(normalized, request, client, raw=True)
+        existing_ids = ib.planned_existing_ids(component_plan)
+        assert existing_ids["OP"] == cap.CAPTURED_PATCH_OP  # the name resolved
+        validated = wf._validate_processes(
+            normalized, request.effect_declarations, request.intent.conflict_policy,
+            boomi_client=client, existing_ids=existing_ids, target_reads=reads)
+    diagnostics = validated[1]
+    identity = sorted({d.code for d in diagnostics if d.code.startswith("CONNECTOR_REPLAY_IDENTITY")})
+    return identity, list(client.component.reads), cap
+
+
+def test_a_name_reused_operation_gives_compile_its_verb_from_the_bytes_that_give_its_profile():
+    from boomi_mcp.errors import CONNECTOR_REPLAY_IDENTITY_MISMATCH
+
+    # The explicit-id binding refuses the contradiction: the authority to match.
+    by_id, _reads, cap = _name_reused_operation_validation("POST", "id")
+    assert by_id == [CONNECTOR_REPLAY_IDENTITY_MISMATCH], by_id
+    # The SAME contradiction bound by name is refused the same way (it compiled: the
+    # stored profile was taken from those bytes and the declared PATCH kept).
+    by_name, reads, _cap = _name_reused_operation_validation("POST", "name")
+    assert by_name == [CONNECTOR_REPLAY_IDENTITY_MISMATCH], by_name
+    # Non-vacuity: the stored operation that agrees with the request is not refused,
+    # and its bytes are read ONCE — identity and profile share the one reading.
+    agreeing, reads, _cap = _name_reused_operation_validation("PATCH", "name")
+    assert agreeing == [], agreeing
+    assert reads.count(cap.CAPTURED_PATCH_OP) == 1, reads

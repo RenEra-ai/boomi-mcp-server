@@ -1395,7 +1395,7 @@ def _resolved_recipe_target_readings(
     read again; any other binding — by name, by a config-only id, a create
     bound to a same-name component — is. Only successful reads are returned; an unreadable one stays unknown (the judge fails
     closed on it; ``reads`` caches the failure so it is not asked again)."""
-    from ..categories.integration_builder import _bound_existing_id, canonical_component_id
+    from ..categories.integration_builder import _bound_existing_id
 
     targets = getattr(normalized, "recipe_rest_targets", ()) or ()
     if not targets:
@@ -1411,30 +1411,74 @@ def _resolved_recipe_target_readings(
         resolved = _bound_existing_id(component, existing_ids)
         if not resolved:
             continue
-        held = (already or {}).get(key)
-        if (
-            isinstance(held, dict)
-            and not held.get("read_failed")
-            and isinstance(held.get("xml"), str)
-            and canonical_component_id(held.get("component_id")) == canonical_component_id(resolved)
-        ):
+        if _held_reading_of(already, key, resolved):
             continue
-        fetched = reads.fetch(resolved)
-        if fetched is None:
-            if reads.live:
-                # B17-3: the binding RESOLVED against the account and the read
-                # did not answer — recorded, so identity refuses UNAVAILABLE
-                # exactly as apply does; never an unchecked component.
-                readings[key] = {"component_id": resolved, "read_failed": True}
+        reading = _identity_reading(reads, resolved)
+        if reading is not None:
+            readings[key] = reading
+    return readings
+
+
+def _identity_reading(reads, resolved) -> Optional[Dict[str, Any]]:
+    """ONE resolved component's account reading, in the snapshot's ``live_component_xml``
+    form, read through the phase budget ``reads`` (each id once, so every consumer of the
+    id sees the same bytes). ``None`` when nothing was asked (no account held)."""
+    fetched = reads.fetch(resolved)
+    if fetched is None:
+        if reads.live:
+            # B17-3: the binding RESOLVED against the account and the read
+            # did not answer — recorded, so identity refuses UNAVAILABLE
+            # exactly as apply does; never an unchecked component.
+            return {"component_id": resolved, "read_failed": True}
+        return None
+    version = fetched.get("version")
+    return {
+        "component_id": fetched.get("component_id") or resolved,
+        "component_version": None if version is None else str(version),
+        "xml": fetched["xml"],
+        "unparseable": bool(fetched.get("unparseable")),
+        "read_failed": False,
+    }
+
+
+def _held_reading_of(already, key, resolved) -> bool:
+    """Whether ``already`` holds a successful reading of ``key`` at the SAME resolved id."""
+    from ..categories.integration_builder import canonical_component_id
+
+    held = (already or {}).get(key)
+    return (
+        isinstance(held, dict)
+        and not held.get("read_failed")
+        and isinstance(held.get("xml"), str)
+        and canonical_component_id(held.get("component_id")) == canonical_component_id(resolved)
+    )
+
+
+def _profile_bound_operation_readings(components, profile_bindings, reads, already=None) -> Dict[str, Any]:
+    """#159 arch-r1 #2: the identity reading of every connector whose STORED profile links
+    compile reads (``stored_profile_bindings_for_unwritten_components``), from the same id
+    through the same budget — so the bytes that supply a reused operation's profile also
+    supply its verb and family, as they do for an operation bound by explicit id.
+
+    Derived from the profile reader's own output (the components it read, at the id it
+    read them), never from a second reuse predicate: an operation reused BY NAME had its
+    profile taken from its stored bytes while connector identity compared the request's
+    declared verb against nothing, so compile accepted what apply refused. A key
+    ``already`` holding a successful reading of the same id is not read again."""
+    from .connector_resolution_snapshot import identity_reads_component
+
+    by_key = {component.key: component for component in components or ()}
+    readings: Dict[str, Any] = {}
+    for binding in profile_bindings or ():
+        key, resolved = binding.component_key, binding.component_id
+        component = by_key.get(key)
+        if component is None or not resolved or not identity_reads_component(component):
             continue
-        version = fetched.get("version")
-        readings[key] = {
-            "component_id": fetched.get("component_id") or resolved,
-            "component_version": None if version is None else str(version),
-            "xml": fetched["xml"],
-            "unparseable": bool(fetched.get("unparseable")),
-            "read_failed": False,
-        }
+        if key in readings or _held_reading_of(already, key, resolved):
+            continue
+        reading = _identity_reading(reads, resolved)
+        if reading is not None:
+            readings[key] = reading
     return readings
 
 
@@ -2439,6 +2483,22 @@ def _validate_processes(
                 normalized, conflict_policy or "reuse", existing_ids, target_reads,
                 already=_declared_live,
             ))
+        # #159 S3: the stored profile links of every map and REST operation apply does not
+        # write, read the same way and through the same budget (each id once), and each linked
+        # profile verified from its own envelope. Read BEFORE the snapshot so that (#159
+        # arch-r1 #2) every connector whose stored profile is taken here is identity-read from
+        # those same bytes: its verb and family come from where its profile came from.
+        _profile_reads = target_reads
+        if _profile_reads is None and boomi_client is not None:
+            _profile_reads = BudgetedComponentReads(boomi_client)
+        _profile_bindings = stored_profile_bindings_for_unwritten_components(
+            boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
+            existing_ids=existing_ids, reads=_profile_reads)
+        if _profile_reads is not None:
+            _declared_live.update(_profile_bound_operation_readings(
+                normalized.integration_spec.components, _profile_bindings, _profile_reads,
+                already=_declared_live,
+            ))
         # THE REUSE SET, from the one authority, not the set that read live.
         # This parameter's own contract names `_will_reuse_at_apply`; the live
         # readings are a different question, and under `conflict_policy="clone"`
@@ -2475,12 +2535,8 @@ def _validate_processes(
                 # binding is unjudged (ARCH-186-e1-02; the owner decision of 2026-09-14 keeps plan and
                 # compile degraded rather than refused, and typed apply refuses before any write).
                 binding_unjudged=boomi_client is not None and existing_ids is None),
-            # #159 S3: the stored profile links of every map and REST operation apply does not
-            # write, read the same way and through the same budget (each id once), and each linked
-            # profile verified from its own envelope.
-            profile_bindings=stored_profile_bindings_for_unwritten_components(
-                boomi_client, normalized.integration_spec.components, conflict_policy or "reuse",
-                existing_ids=existing_ids, reads=target_reads),
+            # #159 S3: read above, before the identity readings that depend on it.
+            profile_bindings=_profile_bindings,
         )
     except ConnectorIdentityError as snapshot_error:
         # EVERY failure, and the identities that DID resolve. Reporting only the
