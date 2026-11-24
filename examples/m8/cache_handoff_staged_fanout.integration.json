@@ -2,7 +2,7 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "M8.1 (#132): staged Branch fan-out via a document_cache handoff \u2014 compose_archetypes lowers handoff.mode='document_cache' onto the M11 cache steps: a target-less cache_put staging leg writes the mapped documents into the auto-emitted in-spec Document Cache (Add to Cache consumes the stream, the #122/#131 consumption contract), and every consuming leg re-reads them with an all-documents cache_get before its REST send (write-before-read leg order satisfies the #123 lineage contract).",
+  "purpose": "M8.1 (#132): staged Branch fan-out via a document_cache handoff \u2014 the recipe_request below is ONE invocation of a typed recipe intent (build_integration config.authoring_request with intent_kind 'recipe'); handoff.mode='document_cache' lowers onto the M11 cache steps: a target-less cache_put staging leg writes the mapped documents into the auto-emitted in-spec Document Cache (Add to Cache consumes the stream, the #122/#131 consumption contract), and every consuming leg re-reads them with an all-documents cache_get before its REST send (write-before-read leg order satisfies the #123 lineage contract).",
   "do_not_reuse": "Concrete values below are demo-grade placeholders (example.invalid endpoints, <<...>> sentinels) so the spec plans clean in tests; author real bindings from actual requirements.",
   "recipe_request": {
     "recipe_id": "boomi.compose.db_rest_fanout",

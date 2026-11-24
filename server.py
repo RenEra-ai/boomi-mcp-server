@@ -2468,8 +2468,9 @@ if build_integration_action:
             a reused connection carries binding keys only, a secured REST
             connection must be reused rather than created inline, and every
             required target leaf of a map must be mapped
-            (TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED). Recipe intents may
-            supply per-root governance through `process_envelopes`.
+            (TRANSFORM_REVIEW_REQUIRED_TARGET_UNMAPPED). A recipe intent has
+            no per-root envelope field: a recipe emits its own unit, and that
+            unit's governance comes from the recipe's typed input.
 
                 config = {
                   "authoring_request": {

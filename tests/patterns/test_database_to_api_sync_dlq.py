@@ -310,7 +310,7 @@ def test_l1_catch_notify_served_schema_states_the_validator_rules():
             preset.DatabaseToApiSyncInputV1.model_validate(raw)
         (error,) = caught.value.errors(include_input=False)
         assert error["type"] == "db_to_api_catch_notify_invalid"
-        assert error["loc"][:3] == ("reliability", "catch_notify")
+        assert error["loc"][:2] == ("reliability", "catch_notify")
         assert "SEVERE" not in str(error) and "static text" not in str(error)
 
 
@@ -566,3 +566,44 @@ def test_l1_each_frozen_case_materializes_the_legacy_builder_process():
             plan=plan, id_registry=dict(_L1_XML_IDS), symbols=internals.symbols
         )
         assert emitted == legacy, case_id
+
+
+def test_l1_catch_notify_refusals_point_at_the_field_the_schema_names():
+    """#159 S3 (AR1-13): a missing caught-error token is refused AT
+    ``message_template`` and a bad level AT ``level``, not at the enclosing
+    ``catch_notify`` (the served schema promises those fields)."""
+    from pydantic import ValidationError
+
+    from boomi_mcp.recipes.builtins import database_to_api_sync as preset
+
+    for catch_notify, field in (
+        ({"level": "ERROR", "message_template": "static text, no token"}, "message_template"),
+        ({"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]}, "level"),
+    ):
+        _intent, raw, _material = _l1_inputs("wm_off_dlq_on_create")
+        raw["reliability"]["catch_notify"] = catch_notify
+        with _pytest.raises(ValidationError) as caught:
+            preset.DatabaseToApiSyncInputV1.model_validate(raw)
+        (error,) = caught.value.errors(include_input=False)
+        assert error["loc"] == ("reliability", "catch_notify", field)
+
+
+def test_l1_dlq_limitations_state_the_guarded_method_refusal():
+    """#159 S3 (AR1-13): with a dead-letter cache the send is a guarded connector
+    call, so PUT and DELETE (accepted by the input schema) are refused at compile.
+    The served limitation names exactly the methods the connector-call registry
+    refuses for a guarded call, derived from it."""
+    from boomi_mcp.compiler.process_ir.connector_capabilities import (
+        CONNECTOR_CALL_CAPABILITIES_V1,
+        REST_FAMILY,
+    )
+    from boomi_mcp.recipes.builtins.catalog import _DB_TO_API_GUIDANCE
+    from boomi_mcp.recipes.builtins.database_to_api_sync import DbToApiTargetV1
+
+    methods = DbToApiTargetV1.model_fields["method"].annotation.__args__
+    supported = {a.upper() for f, a in CONNECTOR_CALL_CAPABILITIES_V1 if f == REST_FAMILY}
+    refused = [m for m in methods if m not in supported]
+    assert refused  # non-vacuity: the schema accepts methods the registry does not
+    (note,) = [t for t in _DB_TO_API_GUIDANCE["limitations"] if "guarded connector call" in t]
+    assert "target.method " + ", ".join(refused) in note
+    assert "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED" in note

@@ -2,7 +2,7 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "M8 (#14): composed archetype fan-out \u2014 compose_archetypes(parts) turns one db_source part, one shared transform part, and two rest_target parts into ONE coherent IntegrationSpecV1 whose main process lowers the shared map + Branch fan-out onto the verified flow_sequence surface (#117/#112).",
+  "purpose": "M8 (#14): composed fan-out \u2014 the recipe_request below is ONE invocation of a typed recipe intent (build_integration config.authoring_request with intent_kind 'recipe'); it turns one db_source, one shared transform and two rest_target legs into ONE process unit whose Branch fan-out lowers the shared map onto the verified flow_sequence surface (#117/#112). integration_spec is the normalized spec that request compiles to, shown for comparison; it is not a second request to send.",
   "do_not_reuse": "Concrete values below are demo-grade placeholders (example.invalid endpoints, <<...>> sentinels) so the spec plans clean in tests; author real bindings from actual requirements.",
   "recipe_request": {
     "recipe_id": "boomi.compose.db_rest_fanout",

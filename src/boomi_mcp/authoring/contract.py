@@ -845,9 +845,10 @@ def authoring_workflow_contract() -> Dict[str, Any]:
                 "location (a caller-authored key name is never served)."
             ),
             "recipe_process_unit": (
-                "A recipe may emit a whole process unit (root + envelope). Its "
-                "envelope is the root's ONE governance authority: a "
-                "process_envelopes entry naming it is GOVERNANCE_SOURCE_CONFLICT."
+                "A recipe emits a whole process unit (root + envelope). Its "
+                "envelope is the root's ONE governance authority, authored "
+                "through the recipe's own typed input; the recipe intent has "
+                "no per-root envelope field."
             ),
             "recorded_intent": (
                 "RecordedIntentV1 — a deliberate declaration (typed watermark "

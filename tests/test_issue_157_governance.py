@@ -685,18 +685,23 @@ def test_the_compiling_intents_serve_the_canonical_preview():
 
 
 def test_duplicate_recipe_envelopes_are_refused_by_name():
+    # #159 S3 (AR1-05): the recipe intent has no per-root envelope channel, so
+    # there is nothing to duplicate: the retired field is refused by name.
     with pytest.raises(Exception) as excinfo:
         RecipeAuthoringIntentV1(integration_name="x", invocations=({"recipe_id": "r", "invocation_id": "i"},),
                                 process_envelopes=({"component_key": "p", "name": "a"}, {"component_key": "p", "name": "b"}))
-    assert "governance_envelope_duplicate" in str(excinfo.value)
+    assert "process_envelopes" in str(excinfo.value) and "extra_forbidden" in str(excinfo.value)
 
 
 def test_a_recipe_envelope_carries_governance_only():
-    from boomi_mcp.models.authoring_workflow import RecipeProcessEnvelopeV1
+    # #159 S3 (AR1-05): the per-root recipe envelope model is retired; governance
+    # lives on each unit's own authored envelope, and the recipe intent serves no
+    # envelope field at all.
+    from boomi_mcp.models import authoring_workflow
 
-    assert "action" not in RecipeProcessEnvelopeV1.model_fields
-    assert "depends_on" not in RecipeProcessEnvelopeV1.model_fields
-    assert set(RecipeProcessEnvelopeV1.governance_fields()) >= {"name", "component_prefix", "description", "folder_name", "process_extensions", "watermark", "recorded_intents"}
+    assert not hasattr(authoring_workflow, "RecipeProcessEnvelopeV1")
+    assert "process_envelopes" not in RecipeAuthoringIntentV1.model_fields
+    assert {"name", "component_prefix", "description", "folder_name", "process_extensions", "watermark", "recorded_intents"} <= set(ProcessComponentEnvelopeAuthoredV1.model_fields)
 
 
 def test_the_recipe_lift_refuses_a_second_governance_source_and_accepts_a_prefix(monkeypatch):
@@ -708,14 +713,14 @@ def test_the_recipe_lift_refuses_a_second_governance_source_and_accepts_a_prefix
     import test_process_component_recipe_lift as lift
 
     lift._install_direct_unit_recipe(monkeypatch)
-    with pytest.raises(AuthoringWorkflowError) as excinfo:
-        lift._normalize_direct({"name": "Unit", "action": "create"},
-                               process_envelopes=[{"component_key": "proc", "component_prefix": "R"}])
-    assert excinfo.value.code == "GOVERNANCE_SOURCE_CONFLICT"
-    with pytest.raises(AuthoringWorkflowError) as excinfo:
-        lift._normalize_direct({"name": "Unit", "action": "create"},
-                               process_envelopes=[{"component_key": "other", "component_prefix": "R"}])
-    assert excinfo.value.code == "GOVERNANCE_ENVELOPE_UNMATCHED"
+    # #159 S3 (AR1-05): the per-root envelope field is retired, so neither the
+    # second-source nor the unmatched case can be spelled: the typed request
+    # refuses the field itself, before any normalization.
+    for key in ("proc", "other"):
+        with pytest.raises(Exception) as excinfo:
+            lift._normalize_direct({"name": "Unit", "action": "create"},
+                                   process_envelopes=[{"component_key": key, "component_prefix": "R"}])
+        assert "process_envelopes" in str(excinfo.value) and "extra_forbidden" in str(excinfo.value)
     spec = lift._normalize_direct({"name": "Unit", "action": "create", "description": "d"})
     assert (spec.processes[0].envelope.name, spec.processes[0].envelope.description) == ("Unit", "d")
     # the prefix is unit-envelope governance: accepted there with no name

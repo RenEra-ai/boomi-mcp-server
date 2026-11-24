@@ -33,7 +33,6 @@ from boomi_mcp.errors import ERROR_TAXONOMY, GOVERNANCE_RETIRED_SPELLING  # noqa
 from boomi_mcp.models.authoring_workflow import (  # noqa: E402
     AuthoringRequestV1,
     ProcessIRAuthoringIntentV1,
-    RecipeProcessEnvelopeV1,
 )
 from boomi_mcp.models.governance_intent import (  # noqa: E402
     RETIRED_SPELLINGS,
@@ -141,9 +140,8 @@ def test_each_retired_spelling_is_refused_by_name_on_both_typed_envelopes(spelli
     with pytest.raises(Exception) as excinfo:
         ProcessComponentEnvelopeAuthoredV1(component_key="p", action="create", name="n", **{spelling: "x"})
     assert "governance_retired_spelling" in str(excinfo.value)
-    with pytest.raises(Exception) as excinfo:
-        RecipeProcessEnvelopeV1(component_key="p", **{spelling: "x"})
-    assert "governance_retired_spelling" in str(excinfo.value)
+    # #159 S3 (AR1-05): the recipe per-root envelope is retired; the unit's own
+    # authored envelope (above) is the one typed envelope left.
 
 
 def test_the_refusal_is_served_with_its_registered_code():

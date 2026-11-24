@@ -142,3 +142,33 @@ def test_example_process_is_a_direct_canonical_unit(path):
     # Every authored reference resolves to a supporting component of the request.
     refs = set(re.findall(r"\$ref:([A-Za-z0-9_.\-]+)", json.dumps(config)))
     assert refs and refs <= declared, sorted(refs - declared)
+
+
+_EXAMPLES_ROOT = EXAMPLES_DIR.parent
+_RETIRED_ROUTES = ("compose_archetypes", "build_from_archetype", "process_envelopes")
+
+
+def test_no_shipped_example_directs_a_caller_to_a_retired_route():
+    """#159 S3 (AR1-12): every file under examples/ is read as caller-facing text,
+    so a retired tool action or request field named there sends the caller to a
+    route that no longer exists."""
+    offenders = [
+        (path.name, route)
+        for path in sorted(_EXAMPLES_ROOT.rglob("*.json"))
+        for route in _RETIRED_ROUTES
+        if route in path.read_text()
+    ]
+    assert not offenders, offenders
+
+
+@pytest.mark.parametrize("path", _example_files(), ids=lambda p: p.name)
+def test_example_next_steps_send_the_config_object_not_the_inner_request(path):
+    """#159 S3 (AR1-12): compile refuses a config that IS the inner
+    authoring_request (it requires config.authoring_request), so a tool-call
+    example must not tell the caller to pass the inner request as the config."""
+    data = json.loads(path.read_text())
+    if "tool_call" not in data:
+        pytest.skip(f"{path.name} carries no tool call")
+    steps = data["next_steps"]
+    assert "Send the authoring_request as" not in steps
+    assert "tool_call.arguments.config" in steps

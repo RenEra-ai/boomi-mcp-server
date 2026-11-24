@@ -184,7 +184,7 @@ def _normalize_direct(envelope, base_components=(), process_envelopes=()):
             "component_material": {"version": "1"},
         }],
         "base_components": list(base_components),
-        "process_envelopes": list(process_envelopes),
+        **({"process_envelopes": list(process_envelopes)} if process_envelopes else {}),
     }})
     return _normalize_intent(request).integration_spec
 
@@ -265,9 +265,11 @@ def test_a_per_root_envelope_cannot_second_source_a_direct_unit(monkeypatch):
     """One governance authority per root: a typed per-root envelope naming a
     recipe-emitted unit is refused, never merged."""
     _install_direct_unit_recipe(monkeypatch)
-    with pytest.raises(AuthoringWorkflowError) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         _normalize_direct(
             {"name": "Direct Unit", "action": "create"},
             process_envelopes=[{"component_key": "proc", "name": "Other"}],
         )
-    assert excinfo.value.code == "GOVERNANCE_SOURCE_CONFLICT"
+    # #159 S3 (AR1-05): the field is retired, so the second source is refused
+    # as an unknown field by the typed request, before normalization.
+    assert "process_envelopes" in str(excinfo.value) and "extra_forbidden" in str(excinfo.value)

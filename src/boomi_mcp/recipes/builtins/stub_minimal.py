@@ -44,6 +44,10 @@ class StubMinimalNamingV1(RecipeInputBase):
     component_prefix: str = Field(default=_DEFAULT_PREFIX, min_length=1)
     folder_name: Optional[str] = Field(default=None, min_length=1)
     process_name: Optional[str] = Field(default=None, min_length=1)
+    description: str = Field(
+        default="",
+        description="The description of the process component this recipe creates.",
+    )
 
 
 class StubMinimalInputV1(RecipeInputBase):
@@ -76,6 +80,7 @@ def emit_stub_minimal(inp: StubMinimalInputV1) -> Tuple[object, ...]:
         component_key=inp.process_key,
         name=naming.process_name or f"{naming.component_prefix} {_PROCESS_NAME_SUFFIX}",
         action="create",
+        description=naming.description,
         folder_name=naming.folder_name,
         depends_on=(),
     )

@@ -220,5 +220,5 @@
       }
     }
   },
-  "next_steps": "Reused connections are referenced, never modified. Send the authoring_request as the JSON-string config of build_integration(action='plan'), then action='compile' and review_transformation(action='validate_unmapped') BEFORE apply."
+  "next_steps": "Reused connections are referenced, never modified. Send tool_call.arguments.config (the object that CARRIES authoring_request, not the inner authoring_request itself) as the JSON-string config of build_integration(action='plan'), then action='compile' and review_transformation(action='validate_unmapped') BEFORE apply."
 }

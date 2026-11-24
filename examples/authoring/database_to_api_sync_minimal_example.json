@@ -210,5 +210,5 @@
       }
     }
   },
-  "next_steps": "Send the authoring_request as the JSON-string config of build_integration(action='plan'), then action='compile' and review_transformation(action='validate_unmapped') BEFORE build_integration(action='apply') with the returned expected_capability_revision and expected_compile_hash."
+  "next_steps": "Send tool_call.arguments.config (the object that CARRIES authoring_request, not the inner authoring_request itself) as the JSON-string config of build_integration(action='plan'), then action='compile' and review_transformation(action='validate_unmapped') BEFORE build_integration(action='apply') with the returned expected_capability_revision and expected_compile_hash."
 }
