@@ -62,9 +62,25 @@ def test_example_carries_anti_template_labels(path):
     assert isinstance(data.get("do_not_reuse"), str) and data["do_not_reuse"].strip()
 
 
+#: An example key whose value IS served text, not an example payload: the workflow example's
+#: ``workflow`` equals the served ``build_integration_from_description`` workflow, pinned by
+#: ``test_the_workflow_example_is_the_served_authoring_workflow`` (#159 ARCH-r2 #4). Its prose
+#: ("Select entries from BOTH surfaces") is not SQL; the server owns that text.
+_SERVED_SUBTREES = {"authoring_workflow_sequence_example.json": "workflow"}
+
+
+def _payload_text(path):
+    served_key = _SERVED_SUBTREES.get(path.name)
+    if served_key is None:
+        return path.read_text()
+    data = json.loads(path.read_text())
+    assert served_key in data, f"{path.name}: the pinned served subtree {served_key!r} is missing"
+    return json.dumps({k: v for k, v in data.items() if k != served_key})
+
+
 @pytest.mark.parametrize("path", _example_files(), ids=lambda p: p.name)
 def test_example_contains_no_reusable_sql(path):
-    text = path.read_text()
+    text = _payload_text(path)
     match = SQL_CRUD_RE.search(text)
     assert match is None, f"{path.name}: SQL CRUD pattern found: {match.group(0)!r}"
 
