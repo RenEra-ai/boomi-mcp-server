@@ -876,8 +876,15 @@ class _AdapterAuthority:
         return ""
 
     def is_authoring_process(self, component: _typing.Dict[str, _typing.Any]) -> bool:
+        # A RAW row, read through the raw route's own alias authority (``type`` else
+        # ``component_type``; ``config`` else ``spec``) — #159 arch-r1 #7.
+        from boomi_mcp.categories.integration_builder import (
+            raw_component_config,
+            raw_component_type,
+        )
+
         view = _types.SimpleNamespace(
-            type=component.get("type"), config=component.get("config"),
+            type=raw_component_type(component), config=raw_component_config(component),
             action=component.get("action"),
         )
         if self.live is not None:
@@ -1284,21 +1291,42 @@ _IMPORT_STATEMENT = re.compile(
     re.MULTILINE)
 
 
-def _imports(path, text, known, inventory):
-    """``(target module, imported name or None, line)`` for every import in ``path``.
+@_functools.lru_cache(maxsize=None)
+def _import_statements_of(text):
+    """``(statement, line)`` for every import statement in ``text``, at any depth.
 
-    At any depth (lazy imports included). Cheap on purpose: only import
-    statements are parsed. A docstring line that happens to read like one either
-    fails to parse (skipped) or adds an edge, so every approximation here can
-    only make MORE modules live (fail closed).
+    Python's own parser is the authority on what an import IS (#159 arch-r1 #7):
+    every ``Import``/``ImportFrom`` node of the module's AST, so a compound
+    statement (``if True: import x``, ``try: import x``) is seen exactly like a
+    standalone one. Unioned with the line scan this census used before, which
+    also reads import-shaped lines inside strings and docstrings — kept, because
+    every approximation here may only make MORE modules live (fail closed).
     """
-    out = []
+    found = []
+    try:
+        tree = _ast.parse(text)
+    except SyntaxError:
+        tree = None
+    if tree is not None:
+        found.extend((node, node.lineno) for node in _ast.walk(tree)
+                     if isinstance(node, (_ast.Import, _ast.ImportFrom)))
     for match in _IMPORT_STATEMENT.finditer(text):
         try:
             statement = _ast.parse(match.group(1).strip()).body[0]
         except (SyntaxError, IndexError):
             continue
-        line = text.count("\n", 0, match.start(1)) + 1
+        found.append((statement, text.count("\n", 0, match.start(1)) + 1))
+    return tuple(found)
+
+
+def _imports(path, text, known, inventory):
+    """``(target module, imported name or None, line)`` for every import in ``path``.
+
+    At any depth (lazy imports and compound statements included), read from
+    :func:`_import_statements_of`; a statement both arms see is reported once.
+    """
+    out = []
+    for statement, line in _import_statements_of(text):
         if isinstance(statement, _ast.Import):
             for alias in statement.names:
                 parts = alias.name.split(".")
@@ -1320,7 +1348,7 @@ def _imports(path, text, known, inventory):
                     out.append((base, alias.name, line))
             if base:
                 out.append((base, None, line))
-    return out
+    return list(dict.fromkeys(out))
 
 
 def _import_edges(path, text, known, inventory) -> _typing.Set[str]:
@@ -1477,6 +1505,10 @@ def _example_census(path, document, authority, patterns, context):
     call (``{"tool", "arguments"}`` naming a tool whose action dispatches
     archetypes) and a composition request (``parts`` of composition part kinds).
     """
+    # #159 arch-r1 #7: a component row is read through the raw route's alias authority,
+    # so ``component_type``/``spec`` are the same row as ``type``/``config``.
+    from boomi_mcp.categories.integration_builder import raw_component_config, raw_component_type
+
     records, envelopes = [], []
     archetype_names = set(patterns.archetypes) if patterns is not None else set()
     dispatch_tools = {
@@ -1499,26 +1531,28 @@ def _example_census(path, document, authority, patterns, context):
             return
         components = node.get("components")
         is_spec = isinstance(components, list) and bool(components) and all(
-            isinstance(c, dict) and "type" in c for c in components)
+            isinstance(c, dict) and raw_component_type(c) is not None for c in components)
         if is_spec:
             for index, component in enumerate(components):
                 cptr = _pointer(_pointer(ptr, "components"), index)
                 if not authority.is_authoring_process(component):
                     envelopes.append(("component", cptr, "not an authored process"))
                     continue
-                config = component.get("config")
+                config = raw_component_config(component)
+                # The key the authority read it from (by identity), for the pointer.
+                config_key = next((k for k, v in component.items() if v is config), "config")
                 dialect = authority.dialect(config) if isinstance(config, dict) else None
                 if dialect is None:
                     selector = isinstance(config, dict) and any(
                         k in config for k in authority.selectors)
                     if selector:
-                        records.append(_finding("unclassified", path, _pointer(cptr, "config"),
+                        records.append(_finding("unclassified", path, _pointer(cptr, config_key),
                                                 "process kind is not an adapter kind", 0))
                     envelopes.append(("component", cptr, "process with no adapter kind"))
                     continue
                 envelopes.append(("component", cptr, "adapter process config"))
                 records.append(_finding("example_process_config", path,
-                                        _pointer(cptr, "config"), dialect, 0, (dialect,)))
+                                        _pointer(cptr, config_key), dialect, 0, (dialect,)))
         tool, arguments = node.get("tool"), node.get("arguments")
         if isinstance(tool, str) and isinstance(arguments, dict):
             name = arguments.get("name")
@@ -1841,6 +1875,13 @@ def test_census_detects_an_injected_reachable_adapter_call(arm):
          "dict-literal process_kind='database_to_api_sync'", 20),
     }
     assert all(r["path"] == _INJECTED_CONTROL_PATH for r in records)
+    # #159 arch-r1 #7: an import inside a compound statement is the same edge.
+    for compound in ("if True: import boomi_mcp._l8_injected_census_control\n",
+                     "try:\n    import boomi_mcp._l8_injected_census_control\n"
+                     "except ImportError:\n    pass\n"):
+        nested = {"l8_control_entry.py": compound, _INJECTED_CONTROL_PATH: _INJECTED_CONTROL_SOURCE}
+        assert {(r["class"], r["symbol"], r["form"], r["line"]) for r in _python_census(
+            nested, authority)[0] if r["class"] in _FINDING_CLASSES} == found, compound
     route = next(r for r in records if r["symbol"] == "injected_route")
     assert "sync_pipeline" in route["reaches"]
     # The selector read in the dispatch is a validator, not a caller.
@@ -1970,6 +2011,15 @@ def test_census_detects_a_database_to_api_sync_flow_sequence_example(arm):
     assert [r["form"] for r in _example_census(
         path, aliased, authority, census.patterns, census.context)[0]] == [
         "database_to_api_sync/flow_sequence"]
+    # #159 arch-r1 #7: the raw route's row aliases (``component_type``, ``spec``) are the
+    # same process row, found at the alias's own pointer.
+    row_aliased = _flow_sequence_example()
+    row = row_aliased["integration_spec"]["components"][0]
+    row["component_type"], row["spec"] = row.pop("type"), row.pop("config")
+    assert [(r["class"], r["symbol"], r["form"]) for r in _example_census(
+        path, row_aliased, authority, census.patterns, census.context)[0]] == [
+        ("example_process_config", "/integration_spec/components/0/spec",
+         "database_to_api_sync/flow_sequence")]
     referenced = _flow_sequence_example()
     referenced["integration_spec"]["components"][0]["config"]["reference_only"] = True
     assert _example_census(path, referenced, authority, census.patterns, census.context)[0] == []
