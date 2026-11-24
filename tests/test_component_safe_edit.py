@@ -1457,14 +1457,72 @@ def test_a_merge_claims_a_version_increment_only_when_the_re_read_shows_one(
     assert "verification" not in res
 
 
-@pytest.mark.parametrize("before, after, state", [
-    (3, None, "unconfirmed"), (None, {"version": 4}, "observed"),
-    (3, {"version": 4}, "advanced"), (3, {"version": 3}, "unchanged"),
-    (3, {"version": 2}, "unchanged"), (3, {"version": ""}, "observed"),
+def _reading(root):
+    """A post-write reading as the one read returns it: the dict keeps the raw XML."""
+    return {"version": 0, "xml": root}
+
+
+_A_ENV = '<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="A" type="x"{0}/>'
+
+
+@pytest.mark.parametrize("before, after, state, version", [
+    (3, None, "unconfirmed", None),
+    (None, _reading(_A_ENV.format(' version="4"')), "observed", 4),
+    (3, _reading(_A_ENV.format(' version="4"')), "advanced", 4),
+    (3, _reading(_A_ENV.format(' version="3"')), "unchanged", 3),
+    (3, _reading(_A_ENV.format(' version="2"')), "unchanged", 2),
+    # ARCH-r3 #1: no version evidence -> nothing is claimed.
+    (3, _reading(_A_ENV.format('')), "unconfirmed", None),
+    (None, _reading(_A_ENV.format('')), "unconfirmed", None),
+    (3, _reading(_A_ENV.format(' version=""')), "unconfirmed", None),
+    (3, _reading('<NotAComponent componentId="A" version="999"/>'), "unconfirmed", None),
+    (3, _reading("not xml"), "unconfirmed", None),
 ])
-def test_post_write_version_covers_every_case_of_its_authority(before, after, state):
-    """ARCH-r2 #2 coverage claim: reading present/absent × same-object baseline present/absent ×
-    advanced or not — the four states are the post-write read's whole case set."""
+def test_post_write_version_covers_every_case_of_its_authority(before, after, state, version):
+    """ARCH-r2 #2 / ARCH-r3 #1 coverage claim: reading present/absent × the reading stating a
+    version in a genuine ComponentGet envelope or not × same-object baseline present/absent ×
+    advanced or not. A root that is no component, or a component stating no version, is NO
+    evidence (the read's dict defaults a missing version to 0) — before r3 those served version
+    999 as an increment and "version 0" as observed."""
     from boomi_mcp.categories.components._shared import post_write_version
 
-    assert post_write_version(before, after)[0] == state
+    assert post_write_version(before, after) == (state, version)
+
+
+class _NoEvidenceApi(_VersioningApi):
+    """After the write, answers A's id on a root that establishes no version."""
+
+    def __init__(self, answer):
+        super().__init__(after=None)
+        self.answer = answer
+
+    def get_component(self, component_id):
+        if self.pushed:
+            self.reads.append(component_id)
+            return self.answer.encode("utf-8")
+        return super().get_component(component_id)
+
+
+@pytest.mark.parametrize("answer", [
+    f'<NotAComponent componentId="{_A_ID}" version="999"/>',
+    _db_conn_named(_A_ID).replace('version="3" ', "", 1),
+], ids=["not_a_component_envelope", "envelope_stating_no_version"])
+@pytest.mark.parametrize("config", [
+    {"source_branch": "dev", "target_branch": "main"}, {"source_version": 1, "target_version": 2},
+], ids=["head_target", "snapshot_target"])
+def test_a_merge_claims_no_version_a_re_read_does_not_establish(answer, config, monkeypatch):
+    """ARCH-r3 #1: a post-write answer that is no component envelope, or a component envelope
+    stating no version, establishes no version: the merge claims neither an increment nor an
+    observed version, serves no new_version, and still reports the landed write."""
+    from boomi_mcp.categories.components import analyze_component
+    from boomi_mcp.categories.components.analyze_component import merge_versions
+
+    monkeypatch.setattr(analyze_component, "compare_versions", lambda *a, **k: {"_success": True})
+    client = _VersioningClient(3)
+    client.component = _NoEvidenceApi(answer)
+    res = merge_versions(client, "p", _A_ID, config)
+    assert res["_success"] is True and res["boomi_mutation"] is True, res
+    assert [cid for cid, _ in client.component.pushed] == [_A_ID]
+    assert "incremented" not in res["note"] and "shows version" not in res["note"], res["note"]
+    assert "could not be confirmed" in res["note"], res["note"]
+    assert res["new_version"] == ""

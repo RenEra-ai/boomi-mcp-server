@@ -1348,8 +1348,9 @@ def apply_component_edit_action(
         state, new_version = post_write_version(base_version, post)
         if state == "unconfirmed":
             result["version_comparison_error"] = (
-                "The write succeeded, but the post-write re-read failed or the "
-                "request's read budget was spent; no version comparison performed."
+                "The write succeeded, but the post-write re-read established no version "
+                "(it failed, did not answer a component envelope stating one, or the "
+                "request's read budget was spent); no version comparison performed."
             )
             result["diff"] = _unified_diff(current["xml"], merged_xml, max_diff_lines)[0]
         elif state == "unchanged":

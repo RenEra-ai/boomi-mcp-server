@@ -375,7 +375,8 @@ def post_write_version(before: Any, after: Optional[Dict[str, Any]]) -> Tuple[st
     whose target is a version snapshot); ``after`` is the post-write reading
     (``None`` when it failed). Returns ``(state, version)``:
 
-    - ``"unconfirmed"``: no reading — nothing about the version may be claimed;
+    - ``"unconfirmed"``: no reading, or one that establishes no version (not a
+      ComponentGet envelope, or an envelope stating none) — nothing is claimed;
     - ``"observed"``: a reading but no same-object baseline — its version is
       served, no increment is claimed;
     - ``"advanced"``: the reading's version is past the baseline;
@@ -383,11 +384,22 @@ def post_write_version(before: Any, after: Optional[Dict[str, Any]]) -> Tuple[st
     """
     if after is None:
         return "unconfirmed", None
-    version = after.get("version")
+    # The version is EVIDENCE only when the reading is a genuine ComponentGet
+    # envelope that states one (#159 ARCH-r3-01): the read's dict defaults a
+    # missing ``version`` to 0 and checks only the envelope's id, so a root that
+    # is no component, or a component stating no version, establishes nothing.
+    # Read from the XML root through the one strict envelope parser.
+    from ...authoring.stored_profile_bindings import _envelope_attributes
+
+    attributes = _envelope_attributes(after.get("xml"))
+    try:
+        version = int(str((attributes or {})["version"]).strip())
+    except (KeyError, TypeError, ValueError):
+        return "unconfirmed", None
     if before is None:
         return "observed", version
     try:
-        advanced = int(version) > int(before)
+        advanced = version > int(before)
     except (TypeError, ValueError):
         return "observed", version
     return ("advanced" if advanced else "unchanged"), version
