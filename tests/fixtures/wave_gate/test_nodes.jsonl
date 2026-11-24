@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15063, "minimum_collected": 15063, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15071, "minimum_collected": 15071, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16035,12 +16035,26 @@
 {"kind": "test", "id": "pytest-016034", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_a_version_increment_only_when_the_re_read_shows_one[head_target_advanced]", "state": "active"}
 {"kind": "test", "id": "pytest-016035", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_a_version_increment_only_when_the_re_read_shows_one[head_target_not_advanced]", "state": "active"}
 {"kind": "test", "id": "pytest-016036", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_a_version_increment_only_when_the_re_read_shows_one[snapshot_target_observed]", "state": "active"}
-{"kind": "test", "id": "pytest-016037", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-None-unconfirmed]", "state": "active"}
-{"kind": "test", "id": "pytest-016038", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[None-after1-observed]", "state": "active"}
-{"kind": "test", "id": "pytest-016039", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after2-advanced]", "state": "active"}
-{"kind": "test", "id": "pytest-016040", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after3-unchanged]", "state": "active"}
-{"kind": "test", "id": "pytest-016041", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after4-unchanged]", "state": "active"}
-{"kind": "test", "id": "pytest-016042", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after5-observed]", "state": "active"}
+{"kind": "test", "id": "pytest-016037", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-None-unconfirmed]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-016038", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[None-after1-observed]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-016039", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after2-advanced]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-016040", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after3-unchanged]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-016041", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after4-unchanged]", "state": "tombstone"}
+{"kind": "test", "id": "pytest-016042", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after5-observed]", "state": "tombstone"}
 {"kind": "test", "id": "pytest-016043", "node_id": "tests/test_legacy_process_ir_adapters.py::test_the_workflow_example_is_the_served_authoring_workflow", "state": "active"}
 {"kind": "test", "id": "pytest-016044", "node_id": "tests/test_issue_157_derived_flows.py::test_a_malformed_listener_route_still_serves_no_endpoints_when_reused", "state": "active"}
 {"kind": "test", "id": "pytest-016045", "node_id": "tests/test_issue_157_derived_flows.py::test_a_declared_status_set_is_served_on_a_reused_rest_operation", "state": "active"}
+{"kind": "test", "id": "pytest-016046", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-None-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016047", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[None-after1-observed-4]", "state": "active"}
+{"kind": "test", "id": "pytest-016048", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after2-advanced-4]", "state": "active"}
+{"kind": "test", "id": "pytest-016049", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after3-unchanged-3]", "state": "active"}
+{"kind": "test", "id": "pytest-016050", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after4-unchanged-2]", "state": "active"}
+{"kind": "test", "id": "pytest-016051", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after5-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016052", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[None-after6-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016053", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after7-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016054", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after8-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016055", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after9-unconfirmed-None]", "state": "active"}
+{"kind": "test", "id": "pytest-016056", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_no_version_a_re_read_does_not_establish[head_target-not_a_component_envelope]", "state": "active"}
+{"kind": "test", "id": "pytest-016057", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_no_version_a_re_read_does_not_establish[head_target-envelope_stating_no_version]", "state": "active"}
+{"kind": "test", "id": "pytest-016058", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_no_version_a_re_read_does_not_establish[snapshot_target-not_a_component_envelope]", "state": "active"}
+{"kind": "test", "id": "pytest-016059", "node_id": "tests/test_component_safe_edit.py::test_a_merge_claims_no_version_a_re_read_does_not_establish[snapshot_target-envelope_stating_no_version]", "state": "active"}

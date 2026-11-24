@@ -82,7 +82,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 669,
+      "evidence_line": 681,
       "form": "component.create_component(...)",
       "path": "src/boomi_mcp/categories/components/_shared.py",
       "row_id": "WR-2e3f1036",
@@ -91,7 +91,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 701,
+      "evidence_line": 713,
       "form": "component.update_component(...)",
       "path": "src/boomi_mcp/categories/components/_shared.py",
       "row_id": "WR-0972716f",
@@ -3214,7 +3214,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller.",
-      "evidence_line": 669,
+      "evidence_line": 681,
       "forms": [
         "component.create_component(...)"
       ],
@@ -3227,7 +3227,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted.",
-      "evidence_line": 701,
+      "evidence_line": 713,
       "forms": [
         "component.update_component(...)"
       ],
