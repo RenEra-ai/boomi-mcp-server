@@ -1088,10 +1088,10 @@ def test_a_declared_status_set_is_served_on_a_reused_rest_operation(cases):
 
 
 def test_a_database_write_endpoint_is_served_only_for_components_apply_writes(cases):
-    """The DB write target's ``operation`` and ``statement_type`` are read off the
-    write operation's and write profile's CANDIDATE config, each off its own
-    component (field-level since r2-01): either bound by name under ``reuse``
-    omits exactly its own key from the row, and every row stands; written, the
+    """The DB write target's ``operation`` is read off the write operation's CANDIDATE
+    config, and ``statement_type`` off the write profile that config links (field-level
+    since r2-01): a reused operation omits both (its stored profile link is not read),
+    a reused profile omits its ``statement_type``, and every row stands; written, the
     frozen rows stand."""
     case_id = "api_to_database_sync/create"
     components, root, facts, wm = _hand_built_linear_case(cases, case_id)
@@ -1100,7 +1100,9 @@ def test_a_database_write_endpoint_is_served_only_for_components_apply_writes(ca
     assert target["operation"] == "Send" and target["statement_type"]
     assert "write" in [r["key"] for r in frozen[0]]
     for key, omitted in (
-        ("target_db_write_operation", {"operation"}),
+        # The profile is found through the operation's candidate link, so a
+        # reused operation also takes the profile's statement_type with it.
+        ("target_db_write_operation", {"operation", "statement_type"}),
         ("target_db_write_profile", {"statement_type"}),
     ):
         assert key in {c["key"] for c in components}, key

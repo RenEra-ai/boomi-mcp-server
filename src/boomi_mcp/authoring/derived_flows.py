@@ -1367,11 +1367,14 @@ def _linear_endpoint(
         spelling = DB_WRITE_OPERATION_SPELLINGS.get(str(op_config.get("operation_mode") or ""))
         if not _is_write_profile(profile) or spelling is None:
             return None
-        # Each read off its own component's CANDIDATE config.
+        # ``operation`` is read off the operation's CANDIDATE config;
+        # ``statement_type`` off the profile that candidate config links
+        # (``write_profile_id``) — so it needs BOTH written: a reused operation
+        # keeps its stored profile link, which planning does not read.
         if writes(operation):
             extra["operation"] = spelling
-        if writes(profile):
-            extra["statement_type"] = (profile.config or {}).get("statement_type")
+            if writes(profile):
+                extra["statement_type"] = (profile.config or {}).get("statement_type")
     return _endpoint_row(
         token,
         direction,
