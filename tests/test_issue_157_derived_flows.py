@@ -974,6 +974,114 @@ def test_a_listener_route_is_served_only_through_components_apply_writes(cases):
     assert served(existing_ids={}, conflict_policy="reuse") == frozen
 
 
+def _bound_under(case_components, root, facts, ids, policy, *, watermark_field=None):
+    return _dumped(
+        _linear_project(
+            case_components, root, facts, watermark_field=watermark_field,
+            existing_ids=ids, conflict_policy=policy,
+        )
+    )
+
+
+def test_a_rest_endpoint_is_served_only_for_an_operation_apply_writes(cases):
+    """#159 architect review r1 sibling sweep: a REST endpoint's ``method`` is
+    read off the operation's CANDIDATE config. Bound by name under ``reuse``,
+    apply keeps the existing operation, so the method is not derivable and the
+    route projects its transform row only; written (no namesake, or ``clone``)
+    it serves the frozen rows unchanged. Source and target operations alike."""
+    for case_id, key in (
+        ("database_to_api_sync/wm_off_dlq_on_create", "target_rest_operation"),
+        ("api_to_api_sync/create", "source_rest_source_operation"),
+        ("api_to_api_sync/create", "target_rest_operation"),
+    ):
+        components, root, facts, wm = _hand_built_linear_case(cases, case_id)
+        assert key in {c["key"] for c in components}, (case_id, key)
+        frozen = _bound_under(components, root, facts, None, None, watermark_field=wm)
+        assert any(e.get("method") for e in frozen[1]), case_id
+        bound = {key: "existing-operation-id"}
+        for policy in ("reuse", None):
+            flows, endpoints = _bound_under(components, root, facts, bound, policy, watermark_field=wm)
+            assert [r["key"] for r in flows] == ["transform"] and endpoints == [], (case_id, key, policy)
+        assert _bound_under(components, root, facts, bound, "clone", watermark_field=wm) == frozen
+        assert _bound_under(components, root, facts, {}, "reuse", watermark_field=wm) == frozen
+
+
+def test_a_database_write_endpoint_is_served_only_for_components_apply_writes(cases):
+    """The DB write target's ``operation`` and ``statement_type`` are read off the
+    write operation's and write profile's CANDIDATE config: either bound by name
+    under ``reuse`` makes them non-derivable; written, the frozen rows stand."""
+    case_id = "api_to_database_sync/create"
+    components, root, facts, wm = _hand_built_linear_case(cases, case_id)
+    frozen = _bound_under(components, root, facts, None, None)
+    (target,) = [e for e in frozen[1] if e["direction"] == "target"]
+    assert target["operation"] == "Send" and target["statement_type"]
+    for key in ("target_db_write_operation", "target_db_write_profile"):
+        assert key in {c["key"] for c in components}, key
+        bound = {key: "existing-id"}
+        for policy in ("reuse", None):
+            flows, endpoints = _bound_under(components, root, facts, bound, policy)
+            assert endpoints == [], (key, policy)
+            assert "write" not in [r["key"] for r in flows], (key, policy)
+        assert _bound_under(components, root, facts, bound, "clone") == frozen, key
+
+
+def test_a_connection_endpoint_binding_follows_apply_writes(cases):
+    """A connection's ``binding_mode`` is apply's answer for that component,
+    asked of the same rule with the request's policy — not only of the reuse
+    set a caller hands in: a create bound by name under ``reuse`` is a reuse
+    serving the bound id; under ``clone`` it is written and stays a create."""
+    case_id = "database_to_api_sync/wm_off_dlq_on_create"
+    components, root, facts, wm = _hand_built_linear_case(cases, case_id)
+    frozen = _bound_under(components, root, facts, None, None, watermark_field=wm)
+    (target,) = [e for e in frozen[1] if e["key"] == "rest_target"]
+    assert target["binding_mode"] == "create"
+    bound = {"target_rest_connection": "existing-connection-id"}
+    _flows, endpoints = _bound_under(components, root, facts, bound, "reuse", watermark_field=wm)
+    (reused,) = [e for e in endpoints if e["key"] == "rest_target"]
+    assert reused["binding_mode"] == "reuse" and reused["component_id"] == "existing-connection-id"
+    assert "auth_mode" not in reused
+    assert _bound_under(components, root, facts, bound, "clone", watermark_field=wm) == frozen
+
+
+def test_a_fanout_target_method_is_served_only_for_an_operation_apply_writes():
+    """The fan-out leg (and target endpoint) ``method`` is read off each target
+    operation's CANDIDATE config: one target operation bound by name under
+    ``reuse`` makes the route non-derivable; written, it serves unchanged."""
+    from boomi_mcp.authoring.derived_flows import derive_recipe_projection
+
+    _result, normalized = _flagship_projection_inputs()
+    (unit,) = normalized.integration_spec.processes
+    facts = normalized.recipe_projection_facts[unit.envelope.component_key]
+
+    def project(ids, policy):
+        kwargs = {} if policy is None else {"conflict_policy": policy}
+        return derive_recipe_projection(
+            normalized.integration_spec.processes,
+            normalized.integration_spec.components,
+            connector_metadata=normalized.connector_metadata,
+            projection_facts=normalized.recipe_projection_facts,
+            recorded_intents=normalized.recorded_intents,
+            existing_ids=ids,
+            **kwargs,
+        )
+
+    baseline = _project(normalized)
+    assert baseline.composition_summaries[unit.envelope.component_key].fanout_legs[0].method
+    for target in (facts.targets[0], facts.targets[1]):
+        bound = {target.operation_key: "existing-operation-id"}
+        for policy in ("reuse", None):
+            moved = project(bound, policy)
+            assert [r.key for r in moved.flows] == ["transform"], (target.part_key, policy)
+            assert moved.endpoints == () and moved.composition_summaries == {}
+        written = project(bound, "clone")
+        assert [r.model_dump(mode="json") for r in written.flows] == [
+            r.model_dump(mode="json") for r in baseline.flows
+        ]
+        assert [e.model_dump(mode="json") for e in written.endpoints] == [
+            e.model_dump(mode="json") for e in baseline.endpoints
+        ]
+
+
 def test_only_an_exact_unreferencing_passthrough_stop_root_infers_stub_facts():
     """#159 S2: a fact-less root that is exactly ``passthrough -> stop`` and
     references nothing infers the stub facts (the stub recipe emits none) and

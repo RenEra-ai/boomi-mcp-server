@@ -921,7 +921,7 @@ def _with_hints(row: Any, facts: Any) -> Any:
 
 def _route_projection(
     unit, by_key, metadata, facts, transform_rows, watermarked, reused_keys=frozenset(),
-    existing_ids=None,
+    existing_ids=None, conflict_policy=None,
 ):
     """``(rows, endpoints, summary)`` for one fact-carrying unit, or None.
 
@@ -1020,7 +1020,8 @@ def _route_projection(
     endpoints = [
         _endpoint_row(
             source_token, "source", source_connection, source_family,
-            reused=source_connection.key in reused_keys,
+            reused=_apply_writes(source_connection, reused_keys, existing_ids, conflict_policy)
+            is False,
             existing_ids=existing_ids,
         )
     ]
@@ -1028,6 +1029,10 @@ def _route_projection(
     modes: Dict[str, str] = {}
     binding_modes: Dict[str, str] = {}
     for index, (target, connection, operation) in enumerate(target_components):
+        # The method is read off the operation's CANDIDATE config: derivable
+        # only when apply writes that config (``_apply_writes``).
+        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
+            return None
         method = (operation.config or {}).get("method")
         endpoint = _endpoint_row(
             target_token if index == 0 else "{0}_{1}".format(target_token, slugify(target.part_key)),
@@ -1035,7 +1040,7 @@ def _route_projection(
             connection,
             target_family,
             method=method,
-            reused=connection.key in reused_keys,
+            reused=_apply_writes(connection, reused_keys, existing_ids, conflict_policy) is False,
             existing_ids=existing_ids,
         )
         endpoints.append(endpoint)
@@ -1331,6 +1336,10 @@ def _linear_endpoint(
     extra: Dict[str, Any] = {}
     method = None
     if family == "rest":
+        # Read off the operation's CANDIDATE config: served only when apply
+        # writes it (``_apply_writes``), else the endpoint is not derivable.
+        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
+            return None
         method = op_config.get("method")
         if fact.expected_status_codes is not None:
             extra["expected_status_codes"] = tuple(fact.expected_status_codes)
@@ -1338,6 +1347,13 @@ def _linear_endpoint(
         profile = by_key.get(_ref_key(op_config.get("write_profile_id")) or "")
         spelling = DB_WRITE_OPERATION_SPELLINGS.get(str(op_config.get("operation_mode") or ""))
         if not _is_write_profile(profile) or spelling is None:
+            return None
+        # Both read off CANDIDATE config: served only when apply writes the
+        # operation and the write profile (``_apply_writes``).
+        if any(
+            _apply_writes(component, reused_keys, existing_ids, conflict_policy) is not True
+            for component in (operation, profile)
+        ):
             return None
         extra["operation"] = spelling
         extra["statement_type"] = (profile.config or {}).get("statement_type")
@@ -1347,7 +1363,7 @@ def _linear_endpoint(
         connection,
         family,
         method=method,
-        reused=connection.key in reused_keys,
+        reused=_apply_writes(connection, reused_keys, existing_ids, conflict_policy) is False,
         existing_ids=existing_ids,
         extra=extra,
     )
@@ -1683,7 +1699,7 @@ def _project_unit_route(
     if isinstance(facts, RecipeUnitProjectionFactsV1):
         return _route_projection(
             unit, by_key, metadata, facts, transform_rows, watermarked,
-            reused_keys, existing_ids,
+            reused_keys, existing_ids, conflict_policy,
         )
     if isinstance(facts, LinearRouteProjectionFactsV1):
         linear = _linear_route_projection(
