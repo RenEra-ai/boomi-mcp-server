@@ -2035,11 +2035,17 @@ def test_the_workflow_example_is_the_served_authoring_workflow():
     (bidirectional pin), so its calls (``config={'authoring_request': ...}``) cannot drift again."""
     import json
 
-    from boomi_mcp.categories.meta_tools import _authoring_workflow_sequences
+    from boomi_mcp.categories.meta_tools import get_schema_template_action
 
     document = json.loads(Path(_NARRATIVE_EXAMPLE).read_text(encoding="utf-8"))
     assert document["workflow_name"] == "build_integration_from_description"
-    assert document["workflow"] == _authoring_workflow_sequences()["build_integration_from_description"]
+    # ARCH-r3 #2: pinned to the PUBLIC route the example names as its exact source — not to the
+    # internal builder, and not to list_capabilities(), which drops steps whose tool is absent.
+    selector = "workflow:build_integration_from_description"
+    assert f"get_schema_template(schema_name='{selector}')" in document["purpose"]
+    served = get_schema_template_action(schema_name=selector)
+    assert served["_success"] is True, served
+    assert document["workflow"] == served["workflow"]
 
 
 def test_narrative_workflow_example_is_excluded_for_the_right_reason():

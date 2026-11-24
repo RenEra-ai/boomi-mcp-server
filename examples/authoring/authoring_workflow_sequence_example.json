@@ -2,7 +2,7 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "Show the recommended authoring workflow as data. Its workflow object is an exact copy of the served build_integration_from_description workflow (list_capabilities()['workflows']), pinned by a test; fetch the live sequence from the server rather than copying this file.",
+  "purpose": "Show the recommended authoring workflow as data. Its workflow object is an exact copy of get_schema_template(schema_name='workflow:build_integration_from_description')['workflow'], pinned by a test; list_capabilities()['workflows'] serves the same sequence minus any step whose tool the server does not register. Fetch the live sequence from the server rather than copying this file.",
   "do_not_reuse": "This file illustrates the step sequence only. Fetch the live sequence from the server instead of copying this file — the server copy is canonical and may have moved on.",
   "workflow_name": "build_integration_from_description",
   "workflow": {
