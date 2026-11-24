@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15061, "minimum_collected": 15061, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15063, "minimum_collected": 15063, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16042,3 +16042,5 @@
 {"kind": "test", "id": "pytest-016041", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after4-unchanged]", "state": "active"}
 {"kind": "test", "id": "pytest-016042", "node_id": "tests/test_component_safe_edit.py::test_post_write_version_covers_every_case_of_its_authority[3-after5-observed]", "state": "active"}
 {"kind": "test", "id": "pytest-016043", "node_id": "tests/test_legacy_process_ir_adapters.py::test_the_workflow_example_is_the_served_authoring_workflow", "state": "active"}
+{"kind": "test", "id": "pytest-016044", "node_id": "tests/test_issue_157_derived_flows.py::test_a_malformed_listener_route_still_serves_no_endpoints_when_reused", "state": "active"}
+{"kind": "test", "id": "pytest-016045", "node_id": "tests/test_issue_157_derived_flows.py::test_a_declared_status_set_is_served_on_a_reused_rest_operation", "state": "active"}
