@@ -636,6 +636,19 @@ def _verified_dependencies(boomi_client: Boomi, request, reads=None) -> Dict[str
                 pointer,
                 "Bind an id that exists in this account, then retry.",
             )
+        if not _envelope_names(fetched.get("xml"), bound, id_required=True):
+            # ARCH-r1 #1: the reading must be the BOUND component's own envelope — a
+            # verified type, version and digest of another component bind nothing. The
+            # one read already fails another id (the read-failure refusal above); this
+            # adds the platform root and the id's presence. Value-free.
+            return _canonical_refusal(
+                COMPONENT_EDIT_DEPENDENCY_UNVERIFIED,
+                "The account answered a supporting component's read with a document that "
+                "is not that component's own envelope (another component id, or no "
+                "component envelope); nothing was written.",
+                pointer,
+                "Retry; if it repeats, read the bound component and check its id.",
+            )
         live_type = (fetched.get("type") or "").strip()
         if live_type != str(comp.type).strip():
             return _canonical_refusal(
@@ -788,6 +801,103 @@ def _compute_canonical_xml(
     }
 
 
+def _envelope_names(component_xml: Any, component_id: str, *, id_required: bool) -> bool:
+    """Whether ``component_xml`` is a ComponentGet envelope OF ``component_id`` (#159 ARCH-r1 #1).
+
+    The platform's answer states its own id on the envelope root (``bns:Component/@componentId``);
+    that, never the id this server asked for, says WHICH component the bytes are. The fetch dict's
+    ``component_id`` falls back to the requested id, so it cannot tell; the one envelope reader
+    (``stored_profile_bindings.stored_profile_envelope``, which also refuses a root that is not the
+    platform's ``Component``) reads the root itself. A write of these bytes to ``component_id``
+    when they name another component would overwrite ``component_id`` with that component.
+
+    The one read (``_shared.component_get_xml``) already fails an answer naming another id, for
+    every caller. This adds only what the read does not: the platform ``Component`` root, the
+    id's PRESENCE where required, and the same judgment of bytes no read produced — the
+    previewed and the written XML.
+
+    ``id_required``: a root stating NO id names nothing, and fails when required (every read the
+    canonical arm judges, and its write). The legacy arms tolerate a missing id — it names no OTHER
+    component, and their pre-S3 fixtures omit it — but never another id.
+    """
+    from ...authoring.stored_profile_bindings import stored_profile_envelope
+    from ..integration_builder import canonical_component_id
+
+    envelope = stored_profile_envelope(component_xml)
+    if envelope is None:
+        return False
+    stated = canonical_component_id(envelope[0])
+    if stated is None:
+        return not id_required
+    return stated == canonical_component_id(component_id)
+
+
+def _target_envelope_refusal(during: str) -> Dict[str, Any]:
+    """The refusal when the target's read (or the write) carries bytes that are not its own
+    envelope. Value-free: the ids involved are not echoed."""
+    return {
+        "_success": False,
+        "error": (
+            f"The account answered the {during} of the component being edited with a document "
+            "that is not that component's own envelope (another component id, or no component "
+            "envelope); nothing was written."
+        ),
+        "field": "component_id",
+        "hint": "Retry; if it repeats, read the component with manage_component and check its id.",
+        "boomi_mutation": False,
+    }
+
+
+def _read_target(boomi_client: Boomi, component_id: str, reads=None):
+    """``(current, refusal)``: the edited component's live reading, judged to be ITS OWN.
+
+    ``reads`` (#159 ARCH-r1 #11): the canonical arm's ONE ``workflow.BudgetedComponentReads`` for
+    the whole prepare or apply call. The target is its first read, so the target, the compile, the
+    dependency verification and apply's final re-read all spend one budget; without it the target
+    was read under a standalone deadline and the budget started afresh after it. A read the budget
+    could not make, that failed, or did not parse refuses, value-free; one that timed out serves
+    ``COMPONENT_GET_DEADLINE_EXCEEDED`` as before. The legacy arms read as before
+    (``component_get_xml`` under its own deadline, with its deadline envelope).
+
+    The one read itself refuses an answer naming ANOTHER component
+    (``_shared.ComponentGetIdentityMismatch``, a failed read on both arms). What this adds on
+    top, through ``_envelope_names``: the root must be the platform's ``Component`` envelope,
+    and on the canonical arm it must state its id at all.
+    """
+    if reads is not None:
+        try:
+            current = reads.fetch(component_id, raise_deadline=True)
+        except ComponentGetDeadlineExceeded as exc:
+            return None, component_get_deadline_envelope(exc)
+        if not isinstance(current, dict) or current.get("unparseable"):
+            return None, {
+                "_success": False,
+                "error": (
+                    "The component being edited could not be read from the account (the read "
+                    "failed, timed out, did not parse, or the request's read budget was spent); "
+                    "nothing was written."
+                ),
+                "field": "component_id",
+                "hint": "Retry once the component can be read.",
+                "boomi_mutation": False,
+            }
+    else:
+        try:
+            current = component_get_xml(boomi_client, component_id)
+        except ComponentGetDeadlineExceeded as exc:
+            return None, component_get_deadline_envelope(exc)
+        except Exception as exc:
+            return None, {
+                "_success": False,
+                "error": f"Failed to fetch component {component_id!r}: {_extract_api_error_msg(exc)}",
+                "exception_type": type(exc).__name__,
+                "boomi_mutation": False,
+            }
+    if not _envelope_names(current.get("xml"), component_id, id_required=reads is not None):
+        return None, _target_envelope_refusal("read")
+    return current, None
+
+
 def _require_live_process(patch: Dict[str, Any], current: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """The canonical arm edits a PROCESS only — the live component's own type decides."""
     type_result = _resolve_component_type(patch, current)
@@ -846,17 +956,16 @@ def prepare_component_edit_action(
             "boomi_mutation": False,
         }
 
-    try:
-        current = component_get_xml(boomi_client, component_id)
-    except ComponentGetDeadlineExceeded as exc:
-        return component_get_deadline_envelope(exc)
-    except Exception as exc:
-        return {
-            "_success": False,
-            "error": f"Failed to fetch component {component_id!r}: {_extract_api_error_msg(exc)}",
-            "exception_type": type(exc).__name__,
-            "boomi_mutation": False,
-        }
+    canonical_reads = None
+    if canonical:
+        from ...authoring.workflow import BudgetedComponentReads
+
+        # #159 S3: ONE read budget for this prepare call — from its FIRST read, the
+        # target's (ARCH-r1 #11), through the compile and the dependency verification.
+        canonical_reads = BudgetedComponentReads(boomi_client)
+    current, refusal = _read_target(boomi_client, component_id, reads=canonical_reads)
+    if refusal is not None:
+        return refusal
 
     type_result = _resolve_component_type(patch, current)
     if not type_result.get("_success"):
@@ -870,13 +979,10 @@ def prepare_component_edit_action(
         if refusal is not None:
             refusal.setdefault("boomi_mutation", False)
             return refusal
-        from ...authoring.workflow import BudgetedComponentReads
 
         merged = _compute_canonical_xml(
             boomi_client, profile, component_id, current, patch[_CANONICAL_PATCH_KEY],
-            phase="prepare", layout_mode=effective_layout,
-            # #159 S3: ONE read budget for this prepare call.
-            reads=BudgetedComponentReads(boomi_client),
+            phase="prepare", layout_mode=effective_layout, reads=canonical_reads,
         )
         if merged.get("_success"):
             canonical_binding = {
@@ -892,6 +998,9 @@ def prepare_component_edit_action(
         merged.setdefault("boomi_mutation", False)
         return merged
     merged_xml = merged["merged_xml"]
+    if not _envelope_names(merged_xml, component_id, id_required=canonical):
+        # ARCH-r1 #1: no token ever covers bytes that name another component.
+        return _target_envelope_refusal("preview")
 
     base_version = current["version"]
     base_xml_sha256 = _sha256(current["xml"])
@@ -1051,17 +1160,17 @@ def apply_component_edit_action(
             "boomi_mutation": False,
         }
 
-    try:
-        current = component_get_xml(boomi_client, component_id)
-    except ComponentGetDeadlineExceeded as exc:
-        return component_get_deadline_envelope(exc)
-    except Exception as exc:
-        return {
-            "_success": False,
-            "error": f"Failed to fetch component {component_id!r}: {_extract_api_error_msg(exc)}",
-            "exception_type": type(exc).__name__,
-            "boomi_mutation": False,
-        }
+    canonical_reads = None
+    if canonical:
+        from ...authoring.workflow import BudgetedComponentReads
+
+        # #159 S3: ONE read budget for this apply call — from its FIRST read, the
+        # target's (ARCH-r1 #11), through the compile, the dependency verification
+        # and the final target check below.
+        canonical_reads = BudgetedComponentReads(boomi_client)
+    current, refusal = _read_target(boomi_client, component_id, reads=canonical_reads)
+    if refusal is not None:
+        return refusal
 
     base_version = current["version"]
     base_xml_sha256 = _sha256(current["xml"])
@@ -1093,12 +1202,8 @@ def apply_component_edit_action(
             refusal.setdefault("boomi_mutation", False)
             return refusal
         # RECOMPUTED, never trusted from the token: the compile, the dependency
-        # reads, the materialization and the merge all run again here.
-        from ...authoring.workflow import BudgetedComponentReads
-
-        # #159 S3: ONE read budget for this apply call — the compile, the dependency
-        # verification and the final target check below all spend it.
-        canonical_reads = BudgetedComponentReads(boomi_client)
+        # reads, the materialization and the merge all run again here, on the
+        # call's one read budget (created before the target read above).
         merged = _compute_canonical_xml(
             boomi_client, profile, component_id, current, patch[_CANONICAL_PATCH_KEY],
             phase="apply", layout_mode=effective_layout, reads=canonical_reads,
@@ -1200,6 +1305,10 @@ def apply_component_edit_action(
                 "boomi_mutation": False,
             }
 
+    # #159 ARCH-r1 #1: the ONE write's own invariant, whatever read fed it — the bytes
+    # sent to ``component_id`` are that component's envelope, never another's.
+    if not _envelope_names(merged_xml, component_id, id_required=canonical):
+        return _target_envelope_refusal("write")
     try:
         boomi_client.component.update_component_raw(component_id, merged_xml)
     except Exception as exc:

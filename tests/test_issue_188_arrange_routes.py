@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -131,6 +132,10 @@ def test_the_raw_api_passthrough_never_arranges():
 PROCESS = (FIXTURES / "before" / "p09_unset_dragpoints.saved.xml").read_text(encoding="utf-8")
 ARRANGED = arrange_process_body(PROCESS)[0]
 UNARRANGEABLE = (FIXTURES / "before" / "p17_orphan_cycle.saved.xml").read_text(encoding="utf-8")
+#: The recorded process's OWN id. Every read-merge-write route requests it: since #159
+#: ARCH-r1 #1 the one read fails an answer whose envelope names another component, so a
+#: route asking for any other id would (rightly) read nothing.
+PID = re.search(r'componentId="([^"]+)"', PROCESS).group(1)
 CONNECTOR = ('<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="connector-settings" '
              'name="c"><bns:object><X xmlns="" a="1"/></bns:object></bns:Component>')
 
@@ -181,9 +186,9 @@ def _arranged_once(xml):
 
 @pytest.mark.parametrize("call", [
     lambda c, m: manage_component.manage_component_action(c, "p", "create", config={"xml": PROCESS, **m}),
-    lambda c, m: manage_component.manage_component_action(c, "p", "update", component_id="x", config={"xml": PROCESS, **m}),
+    lambda c, m: manage_component.manage_component_action(c, "p", "update", component_id=PID, config={"xml": PROCESS, **m}),
     lambda c, m: connectors.manage_connector_action(c, "p", "create", config={"xml": PROCESS, **m}),
-    lambda c, m: connectors.manage_connector_action(c, "p", "update", component_id="x", config={"xml": PROCESS, **m}),
+    lambda c, m: connectors.manage_connector_action(c, "p", "update", component_id=PID, config={"xml": PROCESS, **m}),
 ], ids=["component-create", "component-update", "connector-create", "connector-update"])
 def test_raw_writes_arrange_once_and_preserve_passes_through(call):
     client = _Client()
@@ -206,7 +211,7 @@ def test_raw_writes_arrange_once_and_preserve_passes_through(call):
 def test_raw_writes_refuse_before_any_transport(router, action):
     route = (manage_component.manage_component_action if router == "component"
              else connectors.manage_connector_action)
-    extra = {"component_id": "x"} if action == "update" else {}
+    extra = {"component_id": PID} if action == "update" else {}
     for body, mode, code in ((UNARRANGEABLE, None, "PROCESS_LAYOUT_UNARRANGEABLE"),
                              ("<bns:Component xmlns:bns='u' type='process'><bns:object>", None,
                               "PROCESS_LAYOUT_XML_INVALID"),
@@ -252,29 +257,29 @@ def test_a_receipt_submits_its_bytes_unchanged_and_a_stale_one_refuses():
 
 def test_clone_arranges_the_final_body_and_preserve_keeps_it():
     client = _Client()
-    result = manage_component.manage_component_action(client, "p", "clone", component_id="src", config={"name": "Copy"})
+    result = manage_component.manage_component_action(client, "p", "clone", component_id=PID, config={"name": "Copy"})
     assert result["_success"] and result["layout"]["reason"] == "arranged"
     (sent,) = _sent(client)
     assert 'name="Copy"' in sent and compare(sent, ARRANGED) == []
     client = _Client()
     result = manage_component.manage_component_action(
-        client, "p", "clone", component_id="src", config={"name": "Copy", "layout": "preserve"})
+        client, "p", "clone", component_id=PID, config={"name": "Copy", "layout": "preserve"})
     (sent,) = _sent(client)
     assert compare(sent, PROCESS) == [] and result["layout"]["mode"] == "preserve"
 
 
 def test_metadata_routes_keep_the_live_geometry():
     client = _Client()
-    result = manage_component.manage_component_action(client, "p", "update", component_id="x", config={"name": "Renamed"})
+    result = manage_component.manage_component_action(client, "p", "update", component_id=PID, config={"name": "Renamed"})
     (sent,) = _sent(client)
     assert compare(sent, PROCESS) == [] and result["layout"]["reason"] == "metadata_only"
     client = _Client()
-    connectors.manage_connector_action(client, "p", "update", component_id="x", config={"name": "Renamed"})
+    connectors.manage_connector_action(client, "p", "update", component_id=PID, config={"name": "Renamed"})
     (sent,) = _sent(client)
     assert compare(sent, PROCESS) == []
     from boomi_mcp.categories import folders
     client = _Client()
-    folders._action_move_component(client, "p", component_id="x", target_folder_id="F2")
+    folders._action_move_component(client, "p", component_id=PID, target_folder_id="F2")
     (sent,) = _sent(client)
     assert compare(sent, PROCESS) == []
 
@@ -282,14 +287,14 @@ def test_metadata_routes_keep_the_live_geometry():
 def test_merge_arranges_and_its_diff_shows_the_submitted_coordinates():
     client = _Client()
     result = analyze_component.analyze_component_action(
-        client, "p", "merge", component_id="x", config={"source_version": 1})
+        client, "p", "merge", component_id=PID, config={"source_version": 1})
     assert result["_success"], result
     (sent,) = _sent(client)
     assert compare(sent, ARRANGED) == [] and result["layout"]["reason"] == "arranged"
     assert 'x="48.0"' in result["diff_preview"]  # coordinate churn is visible
     client = _Client()
     result = analyze_component.analyze_component_action(
-        client, "p", "merge", component_id="x", config={"source_version": 1, "layout": "preserve"})
+        client, "p", "merge", component_id=PID, config={"source_version": 1, "layout": "preserve"})
     (sent,) = _sent(client)
     assert compare(sent, PROCESS) == []
 
@@ -302,7 +307,7 @@ def _structured_update(client, monkeypatch, **kw):
     from boomi_mcp.categories.components.builders._process_preservation import (
         PROCESS_PRESERVATION_POLICY)
     spec = ib.IntegrationComponentSpec(key="p", type="process", action="update", name="p", config={})
-    return ib._apply_structured_update(client, "p", "x", spec, PROCESS, PROCESS_PRESERVATION_POLICY, **kw)
+    return ib._apply_structured_update(client, "p", PID, spec, PROCESS, PROCESS_PRESERVATION_POLICY, **kw)
 
 
 def test_the_structured_update_digests_the_arranged_bytes(monkeypatch):
@@ -336,7 +341,7 @@ def test_a_structured_update_layout_refusal_precedes_pre_push_and_transport(monk
     from boomi_mcp.categories.components.builders._process_preservation import (
         PROCESS_PRESERVATION_POLICY)
     spec = ib.IntegrationComponentSpec(key="p", type="process", action="update", name="p", config={})
-    result = ib._apply_structured_update(client, "p", "x", spec, PROCESS, PROCESS_PRESERVATION_POLICY,
+    result = ib._apply_structured_update(client, "p", PID, spec, PROCESS, PROCESS_PRESERVATION_POLICY,
                                          on_pre_push=lambda: pre_push.append(1))
     assert result["error_code"] == "PROCESS_LAYOUT_UNARRANGEABLE"
     assert result["write_attempted"] is False and pre_push == [] and _sent(client) == []
@@ -401,7 +406,7 @@ def safe_edit_process(monkeypatch):
                         lambda *a, **k: {"_success": True, "readings": {}})
     monkeypatch.setattr(_workflow, "compile_authoring_request_v1", lambda *a, **k: (
         SimpleNamespace(revision_binding=SimpleNamespace(compile_hash="sha256:" + "a" * 64)),
-        SimpleNamespace(component_plan_unjudged=False, resolved_component_ids={"root": "x"},
+        SimpleNamespace(component_plan_unjudged=False, resolved_component_ids={"root": PID},
                         materialization_plans={"root": object()}, symbols=None,
                         connector_resolution_snapshot=None),
     ))
@@ -416,10 +421,10 @@ def safe_edit_process(monkeypatch):
 def test_safe_edit_prepare_and_apply_write_the_previewed_bytes(safe_edit_process, mode):
     patch = dict(safe_edit_process, **({"layout": mode} if mode else {}))
     client = _Client(live=PROCESS.replace('name="AFL', 'name="OLD', 1))
-    prep = safe_edit_component.prepare_component_edit_action(client, "p", "x", patch)
+    prep = safe_edit_component.prepare_component_edit_action(client, "p", PID, patch)
     assert prep["_success"], prep
     apply = safe_edit_component.apply_component_edit_action(
-        client, "p", "x", patch, prep["confirmation_token"], confirm_apply=True)
+        client, "p", PID, patch, prep["confirmation_token"], confirm_apply=True)
     assert apply["_success"], apply
     (sent,) = _sent(client)
     assert sent == (PROCESS if mode else ARRANGED)
@@ -431,10 +436,10 @@ def test_safe_edit_prepare_and_apply_write_the_previewed_bytes(safe_edit_process
 
 def test_safe_edit_internal_preserve_needs_no_patch_key(safe_edit_process):
     client = _Client()
-    prep = safe_edit_component.prepare_component_edit_action(client, "p", "x", safe_edit_process,
+    prep = safe_edit_component.prepare_component_edit_action(client, "p", PID, safe_edit_process,
                                                              layout_mode="preserve")
     apply = safe_edit_component.apply_component_edit_action(
-        client, "p", "x", safe_edit_process, prep["confirmation_token"], confirm_apply=True,
+        client, "p", PID, safe_edit_process, prep["confirmation_token"], confirm_apply=True,
         layout_mode="preserve")
     assert apply["_success"] and _sent(client) == [PROCESS]
 
@@ -442,33 +447,33 @@ def test_safe_edit_internal_preserve_needs_no_patch_key(safe_edit_process):
 def test_safe_edit_refuses_old_tokens_and_changed_modes(safe_edit_process):
     import base64, json
     client = _Client()
-    prep = safe_edit_component.prepare_component_edit_action(client, "p", "x", safe_edit_process)
+    prep = safe_edit_component.prepare_component_edit_action(client, "p", PID, safe_edit_process)
     token = json.loads(base64.urlsafe_b64decode(prep["confirmation_token"]))
     old = {k: token[k] for k in ("component_id", "version", "base_xml_sha256", "patch_sha256")}
     old_token = base64.urlsafe_b64encode(json.dumps(old).encode()).decode()
     result = safe_edit_component.apply_component_edit_action(
-        client, "p", "x", safe_edit_process, old_token, confirm_apply=True)
+        client, "p", PID, safe_edit_process, old_token, confirm_apply=True)
     assert result["error_code"] == "COMPONENT_EDIT_TOKEN_INVALID" and _sent(client) == []
     result = safe_edit_component.apply_component_edit_action(
-        client, "p", "x", safe_edit_process, prep["confirmation_token"], confirm_apply=True,
+        client, "p", PID, safe_edit_process, prep["confirmation_token"], confirm_apply=True,
         layout_mode="preserve")
     assert result["error_code"] == "COMPONENT_EDIT_TOKEN_INVALID" and _sent(client) == []
 
 
 def test_safe_edit_refuses_bytes_that_differ_from_the_preview(safe_edit_process, monkeypatch):
     client = _Client()
-    prep = safe_edit_component.prepare_component_edit_action(client, "p", "x", safe_edit_process)
+    prep = safe_edit_component.prepare_component_edit_action(client, "p", PID, safe_edit_process)
     monkeypatch.setattr(safe_edit_component, "merge_for_update",
                         lambda current, built, policy: built.replace('userlabel="', 'userlabel="z', 1))
     result = safe_edit_component.apply_component_edit_action(
-        client, "p", "x", safe_edit_process, prep["confirmation_token"], confirm_apply=True)
+        client, "p", PID, safe_edit_process, prep["confirmation_token"], confirm_apply=True)
     assert result["error_code"] == "COMPONENT_EDIT_DRIFT_DETECTED" and _sent(client) == []
 
 
 def test_safe_edit_layout_refusal_is_read_only(safe_edit_process, monkeypatch):
     monkeypatch.setattr(safe_edit_component, "merge_for_update", lambda current, built, policy: UNARRANGEABLE)
     client = _Client()
-    prep = safe_edit_component.prepare_component_edit_action(client, "p", "x", safe_edit_process)
+    prep = safe_edit_component.prepare_component_edit_action(client, "p", PID, safe_edit_process)
     assert prep["error_code"] == "PROCESS_LAYOUT_UNARRANGEABLE" and prep["boomi_mutation"] is False
     assert _sent(client) == []
 
@@ -641,14 +646,14 @@ def test_a_legacy_process_create_is_placed_then_arranged_once(mode):
 def test_every_hook_accepts_an_explicit_internal_preserve(monkeypatch):
     calls = {
         "create_component": lambda c: manage_component.create_component(c, "p", {"xml": PROCESS}, layout_mode="preserve"),
-        "update_component": lambda c: manage_component.update_component(c, "p", "x", {"xml": PROCESS}, layout_mode="preserve"),
-        "clone_component": lambda c: manage_component.clone_component(c, "p", "x", {"name": "C"}, layout_mode="preserve"),
+        "update_component": lambda c: manage_component.update_component(c, "p", PID, {"xml": PROCESS}, layout_mode="preserve"),
+        "clone_component": lambda c: manage_component.clone_component(c, "p", PID, {"name": "C"}, layout_mode="preserve"),
         "create_connector": lambda c: connectors.create_connector(c, "p", {"xml": PROCESS}, layout_mode="preserve"),
-        "update_connector": lambda c: connectors.update_connector(c, "p", "x", {"xml": PROCESS}, layout_mode="preserve"),
-        "merge_versions": lambda c: analyze_component.merge_versions(c, "p", "x", {"source_version": 1}, layout_mode="preserve"),
+        "update_connector": lambda c: connectors.update_connector(c, "p", PID, {"xml": PROCESS}, layout_mode="preserve"),
+        "merge_versions": lambda c: analyze_component.merge_versions(c, "p", PID, {"source_version": 1}, layout_mode="preserve"),
         "manage_component_action": lambda c: manage_component.manage_component_action(c, "p", "create", layout_mode="preserve", config={"xml": PROCESS}),
         "manage_connector_action": lambda c: connectors.manage_connector_action(c, "p", "create", layout_mode="preserve", config={"xml": PROCESS}),
-        "analyze_component_action": lambda c: analyze_component.analyze_component_action(c, "p", "merge", component_id="x", layout_mode="preserve", config={"source_version": 1}),
+        "analyze_component_action": lambda c: analyze_component.analyze_component_action(c, "p", "merge", component_id=PID, layout_mode="preserve", config={"source_version": 1}),
     }
     for name, call in calls.items():
         client = _Client()
@@ -769,6 +774,6 @@ def test_a_structured_connector_update_keeps_preserve_for_a_process_sibling(monk
                 "auth": "NONE"})
     client = _Client()
     client.connector = MagicMock()  # connector-type validation reads the account's catalog
-    result = ib._execute_component(client, "p", comp, comp.config, target_id="x", layout_mode="preserve")
+    result = ib._execute_component(client, "p", comp, comp.config, target_id=PID, layout_mode="preserve")
     assert seen == ["preserve"], (seen, result)
     assert _sent(client) == [PROCESS]

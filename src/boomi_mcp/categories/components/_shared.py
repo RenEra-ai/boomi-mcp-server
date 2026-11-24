@@ -98,6 +98,46 @@ class StoredComponentXmlUnparseable(ET.ParseError):
         super().__init__(f"Component {component_id!r} returned a document that does not parse")
 
 
+class ComponentGetIdentityMismatch(Exception):
+    """A component GET SUCCEEDED, but the envelope the account answered names ANOTHER
+    component (#159 ARCH-r1 #1, the structural fix of the envelope-identity class).
+
+    A READ FAILURE, routed exactly like a failed GET (a plain ``Exception``, never a
+    ``ParseError``): the bytes are not the requested component's, so no caller may
+    read, judge, merge or write them — every read-merge-write route would otherwise
+    write component B's bytes to component A. Never carries the answered bytes, and
+    its message names neither id (value-free: callers serve it as the read error)."""
+
+    def __init__(self):
+        super().__init__(
+            "GET answered with a component envelope that names another component"
+        )
+
+
+def requested_component_base_id(requested: Any) -> str:
+    """The component a GET request names: the part before ``~``.
+
+    The platform's component GET takes ``{componentId}`` or the qualified forms
+    ``{componentId}~{branchId}`` and ``{componentId}~{version}``
+    (``analyze_component.merge_component``'s branch and version modes, its verify
+    read); the answered envelope's ``componentId`` is the bare id in every form."""
+    return str(requested).split("~", 1)[0]
+
+
+def _envelope_names_requested(stated_id: Any, requested: Any) -> bool:
+    """Whether an answered envelope's ``componentId`` names the requested component.
+
+    Compared under the one id spelling (``integration_builder.canonical_component_id``:
+    trimmed, a GUID compared lowercase). A blank stated id names nothing and is not a
+    mismatch here (the legacy fixtures omit it; readers that need it present check it)."""
+    from ..integration_builder import canonical_component_id
+
+    stated = canonical_component_id(stated_id)
+    if stated is None:
+        return True
+    return stated == canonical_component_id(requested_component_base_id(requested))
+
+
 class ComponentGetDeadlineExceeded(Exception):
     """A synchronous component XML GET exceeded its wall-clock deadline.
 
@@ -303,6 +343,14 @@ def component_get_xml(
         # its own ParseError subclass so existing ParseError handlers behave as
         # before, carrying the bytes so a caller can classify them itself.
         raise StoredComponentXmlUnparseable(component_id, raw_xml) from exc
+
+    # #159 ARCH-r1 #1 — THE ONE READ's invariant: the answered envelope must be the
+    # REQUESTED component's. Checked before the dict below, whose ``component_id``
+    # falls back to the requested id and so cannot tell. A different id is a read
+    # failure for every caller (each already routes a failed GET); a missing id is
+    # not a different one and keeps the fallback.
+    if not _envelope_names_requested(root.attrib.get('componentId'), component_id):
+        raise ComponentGetIdentityMismatch()
 
     return {
         'component_id': root.attrib.get('componentId', component_id),
