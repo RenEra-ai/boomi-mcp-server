@@ -1029,11 +1029,11 @@ def _route_projection(
     modes: Dict[str, str] = {}
     binding_modes: Dict[str, str] = {}
     for index, (target, connection, operation) in enumerate(target_components):
-        # The method is read off the operation's CANDIDATE config: derivable
-        # only when apply writes that config (``_apply_writes``).
-        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
-            return None
-        method = (operation.config or {}).get("method")
+        # The method is read off the operation's CANDIDATE config: served only
+        # when apply writes that config (``_apply_writes``). Otherwise the
+        # endpoint and its leg are served without it (#159 arch r2-01).
+        written = _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is True
+        method = (operation.config or {}).get("method") if written else None
         endpoint = _endpoint_row(
             target_token if index == 0 else "{0}_{1}".format(target_token, slugify(target.part_key)),
             "target",
@@ -1052,9 +1052,10 @@ def _route_projection(
         leg_summary: Dict[str, Any] = {
             "part_key": target.part_key,
             "leg": leg,
-            "method": method,
             "binding_mode": endpoint.binding_mode,
         }
+        if written:
+            leg_summary["method"] = method
         if target.expected_status_codes:
             leg_summary["expected_status_codes"] = tuple(target.expected_status_codes)
         if staging is not None:
@@ -1245,13 +1246,16 @@ def _listener_endpoint_extra(
     ``effective_api_service_route`` over that component's route and the linked
     operation, served with ``publish_mode: api_service``.
 
-    Both are read off CANDIDATE configuration, so each is served only when apply
-    WRITES that configuration (:func:`_apply_writes`). An API Service apply
-    binds without writing keeps its existing routes — the route read off the
-    candidate names nothing apply wires (#159 architect review r1, finding 4) —
-    and a listener operation apply binds without writing keeps its existing
-    object and type. Either way the endpoint cannot be derived: None, and the
-    bare-WSS formula is never offered in its place.
+    None when that derivation fails (two services route to the process, the
+    route resolves no method, the operation names no object or type).
+
+    Every key is read off CANDIDATE configuration, so the derived keys are
+    served only when apply WRITES what they are read from
+    (:func:`_apply_writes`), and ``{}`` otherwise: a listener operation apply
+    binds without writing keeps its stored object and type, and an API Service
+    apply binds without writing keeps its stored routes, so the route read off
+    the candidate names nothing apply wires (#159 architect review r1, finding
+    4). The bare-WSS formula is never offered in a reused service's place.
     """
     from ..categories.components.builders._api_service_paths import (
         effective_api_service_route,
@@ -1259,9 +1263,8 @@ def _listener_endpoint_extra(
     )
     from ..patterns.primitives.wss_listen import compute_wss_endpoint
 
-    if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
-        return None
     op_config = dict(operation.config or {})
+    written = [operation]
     wanted = REF_PREFIX + process_key
     services = []
     for component in components:
@@ -1275,27 +1278,34 @@ def _listener_endpoint_extra(
         return None
     if services:
         service, route = services[0]
-        if _apply_writes(service, reused_keys, existing_ids, conflict_policy) is not True:
-            return None
+        written.append(service)
         config = service.config or {}
         resolved = effective_api_service_route(
             config.get("base_url_path"), dict(route), op_config
         )
         if not resolved.get("method"):
             return None
-        return {
+        extra = {
             "method": resolved["method"],
             "endpoint_path": resolved["path"],
             "publish_mode": "api_service",
         }
-    object_name = str(op_config.get("object_name") or "").strip()
-    operation_type = str(op_config.get("operation_type") or "").strip()
-    if not object_name or not operation_type:
-        return None
-    return {
-        "method": wss_http_method(op_config.get("input_type")),
-        "endpoint_path": compute_wss_endpoint(operation_type, object_name),
-    }
+    else:
+        object_name = str(op_config.get("object_name") or "").strip()
+        operation_type = str(op_config.get("operation_type") or "").strip()
+        if not object_name or not operation_type:
+            return None
+        extra = {
+            "method": wss_http_method(op_config.get("input_type")),
+            "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+        }
+    if any(
+        _apply_writes(component, reused_keys, existing_ids, conflict_policy) is not True
+        for component in written
+    ):
+        # #159 architect review r2-01: the row stands; only these keys go.
+        return {}
+    return extra
 
 
 def _linear_endpoint(
@@ -1312,22 +1322,34 @@ def _linear_endpoint(
     existing_ids,
     conflict_policy=None,
 ):
-    """One linear endpoint row, or None when a served key cannot be derived."""
+    """One linear endpoint row, or None when its route fact does not resolve.
+
+    A key read off the CANDIDATE configuration of a component apply does not
+    write (:func:`_apply_writes`) is omitted, and the row is served without it.
+    """
     from ..models.derived_flows import DerivedEndpointRowV1
 
     op_config = operation.config or {}
+
+    def writes(component) -> bool:
+        return _apply_writes(component, reused_keys, existing_ids, conflict_policy) is True
+
     if family == "wss":
         extra = _listener_endpoint_extra(
             operation, components, process_key, reused_keys, existing_ids, conflict_policy
         )
         if extra is None:
             return None
-        # Served only for an operation apply writes, so the binding is a create.
+        # The binding is apply's answer for the operation, as ``_endpoint_row``
+        # answers it for a connection.
+        reuse = bool(op_config.get("reference_only")) or (
+            _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is False
+        )
         return DerivedEndpointRowV1(
             key=token,
             type="wss",
             direction=direction,
-            binding_mode="create",
+            binding_mode="reuse" if reuse else "create",
             executable=False,
             **extra,
         )
@@ -1336,11 +1358,8 @@ def _linear_endpoint(
     extra: Dict[str, Any] = {}
     method = None
     if family == "rest":
-        # Read off the operation's CANDIDATE config: served only when apply
-        # writes it (``_apply_writes``), else the endpoint is not derivable.
-        if _apply_writes(operation, reused_keys, existing_ids, conflict_policy) is not True:
-            return None
-        method = op_config.get("method")
+        if writes(operation):
+            method = op_config.get("method")
         if fact.expected_status_codes is not None:
             extra["expected_status_codes"] = tuple(fact.expected_status_codes)
     elif family == "database" and direction == "target":
@@ -1348,15 +1367,11 @@ def _linear_endpoint(
         spelling = DB_WRITE_OPERATION_SPELLINGS.get(str(op_config.get("operation_mode") or ""))
         if not _is_write_profile(profile) or spelling is None:
             return None
-        # Both read off CANDIDATE config: served only when apply writes the
-        # operation and the write profile (``_apply_writes``).
-        if any(
-            _apply_writes(component, reused_keys, existing_ids, conflict_policy) is not True
-            for component in (operation, profile)
-        ):
-            return None
-        extra["operation"] = spelling
-        extra["statement_type"] = (profile.config or {}).get("statement_type")
+        # Each read off its own component's CANDIDATE config.
+        if writes(operation):
+            extra["operation"] = spelling
+        if writes(profile):
+            extra["statement_type"] = (profile.config or {}).get("statement_type")
     return _endpoint_row(
         token,
         direction,
@@ -1379,7 +1394,8 @@ def _linear_route_projection(
     does not resolve against the root and components: one ``map_ref``, the
     source connector node before it and the target connector node after it,
     both binding the operations the facts name, each family in the closed
-    tables, and every endpoint key derivable.
+    tables, and every endpoint row derivable. A key read off a component apply
+    does not write is omitted from its row, never a reason for None.
     """
     from ..models.derived_flows import (
         DerivedConnectorFlowV1,
