@@ -608,13 +608,11 @@ GOVERNANCE_NAME_COLLISION = "GOVERNANCE_NAME_COLLISION"
 #: A supporting component with no explicit placement/name is owned by two
 #: roots whose governance disagrees.
 GOVERNANCE_INHERITANCE_AMBIGUOUS = "GOVERNANCE_INHERITANCE_AMBIGUOUS"
-#: A recipe per-root envelope names a key no composed root has.
+#: Retired producer (#159 S3): recipe per-root envelopes no longer exist.
 GOVERNANCE_ENVELOPE_UNMATCHED = "GOVERNANCE_ENVELOPE_UNMATCHED"
-#: Two recipe per-root envelopes name the same root.
+#: Retired producer (#159 S3): recipe per-root envelopes no longer exist.
 GOVERNANCE_ENVELOPE_DUPLICATE = "GOVERNANCE_ENVELOPE_DUPLICATE"
-#: Governance for one root arrives from two sources — a typed envelope AND the
-#: lifted component's config/name — which would make one of them a silent
-#: duplicate authority.
+#: Retired producer (#159 S3): recipe per-root envelopes no longer exist.
 GOVERNANCE_SOURCE_CONFLICT = "GOVERNANCE_SOURCE_CONFLICT"
 #: A connection binding both reuses an existing component and carries inline
 #: creation settings, or names two disagreeing reuse identities.
@@ -2559,7 +2557,9 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="governance",
             retryable=False,
             summary=(
-                "A recipe per-root envelope names a component key that no "
+                "No longer produced: recipe per-root envelopes "
+                "(process_envelopes) were retired in #159 S3. Formerly: a "
+                "recipe per-root envelope named a component key that no "
                 "composed process root carries."
             ),
             owner="#157",
@@ -2568,7 +2568,11 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             code=GOVERNANCE_ENVELOPE_DUPLICATE,
             category="governance",
             retryable=False,
-            summary="Two recipe per-root envelopes name the same process root.",
+            summary=(
+                "No longer produced: recipe per-root envelopes "
+                "(process_envelopes) were retired in #159 S3. Formerly: two "
+                "recipe per-root envelopes named the same process root."
+            ),
             owner="#157",
         ),
         ErrorCodeSpec(
@@ -2576,9 +2580,11 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             category="governance",
             retryable=False,
             summary=(
-                "Governance for one process root was supplied both by a typed "
+                "No longer produced: recipe per-root envelopes "
+                "(process_envelopes) were retired in #159 S3. Formerly: "
+                "governance for one process root was supplied both by a typed "
                 "per-root envelope and by the lifted component's own name or "
-                "config; only the typed envelope is an authority."
+                "config."
             ),
             owner="#157",
         ),

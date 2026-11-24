@@ -190,7 +190,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 2349,
+      "evidence_line": 2348,
       "form": "component.update_component_raw(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-86ab577f",
@@ -199,7 +199,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 7928,
+      "evidence_line": 7926,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-c52b7626",
@@ -208,7 +208,7 @@
     {
       "census": "component_xml_write",
       "count": 8,
-      "evidence_line": 3025,
+      "evidence_line": 3024,
       "form": "create_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-1ee76aa9",
@@ -217,7 +217,7 @@
     {
       "census": "component_xml_write",
       "count": 1,
-      "evidence_line": 3452,
+      "evidence_line": 3451,
       "form": "update_component(...)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "WR-a22eb226",
@@ -1144,7 +1144,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9551,
+      "evidence_line": 9549,
       "form": "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-21fe473d",
@@ -1153,7 +1153,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 9920,
+      "evidence_line": 9918,
       "form": "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-aabdab32",
@@ -1162,7 +1162,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7853,
+      "evidence_line": 7851,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-35437114",
@@ -1171,7 +1171,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 7928,
+      "evidence_line": 7926,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-3999ba54",
@@ -1180,7 +1180,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 9,
-      "evidence_line": 2896,
+      "evidence_line": 2895,
       "form": "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e2d2ad35",
@@ -1189,7 +1189,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 8,
-      "evidence_line": 3025,
+      "evidence_line": 3024,
       "form": "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-9d79c02d",
@@ -1198,7 +1198,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2857,
+      "evidence_line": 2856,
       "form": "create_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-49361ab2",
@@ -1207,7 +1207,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 3452,
+      "evidence_line": 3451,
       "form": "update_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-6c155310",
@@ -1216,7 +1216,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 2937,
+      "evidence_line": 2936,
       "form": "update_connector(...) [legacy-bearing, src/boomi_mcp/categories/components/connectors.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-dcac7790",
@@ -1225,7 +1225,7 @@
     {
       "census": "legacy_transitive_call",
       "count": 1,
-      "evidence_line": 11567,
+      "evidence_line": 11565,
       "form": "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "LT-e5bb8b19",
@@ -1396,7 +1396,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "form": "config.get('process_kind')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-79d659fc",
@@ -1405,7 +1405,7 @@
     {
       "census": "process_kind_consumer",
       "count": 1,
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "form": "config.get('process_type')",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "PC-f2498867",
@@ -2098,7 +2098,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 10069,
+      "evidence_line": 10067,
       "form": "'Component' (unclassified Component-endpoint literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-37ab9607",
@@ -2107,7 +2107,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "form": "'process_kind' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-bfccf421",
@@ -2116,7 +2116,7 @@
     {
       "census": "unclassified_reference",
       "count": 1,
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "form": "'process_type' (unclassified selector literal)",
       "path": "src/boomi_mcp/categories/integration_builder.py",
       "row_id": "UR-ad8d292d",
@@ -3358,7 +3358,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path.",
-      "evidence_line": 2349,
+      "evidence_line": 2348,
       "forms": [
         "component.update_component_raw(...)"
       ],
@@ -3371,7 +3371,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded.",
-      "evidence_line": 7928,
+      "evidence_line": 7926,
       "forms": [
         "create_component(...)"
       ],
@@ -3384,7 +3384,7 @@
     {
       "census": "component_xml_write",
       "disposition": "WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots.",
-      "evidence_line": 3025,
+      "evidence_line": 3024,
       "forms": [
         "create_component(...)",
         "update_component(...)"
@@ -4004,7 +4004,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 9551,
+      "evidence_line": 9549,
       "forms": [
         "_execute_canonical_process(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "_execute_component(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
@@ -4018,7 +4018,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 7853,
+      "evidence_line": 7851,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]"
@@ -4032,7 +4032,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 2857,
+      "evidence_line": 2856,
       "forms": [
         "_apply_structured_update(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]",
         "create_component(...) [legacy-bearing, src/boomi_mcp/categories/components/manage_component.py]",
@@ -4049,7 +4049,7 @@
     {
       "census": "legacy_transitive_call",
       "disposition": "follow the callee's row; this is an edge, not a site",
-      "evidence_line": 11567,
+      "evidence_line": 11565,
       "forms": [
         "_apply_plan(...) [legacy-bearing, src/boomi_mcp/categories/integration_builder.py]"
       ],
@@ -4236,7 +4236,7 @@
     {
       "census": "process_kind_consumer",
       "disposition": "delete with the legacy consumer",
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "forms": [
         "config.get('process_kind')",
         "config.get('process_type')"
@@ -4842,7 +4842,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 10069,
+      "evidence_line": 10067,
       "forms": [
         "'Component' (unclassified Component-endpoint literal)"
       ],
@@ -4855,7 +4855,7 @@
     {
       "census": "unclassified_reference",
       "disposition": "residue: a watched name mentioned in a shape the census does not classify",
-      "evidence_line": 4267,
+      "evidence_line": 4266,
       "forms": [
         "'process_kind' (unclassified selector literal)",
         "'process_type' (unclassified selector literal)"

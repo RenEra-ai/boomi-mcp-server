@@ -249,7 +249,6 @@ from ..errors import (
     UPDATE_PRESERVATION_PUSH_FAILED,
     PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,
     PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT,
-    GOVERNANCE_ENVELOPE_DUPLICATE,
     GOVERNANCE_FLOWS_OUTPUT_ONLY,
     GOVERNANCE_NAME_UNRESOLVED,
     GOVERNANCE_RECORDED_INTENT_INVALID,
@@ -6811,12 +6810,11 @@ _NAMED_VALIDATION_CODES = {
         PROCESS_COMPONENT_REFERENCE_INVALID_FORMAT
     ),
     # #157 (M12.19): the governance models' own custom types. Every
-    # `PydanticCustomError` type string the authored envelope, the recipe
-    # per-root envelope and the recorded-intent models raise has a row here,
+    # `PydanticCustomError` type string the authored envelope and the
+    # recorded-intent models raise has a row here,
     # and a two-way test pins it against the models — a governance refusal
     # must serve its named code, never collapse to the generic input code.
     "governance_name_unresolved": GOVERNANCE_NAME_UNRESOLVED,
-    "governance_envelope_duplicate": GOVERNANCE_ENVELOPE_DUPLICATE,
     "governance_retired_spelling": GOVERNANCE_RETIRED_SPELLING,
     "governance_flows_output_only": GOVERNANCE_FLOWS_OUTPUT_ONLY,
     "governance_recorded_intent_invalid": GOVERNANCE_RECORDED_INTENT_INVALID,
