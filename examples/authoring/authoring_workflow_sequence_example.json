@@ -2,30 +2,32 @@
   "example_not_template": true,
   "is_template": false,
   "template_status": "example_only_not_reusable_template",
-  "purpose": "Show the recommended profile-first, archetype-first authoring workflow as data. The live, always-current version is returned by get_schema_template(schema_name='workflow:build_integration_from_description') and list_capabilities()['workflows'].",
+  "purpose": "Show the recommended authoring workflow as data. Its workflow object is an exact copy of the served build_integration_from_description workflow (list_capabilities()['workflows']), pinned by a test; fetch the live sequence from the server rather than copying this file.",
   "do_not_reuse": "This file illustrates the step sequence only. Fetch the live sequence from the server instead of copying this file — the server copy is canonical and may have moved on.",
   "workflow_name": "build_integration_from_description",
   "workflow": {
-    "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
+    "description": "Author an integration: FIRST consult design_doctrine and select patterns by capability_status, THEN prefer an executable recipe; fall back to direct ProcessIR units only when no recipe fits.",
     "steps": [
       "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
-      "2. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
-      "3. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
-      "4. build_integration(action='plan', config=<an authoring_request whose recipe intent invokes the chosen recipe_id + recipe_version>) → semantic validation and the integration_spec_preview (no Boomi mutation)",
-      "5. build_integration(action='compile', ...) → capability revision + compile hash (no Boomi mutation)",
-      "6. review_transformation(action='validate_unmapped', ...) → confirm no unmapped/invalid mappings BEFORE apply",
-      "7. build_integration(action='apply', ...) → execute ordered component creation/update",
-      "8. build_integration(action='verify', ...) → verify created components and dependencies",
-      "9. orchestrate_deploy(..., dry_run=true) → preview package/deploy/runtime-bind; re-run with dry_run=false to execute"
+      "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing a recipe; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff). For cache / dynamic-property / state-handoff intents also consult get_schema_template(schema_name='cache_property_authoring') (per-term capability_status + provenance, #124) — plan-time lineage validation rejects unprovable cache/property reads before any mutation.",
+      "3. list_integration_archetypes() → discover the executable recipe catalog: recipe_id + exact recipe_version per row (read-only, no Boomi mutation)",
+      "4. get_integration_archetype(name='<recipe_id>', recipe_version='<version>') → inspect the descriptor (capability_notes, limitations, examples), input_schema and, where declared, component_material_schema",
+      "5. suggest_connection_reuse(profile='...', connector_type='...', endpoint_hint='...') → check for an EXISTING secured connection to reuse (reference_only + conflict_policy='reuse') before authoring a new one; feed any returned reuse binding into the recipe input (binding_mode='reuse') or the request's base_components (read-only, no Boomi mutation)",
+      "6. build_integration(action='plan', config='{\"authoring_request\": {\"contract_version\": \"2\", \"intent\": {\"intent_kind\": \"recipe\", \"integration_name\": \"...\", \"invocations\": [{\"recipe_id\": \"...\", \"recipe_version\": \"...\", \"invocation_id\": \"...\", \"raw_input\": {...}, \"component_material\": {...}}]}}}') → semantic validation, gaps and the authoring_result.integration_spec_preview (no Boomi mutation)",
+      "7. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <authoring_result.integration_spec_preview from step 6>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+      "8. build_integration(action='compile', config='{\"authoring_request\": <request from step 6>}') → capability revision + compile hash (no Boomi mutation)",
+      "9. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {<request from step 6>, \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → execute ordered component creation/update",
+      "10. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+      "11. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test)."
     ],
     "fallback": {
-      "when": "No archetype fits — an integration shape not yet covered by the registry.",
+      "when": "No recipe fits — e.g., an integration shape not yet covered by the recipe registry.",
       "steps": [
-        "F1. get_schema_template(schema_name='IntegrationSpecV1') → get the spec JSON schema",
-        "F2. build_integration(action='plan', ...) → validate the hand-authored spec",
-        "F3. build_integration(action='apply', ...) → execute",
-        "F4. build_integration(action='verify', ...) → verify",
-        "F5. orchestrate_deploy(..., dry_run=true) → preview, then re-run with dry_run=false"
+        "F1. get_schema_template(schema_name='AuthoringRequestV1') → the exact request schema; author ProcessIR units (intent_kind='process_ir') against get_schema_template(schema_name='ProcessIRV1')",
+        "F2. build_integration(action='plan', config='{\"authoring_request\": ...}') → validate the hand-authored units, then action='compile' for the compile hash",
+        "F3. build_integration(action='apply', config='{\"dry_run\": false, \"authoring_request\": {..., \"expected_capability_revision\": \"...\", \"expected_compile_hash\": \"...\"}}') → execute",
+        "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
+        "F5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview the deploy plan; re-run with dry_run=false to package → deploy → bind runtime → optional schedule/test."
       ]
     }
   }

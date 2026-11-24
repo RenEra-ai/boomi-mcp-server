@@ -2028,6 +2028,20 @@ def test_census_detects_a_database_to_api_sync_flow_sequence_example(arm):
 _NARRATIVE_EXAMPLE = "examples/authoring/authoring_workflow_sequence_example.json"
 
 
+def test_the_workflow_example_is_the_served_authoring_workflow():
+    """#159 ARCH-r2 #4 (structural, second instance of ARCH-r1 #12): the example's ``workflow``
+    is not a hand copy of the served workflow — it IS the served
+    ``build_integration_from_description`` object. A served change or an example edit fails here
+    (bidirectional pin), so its calls (``config={'authoring_request': ...}``) cannot drift again."""
+    import json
+
+    from boomi_mcp.categories.meta_tools import _authoring_workflow_sequences
+
+    document = json.loads(Path(_NARRATIVE_EXAMPLE).read_text(encoding="utf-8"))
+    assert document["workflow_name"] == "build_integration_from_description"
+    assert document["workflow"] == _authoring_workflow_sequences()["build_integration_from_description"]
+
+
 def test_narrative_workflow_example_is_excluded_for_the_right_reason():
     census = _production_census()
     # 1. Discovered — the exclusion is not a skipped file.
