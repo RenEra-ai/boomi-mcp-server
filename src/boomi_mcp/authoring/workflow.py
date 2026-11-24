@@ -49,7 +49,6 @@ from pydantic import ValidationError
 
 from ..errors import (
     GOVERNANCE_PREVIEW_UNREPRESENTABLE,
-    GOVERNANCE_SOURCE_CONFLICT,
     AUTHORING_APPLY_VALIDATION_REQUIRED,
     AUTHORING_CAPABILITY_REVISION_MISMATCH,
     AUTHORING_COMPILE_BLOCKED,
@@ -997,33 +996,6 @@ def _normalize_recipe_intent(
         for pair in sorted(result.composed.process_roots, key=lambda pair: pair[0])
         if pair[0] not in unit_keys
     )
-    envelopes = {
-        envelope.component_key: envelope
-        for envelope in (getattr(intent, "process_envelopes", None) or ())
-    }
-    # ONE governance authority per root: a recipe-emitted unit carries its own
-    # envelope, so a typed per-root envelope naming it is a second source.
-    for key in sorted(set(envelopes) & unit_keys):
-        raise AuthoringWorkflowError(
-            GOVERNANCE_SOURCE_CONFLICT,
-            (
-                _diag(
-                    GOVERNANCE_SOURCE_CONFLICT,
-                    "error",
-                    message=(
-                        "A per-root envelope names a process unit whose recipe "
-                        "already supplies its envelope."
-                    ),
-                    path="/intent/process_envelopes",
-                    subject_kind="process",
-                    subject_id=key,
-                    remediation=(
-                        "Drop the envelope; author the unit's governance through "
-                        "the recipe input that emits it."
-                    ),
-                ),
-            ),
-        )
     # #159 S3: the #153 interim lift is gone — every surviving executable emits a
     # process UNIT (root + envelope). A bare `set_process_root` root has no
     # envelope to materialize from, so it is refused rather than silently dropped
@@ -1046,31 +1018,6 @@ def _normalize_recipe_intent(
                         "contribution (list_integration_archetypes lists them)."
                     ),
                     cause_codes=(PROCESS_COMPONENT_SCHEMA_INVALID_CARDINALITY,),
-                ),
-            ),
-        )
-    # An envelope naming no unit has nothing to govern (the unit case was refused
-    # above as a second source).
-    from ..errors import GOVERNANCE_ENVELOPE_UNMATCHED
-
-    for envelope_key in sorted(set(envelopes) - unit_keys):
-        raise AuthoringWorkflowError(
-            GOVERNANCE_ENVELOPE_UNMATCHED,
-            (
-                _diag(
-                    GOVERNANCE_ENVELOPE_UNMATCHED,
-                    "error",
-                    message=(
-                        "A per-root envelope names a component key that no "
-                        "composed process root carries."
-                    ),
-                    path="/intent/process_envelopes",
-                    subject_kind="process",
-                    subject_id=envelope_key,
-                    remediation=(
-                        "Name a root the invoked recipes compose, or drop "
-                        "the envelope."
-                    ),
                 ),
             ),
         )

@@ -80,24 +80,18 @@ from .derived_flows import (
 )
 from .governance_intent import (
     RecordedIntentV1,
-    RuntimeHintDeclarationV1,
-    WatermarkDeclarationV1,
-    reject_retired_spellings,
 )
 from .integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .process_component import (
     ProcessAuthoringUnitAuthoredV1,
     ProcessAuthoringUnitV1,
     ProcessComponentEnvelopeAuthoredV1,
-    ProcessExtensionBindingsV1,
 )
 from .recipe_contributions import (
-    RecipeComponentKey,
     # #159 S1 (C9): server-produced run records, served on both read-only phases.
     RecipeInvocationProvenanceV1,
     RecipeRunDiagnosticV1,
 )
-from .process_ir import ProcessIRV1
 from .system_topology import SystemTopologySpecV1
 
 #: The authoring CONTRACT version. Distinct from every schema's own version: this
@@ -326,64 +320,6 @@ class RecipeInvocationRequestV1(_AuthoringModel):
                 yield key, value
 
 
-class RecipeProcessEnvelopeV1(_AuthoringModel):
-    """Typed per-root governance for ONE composed recipe root (issue #157).
-
-    Key-addressed: ``component_key`` names the composed root it governs, and
-    normalization matches it EXACTLY against the roots the recipe engine
-    composed (an unmatched key is ``GOVERNANCE_ENVELOPE_UNMATCHED``, a
-    repeated key ``GOVERNANCE_ENVELOPE_DUPLICATE``). It carries governance
-    only — no ``action``, ``component_id`` or ``depends_on``, which stay
-    authored on the lifted process component the recipe emitted — and when it
-    is present the lifted component may not ALSO carry a name, description,
-    folder or extension bindings (``GOVERNANCE_SOURCE_CONFLICT``): one root,
-    one governance authority.
-
-    An envelope intake extension, not a replacement for the interim lift —
-    #159 owns direct process-unit recipe contributions.
-    """
-
-    component_key: RecipeComponentKey
-    name: Optional[str] = None
-    component_prefix: Optional[str] = None
-    description: str = ""
-    folder_name: Optional[str] = None
-    process_extensions: ProcessExtensionBindingsV1 = Field(
-        default_factory=ProcessExtensionBindingsV1
-    )
-    watermark: Optional[WatermarkDeclarationV1] = None
-    recorded_intents: Tuple[RuntimeHintDeclarationV1, ...] = ()
-
-    @model_validator(mode="before")
-    @classmethod
-    def _refuse_retired_spellings(cls, value: Any) -> Any:
-        if isinstance(value, Mapping):
-            reject_retired_spellings(value, path="")
-        return value
-
-    @field_validator("name", "component_prefix", "folder_name")
-    @classmethod
-    def _check_unpadded(cls, value: Optional[str], info) -> Optional[str]:
-        if value is None:
-            return None
-        if not value or value != value.strip():
-            raise PydanticCustomError(
-                "process_component_value_invalid",
-                "{what} must be non-blank and carry no surrounding whitespace",
-                {"what": str(info.field_name)},
-            )
-        return value
-
-    #: The governance fields this envelope can supply. DERIVED from the model,
-    #: so the source-conflict rule at the lift compares against the real field
-    #: set rather than a second hand-written list.
-    @classmethod
-    def governance_fields(cls) -> Tuple[str, ...]:
-        return tuple(
-            name for name in cls.model_fields if name != "component_key"
-        )
-
-
 class RecipeAuthoringIntentV1(_AuthoringModel):
     """Typed recipe contributions entering the workflow (issue #145)."""
 
@@ -392,8 +328,6 @@ class RecipeAuthoringIntentV1(_AuthoringModel):
     invocations: Tuple[RecipeInvocationRequestV1, ...] = Field(min_length=1)
     base_components: Tuple[IntegrationComponentSpec, ...] = ()
     conflict_policy: Literal["reuse", "clone", "fail"] = "reuse"
-    #: #157: optional typed per-root governance, key-addressed.
-    process_envelopes: Tuple[RecipeProcessEnvelopeV1, ...] = ()
 
     @model_validator(mode="before")
     @classmethod
@@ -409,21 +343,6 @@ class RecipeAuthoringIntentV1(_AuthoringModel):
                     _refuse_flows_key(invocation.get("raw_input"))
                 else:
                     _refuse_flows_key(getattr(invocation, "raw_input", None))
-        return value
-
-    @field_validator("process_envelopes")
-    @classmethod
-    def _check_envelopes(
-        cls, value: Tuple[RecipeProcessEnvelopeV1, ...]
-    ) -> Tuple[RecipeProcessEnvelopeV1, ...]:
-        keys = [envelope.component_key for envelope in value]
-        duplicated = sorted({key for key in keys if keys.count(key) > 1})
-        if duplicated:
-            raise PydanticCustomError(
-                "governance_envelope_duplicate",
-                "process_envelopes name the same component_key more than once: {keys}",
-                {"keys": ", ".join(duplicated)},
-            )
         return value
 
 

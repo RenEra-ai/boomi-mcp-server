@@ -47,7 +47,7 @@ from typing import Literal as _Literal
 from typing import Mapping as _Mapping
 from typing import Optional, Tuple
 
-from pydantic import Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictInt, ValidationInfo, field_validator, model_validator
 from pydantic import ValidationError as _ValidationError
 from pydantic_core import PydanticCustomError
 
@@ -238,23 +238,40 @@ class DbToApiCatchNotifyV1(RecipeInputBase):
         ),
     )
 
+    # The ProcessIR Notify node is the authority for the level vocabulary and
+    # the caught-error token rule; each refusal is raised AT the field the
+    # served schema names (``level`` or ``message_template``), never at the
+    # enclosing ``catch_notify``. Nothing submitted is echoed.
     @field_validator("level")
     @classmethod
     def _normalize_level(cls, value: str) -> str:
-        return value.strip().upper()
-
-    @model_validator(mode="after")
-    def _notify_authority(self) -> "DbToApiCatchNotifyV1":
-        # The ProcessIR Notify node is the authority for the level vocabulary
-        # and the caught-error token rule. Nothing submitted is echoed.
+        value = value.strip().upper()
         try:
-            NotifyNodeV1(kind="notify", level=self.level, message_template=self.message_template)
+            # A template that satisfies the authority's token rule isolates the
+            # level check: only the level can fail here.
+            NotifyNodeV1(kind="notify", level=value, message_template=CAUGHT_ERROR_PROPERTY_ID)
         except _ValidationError:
             raise PydanticCustomError(
                 "db_to_api_catch_notify_invalid",
-                "catch_notify must name a supported level and reference the caught-error property",
+                "catch_notify.level must name a supported platform log level",
             ) from None
-        return self
+        return value
+
+    @field_validator("message_template")
+    @classmethod
+    def _check_message_template(cls, value: str, info: ValidationInfo) -> str:
+        level = info.data.get("level")
+        if level is None:
+            # The level was already refused at its own field.
+            return value
+        try:
+            NotifyNodeV1(kind="notify", level=level, message_template=value)
+        except _ValidationError:
+            raise PydanticCustomError(
+                "db_to_api_catch_notify_invalid",
+                "catch_notify.message_template must reference the caught-error property",
+            ) from None
+        return value
 
 
 class DbToApiReliabilityV1(RecipeInputBase):

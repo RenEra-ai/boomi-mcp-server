@@ -418,3 +418,16 @@ def test_stub_recipe_unit_projects_the_frozen_stub_rows_from_stub_facts():
 
     assert rows == frozen("flows.baseline.jsonl")
     assert endpoints == frozen("endpoints.baseline.jsonl")
+
+
+def test_stub_description_is_a_served_typed_input_that_reaches_the_envelope():
+    """#159 S3 (AR1-05): the retired recipe envelope field was the only way to
+    describe a stub's process; the typed input now carries it, with a served
+    description, and the emitted unit's envelope receives it."""
+    schema = StubMinimalInputV1.model_json_schema()
+    prop = schema["$defs"]["StubMinimalNamingV1"]["properties"]["description"]
+    assert prop["description"]
+    raw_input = _stub_canonical_request()["intent"]["invocations"][0]["raw_input"]
+    raw_input = {**raw_input, "naming": {**raw_input.get("naming", {}), "description": "A stub."}}
+    unit = emit_stub_minimal(StubMinimalInputV1.model_validate(raw_input))[0].unit
+    assert unit.envelope.description == "A stub."

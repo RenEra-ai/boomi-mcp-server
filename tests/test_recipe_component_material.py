@@ -43,7 +43,6 @@ from boomi_mcp.errors import (  # noqa: E402
     AUTHORING_PLAN_STALE,
     COMPOSITION_UNSUPPORTED_TOPOLOGY,
     GOVERNANCE_RETIRED_SPELLING,
-    GOVERNANCE_SOURCE_CONFLICT,
     RECIPE_CONSTRAINT_FAILED,
     RECIPE_INPUT_INVALID,
 )
@@ -368,13 +367,13 @@ def test_a_composition_refusal_reaches_the_caller_with_cause_and_pointer():
 
 def test_an_envelope_naming_a_recipe_emitted_unit_is_a_source_conflict():
     raw, material = flagship_v2()
-    request = recipe_request(
-        raw, material, process_envelopes=[{"component_key": "main_process", "name": "Other"}]
-    )
-    with pytest.raises(AuthoringWorkflowError) as caught:
-        plan_authoring_request_v1(request, profile="p")
-    assert caught.value.code == GOVERNANCE_SOURCE_CONFLICT
-    assert caught.value.diagnostics[0].path == "/intent/process_envelopes"
+    # #159 S3 (AR1-05): the per-root envelope field is retired, so a second
+    # governance source cannot be spelled: the typed request refuses the field.
+    with pytest.raises(Exception) as caught:
+        recipe_request(
+            raw, material, process_envelopes=[{"component_key": "main_process", "name": "Other"}]
+        )
+    assert "process_envelopes" in str(caught.value) and "extra_forbidden" in str(caught.value)
 
 
 def _registration(**overrides):
@@ -1522,10 +1521,10 @@ _KEY_PROBE = "canaryKEY77"
     ["envelope_caller_key", "envelope_digit_key", "material_caller_key", "material_digit_array"],
 )
 def test_no_retired_spelling_consumer_serves_a_caller_key_at_the_tool_boundary(case):
-    """CDX-r2-04 sweep: ``reject_retired_spellings`` has THREE callers (the
-    material model, the recipe per-root envelope, the process-component
-    envelope). The material refusal's pointer is walked typed; the two envelope
-    refusals are served by the typed-request boundary as their model-level
+    """CDX-r2-04 sweep: ``reject_retired_spellings`` has TWO callers (the
+    material model and the process-component envelope; the recipe per-root
+    envelope retired in #159 S3). The material refusal's pointer is walked typed; the envelope
+    refusal is served by the typed-request boundary as their model-level
     ``loc`` and ``type`` only (never the ctx path or the message). Measured at
     the served ``build_integration`` envelope, which validates before the
     workflow."""
@@ -1547,10 +1546,20 @@ def test_no_retired_spelling_consumer_serves_a_caller_key_at_the_tool_boundary(c
             }
         ],
     }
-    if case == "envelope_caller_key":
-        intent["process_envelopes"] = [{"component_key": "main_process", _KEY_PROBE: {"cron": "x"}}]
-    elif case == "envelope_digit_key":
-        intent["process_envelopes"] = [{"component_key": "main_process", _DIGIT_KEY: {"cron": "x"}}]
+    if case in ("envelope_caller_key", "envelope_digit_key"):
+        # #159 S3 (AR1-05): the recipe per-root envelope is retired; the unit's
+        # own authored envelope is the typed envelope that serves the refusal.
+        probe = _KEY_PROBE if case == "envelope_caller_key" else _DIGIT_KEY
+        intent = {
+            "intent_kind": "process_ir",
+            "integration_name": "retired probe",
+            "units": [{
+                "envelope": {"component_key": "main_process", "action": "create", "name": "n",
+                             probe: {"cron": "x"}},
+                "process_ir": {"version": "1", "body": {"kind": "sequence", "steps": [
+                    {"kind": "passthrough"}, {"kind": "stop"}]}},
+            }],
+        }
     elif case == "material_caller_key":
         material["source"]["connection"][_KEY_PROBE] = {"jdbc_options": {"a": "b"}}
     else:

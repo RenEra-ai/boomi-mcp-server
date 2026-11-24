@@ -206,14 +206,13 @@ def recipe_request(
         invocation["recipe_version"] = recipe_version
     if material is not None:
         invocation["component_material"] = copy.deepcopy(material)
-    return AuthoringRequestV1.model_validate(
-        {
-            "intent": {
-                "intent_kind": "recipe",
-                "integration_name": "Fanout v2",
-                "invocations": [invocation, *extra_invocations],
-                "base_components": list(base_components),
-                "process_envelopes": list(process_envelopes),
-            }
-        }
-    )
+    intent = {
+        "intent_kind": "recipe",
+        "integration_name": "Fanout v2",
+        "invocations": [invocation, *extra_invocations],
+        "base_components": list(base_components),
+    }
+    if process_envelopes:
+        # Retired (#159 S3): forwarded only so a witness can show the refusal.
+        intent["process_envelopes"] = list(process_envelopes)
+    return AuthoringRequestV1.model_validate({"intent": intent})

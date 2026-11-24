@@ -648,7 +648,6 @@ def _matrix_request(seed):
                 "integration_name": request["integration_name"],
                 "invocations": [invocation],
                 "base_components": request.get("base_components", []),
-                "process_envelopes": request.get("process_envelopes", []),
             }
         }
     )

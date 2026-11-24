@@ -28,6 +28,10 @@ from __future__ import annotations
 from typing import Tuple
 
 from .. import component_material as _component_material
+from ...compiler.process_ir.connector_capabilities import (
+    CONNECTOR_CALL_CAPABILITIES_V1 as _CONNECTOR_CALLS,
+    REST_FAMILY as _REST_FAMILY,
+)
 from ..contracts import (
     RecipeCapabilityRequirementV1,
     RecipeConflictPolicyV1,
@@ -367,6 +371,27 @@ _API_TO_DB_V1_GUIDANCE = dict(
     ),
 )
 
+#: DERIVED from the connector-call registry (the authority the guarded send is
+#: checked against) and the input's own method vocabulary, never hand-listed.
+_GUARDED_REST_ACTIONS = {
+    action.upper() for family, action in _CONNECTOR_CALLS if family == _REST_FAMILY
+}
+_DLQ_UNGUARDABLE_METHODS = tuple(
+    method
+    for method in _component_material._RestMethodV2.__args__
+    if method not in _GUARDED_REST_ACTIONS
+)
+_DLQ_METHOD_NOTE = (
+    "With a dead-letter cache the REST send runs inside a guarded connector call, "
+    "which supports only the methods "
+    + ", ".join(sorted(m for m in _component_material._RestMethodV2.__args__ if m in _GUARDED_REST_ACTIONS))
+    + "; target.method "
+    + ", ".join(_DLQ_UNGUARDABLE_METHODS)
+    + " passes the input schema but is refused at compile with "
+    "PROCESS_IR_CAPABILITY_CONNECTOR_ACTION_UNSUPPORTED (the same method without a "
+    "dead-letter cache is accepted)."
+)
+
 _DB_TO_API_GUIDANCE = dict(
     limitations=(
         "reliability.retry.max_attempts accepts only 1; 2 to 6 are refused with "
@@ -378,6 +403,7 @@ _DB_TO_API_GUIDANCE = dict(
         "(reliability.dlq.cache_key); a profiled or unreadable cache is refused at plan "
         "and compile (PROCESS_IR_SEMANTIC_PROFILE_MISMATCH), and the cache is never "
         "created.",
+        _DLQ_METHOD_NOTE,
         "With a dead-letter cache the process is two connector-scoped Try/Catch guards "
         "(database read, then REST send) with retry count 0; catch_notify is a log-only "
         "Notify on both catch legs and requires a dead-letter cache.",
