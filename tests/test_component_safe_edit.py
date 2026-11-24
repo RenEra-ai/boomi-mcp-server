@@ -981,3 +981,177 @@ def test_a_legacy_process_body_patch_is_refused_at_prepare_and_apply(body, monke
         assert applied["error_code"] == code, applied
         assert "CANARY_K" not in repr(applied) and "CANARY_V" not in repr(applied)
     assert client.component.pushed == []
+
+
+# ---------------------------------------------------------------------------
+# #159 architect review r1 #1 / #11: every read safe edit writes from is the named
+# component's OWN envelope, and the canonical arm spends ONE read budget per call.
+# ---------------------------------------------------------------------------
+#
+# Every byte below is a capture already served above; a fault rewrites ONLY the
+# envelope's `componentId` (or the root's name), so nothing but the envelope check
+# can tell the faulty answer from the true one.
+
+_ANOTHER_ID = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
+
+
+def _envelope_fault(xml_text, fault, own_id):
+    if fault == "another_id":
+        text = xml_text.replace(f'componentId="{own_id}"', f'componentId="{_ANOTHER_ID}"', 1)
+    elif fault == "no_id":
+        text = xml_text.replace(f'componentId="{own_id}"', "", 1)
+    else:  # not_a_component: the expected id and type, on a root that is no ComponentGet envelope
+        text = _re.sub(r"<bns:Component\b", "<NotAComponent", xml_text, count=1).replace(
+            "</bns:Component>", "</NotAComponent>")
+    assert text != xml_text, fault
+    return text
+
+
+def _refused_unwritten(res, client, *, field="component_id"):
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert res["field"] == field, res
+    assert "envelope" in res["error"], res
+    assert _ANOTHER_ID not in _json.dumps(res)
+    assert client.component.pushed == []
+
+
+@pytest.mark.parametrize("fault", ["another_id", "no_id", "not_a_component"])
+def test_canonical_update_refuses_a_target_answer_that_is_not_its_own_envelope(fault, monkeypatch):
+    """ARCH-r1 #1 (CRITICAL): the account answers the read of process A with bytes that are not
+    A's envelope. Before the fix prepare AND apply succeeded and pushed those bytes — B's id
+    included — to A's update endpoint. Prepare now refuses; and apply, whose token was minted
+    while A answered truly, refuses when A's answer turns faulty: nothing is written."""
+    _spy_compare(monkeypatch)
+    store = canonical_account_store()
+    store[CANONICAL_PROCESS_ID] = _envelope_fault(store[CANONICAL_PROCESS_ID], fault, CANONICAL_PROCESS_ID)
+    client = CanonicalAccount(store)
+    _refused_unwritten(prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, canonical_patch()),
+                       client)
+
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    client.component.store[CANONICAL_PROCESS_ID] = _envelope_fault(
+        client.component.store[CANONICAL_PROCESS_ID], fault, CANONICAL_PROCESS_ID)
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    _refused_unwritten(res, client)
+    assert "error_code" not in res  # the envelope refusal, not the drift check behind it
+
+
+@pytest.mark.parametrize("fault", ["another_id", "no_id", "not_a_component"])
+def test_canonical_update_refuses_a_dependency_answer_that_is_not_its_own_envelope(fault, monkeypatch):
+    """ARCH-r1 #1 (CRITICAL, supporting bindings): the bound GET connection's id answers with the
+    same captured bytes under another envelope. Before the fix the type check passed and the
+    update was written against a dependency the account never answered for. Now prepare refuses
+    COMPONENT_EDIT_DEPENDENCY_UNVERIFIED at that row, and apply after a clean prepare too."""
+    _spy_compare(monkeypatch)
+    pointer = "authoring_request.intent.components.0"
+    store = canonical_account_store()
+    store["RCONN"] = _envelope_fault(store["RCONN"], fault, "RCONN")
+    client = CanonicalAccount(store)
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, canonical_patch())
+    _refused_unwritten(res, client, field=pointer)
+    assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    client.component.store["RCONN"] = _envelope_fault(client.component.store["RCONN"], fault, "RCONN")
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    _refused_unwritten(res, client, field=pointer)
+    assert res["error_code"] == "COMPONENT_EDIT_DEPENDENCY_UNVERIFIED", res
+
+
+def test_canonical_update_never_previews_bytes_that_name_another_component(monkeypatch):
+    """ARCH-r1 #1: whatever produced them, bytes naming another component are never previewed,
+    so no token covers them (and the one write asserts the same invariant)."""
+    original = safe_edit_component.merge_for_update
+
+    def _merge_naming_another(current, built, policy):
+        return original(current, built, policy).replace(
+            f'componentId="{CANONICAL_PROCESS_ID}"', f'componentId="{_ANOTHER_ID}"', 1)
+
+    monkeypatch.setattr(safe_edit_component, "merge_for_update", _merge_naming_another)
+    client = CanonicalAccount(canonical_account_store())
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, canonical_patch())
+    _refused_unwritten(res, client)
+    assert res.get("confirmation_token") is None
+
+
+@pytest.mark.parametrize("fault", ["another_id", "not_a_component"])
+def test_legacy_edit_refuses_a_target_answer_naming_another_component(fault, monkeypatch):
+    """ARCH-r1 #1, the sibling arm (INHERITED from ed17dde, measured): the metadata smart-merge
+    arm reads its target through the same read. A target answering with another component's
+    envelope is refused at prepare and at apply; a missing id (the pre-S3 fixtures' spelling)
+    stays accepted there — it names no other component."""
+    _spy_compare(monkeypatch)
+    own = _CURRENT_DB_CONN.replace("<bns:Component ", f'<bns:Component componentId="{COMPONENT_ID}" ', 1)
+    faulty = _envelope_fault(own, fault, COMPONENT_ID)
+    patch = {"config": {"name": "conn-renamed"}}
+
+    client = _FakeClient(faulty)
+    _refused_unwritten(prepare_component_edit_action(client, "prof", COMPONENT_ID, patch), client)
+
+    client = _FakeClient(own)
+    token = _prepare_then_token(client, patch)
+    client.component._xml = faulty
+    res = apply_component_edit_action(client, "prof", COMPONENT_ID, patch, token, confirm_apply=True)
+    _refused_unwritten(res, client)
+
+    # Controls: the component's own id, and no id at all, still edit.
+    for live in (own, _CURRENT_DB_CONN):
+        client = _FakeClient(live)
+        token = _prepare_then_token(client, patch)
+        res = apply_component_edit_action(client, "prof", COMPONENT_ID, patch, token, confirm_apply=True)
+        assert res["_success"] is True, res
+        assert [cid for cid, _ in client.component.pushed] == [COMPONENT_ID]
+
+
+def test_canonical_update_spends_one_read_budget_from_the_target_read(monkeypatch):
+    """ARCH-r1 #11: prepare and apply each spend ONE read budget, starting at the target's read.
+    Every account read before the write is handed the budget's REMAINING slice — so none runs
+    under a standalone deadline (``None``), and the slices never grow. Before the fix the target
+    was read under its own deadline and a fresh budget started after it (two budgets per call)."""
+    from boomi_mcp.categories.components import _shared
+
+    _spy_compare(monkeypatch)
+    real = _shared.component_get_xml
+    calls = []
+
+    def _spy(client, component_id, deadline_seconds=None):
+        if not client.component.pushed:  # the post-write comparison read is not a pre-write read
+            calls.append((component_id, deadline_seconds))
+        return real(client, component_id, deadline_seconds=deadline_seconds)
+
+    monkeypatch.setattr(_shared, "component_get_xml", _spy)
+    monkeypatch.setattr(safe_edit_component, "component_get_xml", _spy)
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    prepare_calls = list(calls)
+    calls.clear()
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    assert res["_success"] is True, res
+    for phase, seen in (("prepare", prepare_calls), ("apply", calls)):
+        assert seen and seen[0][0] == CANONICAL_PROCESS_ID, (phase, seen)
+        deadlines = [deadline for _cid, deadline in seen]
+        assert None not in deadlines, (phase, seen)
+        assert deadlines == sorted(deadlines, reverse=True), (phase, seen)
+
+
+def test_captured_mapped_update_refuses_a_linked_profile_that_is_no_component_envelope():
+    """ARCH-r1 #3: the PATCH request profile the map targets answers with its expected id and type
+    on a root that is no ComponentGet envelope (`<NotAComponent>`). Before the fix that verified as
+    the profile and prepare succeeded; now the link is UNKNOWN and prepare refuses PROFILE_MISMATCH
+    at the map, writing nothing."""
+    store = captured_bound_profiles_store()
+    store[CAPTURED_PATCH_REQUEST_PROFILE] = _envelope_fault(
+        store[CAPTURED_PATCH_REQUEST_PROFILE], "not_a_component", CAPTURED_PATCH_REQUEST_PROFILE)
+    assert f'componentId="{CAPTURED_PATCH_REQUEST_PROFILE}"' in store[CAPTURED_PATCH_REQUEST_PROFILE]
+    client = CanonicalAccount(store)
+    res = prepare_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, captured_bound_profiles_patch())
+    assert res["_success"] is False, res
+    assert res["boomi_mutation"] is False
+    assert _profile_mismatch_at_the_map(res), res
+    assert client.component.pushed == []
