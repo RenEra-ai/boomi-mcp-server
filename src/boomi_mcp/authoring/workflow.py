@@ -1474,6 +1474,12 @@ def _profile_bound_operation_readings(components, profile_bindings, reads, alrea
         component = by_key.get(key)
         if component is None or not resolved or not identity_reads_component(component):
             continue
+        if binding.input.state == "unknown" and binding.output.state == "unknown":
+            # No profile fact was taken from those bytes (unreadable, unparseable, another
+            # component's envelope, another type): no second fact for a verb to disagree
+            # with, so this adds no identity judgement — the component is judged exactly as
+            # before (by apply's pre-write reading when a root compiles).
+            continue
         if key in readings or _held_reading_of(already, key, resolved):
             continue
         reading = _identity_reading(reads, resolved)
