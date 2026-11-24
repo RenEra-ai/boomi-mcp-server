@@ -1180,17 +1180,28 @@ _SCHEMA_SUMMARY_ROW_KEYS: Tuple[str, ...] = (
 )
 
 
-def _schema_summary_row(row: Any, map_component, by_key, reused) -> Optional[Any]:
+def _schema_summary_row(row: Any, map_component, by_key, reused, writes=None) -> Optional[Any]:
     """The ``schema_summary`` transform row, built from the rich row and the
-    map's target profile component. None when the target cannot be summarized."""
+    map's target profile component. None when the target cannot be summarized.
+
+    ``writes`` is apply's write predicate (``_apply_writes(...) is True``): the
+    write-profile summary is read off the profile the map's CANDIDATE config
+    links, so it is served only when apply writes BOTH the map and that profile.
+    Otherwise the row is served without a target summary (#159 r2-01 fix-only
+    review: a reused profile keeps its stored schema, which planning does not read).
+    """
     if map_component is None or map_component.key in reused:
         return None
+    if writes is None:
+        def writes(component):
+            return component.key not in reused
     payload = row.model_dump(mode="json", exclude_unset=True)
     out = {key: payload[key] for key in _SCHEMA_SUMMARY_ROW_KEYS if key in payload}
     target_key = _ref_key((map_component.config or {}).get("target_profile_id")) or ""
     target = by_key.get(target_key)
-    if _is_write_profile(target) and target_key not in reused:
-        out["target_write_profile"] = write_profile_summary(target.config or {})
+    if _is_write_profile(target):
+        if writes(map_component) and writes(target):
+            out["target_write_profile"] = write_profile_summary(target.config or {})
     elif payload.get("target_payload_profile") is not None:
         out["target_payload_profile"] = payload["target_payload_profile"]
     else:
@@ -1445,7 +1456,11 @@ def _linear_route_projection(
     if hints.detail == "schema_summary":
         map_node = nodes[map_positions[0]]
         map_key = _ref_key(getattr(map_node, "map_ref", None)) or ""
-        transform = _schema_summary_row(transform, by_key.get(map_key), by_key, reused)
+        transform = _schema_summary_row(
+            transform, by_key.get(map_key), by_key, reused,
+            writes=lambda component: _apply_writes(
+                component, reused_keys, existing_ids, conflict_policy) is True,
+        )
         if transform is None:
             return None
 

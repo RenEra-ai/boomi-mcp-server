@@ -271,7 +271,11 @@ TransformOperationSummaryV1 = Annotated[
 
 
 class DerivedTransformFlowV1(_DerivedFlowModel):
-    """The rich `transform` row, derived from the generator and the map components."""
+    """The rich `transform` row, derived from the generator and the map components.
+
+    ``target_write_profile`` is served only when apply writes both the map and the
+    write profile it links; a reused one keeps its stored schema, which planning does
+    not read."""
 
     key: NonEmptyString
     name: str = ""

@@ -939,13 +939,15 @@ def _row_delta(full_rows, rows, *, keyed_by="key"):
     return omitted, changed
 
 
-def _linear_delta(full, served):
+def _linear_delta(full, served, *, flows_omitted=None):
     """#159 architect review r2-01: the projection with a component bound and
     not written is the FULL one (every component written) minus keys — the same
-    flows, the same endpoint rows — and this is the endpoint-key difference."""
+    flow rows and endpoint rows — and this is the endpoint-key difference. Flow
+    rows may omit exactly ``flows_omitted`` (row key -> keys; none by default)
+    and nothing else."""
     full_flows, full_endpoints = full
     flows, endpoints = served
-    assert flows == full_flows
+    assert _row_delta(full_flows, flows) == (flows_omitted or {}, {})
     return _row_delta(full_endpoints, endpoints)
 
 
@@ -1099,22 +1101,26 @@ def test_a_database_write_endpoint_is_served_only_for_components_apply_writes(ca
     (target,) = [e for e in frozen[1] if e["direction"] == "target"]
     assert target["operation"] == "Send" and target["statement_type"]
     assert "write" in [r["key"] for r in frozen[0]]
-    for key, omitted in (
+    summary = {"transform": {"target_write_profile"}}
+    assert "target_write_profile" in [r for r in frozen[0] if r["key"] == "transform"][0]
+    for key, omitted, flows_omitted in (
         # The profile is found through the operation's candidate link, so a
         # reused operation also takes the profile's statement_type with it.
-        ("target_db_write_operation", {"operation", "statement_type"}),
-        ("target_db_write_profile", {"statement_type"}),
+        ("target_db_write_operation", {"operation", "statement_type"}, None),
+        # A reused profile keeps its stored schema: the transform row's
+        # write-profile summary goes too (r2-01 fix-only review).
+        ("target_db_write_profile", {"statement_type"}, summary),
     ):
         assert key in {c["key"] for c in components}, key
         bound = {key: "existing-id"}
         for policy in ("reuse", None):
             served = _bound_under(components, root, facts, bound, policy)
-            assert _linear_delta(frozen, served) == ({target["key"]: omitted}, {}), (key, policy)
+            assert _linear_delta(frozen, served, flows_omitted=flows_omitted) == (
+                {target["key"]: omitted}, {}), (key, policy)
         assert _bound_under(components, root, facts, bound, "clone") == frozen, key
     both = {"target_db_write_operation": "a", "target_db_write_profile": "b"}
-    assert _linear_delta(frozen, _bound_under(components, root, facts, both, "reuse")) == (
-        {target["key"]: {"operation", "statement_type"}}, {}
-    )
+    assert _linear_delta(frozen, _bound_under(components, root, facts, both, "reuse"),
+                         flows_omitted=summary) == ({target["key"]: {"operation", "statement_type"}}, {})
 
 
 def test_a_connection_endpoint_binding_follows_apply_writes(cases):
