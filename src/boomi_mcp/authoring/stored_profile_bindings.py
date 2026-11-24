@@ -50,9 +50,16 @@ def _parse_strict(component_xml: Any, on_start: Callable[[list, str, dict], None
 
     ``on_start(stack, local_name, attributes)`` sees every element with its ancestor stack
     (local names, the element itself last). False when the bytes are not a string, are empty,
-    or do not parse — the caller's answer is then UNKNOWN.
+    do not parse, or are not a ComponentGet ENVELOPE — the caller's answer is then UNKNOWN.
+
+    The envelope is the platform's: its root is ``Component`` in the platform namespace
+    (``arrange.model.BNS``; every capture this module reads, e.g.
+    ``cap159-s3-bound-profiles/*.xml``). Any other root — ``<NotAComponent>`` carrying the
+    expected ``componentId`` and ``type`` — answers for no component (#159 ARCH-r1 #3).
     """
     import xml.parsers.expat
+
+    from ..arrange.model import BNS
 
     if not isinstance(component_xml, str) or not component_xml.strip():
         return False
@@ -63,6 +70,8 @@ def _parse_strict(component_xml: Any, on_start: Callable[[list, str, dict], None
     stack: list = []
 
     def _start(name, attributes):
+        if not stack and name != f"{BNS}}}Component":
+            raise _Refused
         stack.append(name.rsplit("}", 1)[-1].rsplit(":", 1)[-1])
         on_start(stack, stack[-1], attributes)
 
@@ -108,21 +117,50 @@ def stored_map_profile_links(component_xml: Any) -> Optional[Tuple[str, str]]:
     return tuple(value.strip() if isinstance(value, str) else "" for value in maps[0])
 
 
+def _envelope_attributes(component_xml: Any) -> Optional[Dict[str, str]]:
+    """The attributes of a stored component's envelope root, or None when unreadable."""
+    roots = []
+
+    def _on_start(stack, _local, attributes):
+        if len(stack) == 1:
+            roots.append(dict(attributes))
+
+    if not _parse_strict(component_xml, _on_start) or len(roots) != 1:
+        return None
+    return roots[0]
+
+
 def stored_profile_envelope(component_xml: Any) -> Optional[Tuple[Optional[str], Optional[str]]]:
     """``(componentId, type)`` of a stored component's own envelope, or None when unreadable.
 
     Read from the XML ROOT: the fetch dict's ``component_id`` falls back to the REQUESTED id when
     the envelope names none, so it cannot tell a profile from a component answering for another.
     """
-    roots = []
-
-    def _on_start(stack, _local, attributes):
-        if len(stack) == 1:
-            roots.append((attributes.get("componentId"), attributes.get("type")))
-
-    if not _parse_strict(component_xml, _on_start) or len(roots) != 1:
+    attributes = _envelope_attributes(component_xml)
+    if attributes is None:
         return None
-    return roots[0]
+    return attributes.get("componentId"), attributes.get("type")
+
+
+def _family_unsettled_in_scope(component, stored_xml) -> bool:
+    """Whether a stored connector action whose bytes settle NO family is in this reader's scope.
+
+    The platform states an operation's connector on its envelope's ``subType``; the one family
+    reader (``connector_family_of``) maps it. An envelope stating no ``subType`` settles nothing
+    — unlike a ``subType`` naming a family this repository does not model, which IS settled (as
+    another family, out of scope, as before). Unsettled, the operation may be the REST operation
+    the request declares, so it is in scope unless the request declares another family: recorded
+    UNKNOWN, never dropped — a dropped reading leaves its input undeclared and unchecked
+    (#159 ARCH-r1 #3).
+    """
+    from ..categories.components.builders.connector_builder import connector_family_of
+
+    attributes = _envelope_attributes(stored_xml)
+    if attributes is not None and str(attributes.get("subType") or "").strip():
+        return False
+    config = getattr(component, "config", None) or {}
+    declared = config.get("connector_type") if isinstance(config, dict) else None
+    return connector_family_of(declared) in (None, "rest")
 
 
 def verified_profile_side(raw_profile_id: Optional[str], fetch_xml) -> StoredProfileSideV1:
@@ -191,8 +229,9 @@ def stored_profile_bindings_for_unwritten_components(
     profile two components link is read once. ``None`` with no client: nothing was read.
 
     A connector action is recorded only when it is a REST operation — proved by its stored bytes,
-    or, when those could not be read, declared by the request — because only REST operations are
-    scoped here; any other family keeps stating no profile, as before.
+    or, when those could not be read or state no ``subType``, not declared as another family by the
+    request (``_family_unsettled_in_scope``) — because only REST operations are scoped here; any
+    other family keeps stating no profile, as before.
 
     Unlike the cache reader there is no ``binding_unjudged`` arm: a component apply writes is
     skipped even on a route whose name binding is unjudged (see the loop).
@@ -265,10 +304,12 @@ def stored_profile_bindings_for_unwritten_components(
                 else None
             )
             if identity is None or not identity.readable:
-                if _declares_rest(component):
+                if _declares_rest(component) or _family_unsettled_in_scope(component, stored_xml):
                     readings.append(unknown_reading)
                 continue
             if identity.family != "rest":
+                if _family_unsettled_in_scope(component, stored_xml):
+                    readings.append(unknown_reading)
                 # Another family is not scoped here; it states no profile, as before.
                 continue
             if (identity.document_component_type or "").strip() != _OPERATION_TYPE:

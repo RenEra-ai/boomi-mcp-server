@@ -4079,10 +4079,18 @@ def test_stored_profile_bindings_of_the_unprofiled_cap155_operations_are_absent_
 @pytest.mark.parametrize("fault", [
     "profile_unreadable", "profile_envelope_names_another_id", "profile_is_not_a_profile",
     "malformed_stored_id", "map_unreadable", "map_declares_an_entity",
+    # #159 ARCH-r1 #3: the expected id and type on a root that is no ComponentGet envelope.
+    "profile_root_is_not_a_component",
 ])
 def test_a_stored_profile_link_that_cannot_be_verified_is_unknown(fault):
     cap, rows, store = _s3b_captured()
     patch_in = cap.CAPTURED_PATCH_REQUEST_PROFILE
+    if fault == "profile_root_is_not_a_component":
+        import re as _re3
+
+        renamed = _re3.sub(r"<bns:Component\b", "<NotAComponent", store[patch_in], count=1)
+        store[patch_in] = renamed.replace("</bns:Component>", "</NotAComponent>")
+        assert f'componentId="{patch_in}"' in store[patch_in] and 'type="profile.json"' in store[patch_in]
     if fault == "profile_unreadable":
         del store[patch_in]
     elif fault == "profile_envelope_names_another_id":
@@ -4257,3 +4265,49 @@ def test_an_unjudged_name_binding_leaves_a_created_map_or_rest_operation_its_own
         assert (symbols["$ref:MAP"].input_profile_ref, symbols["$ref:MAP"].output_profile_ref,
                 symbols["$ref:MAP"].profiles_unknown) == ("$ref:PREAD", "$ref:PREQ", None)
         assert (symbols["$ref:OP"].input_profile_ref, symbols["$ref:OP"].profiles_unknown) == ("$ref:PREQ", None)
+
+
+def _s3b_without_subtype(stored_xml):
+    import re as _re3
+
+    text, count = _re3.subn(r'\s+subType="[^"]*"', "", stored_xml, count=1)
+    assert count == 1
+    return text
+
+
+@pytest.mark.parametrize("declared", ["rest", "undeclared"])
+def test_a_stored_operation_stating_no_subtype_is_unknown_not_dropped(declared):
+    """#159 ARCH-r1 #3: the stored PATCH operation's envelope states no ``subType``, so its bytes
+    settle no family. Before the fix it fell into "another family" and was DROPPED — its input then
+    undeclared, so a call fed by a cache skipped the input-profile check. It is in scope unless the
+    request declares another family: recorded UNKNOWN on both sides."""
+    cap, rows, store = _s3b_captured()
+    store[cap.CAPTURED_PATCH_OP] = _s3b_without_subtype(store[cap.CAPTURED_PATCH_OP])
+    if declared == "undeclared":
+        rows = [dict(row, config={k: v for k, v in row["config"].items() if k != "connector_type"})
+                if row["key"] == "OP" else row for row in rows]
+    readings, _reads = _s3b_read(rows, store)
+    assert "OP" in readings, readings
+    assert (readings["OP"].input.state, readings["OP"].output.state) == ("unknown", "unknown")
+    symbols, _table = _s3b_symbols(rows, tuple(readings.values()))
+    assert symbols["$ref:OP"].input_profile_ref is None and symbols["$ref:OP"].profiles_unknown is True
+
+
+@pytest.mark.parametrize("variant", ["unmodelled_subtype", "declared_another_family"])
+def test_a_stored_operation_of_a_settled_or_declared_other_family_stays_unrecorded(variant):
+    """Control for the rule above: an envelope whose ``subType`` names a family this repository does
+    not model IS settled (another family, out of scope), and a request declaring another family keeps
+    an unsettled operation out of scope — neither is recorded, exactly as before."""
+    cap, rows, store = _s3b_captured()
+    op = store[cap.CAPTURED_PATCH_OP]
+    if variant == "unmodelled_subtype":
+        store[cap.CAPTURED_PATCH_OP] = op.replace('subType="officialboomi-X3979C-rest-prod"', 'subType="sftp"', 1)
+        assert 'subType="sftp"' in store[cap.CAPTURED_PATCH_OP]
+        rows = [dict(row, config={k: v for k, v in row["config"].items() if k != "connector_type"})
+                if row["key"] == "OP" else row for row in rows]
+    else:
+        store[cap.CAPTURED_PATCH_OP] = _s3b_without_subtype(op)
+        rows = [dict(row, config=dict(row["config"], connector_type="database"))
+                if row["key"] == "OP" else row for row in rows]
+    readings, _reads = _s3b_read(rows, store)
+    assert "OP" not in readings, readings
