@@ -424,6 +424,11 @@ class DerivedEndpointRowV1(_OmitUnsetModel):
     stub endpoint is a bare labelled placeholder with no binding
     and no ``executable`` key at all — so ``binding_mode`` is required on every
     type EXCEPT ``stub``, and ``label`` is served on ``stub`` alone.
+
+    ``method``, ``operation``, ``statement_type``, ``endpoint_path`` and
+    ``publish_mode`` are served only when apply writes every component each is
+    read from; a reused one keeps its stored configuration, which planning
+    does not read, and the row is served without them.
     """
 
     key: NonEmptyString
@@ -462,7 +467,10 @@ class DerivedCompositionPartV1(_OmitUnsetModel):
 
 
 class DerivedFanoutLegV1(_OmitUnsetModel):
-    """One non-first fan-out target, at its ACTUAL Branch leg position."""
+    """One non-first fan-out target, at its ACTUAL Branch leg position.
+
+    ``method`` is served only when apply writes the target operation; a reused
+    one keeps its stored configuration, which planning does not read."""
 
     part_key: NonEmptyString
     leg: int = Field(ge=1)

@@ -811,10 +811,13 @@ class TestTypedListenerPresets:
     def test_the_advertised_route_follows_the_requests_conflict_policy(self, listener_preset_registry):
         """#159 architect review r1, finding 4, through the PUBLIC planner: an API
         Service of the same name already exists. Under ``reuse`` apply binds it
-        without writing its routes, so no listener route is advertised; under
-        ``clone`` apply writes the clone with this process's route, so the frozen
-        listener row is served again. The policy reaches the projection from the
-        request itself."""
+        without writing its routes, so the listener row is served WITHOUT the
+        route it would read off the candidate (``method``, ``endpoint_path``,
+        ``publish_mode``) — and, since r2-01, nothing else changes: the listener
+        row keeps its binding, and the database endpoint and every flow row are
+        served exactly as under ``clone``, where apply writes the clone with this
+        process's route and the frozen listener row is served. The policy
+        reaches the projection from the request itself."""
         import _issue_157_flows_accounting as acct
         from boomi_mcp.authoring.workflow import plan_authoring_request_v1
         from boomi_mcp.models.authoring_workflow import AuthoringRequestV1
@@ -836,7 +839,7 @@ class TestTypedListenerPresets:
             if row["payload"].get("type") == "wss"
         ]
 
-        def listener_rows(policy):
+        def served(policy):
             payload = _canonical(case_id)
             payload["intent"]["conflict_policy"] = policy
             with patch(acct._GET_XML, acct.replay_component_get_xml()), patch(
@@ -848,14 +851,23 @@ class TestTypedListenerPresets:
                     profile="issue-157-replay",
                 )
             assert "existing-api-service-id" in json.dumps(result.model_dump(mode="json"))
-            return [
-                row.model_dump(mode="json", exclude_unset=True)
-                for row in result.integration_spec_preview.endpoints
-                if row.type == "wss"
-            ]
+            preview = result.integration_spec_preview
+            return (
+                [row.model_dump(mode="json", exclude_unset=True) for row in preview.flows],
+                [row.model_dump(mode="json", exclude_unset=True) for row in preview.endpoints],
+            )
 
-        assert listener_rows("reuse") == []
-        assert listener_rows("clone") == [frozen]
+        reused_flows, reused_endpoints = served("reuse")
+        cloned_flows, cloned_endpoints = served("clone")
+        assert [row for row in cloned_endpoints if row["type"] == "wss"] == [frozen]
+        assert {row["type"] for row in cloned_endpoints} == {"wss", "database"}
+        assert reused_flows == cloned_flows and len(reused_flows) > 1
+        route_keys = {"method", "endpoint_path", "publish_mode"}
+        assert route_keys <= set(frozen)
+        assert reused_endpoints == [
+            {k: v for k, v in row.items() if k not in route_keys} if row["type"] == "wss" else row
+            for row in cloned_endpoints
+        ]
 
     def test_the_preset_modules_import_no_legacy_producer(self):
         """The presets may never reach the retiring archetypes or the bridge."""

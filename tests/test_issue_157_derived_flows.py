@@ -923,15 +923,44 @@ def test_every_supported_rest_spelling_projects_the_same_route(cases):
         ], spelling
 
 
+def _row_delta(full_rows, rows, *, keyed_by="key"):
+    """``(omitted, changed)`` between two dumped row lists of the SAME rows:
+    per row key, the keys FULL serves that ROWS omits, and the values ROWS
+    serves differently. A row added or dropped, or a key ROWS adds, fails."""
+    assert [r[keyed_by] for r in rows] == [r[keyed_by] for r in full_rows]
+    omitted, changed = {}, {}
+    for whole, row in zip(full_rows, rows):
+        assert set(row) <= set(whole), (row[keyed_by], set(row) - set(whole))
+        if set(whole) - set(row):
+            omitted[row[keyed_by]] = set(whole) - set(row)
+        moved = {k: (whole[k], row[k]) for k in row if row[k] != whole[k]}
+        if moved:
+            changed[row[keyed_by]] = moved
+    return omitted, changed
+
+
+def _linear_delta(full, served):
+    """#159 architect review r2-01: the projection with a component bound and
+    not written is the FULL one (every component written) minus keys — the same
+    flows, the same endpoint rows — and this is the endpoint-key difference."""
+    full_flows, full_endpoints = full
+    flows, endpoints = served
+    assert flows == full_flows
+    return _row_delta(full_endpoints, endpoints)
+
+
 def test_a_listener_route_is_served_only_through_components_apply_writes(cases):
-    """#159 architect review r1, finding 4: the advanced listener's route is read
-    off the API Service's CANDIDATE routes and the listener operation's candidate
-    config. Apply binds a create matched by name under ``reuse`` WITHOUT writing
-    it (``apply_writes_component_config``), so a reused service keeps its
-    existing routes and names no route to the new process. The endpoint — and so
-    the route's connector rows — is served only when apply writes both; without
-    a policy, only when it writes them under every policy. A clone, an update
-    and an unmatched create are written, and serve the frozen row unchanged."""
+    """#159 architect review r1, finding 4 (field-level since r2-01): the
+    advanced listener's method, path and ``publish_mode`` are read off the API
+    Service's CANDIDATE routes and the listener operation's candidate config.
+    Apply binds a create matched by name under ``reuse`` WITHOUT writing it
+    (``apply_writes_component_config``), so a reused service keeps its existing
+    routes and names no route to the new process. Those three keys are served
+    only when apply writes both; without a policy, only when it writes them
+    under every policy. Every other row — the DB endpoint, the write row, the
+    listener row itself — is served exactly as when both are written, and the
+    listener's ``binding_mode`` is apply's answer for its operation. A clone,
+    an update and an unmatched create are written, and serve the frozen rows."""
     from boomi_mcp.categories.integration_builder import apply_writes_component_config
     from boomi_mcp.models.integration_models import IntegrationComponentSpec
 
@@ -942,8 +971,11 @@ def test_a_listener_route_is_served_only_through_components_apply_writes(cases):
     frozen = _dumped(_linear_project(components, root, facts))
     (listener,) = [e for e in frozen[1] if e["type"] == "wss"]
     assert listener["publish_mode"] == "api_service" and listener["binding_mode"] == "create"
+    assert listener["method"] and listener["endpoint_path"]
     full_keys = [r["key"] for r in frozen[0]]
-    assert full_keys[0] == "listen" and len(full_keys) > 1
+    assert full_keys[0] == "listen" and "write" in full_keys
+    (database,) = [e for e in frozen[1] if e["type"] == "database"]
+    assert database["operation"] and database["statement_type"]
 
     bound = {service["key"]: "existing-api-service-id"}
     # non-vacuity: apply's own predicate says it does NOT write the bound
@@ -955,23 +987,50 @@ def test_a_listener_route_is_served_only_through_components_apply_writes(cases):
     def served(components_in=components, **kwargs):
         return _dumped(_linear_project(components_in, root, facts, **kwargs))
 
+    route_keys = {"method", "endpoint_path", "publish_mode"}
     for policy in (None, "reuse"):
-        flows, endpoints = served(existing_ids=bound, conflict_policy=policy)
-        assert [r["key"] for r in flows] == ["transform"], policy
-        assert endpoints == [], policy
-        # the listener OPERATION bound by name is the same case
-        flows, endpoints = served(existing_ids={operation_key: "existing-op-id"}, conflict_policy=policy)
-        assert endpoints == [], policy
+        # the reused SERVICE: the operation is written, so the binding stays a create
+        assert _linear_delta(frozen, served(existing_ids=bound, conflict_policy=policy)) == (
+            {listener["key"]: route_keys}, {}
+        ), policy
+    # the listener OPERATION bound by name: under reuse apply binds it as it
+    # stands; without a policy the answer is unknown, so the keys go and the
+    # binding is not claimed as a reuse
+    op_bound = {operation_key: "existing-op-id"}
+    assert _linear_delta(frozen, served(existing_ids=op_bound, conflict_policy="reuse")) == (
+        {listener["key"]: route_keys}, {listener["key"]: {"binding_mode": ("create", "reuse")}}
+    )
+    assert _linear_delta(frozen, served(existing_ids=op_bound)) == (
+        {listener["key"]: route_keys}, {}
+    )
     # the service the caller already answered as reused
-    assert served(reused_keys={service["key"]})[1] == []
+    assert _linear_delta(frozen, served(reused_keys={service["key"]})) == (
+        {listener["key"]: route_keys}, {}
+    )
     # written: a clone of the namesake, an update, or no namesake at all
     assert served(existing_ids=bound, conflict_policy="clone") == frozen
+    assert served(existing_ids=op_bound, conflict_policy="clone") == frozen
     updated = copy.deepcopy(components)
     for component in updated:
         if component["key"] == service["key"]:
             component.update(action="update", component_id="existing-api-service-id")
     assert served(updated, existing_ids=bound) == frozen
     assert served(existing_ids={}, conflict_policy="reuse") == frozen
+
+
+def test_a_malformed_listener_route_still_serves_no_endpoints_when_reused(cases):
+    """The r2-01 field-level omission never widens what is served: a listener
+    route whose derivation fails (two API Services route to the process) serves
+    no endpoint whether or not apply writes the components."""
+    case_id = "http_listener_to_db/advanced_runtime"
+    components, root, facts, _wm = _hand_built_linear_case(cases, case_id)
+    (service,) = [c for c in components if c["type"] == "webservice"]
+    twin = copy.deepcopy(service)
+    twin.update(key=service["key"] + "_twin", name=service["name"] + " Twin")
+    doubled = components + [twin]
+    for kwargs in ({}, {"existing_ids": {service["key"]: "x"}, "conflict_policy": "reuse"}):
+        flows, endpoints = _dumped(_linear_project(doubled, root, facts, **kwargs))
+        assert endpoints == [] and [r["key"] for r in flows] == ["transform"], kwargs
 
 
 def _bound_under(case_components, root, facts, ids, policy, *, watermark_field=None):
@@ -984,11 +1043,12 @@ def _bound_under(case_components, root, facts, ids, policy, *, watermark_field=N
 
 
 def test_a_rest_endpoint_is_served_only_for_an_operation_apply_writes(cases):
-    """#159 architect review r1 sibling sweep: a REST endpoint's ``method`` is
-    read off the operation's CANDIDATE config. Bound by name under ``reuse``,
-    apply keeps the existing operation, so the method is not derivable and the
-    route projects its transform row only; written (no namesake, or ``clone``)
-    it serves the frozen rows unchanged. Source and target operations alike."""
+    """#159 architect review r1 sibling sweep (field-level since r2-01): a REST
+    endpoint's ``method`` is read off the operation's CANDIDATE config. Bound by
+    name under ``reuse``, apply keeps the existing operation, so that endpoint
+    is served WITHOUT its method — its declared ``expected_status_codes``, the
+    other endpoint and every row stand; written (no namesake, or ``clone``) it
+    serves the frozen rows unchanged. Source and target operations alike."""
     for case_id, key in (
         ("database_to_api_sync/wm_off_dlq_on_create", "target_rest_operation"),
         ("api_to_api_sync/create", "source_rest_source_operation"),
@@ -997,32 +1057,62 @@ def test_a_rest_endpoint_is_served_only_for_an_operation_apply_writes(cases):
         components, root, facts, wm = _hand_built_linear_case(cases, case_id)
         assert key in {c["key"] for c in components}, (case_id, key)
         frozen = _bound_under(components, root, facts, None, None, watermark_field=wm)
-        assert any(e.get("method") for e in frozen[1]), case_id
+        direction = "source" if key.startswith("source_") else "target"
+        (endpoint,) = [e for e in frozen[1] if e["direction"] == direction]
+        assert endpoint["method"], case_id
         bound = {key: "existing-operation-id"}
         for policy in ("reuse", None):
-            flows, endpoints = _bound_under(components, root, facts, bound, policy, watermark_field=wm)
-            assert [r["key"] for r in flows] == ["transform"] and endpoints == [], (case_id, key, policy)
+            served = _bound_under(components, root, facts, bound, policy, watermark_field=wm)
+            assert _linear_delta(frozen, served) == ({endpoint["key"]: {"method"}}, {}), (
+                case_id, key, policy,
+            )
         assert _bound_under(components, root, facts, bound, "clone", watermark_field=wm) == frozen
         assert _bound_under(components, root, facts, {}, "reuse", watermark_field=wm) == frozen
 
 
+def test_a_declared_status_set_is_served_on_a_reused_rest_operation(cases):
+    """``expected_status_codes`` is declared on the route fact, not read off the
+    operation's candidate config, so a reused operation keeps it on its row."""
+    case_id = "database_to_api_sync/wm_off_dlq_on_create"
+    components, root, facts, wm = _hand_built_linear_case(cases, case_id)
+    declared = facts.model_copy(
+        update={"target": facts.target.model_copy(update={"expected_status_codes": (200, 201)})}
+    )
+    frozen = _bound_under(components, root, declared, None, None, watermark_field=wm)
+    (target,) = [e for e in frozen[1] if e["direction"] == "target"]
+    assert target["expected_status_codes"] == [200, 201] and target["method"]
+    served = _bound_under(
+        components, root, declared, {"target_rest_operation": "x"}, "reuse", watermark_field=wm
+    )
+    assert _linear_delta(frozen, served) == ({target["key"]: {"method"}}, {})
+
+
 def test_a_database_write_endpoint_is_served_only_for_components_apply_writes(cases):
     """The DB write target's ``operation`` and ``statement_type`` are read off the
-    write operation's and write profile's CANDIDATE config: either bound by name
-    under ``reuse`` makes them non-derivable; written, the frozen rows stand."""
+    write operation's and write profile's CANDIDATE config, each off its own
+    component (field-level since r2-01): either bound by name under ``reuse``
+    omits exactly its own key from the row, and every row stands; written, the
+    frozen rows stand."""
     case_id = "api_to_database_sync/create"
     components, root, facts, wm = _hand_built_linear_case(cases, case_id)
     frozen = _bound_under(components, root, facts, None, None)
     (target,) = [e for e in frozen[1] if e["direction"] == "target"]
     assert target["operation"] == "Send" and target["statement_type"]
-    for key in ("target_db_write_operation", "target_db_write_profile"):
+    assert "write" in [r["key"] for r in frozen[0]]
+    for key, omitted in (
+        ("target_db_write_operation", {"operation"}),
+        ("target_db_write_profile", {"statement_type"}),
+    ):
         assert key in {c["key"] for c in components}, key
         bound = {key: "existing-id"}
         for policy in ("reuse", None):
-            flows, endpoints = _bound_under(components, root, facts, bound, policy)
-            assert endpoints == [], (key, policy)
-            assert "write" not in [r["key"] for r in flows], (key, policy)
+            served = _bound_under(components, root, facts, bound, policy)
+            assert _linear_delta(frozen, served) == ({target["key"]: omitted}, {}), (key, policy)
         assert _bound_under(components, root, facts, bound, "clone") == frozen, key
+    both = {"target_db_write_operation": "a", "target_db_write_profile": "b"}
+    assert _linear_delta(frozen, _bound_under(components, root, facts, both, "reuse")) == (
+        {target["key"]: {"operation", "statement_type"}}, {}
+    )
 
 
 def test_a_connection_endpoint_binding_follows_apply_writes(cases):
@@ -1045,17 +1135,23 @@ def test_a_connection_endpoint_binding_follows_apply_writes(cases):
 
 def test_a_fanout_target_method_is_served_only_for_an_operation_apply_writes():
     """The fan-out leg (and target endpoint) ``method`` is read off each target
-    operation's CANDIDATE config: one target operation bound by name under
-    ``reuse`` makes the route non-derivable; written, it serves unchanged."""
+    operation's CANDIDATE config. #159 architect review r2-01: ONE target
+    operation bound by name under ``reuse`` omits exactly that target's method
+    — from its endpoint row and, for a non-first target, from its leg — and the
+    projection is otherwise the full one: every flow row, the source and every
+    other target endpoint, the composition summary and its leg count. Written
+    (``clone``), it serves the full projection unchanged."""
     from boomi_mcp.authoring.derived_flows import derive_recipe_projection
 
     _result, normalized = _flagship_projection_inputs()
     (unit,) = normalized.integration_spec.processes
-    facts = normalized.recipe_projection_facts[unit.envelope.component_key]
+    process_key = unit.envelope.component_key
+    facts = normalized.recipe_projection_facts[process_key]
+    assert len(facts.targets) >= 2
 
     def project(ids, policy):
         kwargs = {} if policy is None else {"conflict_policy": policy}
-        return derive_recipe_projection(
+        projected = derive_recipe_projection(
             normalized.integration_spec.processes,
             normalized.integration_spec.components,
             connector_metadata=normalized.connector_metadata,
@@ -1064,22 +1160,39 @@ def test_a_fanout_target_method_is_served_only_for_an_operation_apply_writes():
             existing_ids=ids,
             **kwargs,
         )
+        return (
+            [r.model_dump(mode="json") for r in projected.flows],
+            [e.model_dump(mode="json") for e in projected.endpoints],
+            {k: s.model_dump(mode="json") for k, s in projected.composition_summaries.items()},
+        )
 
-    baseline = _project(normalized)
-    assert baseline.composition_summaries[unit.envelope.component_key].fanout_legs[0].method
-    for target in (facts.targets[0], facts.targets[1]):
+    full = project(None, None)
+    full_flows, full_endpoints, full_summaries = full
+    summary = full_summaries[process_key]
+    assert summary["fanout_targets"] == len(facts.targets) and summary["fanout_legs"]
+    assert all(leg["method"] for leg in summary["fanout_legs"])
+    targets = [e for e in full_endpoints if e["direction"] == "target"]
+    assert len(targets) == len(facts.targets) and all(e["method"] for e in targets)
+    assert any(e["direction"] == "source" for e in full_endpoints)
+
+    for index, target in enumerate(facts.targets):
         bound = {target.operation_key: "existing-operation-id"}
         for policy in ("reuse", None):
-            moved = project(bound, policy)
-            assert [r.key for r in moved.flows] == ["transform"], (target.part_key, policy)
-            assert moved.endpoints == () and moved.composition_summaries == {}
-        written = project(bound, "clone")
-        assert [r.model_dump(mode="json") for r in written.flows] == [
-            r.model_dump(mode="json") for r in baseline.flows
-        ]
-        assert [e.model_dump(mode="json") for e in written.endpoints] == [
-            e.model_dump(mode="json") for e in baseline.endpoints
-        ]
+            flows, endpoints, summaries = project(bound, policy)
+            assert flows == full_flows, (target.part_key, policy)
+            assert _row_delta(full_endpoints, endpoints) == (
+                {targets[index]["key"]: {"method"}}, {}
+            ), (target.part_key, policy)
+            assert set(summaries) == set(full_summaries)
+            served = dict(summaries[process_key])
+            whole = dict(full_summaries[process_key])
+            legs, full_legs = served.pop("fanout_legs"), whole.pop("fanout_legs")
+            assert served == whole, (target.part_key, policy)
+            expected_legs = {} if index == 0 else {target.part_key: {"method"}}
+            assert _row_delta(full_legs, legs, keyed_by="part_key") == (expected_legs, {}), (
+                target.part_key, policy,
+            )
+        assert project(bound, "clone") == full
 
 
 def test_only_an_exact_unreferencing_passthrough_stop_root_infers_stub_facts():
