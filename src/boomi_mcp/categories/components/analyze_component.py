@@ -735,7 +735,10 @@ def merge_versions(
             "diff_lines": len(diff),
             "diff_preview": ''.join(diff[:50]) if diff else "No differences found",
             "profile": profile,
-            "note": f"Source ({source_label}) content merged onto target ({target_label}). Component version incremented.",
+            "note": (
+                f"Source ({source_label}) content merged onto target ({target_label}). "
+                + ("Component version incremented." if verify else
+                   "Boomi accepted the merge; the resulting version could not be confirmed.")),
         }
 
         if verification is not None:

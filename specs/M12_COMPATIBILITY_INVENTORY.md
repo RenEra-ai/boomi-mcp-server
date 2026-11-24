@@ -2093,7 +2093,7 @@ rather than aspirational.
 | LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2265 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4425 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2404 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 977 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 980 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1117 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-a4d26b62 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_branch_shapes | 2 | 3404 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-020c9559 | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_connector_scoped_try_catch_shapes | 7 | 4684 | #160 | follow the callee's row; this is an edge, not a site |

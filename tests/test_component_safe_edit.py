@@ -1371,3 +1371,6 @@ def test_a_failed_verification_read_never_reports_a_landed_write_as_failed(route
     assert [cid for cid, _ in client.component.pushed] == [_A_ID]
     assert _B_ID not in _json.dumps(res)
     assert "verification read failed" not in _json.dumps(res)
+    # Nothing confirmed is claimed: no version, and no note asserting an increment.
+    assert "incremented" not in res.get("note", "")
+    assert res.get("new_version", "") == ""
