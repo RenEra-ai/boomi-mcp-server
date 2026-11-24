@@ -1248,6 +1248,28 @@ class BudgetedComponentReads:
         self._budget = float(_shared._component_get_deadline_seconds())
         self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
+    def run(self, fn, component_id):
+        """Run one NON-read account call (``fn()``) on the REMAINING budget and
+        charge it (#159 ARCH-r2-03: every account call of a canonical safe-edit
+        call spends its one budget, the post-write version comparison included).
+
+        Returns ``fn()``'s result, re-raises its own exception, or raises
+        ``ComponentGetDeadlineExceeded`` on timeout — or at once, without
+        calling ``fn``, when no budget remains."""
+        import time as _time
+
+        from ..categories.components import _shared
+
+        if self._budget <= 0:
+            raise _shared.ComponentGetDeadlineExceeded(
+                component_id=component_id, deadline_seconds=0, elapsed_seconds=0.0
+            )
+        started = _time.monotonic()
+        try:
+            return _shared._run_with_deadline(fn, component_id, self._budget)
+        finally:
+            self._budget -= _time.monotonic() - started
+
     def fetch(
         self, component_id, *, refetch: bool = False, raise_deadline: bool = False
     ) -> Optional[Dict[str, Any]]:

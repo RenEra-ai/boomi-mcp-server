@@ -28,6 +28,7 @@ from boomi.models import (
 
 from boomi.net.transport.api_error import ApiError
 from ._shared import (
+    post_write_version,
     component_get_xml,
     read_after_write,
     _extract_api_error_msg,
@@ -723,6 +724,18 @@ def merge_versions(
         # The write is done: a failed verification read must not report it as
         # failed (mutation accounting) — it is served beside the success.
         verify, verification = read_after_write(boomi_client, verify_id)
+        # The claim about the version is derived from the reading (#159 ARCH-r2-02),
+        # against the pre-write version of the SAME object only: a version-snapshot
+        # target (`{id}~{n}`) is not the head the write and the re-read address.
+        state, read_version = post_write_version(
+            target_meta.get('version') if target_get_id == verify_id else None, verify
+        )
+        outcome = {
+            "advanced": "Component version incremented.",
+            "unchanged": "Boomi accepted the merge, but the post-write read shows no new version.",
+            "observed": "Boomi accepted the merge; the post-write read shows version {0}.".format(read_version),
+            "unconfirmed": "Boomi accepted the merge; the resulting version could not be confirmed.",
+        }[state]
 
         result = {
             "_success": True,
@@ -731,14 +744,11 @@ def merge_versions(
             "component_name": target_meta.get('name', ''),
             "source": source_label,
             "target": target_label,
-            "new_version": verify.get('version', '') if verify else '',
+            "new_version": read_version if read_version is not None else '',
             "diff_lines": len(diff),
             "diff_preview": ''.join(diff[:50]) if diff else "No differences found",
             "profile": profile,
-            "note": (
-                f"Source ({source_label}) content merged onto target ({target_label}). "
-                + ("Component version incremented." if verify else
-                   "Boomi accepted the merge; the resulting version could not be confirmed.")),
+            "note": f"Source ({source_label}) content merged onto target ({target_label}). {outcome}",
         }
 
         if verification is not None:

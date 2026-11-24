@@ -1127,19 +1127,20 @@ def test_legacy_edit_refuses_a_target_answer_naming_another_component(fault, mon
 
 
 def test_canonical_update_spends_one_read_budget_from_the_target_read(monkeypatch):
-    """ARCH-r1 #11: prepare and apply each spend ONE read budget, starting at the target's read.
-    Every account read before the write is handed the budget's REMAINING slice — so none runs
-    under a standalone deadline (``None``), and the slices never grow. Before the fix the target
-    was read under its own deadline and a fresh budget started after it (two budgets per call)."""
+    """ARCH-r1 #11 / ARCH-r2 #3: prepare and apply each spend ONE read budget, starting at the
+    target's read. EVERY account read of the call — the post-write re-read included — is handed
+    the budget's REMAINING slice, so none runs under a standalone deadline (``None``) and the
+    slices never grow. Before r1 the target was read under its own deadline and a fresh budget
+    started after it; before r2 the post-write re-read ran under a fresh deadline."""
     from boomi_mcp.categories.components import _shared
 
     _spy_compare(monkeypatch)
     real = _shared.component_get_xml
     calls = []
+    post_write = []
 
     def _spy(client, component_id, deadline_seconds=None):
-        if not client.component.pushed:  # the post-write comparison read is not a pre-write read
-            calls.append((component_id, deadline_seconds))
+        (post_write if client.component.pushed else calls).append((component_id, deadline_seconds))
         return real(client, component_id, deadline_seconds=deadline_seconds)
 
     monkeypatch.setattr(_shared, "component_get_xml", _spy)
@@ -1151,11 +1152,43 @@ def test_canonical_update_spends_one_read_budget_from_the_target_read(monkeypatc
     calls.clear()
     res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
     assert res["_success"] is True, res
-    for phase, seen in (("prepare", prepare_calls), ("apply", calls)):
+    # Non-vacuity: the post-write re-read happened, on the target, inside apply's budget.
+    assert [cid for cid, _ in post_write] == [CANONICAL_PROCESS_ID], post_write
+    apply_calls = calls + post_write
+    for phase, seen in (("prepare", prepare_calls), ("apply", apply_calls)):
         assert seen and seen[0][0] == CANONICAL_PROCESS_ID, (phase, seen)
         deadlines = [deadline for _cid, deadline in seen]
         assert None not in deadlines, (phase, seen)
         assert deadlines == sorted(deadlines, reverse=True), (phase, seen)
+
+
+def test_canonical_update_compares_versions_inside_the_calls_one_budget(monkeypatch):
+    """ARCH-r2 #3: the post-write version comparison is an account call of the canonical apply,
+    so it runs on the REMAINING budget: a comparison that stalls past it is abandoned and served
+    as a comparison error beside the landed write. Before the fix it ran unbounded, so the call
+    outlived its budget by the whole stall."""
+    import time as _t
+    from boomi_mcp.categories.components import _shared
+
+    client = CanonicalAccount(canonical_account_store())
+    patch = canonical_patch()
+    token = _canonical_prepare(client, patch)["confirmation_token"]
+    compared = []
+
+    def _slow_compare(boomi_client, profile, component_id, config):
+        compared.append(config)
+        _t.sleep(2.5)
+        return {"_success": True, "diff": {"changed": True}}
+
+    monkeypatch.setattr(safe_edit_component, "compare_versions", _slow_compare)
+    monkeypatch.setattr(_shared, "_component_get_deadline_seconds", lambda: 1)
+    started = _t.monotonic()
+    res = apply_component_edit_action(client, "prof", CANONICAL_PROCESS_ID, patch, token, confirm_apply=True)
+    elapsed = _t.monotonic() - started
+    assert res["_success"] is True and res["boomi_mutation"] is True, res
+    assert compared, "the comparison must have been started (non-vacuity)"
+    assert "version_comparison" not in res and res.get("version_comparison_error"), res
+    assert elapsed < 2.0, elapsed
 
 
 def test_captured_mapped_update_refuses_a_linked_profile_that_is_no_component_envelope():
@@ -1374,3 +1407,61 @@ def test_a_failed_verification_read_never_reports_a_landed_write_as_failed(route
     # Nothing confirmed is claimed: no version, and no note asserting an increment.
     assert "incremented" not in res.get("note", "")
     assert res.get("new_version", "") == ""
+
+
+class _VersioningApi(_AnsweringApi):
+    """Answers A's own envelope: at version 3 until the write, then at ``after`` (4 = the write
+    produced a version, 3 = the re-read shows none — a no-op write or a stale read)."""
+
+    def __init__(self, after):
+        super().__init__(_A_ID)
+        self.after = after
+
+    def get_component(self, component_id):
+        self.reads.append(component_id)
+        version = self.after if self.pushed else 3
+        return _db_conn_named(_A_ID).replace('version="3"', f'version="{version}"', 1).encode("utf-8")
+
+
+class _VersioningClient:
+    def __init__(self, after):
+        self.component = _VersioningApi(after)
+
+
+@pytest.mark.parametrize("config, after, claims_increment, shown", [
+    ({"source_branch": "dev", "target_branch": "main"}, 4, True, "incremented"),
+    ({"source_branch": "dev", "target_branch": "main"}, 3, False, "shows no new version"),
+    ({"source_version": 1, "target_version": 2}, 4, False, "shows version 4"),
+], ids=["head_target_advanced", "head_target_not_advanced", "snapshot_target_observed"])
+def test_a_merge_claims_a_version_increment_only_when_the_re_read_shows_one(
+        config, after, claims_increment, shown, monkeypatch):
+    """ARCH-r2 #2 (structural, second instance of CDX fx2-01): the merge's served version claim is
+    DERIVED from the post-write reading (`_shared.post_write_version`), against the pre-write
+    version of the SAME object. A re-read at the old version claims no increment; a target read
+    as a version snapshot (`{id}~{n}`) is no baseline for the head, so only the observed version
+    is served. Before the fix any successful re-read claimed an increment."""
+    from boomi_mcp.categories.components import analyze_component
+    from boomi_mcp.categories.components.analyze_component import merge_versions
+
+    monkeypatch.setattr(analyze_component, "compare_versions", lambda *a, **k: {"_success": True})
+    client = _VersioningClient(after)
+    res = merge_versions(client, "p", _A_ID, config)
+    assert res["_success"] is True and res["boomi_mutation"] is True, res
+    assert [cid for cid, _ in client.component.pushed] == [_A_ID]
+    assert ("incremented" in res["note"]) is claims_increment, res["note"]
+    assert shown in res["note"], res["note"]
+    assert res["new_version"] == after
+    assert "verification" not in res
+
+
+@pytest.mark.parametrize("before, after, state", [
+    (3, None, "unconfirmed"), (None, {"version": 4}, "observed"),
+    (3, {"version": 4}, "advanced"), (3, {"version": 3}, "unchanged"),
+    (3, {"version": 2}, "unchanged"), (3, {"version": ""}, "observed"),
+])
+def test_post_write_version_covers_every_case_of_its_authority(before, after, state):
+    """ARCH-r2 #2 coverage claim: reading present/absent × same-object baseline present/absent ×
+    advanced or not — the four states are the post-write read's whole case set."""
+    from boomi_mcp.categories.components._shared import post_write_version
+
+    assert post_write_version(before, after)[0] == state

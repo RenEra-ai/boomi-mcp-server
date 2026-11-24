@@ -366,6 +366,33 @@ def component_get_xml(
     }
 
 
+def post_write_version(before: Any, after: Optional[Dict[str, Any]]) -> Tuple[str, Any]:
+    """What a post-write read says about the version a write produced — the ONE
+    derivation every served post-write version claim reads (#159 ARCH-r2-02).
+
+    ``before`` is the pre-write version of the SAME object the post-write read
+    targets (``None`` when the pre-write read was another object, e.g. a merge
+    whose target is a version snapshot); ``after`` is the post-write reading
+    (``None`` when it failed). Returns ``(state, version)``:
+
+    - ``"unconfirmed"``: no reading — nothing about the version may be claimed;
+    - ``"observed"``: a reading but no same-object baseline — its version is
+      served, no increment is claimed;
+    - ``"advanced"``: the reading's version is past the baseline;
+    - ``"unchanged"``: it is not (no new version, or a stale read).
+    """
+    if after is None:
+        return "unconfirmed", None
+    version = after.get("version")
+    if before is None:
+        return "observed", version
+    try:
+        advanced = int(version) > int(before)
+    except (TypeError, ValueError):
+        return "observed", version
+    return ("advanced" if advanced else "unchanged"), version
+
+
 def read_after_write(
     boomi_client: Boomi, component_id: str
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:

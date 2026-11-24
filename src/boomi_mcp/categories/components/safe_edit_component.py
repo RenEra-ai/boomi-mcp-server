@@ -54,6 +54,7 @@ from boomi import Boomi
 
 from ._shared import (
     component_get_xml,
+    post_write_version,
     set_description_element,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
@@ -1333,27 +1334,46 @@ def apply_component_edit_action(
 
     # Expose version comparison after write (acceptance criterion). Best-effort:
     # a comparison failure does not undo the successful write.
+    # #159 ARCH-r2-03: a canonical call reads and compares through its ONE read
+    # budget, like every read before the write. #159 ARCH-r2-02: what is said
+    # about the version is derived from the post-write reading
+    # (``post_write_version``), against the head version read before the write.
     try:
-        post = component_get_xml(boomi_client, component_id)
-        new_version = post["version"]
-        result["new_version"] = new_version
-        if new_version != base_version:
-            comparison = compare_versions(
-                boomi_client,
-                profile,
-                component_id,
-                {"source_version": base_version, "target_version": new_version},
+        if canonical:
+            post = canonical_reads.fetch(component_id, refetch=True)
+            if not isinstance(post, dict) or post.get("unparseable"):
+                post = None
+        else:
+            post = component_get_xml(boomi_client, component_id)
+        state, new_version = post_write_version(base_version, post)
+        if state == "unconfirmed":
+            result["version_comparison_error"] = (
+                "The write succeeded, but the post-write re-read failed or the "
+                "request's read budget was spent; no version comparison performed."
             )
+            result["diff"] = _unified_diff(current["xml"], merged_xml, max_diff_lines)[0]
+        elif state == "unchanged":
+            result["new_version"] = new_version
+            result["version_comparison_note"] = (
+                "The post-write read shows no new version; no version comparison performed."
+            )
+        else:
+            result["new_version"] = new_version
+
+            def _compare():
+                return compare_versions(
+                    boomi_client,
+                    profile,
+                    component_id,
+                    {"source_version": base_version, "target_version": new_version},
+                )
+
+            comparison = canonical_reads.run(_compare, component_id) if canonical else _compare()
             if comparison.get("_success"):
                 result["version_comparison"] = comparison
             else:
                 result["version_comparison_error"] = comparison.get("error")
                 result["diff"] = _unified_diff(current["xml"], merged_xml, max_diff_lines)[0]
-        else:
-            result["version_comparison_note"] = (
-                "Write produced no new version (no effective change); "
-                "no version comparison performed."
-            )
     except ComponentGetDeadlineExceeded as exc:
         result["version_comparison_error"] = str(exc)
         result["diff"] = _unified_diff(current["xml"], merged_xml, max_diff_lines)[0]
