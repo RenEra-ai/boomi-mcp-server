@@ -1211,7 +1211,11 @@ class _AnsweringClient:
         self.component = _AnsweringApi(answered_id)
 
 
-@pytest.mark.parametrize("requested", [_A_ID, _A_ID.upper(), f" {_A_ID} ", f"{_A_ID}~dev-branch", f"{_A_ID}~7"])
+@pytest.mark.parametrize(
+    "requested",
+    [_A_ID, _A_ID.upper(), f" {_A_ID} ", f"{_A_ID}~dev-branch", f"{_A_ID}~7"],
+    ids=["bare", "upper_case", "padded", "branch_qualified", "version_qualified"],
+)
 def test_the_one_read_fails_an_answer_naming_another_component(requested):
     """Non-vacuity at the authority: B's envelope answering a request for A (bare, any case,
     padded, or in the `~branch` / `~version` forms merge_versions sends) is a READ FAILURE,
