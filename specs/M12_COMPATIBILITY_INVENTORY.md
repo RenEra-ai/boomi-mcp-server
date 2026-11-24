@@ -2084,14 +2084,14 @@ rather than aspirational.
 | LG-e9731d65 | legacy_emitter | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _emit_try_catch_shapes | 2 | 4411 | #160 | delete the legacy semantic shell |
 | LG-48cc5eb8 | legacy_transitive_call | server.py | analyze_component | 1 | 1944 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-853101d8 | legacy_transitive_call | server.py | apply_component_edit | 1 | 2148 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-b6bb8a5c | legacy_transitive_call | server.py | build_integration | 1 | 2630 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-a389d52e | legacy_transitive_call | server.py | discover_odata_metadata | 1 | 3128 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-1a0b93dd | legacy_transitive_call | server.py | discover_openapi_spec | 1 | 3027 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-97044988 | legacy_transitive_call | server.py | discover_soap_wsdl | 1 | 3079 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-f5622f58 | legacy_transitive_call | server.py | invoke_boomi_api | 1 | 3517 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-b6bb8a5c | legacy_transitive_call | server.py | build_integration | 1 | 2631 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-a389d52e | legacy_transitive_call | server.py | discover_odata_metadata | 1 | 3129 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-1a0b93dd | legacy_transitive_call | server.py | discover_openapi_spec | 1 | 3028 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-97044988 | legacy_transitive_call | server.py | discover_soap_wsdl | 1 | 3080 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-f5622f58 | legacy_transitive_call | server.py | invoke_boomi_api | 1 | 3518 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-963c3aaf | legacy_transitive_call | server.py | manage_component | 1 | 1830 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-2976fe39 | legacy_transitive_call | server.py | manage_connector | 1 | 2265 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4424 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-4ce172f4 | legacy_transitive_call | server.py | orchestrate_deploy | 3 | 4425 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-334a4633 | legacy_transitive_call | server.py | search_marketplace_recipes | 1 | 2404 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-3f49de44 | legacy_transitive_call | src/boomi_mcp/categories/components/analyze_component.py | analyze_component_action | 1 | 971 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-bb10b9ca | legacy_transitive_call | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.build | 3 | 1117 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2109,10 +2109,10 @@ rather than aspirational.
 | LG-2cc27d39 | legacy_transitive_call | src/boomi_mcp/categories/components/manage_component.py | manage_component_action | 3 | 549 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-205964b1 | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | _run_listener_verify_stage | 2 | 2418 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-ab50f45d | legacy_transitive_call | src/boomi_mcp/categories/deployment/orchestration.py | orchestrate_deploy_action | 1 | 5764 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-3cf79d6e | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 2 | 9491 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-01c3922d | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 2 | 7793 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-3cf79d6e | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 2 | 9551 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-01c3922d | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 2 | 7853 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-f16d0493 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | _execute_component | 20 | 2857 | #160 | follow the callee's row; this is an edge, not a site |
-| LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 1 | 11507 | #160 | follow the callee's row; this is an edge, not a site |
+| LG-1f766152 | legacy_transitive_call | src/boomi_mcp/categories/integration_builder.py | build_integration_action | 1 | 11567 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-06774e06 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_odata_metadata_action | 1 | 1763 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-eb660e0c | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_openapi_spec_action | 1 | 1705 | #160 | follow the callee's row; this is an edge, not a site |
 | LG-2a6651d0 | legacy_transitive_call | src/boomi_mcp/categories/schema_discovery.py | discover_soap_wsdl_action | 1 | 1735 | #160 | follow the callee's row; this is an edge, not a site |
@@ -2137,7 +2137,7 @@ rather than aspirational.
 | LG-105578cb | unclassified_reference | src/boomi_mcp/authoring/process_admission.py | <module> | 2 | 35 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-6993ec78 | unclassified_reference | src/boomi_mcp/authoring/process_entry.py | legacy_config_entry | 2 | 119 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-88502416 | unclassified_reference | src/boomi_mcp/authoring/revision_corpus.py | <module> | 1 | 989 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-03134105 | unclassified_reference | src/boomi_mcp/authoring/stored_profile_bindings.py | stored_map_profile_links._on_start | 1 | 101 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-03134105 | unclassified_reference | src/boomi_mcp/authoring/stored_profile_bindings.py | stored_map_profile_links._on_start | 1 | 110 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-a3b03f12 | unclassified_reference | src/boomi_mcp/categories/components/builders/__init__.py | <module> | 5 | 57 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-bd39ea58 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | <module> | 17 | 5291 | #160 | delete the legacy semantic shell |
 | LG-36bd73fc | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 6 | 702 | #160 | delete the legacy semantic shell |
@@ -2149,8 +2149,8 @@ rather than aspirational.
 | LG-67ac22ad | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _reliability_requests_try_catch | 1 | 2165 | #160 | delete the legacy semantic shell |
 | LG-b4eb25cd | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | _source_dynamic_path_connector_scope_error | 1 | 1722 | #160 | delete the legacy semantic shell |
 | LG-943d38e3 | unclassified_reference | src/boomi_mcp/categories/components/builders/process_flow_builder.py | get_process_flow_builder | 3 | 6171 | #160 | delete the legacy semantic shell |
-| LG-b1b42a81 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 1 | 10009 | #160 | residue: a watched name mentioned in a shape the census does not classify |
-| LG-cd5de55e | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4203 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-b1b42a81 | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _apply_plan | 1 | 10069 | #160 | residue: a watched name mentioned in a shape the census does not classify |
+| LG-cd5de55e | unclassified_reference | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4267 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-7a2682e9 | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _api_to_api_unit_draft | 1 | 1424 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-1ffb629c | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _derive_preset_parameters | 1 | 1038 | #160 | residue: a watched name mentioned in a shape the census does not classify |
 | LG-426c3eeb | unclassified_reference | src/boomi_mcp/categories/integration_import.py | _recipe_invocation_draft | 1 | 1289 | #160 | residue: a watched name mentioned in a shape the census does not classify |
@@ -2206,7 +2206,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
 |---|---|---|---|---|---|---|---|
 | LG-702def56 | authoring_boundary | server.py | build_integration | 1 | 2433 | #159 | migrate the boundary to canonical ProcessIR |
-| LG-4b265c33 | authoring_boundary | server.py | import_integration_draft | 1 | 2916 | #159 | migrate the boundary to canonical ProcessIR |
+| LG-4b265c33 | authoring_boundary | server.py | import_integration_draft | 1 | 2917 | #159 | migrate the boundary to canonical ProcessIR |
 | LG-9e84c0d5 | authoring_boundary | src/boomi_mcp/recipes/builtins/database_to_api_sync.py | boomi.archetype.database_to_api_sync@1.0.0 | 1 | 1 | #159 | migrate the boundary to canonical ProcessIR |
 | LG-987105ff | authoring_boundary | src/boomi_mcp/recipes/builtins/fanout.py | boomi.compose.db_rest_fanout@2.0.0 | 1 | 1 | #159 | migrate the boundary to canonical ProcessIR |
 | LG-ad6500ce | authoring_boundary | src/boomi_mcp/recipes/builtins/http_listener_to_db.py | boomi.archetype.http_listener_to_db@1.0.0 | 1 | 1 | #159 | migrate the boundary to canonical ProcessIR |
@@ -2217,7 +2217,7 @@ example producers are globbed, never enumerated: a sixth example is a diff, not 
 | LG-65a53d30 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | ProcessFlowBuilder.validate_config | 2 | 702 | #160 | delete the legacy semantic shell |
 | LG-bba865c6 | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.validate_config | 2 | 5996 | #160 | delete the legacy semantic shell |
 | LG-42e9928c | process_kind_consumer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | WrapperSubprocessBuilder.validate_config | 2 | 4952 | #160 | delete the legacy semantic shell |
-| LG-0f6e121e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4203 | #160 | delete with the legacy consumer |
+| LG-0f6e121e | process_kind_consumer | src/boomi_mcp/categories/integration_builder.py | _bracketed_naming_warning | 2 | 4267 | #160 | delete with the legacy consumer |
 | LG-f82294a9 | process_kind_consumer | src/boomi_mcp/compiler/process_ir/legacy_adapters/authority.py | _resolve_process_kind | 2 | 217 | #151 | re-home onto the neutral extraction |
 | LG-af904e61 | process_kind_consumer | src/boomi_mcp/models/_process_ir_compat.py | legacy_flow_sequence_to_ir | 2 | 679 | #159 | migrate the compatibility codec, then delete |
 | LG-885d1a16 | process_kind_producer | src/boomi_mcp/categories/components/builders/process_flow_builder.py | SyncPipelineBuilder.lower_config | 1 | 5508 | #160 | delete the legacy semantic shell |
@@ -2286,8 +2286,8 @@ above says what each location means; this one says exactly where the calls are.
 
 | Ledger ID | Census | Path | Symbol | Sites | Baseline line | Owning issue | Disposition |
 |---|---|---|---|---|---|---|---|
-| LG-4e092c94 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _create_component_raw | 1 | 568 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. |
-| LG-c7a85e57 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _update_component_xml | 1 | 600 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. |
+| LG-4e092c94 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _create_component_raw | 1 | 616 | #160 | WRT-shared-raw-create-sink: the shared process-content classifier is enforced at or before this sink for every caller. |
+| LG-c7a85e57 | component_xml_write | src/boomi_mcp/categories/components/_shared.py | _update_component_xml | 1 | 648 | #160 | WRT-shared-dormant-writer: sits behind the two-sided guard, or is deleted. |
 | LG-08665fc8 | component_xml_write | src/boomi_mcp/categories/components/analyze_component.py | merge_versions | 1 | 718 | #160 | WRT-analyze-component-merge: REJECT when the target is a process OR the source/merged root is a process — the merged root IS the source root, so a target-only check never sees a process-root source over a non-process target. |
 | LG-b091f264 | component_xml_write | src/boomi_mcp/categories/components/connectors.py | create_connector | 3 | 400 | #160 | WRT-connector-typed-build: unchanged — the content guard never matches a connector root. · WRT-manage-connector-create: content-based refusal on a process XML root. |
 | LG-91d77b6a | component_xml_write | src/boomi_mcp/categories/components/connectors.py | update_connector | 2 | 590 | #160 | WRT-manage-connector-metadata: semantic-body identity under the shared projection. · WRT-manage-connector-update: two-sided payload-OR-live-target refusal. |
@@ -2295,18 +2295,18 @@ above says what each location means; this one says exactly where the calls are.
 | LG-87f4dbe2 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | create_component | 6 | 94 | #160 | WRT-manage-component-create: create with a process XML root is REJECTED by the shared process-content classifier, whatever the declared type. · WRT-manage-component-typed-create: unchanged — the content guard never matches these roots. |
 | LG-f1dd2559 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | manage_component_action | 2 | 549 | #160 | WRT-manage-component-dispatch: the shared process-content classifier runs at the dispatcher, before either arm. |
 | LG-56fa02b3 | component_xml_write | src/boomi_mcp/categories/components/manage_component.py | update_component | 3 | 277 | #160 | WRT-manage-component-metadata: semantic-body identity under the single shared projection. · WRT-manage-component-update: two-sided check — payload root `process` OR live target type `process` refuses; lookup/parse failure fails closed. |
-| LG-2a29dc0c | component_xml_write | src/boomi_mcp/categories/components/safe_edit_component.py | apply_component_edit_action | 1 | 1204 | #160 | WRT-safe-edit-metadata: route-sensitive projection — the permitted subset is exactly the requested name/folderId/folderName/immediate description; process BODY edits are REJECTED in favour of canonical ProcessIR apply. |
+| LG-2a29dc0c | component_xml_write | src/boomi_mcp/categories/components/safe_edit_component.py | apply_component_edit_action | 1 | 1313 | #160 | WRT-safe-edit-metadata: route-sensitive projection — the permitted subset is exactly the requested name/folderId/folderName/immediate description; process BODY edits are REJECTED in favour of canonical ProcessIR apply. |
 | LG-8f886cf4 | component_xml_write | src/boomi_mcp/categories/folders.py | _action_move_component | 1 | 324 | #160 | WRT-folders-move-component: semantic-body identity under the shared projection. |
 | LG-5f228a61 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _apply_structured_update | 1 | 2349 | #153 | WRT-build-integration-preservation-merge: preserved, re-homed onto the canonical apply path. |
-| LG-d2124aa7 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 1 | 7868 | #153 | WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded. |
+| LG-d2124aa7 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _execute_canonical_process | 1 | 7928 | #153 | WRT-canonical-process-materialization: unchanged, and it is what the retraction leaves behind: a process root reaches the platform only through a compiled artifact whose plan fingerprint and apply-time mutation attestation are both recorded. |
 | LG-c45135b8 | component_xml_write | src/boomi_mcp/categories/integration_builder.py | _execute_component | 9 | 3025 | #153/#160 | WRT-build-integration-generic: content guard at BOTH plan and apply boundaries, placed BEFORE all type dispatch (the process and connector arms dispatch before the fall-through ever runs); mutation-tested with an unknown/future declared type. · WRT-build-integration-structured-process: replaced by canonical ProcessIR materialization/apply. · WRT-build-integration-typed-nonprocess: unchanged — the content guard never matches these roots. |
 | LG-1d129c81 | component_xml_write | src/boomi_mcp/categories/meta_tools.py | invoke_api | 1 | 5962 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
 | LG-0c9343f4 | component_xml_write | src/boomi_mcp/categories/shared_resources.py | _get_channel_raw_json | 1 | 204 | #160 | WRT-shared-channel-lossless-read: unchanged — the endpoint is not /Component and the call is a read, so the process-content classifier never applies; it is inventoried so a future edit cannot turn a hand-rolled transport into a write route unnoticed. |
-| LG-efa0b8f0 | http_client_call | server.py | web_callback | 1 | 5494 | #160 | WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component. |
+| LG-efa0b8f0 | http_client_call | server.py | web_callback | 1 | 5495 | #160 | WRT-external-transport-oauth-callback: unchanged — assert the target host/path is the configured token endpoint, never /Component. |
 | LG-7709911a | http_client_call | src/boomi_mcp/categories/deployment/orchestration.py | _listener_probe | 1 | 1718 | #160 | WRT-external-transport-listener-probe: unchanged — the URL comes from the listener's endpoint, never from a Component route. |
 | LG-7e973d10 | http_client_call | src/boomi_mcp/categories/marketplace.py | search_marketplace_recipes_action | 1 | 253 | #160 | WRT-external-transport-marketplace: unchanged — assert the endpoint is the Marketplace GraphQL host and no component XML is submitted. |
 | LG-9b78e266 | http_client_call | src/boomi_mcp/categories/schema_discovery.py | _fetch | 1 | 461 | #160 | WRT-external-transport-schema-discovery: unchanged — the SSRF guard already forbids platform hosts; assert no /Component target is reachable. |
-| LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3517 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
+| LG-c3bf6d69 | raw_api_invoker | server.py | invoke_boomi_api | 1 | 3518 | #160 | WRT-raw-api-component: ONE canonical endpoint parser feeds classification, ID extraction AND transport; the reserved literal `bulk` is matched BEFORE the `<id>` arm and is never a componentId; every update-shaped call runs the two-sided process check. |
 
 vendor line numbers, which drift independently under `boomi>=3.0.1`):
 
