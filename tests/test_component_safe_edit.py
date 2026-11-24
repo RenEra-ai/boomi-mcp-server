@@ -1188,6 +1188,9 @@ def test_canonical_update_compares_versions_inside_the_calls_one_budget(monkeypa
     assert res["_success"] is True and res["boomi_mutation"] is True, res
     assert compared, "the comparison must have been started (non-vacuity)"
     assert "version_comparison" not in res and res.get("version_comparison_error"), res
+    # It names what ran out — the comparison, not a component GET (QA r6-02).
+    assert "version comparison" in res["version_comparison_error"], res
+    assert "Component GET" not in res["version_comparison_error"], res
     assert elapsed < 2.0, elapsed
 
 

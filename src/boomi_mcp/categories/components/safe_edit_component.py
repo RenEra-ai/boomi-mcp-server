@@ -1368,7 +1368,16 @@ def apply_component_edit_action(
                     {"source_version": base_version, "target_version": new_version},
                 )
 
-            comparison = canonical_reads.run(_compare, component_id) if canonical else _compare()
+            if canonical:
+                try:
+                    comparison = canonical_reads.run(_compare, component_id)
+                except ComponentGetDeadlineExceeded:
+                    # The comparison is not a component GET: say what ran out (QA r6-02).
+                    comparison = {"_success": False, "error": (
+                        "The write succeeded, but the version comparison did not finish "
+                        "within the request's read budget.")}
+            else:
+                comparison = _compare()
             if comparison.get("_success"):
                 result["version_comparison"] = comparison
             else:
