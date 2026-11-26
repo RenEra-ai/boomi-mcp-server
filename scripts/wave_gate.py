@@ -2326,19 +2326,24 @@ def open_shard_out(repo, path, shard):
                 "--shard-out {0} already holds {1}; a shard record is created "
                 "exclusively, never overwritten".format(path, name),
             )
-        # Writable, proven NOW: a read-only directory must fail in seconds, not after the
-        # share's hours of pytest. A uniquely named probe, through the held descriptor.
-        probe = ".wave-gate-probe-{0}-{1}".format(os.getpid(), os.urandom(6).hex())
+        # Writable, checked NOW: a read-only directory must fail in seconds, not after the
+        # share's hours of pytest. NON-MUTATING on purpose (`faccessat` on the held
+        # descriptor): a probe file would need delete permission to clean up, which an
+        # append-only directory denies although it can still take the exclusively created
+        # record. This is an early refusal only; the record's own exclusive create stays the
+        # authority on whether the write succeeds.
         try:
-            probe_fd = os.open(
-                probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_NOFOLLOW, 0o600, dir_fd=fd)
-            os.close(probe_fd)
-            os.unlink(probe, dir_fd=fd)
-        except OSError as exc:
+            writable = os.access(".", os.W_OK | os.X_OK, dir_fd=fd)
+        except (OSError, NotImplementedError) as exc:
             raise _contract(
                 "GATE_USAGE_INVALID",
-                "--shard-out {0} is not writable ({1}); the shard record could not be "
-                "created after the run".format(path, exc),
+                "cannot check that --shard-out {0} is writable ({1})".format(path, exc),
+            )
+        if not writable:
+            raise _contract(
+                "GATE_USAGE_INVALID",
+                "--shard-out {0} is not writable; the shard record could not be created "
+                "after the run".format(path),
             )
         return fd
     except BaseException:
