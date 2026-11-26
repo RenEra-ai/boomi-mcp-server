@@ -10,6 +10,11 @@ must be refused with the code the single-process run uses for the same defect.
 
 The positive path is the gate's own green run at HEAD, plus one end-to-end case here that
 drives real pytest children over a throwaway suite.
+
+The same bar then crosses a JOB boundary (#159 S3): CI runs each share on its own runner
+(`ci --shard K --shard-out DIR`) and the required check (`ci --shard-reports DIR`) reconciles
+the records through the same `reconcile_suite`. The second half of this module is that
+aggregate's negative matrix plus a real shard-then-aggregate end to end.
 """
 
 from __future__ import annotations
@@ -514,3 +519,403 @@ def test_real_pytest_children_run_exactly_their_shares(tmp_path, monkeypatch):
     finally:
         scratch.dispose()
     assert (summary["passed"], summary["skipped"]) == (6, 1)
+
+
+# ---------------------------------------------------------------------------
+# runner shards: one share per RUNNER, re-reconciled as a whole by the aggregate
+# ---------------------------------------------------------------------------
+#
+# The required check outgrew one runner's 6-hour cap, so CI runs each share of
+# `plan_suite_partition(order, weights, SUITE_RUNNERS)` on its own runner
+# (`ci --shard K --shard-out DIR`) and the job carrying the required name
+# (`ci --shard-reports DIR`) loads the records and reconciles the WHOLE through the
+# same `reconcile_suite` the in-process split uses. This is the aggregate's negative
+# matrix: everything the single-runner gate refuses must still be refused when the
+# evidence arrives as records.
+
+_HEAD = "a" * 40
+_BASE = "b" * 40
+
+
+def _runner_plan(monkeypatch, runners=3, modules=None):
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", runners)
+    collected = gate.CollectedNodes(_order(modules or {"test_a": 4, "test_b": 4, "test_c": 4,
+                                                       "test_d": 4}))
+    return collected, gate._runner_plan(collected, {})
+
+
+def _junit(nodes):
+    cases = "".join('<testcase classname="{0}" name="{1}"/>'.format(*gate._junit_projection(n))
+                    for n in nodes)
+    return "<testsuites><testsuite>{0}</testsuite></testsuites>".format(cases).encode("utf-8")
+
+
+def _honest_records(plan):
+    """``{K: record}`` exactly as an honest shard run writes them — built by the gate's own
+    record builder, so the format under test is never a hand-model of it."""
+    return {
+        index: gate._shard_record(
+            index, share["nodes"], 0, ["{0} passed in 1.00s".format(len(share["nodes"]))],
+            _junit(share["nodes"]), head=_HEAD, baseline=_BASE)
+        for index, share in enumerate(plan, 1)
+    }
+
+
+def _write_records(directory, records):
+    directory.mkdir(exist_ok=True)
+    for index, record in records.items():
+        (directory / gate._shard_record_name(index)).write_bytes(gate._shard_record_bytes(record))
+    return directory
+
+
+def _aggregate(tmp_path, collected, reports, cap=30, head=_HEAD, baseline=_BASE):
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    scratch = gate.make_scratch_dir(str(repo))
+    try:
+        return gate.reconcile_shard_records(
+            _manifest(collected, cap), collected, scratch, str(reports), {},
+            head=head, baseline=baseline)
+    finally:
+        assert scratch.dispose()
+
+
+def _refused(tmp_path, collected, reports, code="PYTEST_EXECUTION_UNRECONCILED", **kwargs):
+    with pytest.raises(gate.GateFailure) as excinfo:
+        _aggregate(tmp_path, collected, reports, **kwargs)
+    assert excinfo.value.code == code, excinfo.value.message
+    assert excinfo.value.status in (1, 2)
+    return excinfo.value
+
+
+def test_honest_runner_shards_are_accounted_as_one_suite(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    reports = _write_records(tmp_path / "reports", _honest_records(plan))
+    result = _aggregate(tmp_path, collected, reports)
+    assert (result["passed"], result["skipped"]) == (16, 0)
+
+
+def test_the_runner_count_is_a_committed_constant_and_the_partition_must_fill_it(monkeypatch):
+    """Eight runners, from a committed constant; and a plan with an empty share is refused
+    rather than re-indexed, so "share K" means the same nodes on every runner."""
+    assert gate.SUITE_RUNNERS == 8
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", 4)
+    with pytest.raises(gate.GateFailure) as excinfo:
+        gate._runner_plan(gate.CollectedNodes(_order({"test_a": 1, "test_b": 1})), {})
+    assert excinfo.value.code == "PYTEST_EXECUTION_UNRECONCILED"
+
+
+def _drop(records, index):
+    del records[index]
+
+
+def _mutate(index, **fields):
+    def apply(records):
+        records[index] = dict(records[index], **fields)
+    return apply
+
+
+def _retarget_share(records):
+    """Share 2's honest record, relabelled as share 1: the right index, the wrong nodes."""
+    records[1] = dict(records[2], shard=1)
+
+
+def _duplicate_index(records):
+    """Share 1's record under share 2's name: every file present, one share twice."""
+    records[2] = records[1]
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda records: _drop(records, 3),
+    _duplicate_index,
+    _mutate(2, head="c" * 40),
+    _mutate(2, baseline="c" * 40),
+    _mutate(2, runners=4),
+    _mutate(2, runners=True),
+    _mutate(1, shard=True),
+    _mutate(2, kind="suite-weights"),
+    _mutate(2, schema_version=2),
+    _retarget_share,
+    _mutate(3, junit_sha256="0" * 64),
+    _mutate(3, junit_b64="not base64!"),
+    _mutate(3, node_count=1),
+    _mutate(3, summaries="4 passed in 1.00s"),
+], ids=["missing", "duplicated-index", "head-mismatch", "baseline-mismatch", "runners-mismatch",
+        "runners-boolean", "index-boolean", "wrong-kind", "wrong-schema", "node-list-of-another-share",
+        "junit-sha-mismatch", "junit-not-base64", "node-count-mismatch", "summaries-not-a-list"])
+def test_the_aggregate_refuses_a_record_set_that_is_not_this_run(tmp_path, monkeypatch, mutation):
+    collected, plan = _runner_plan(monkeypatch)
+    records = _honest_records(plan)
+    mutation(records)
+    _refused(tmp_path, collected, _write_records(tmp_path / "reports", records))
+
+
+def test_the_aggregate_refuses_an_extra_record(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    reports = _write_records(tmp_path / "reports", _honest_records(plan))
+    (reports / gate._shard_record_name(4)).write_bytes(
+        (reports / gate._shard_record_name(3)).read_bytes())
+    _refused(tmp_path, collected, reports)
+
+
+def test_the_aggregate_refuses_a_foreign_file_beside_the_records(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    reports = _write_records(tmp_path / "reports", _honest_records(plan))
+    (reports / "junit-1.xml").write_bytes(b"<testsuites/>")
+    _refused(tmp_path, collected, reports)
+
+
+@pytest.mark.parametrize("raw", [
+    b"not json",
+    b'{"kind": "wave-gate-shard", "kind": "wave-gate-shard"}',
+    b'{"status": NaN}',
+    b"\xff\xfe",
+], ids=["not-json", "duplicate-key", "nan", "not-utf8"])
+def test_the_aggregate_refuses_an_unparseable_record(tmp_path, monkeypatch, raw):
+    collected, plan = _runner_plan(monkeypatch)
+    reports = _write_records(tmp_path / "reports", _honest_records(plan))
+    (reports / gate._shard_record_name(2)).write_bytes(raw)
+    _refused(tmp_path, collected, reports)
+
+
+def test_the_aggregate_refuses_a_symlinked_record_directory(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    real = _write_records(tmp_path / "real", _honest_records(plan))
+    link = tmp_path / "reports"
+    link.symlink_to(real, target_is_directory=True)
+    assert _aggregate(tmp_path, collected, real)["passed"] == 16, "the control must be green"
+    _refused(tmp_path, collected, link)
+
+
+def test_the_aggregate_refuses_a_symlinked_record(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    reports = _write_records(tmp_path / "reports", _honest_records(plan))
+    elsewhere = tmp_path / "elsewhere.json"
+    target = reports / gate._shard_record_name(2)
+    elsewhere.write_bytes(target.read_bytes())
+    target.unlink()
+    target.symlink_to(elsewhere)
+    _refused(tmp_path, collected, reports)
+
+
+def test_the_aggregate_refuses_a_missing_record_directory(tmp_path, monkeypatch):
+    collected, _plan = _runner_plan(monkeypatch)
+    _refused(tmp_path, collected, tmp_path / "never-downloaded")
+
+
+def _tampered(plan, index, nodes):
+    records = _honest_records(plan)
+    honest = records[index]
+    records[index] = gate._shard_record(
+        index, plan[index - 1]["nodes"], honest["status"], honest["summaries"], _junit(nodes),
+        head=_HEAD, baseline=_BASE)
+    return records
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda nodes: nodes[:-1],
+    lambda nodes: [nodes[0]] + nodes[:-1],
+], ids=["dropped-node", "doubled-node"])
+def test_the_aggregate_refuses_a_junit_that_does_not_match_its_share(tmp_path, monkeypatch, tamper):
+    collected, plan = _runner_plan(monkeypatch)
+    records = _tampered(plan, 2, tamper(plan[1]["nodes"]))
+    _refused(tmp_path, collected, _write_records(tmp_path / "reports", records))
+
+
+def test_the_aggregate_refuses_a_share_that_exited_nonzero(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    records = _honest_records(plan)
+    records[2] = dict(records[2], status=1)
+    failure = _refused(tmp_path, collected, _write_records(tmp_path / "reports", records),
+                       code="PYTEST_FAILED")
+    assert "runner shard 2/3" in failure.message
+
+
+def test_the_aggregate_refuses_a_share_that_reported_a_failure(tmp_path, monkeypatch):
+    collected, plan = _runner_plan(monkeypatch)
+    records = _honest_records(plan)
+    count = len(plan[0]["nodes"])
+    records[1] = dict(records[1], summaries=["{0} passed, 1 failed in 1.00s".format(count - 1)])
+    _refused(tmp_path, collected, _write_records(tmp_path / "reports", records),
+             code="PYTEST_FAILED")
+
+
+def test_the_aggregate_caps_skips_over_the_sum_of_the_shares(tmp_path, monkeypatch):
+    """Each share is under the cap; the suite is over it. A per-runner cap would let eight
+    runners launder eight times the permitted skips."""
+    collected, plan = _runner_plan(monkeypatch)
+    records = _honest_records(plan)
+    for index, share in enumerate(plan, 1):
+        records[index] = dict(records[index], summaries=[
+            "{0} passed, 2 skipped in 1.00s".format(len(share["nodes"]) - 2)])
+    _refused(tmp_path, collected, _write_records(tmp_path / "reports", records), cap=3,
+             code="PYTEST_SKIPPED_EXCEEDS_CAP")
+
+
+def test_the_aggregate_refusal_is_the_shared_reconciliation(tmp_path, monkeypatch):
+    """NON-VACUITY. The dropped-node record is internally consistent — its junit digest
+    matches, its index, head, baseline and node list are right — so nothing but the whole-suite
+    reconciliation can refuse it. With `reconcile_suite` stubbed out the same records are
+    ACCEPTED; with it in place they are refused. And the aggregate reaches the very function
+    the in-process split uses, not a copy of its checks."""
+    collected, plan = _runner_plan(monkeypatch)
+    records = _tampered(plan, 2, plan[1]["nodes"][:-1])
+    reports = _write_records(tmp_path / "reports", records)
+    _refused(tmp_path, collected, reports)
+
+    calls = []
+    monkeypatch.setattr(gate, "reconcile_suite",
+                        lambda *args, **kwargs: calls.append(kwargs) or
+                        {"passed": 16, "skipped": 0, "failed": 0, "errors": 0})
+    assert _aggregate(tmp_path, collected, reports)["passed"] == 16
+    assert calls, "the aggregate never reached reconcile_suite"
+
+
+# ---------------------------------------------------------------------------
+# end to end: real `--shard K --shard-out` runs, then `--shard-reports`
+# ---------------------------------------------------------------------------
+
+def _git(repo, *args):
+    return subprocess.run(["git", *args], cwd=str(repo), check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _commit_all(repo, message):
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=gate@example.invalid", "-c", "user.name=gate",
+         "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _failure_code(stderr):
+    """The diagnostic code that LEADS the failure line — the last line the gate printed
+    (progress lines such as the baseline come before it)."""
+    return stderr.strip().splitlines()[-1].split()[0]
+
+
+def _throwaway_gate_repo(tmp_path):
+    """A repository the real `ci` flow accepts: committed manifests naming its real tests,
+    a weights file, two declared goldens, and a clean tree."""
+    repo = tmp_path / "repo"
+    (repo / "tests" / "fixtures" / "golden_xml").mkdir(parents=True)
+    (repo / "tests" / "fixtures" / "wave_gate").mkdir(parents=True)
+    (repo / "tests" / "test_a.py").write_text(
+        "def test_one():\n    pass\n\ndef test_two():\n    pass\n", encoding="utf-8")
+    (repo / "tests" / "test_b.py").write_text(
+        "class TestB:\n    def test_m(self):\n        pass\n\n    def test_n(self):\n"
+        "        pass\n", encoding="utf-8")
+    (repo / "tests" / "test_c.py").write_text(
+        "import pytest\n\ndef test_three():\n    pass\n\n"
+        "def test_skip():\n    pytest.skip('environment-conditional')\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    seed = _commit_all(repo, "seed")
+
+    def jsonl(objects):
+        return "".join(json.dumps(o, separators=(",", ":")) + "\n" for o in objects)
+
+    nodes = ["tests/test_a.py::test_one", "tests/test_b.py::TestB::test_m"]
+    (repo / gate.NODES_MANIFEST).write_text(jsonl(
+        [{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes",
+          "minimum_active": 2, "minimum_collected": 2, "maximum_skipped": 1,
+          "bootstrap_base": seed}]
+        + [{"kind": "test", "id": "pytest-{0:06d}".format(i), "node_id": node, "state": "active"}
+           for i, node in enumerate(nodes, 1)]), encoding="utf-8")
+    goldens = []
+    for i in (1, 2):
+        (repo / gate.GOLDEN_DIR / "g{0}.xml".format(i)).write_text("<x/>\n", encoding="utf-8")
+        goldens.append({
+            "kind": "golden", "id": "golden-{0:06d}".format(i), "input_case": "case:{0}".format(i),
+            "renderer": "process-component-v1",
+            "expected_file": "{0}/g{1}.xml".format(gate.GOLDEN_DIR, i),
+            "owner": "repository", "disposition": "survivor", "state": "active"})
+    (repo / gate.GOLDENS_MANIFEST).write_text(jsonl(
+        [{"kind": "manifest", "schema_version": 1, "manifest": "goldens", "minimum_active": 2,
+          "bootstrap_base": seed}] + goldens), encoding="utf-8")
+    (repo / gate.SUITE_WEIGHTS).write_text(json.dumps(
+        {"kind": "suite-weights", "schema_version": 1, "weights": {}}), encoding="utf-8")
+    return repo, _commit_all(repo, "manifests")
+
+
+def test_real_runner_shards_then_the_aggregate_reconcile_green(tmp_path, monkeypatch, capsys):
+    """The positive end to end: every share through the real `ci --shard K --shard-out` flow
+    (baseline, checkout binding, manifests, collection, one real pytest child, the record),
+    then `ci --shard-reports` over exactly those records. Then the same aggregate with one
+    record withheld is refused — the control that the green above was earned."""
+    repo, base = _throwaway_gate_repo(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", 3)
+    fingerprints = []
+    monkeypatch.setattr(gate, "run_fingerprint_phase",
+                        lambda require, provider=None: fingerprints.append(require) or "pending")
+    out = tmp_path / "shard-out"
+    ci = ["--repo", str(repo), "ci", "--base", base]
+
+    for index in (1, 2, 3):
+        assert gate.main(ci + ["--shard", str(index), "--shard-out", str(out)]) == 0
+        err = capsys.readouterr().err
+        assert "SHARD {0}/3".format(index) in err, err
+        assert "NOT the gate's verdict" in err, err
+        assert "non-KB suite green" not in err, "a shard must never print the gate's verdict"
+    assert sorted(p.name for p in out.iterdir()) == ["shard-1.json", "shard-2.json", "shard-3.json"]
+    assert fingerprints == [], "the fingerprint phase belongs to the aggregate, not a shard"
+
+    # A shard record is created exclusively: a second run over the same directory is refused
+    # before it runs anything.
+    assert gate.main(ci + ["--shard", "1", "--shard-out", str(out)]) == 2
+    assert _failure_code(capsys.readouterr().err) == "GATE_USAGE_INVALID"
+
+    assert gate.main(ci + ["--shard-reports", str(out)]) == 0
+    err = capsys.readouterr().err
+    assert "non-KB suite green (5 passed, 1 skipped, cap 1)" in err, err
+    assert fingerprints == [False]
+
+    (out / "shard-2.json").unlink()
+    assert gate.main(ci + ["--shard-reports", str(out)]) == 1
+    assert _failure_code(capsys.readouterr().err) == "PYTEST_EXECUTION_UNRECONCILED"
+
+
+@pytest.mark.parametrize("argv", [
+    ["--shard", "1"],
+    ["--shard-out", "/tmp/x"],
+    ["--shard", "0", "--shard-out", "/tmp/x"],
+    ["--shard", "9", "--shard-out", "/tmp/x"],
+    ["--shard", "one", "--shard-out", "/tmp/x"],
+    ["--shard", "1", "--shard-out", "/tmp/x", "--shard-reports", "/tmp/y"],
+], ids=["shard-without-out", "out-without-shard", "shard-zero", "shard-above-runners",
+        "shard-not-an-integer", "shard-and-reports"])
+def test_malformed_shard_arguments_are_a_usage_error(argv, capsys):
+    assert gate.main(["ci", "--base", "HEAD"] + argv) == 2
+    assert capsys.readouterr().err.split()[0] == "GATE_USAGE_INVALID"
+
+
+def test_a_shard_output_directory_inside_the_repository_is_refused(tmp_path, monkeypatch, capsys):
+    repo, base = _throwaway_gate_repo(tmp_path)
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", 3)
+    status = gate.main(["--repo", str(repo), "ci", "--base", base, "--shard", "1",
+                        "--shard-out", str(repo / "shard-out")])
+    assert status == 2
+    assert _failure_code(capsys.readouterr().err) == "SCRATCH_INSIDE_REPO"
+    # ...and the directory the refused call created is gone again: an empty directory in
+    # the worktree is invisible to `git status`, so the closing fingerprint cannot see it.
+    assert not (repo / "shard-out").exists()
+
+
+def test_a_red_shard_writes_no_record(tmp_path, monkeypatch, capsys):
+    """The aggregate's refusal of a MISSING record is how a red share reaches the required
+    check, so a shard whose share fails must exit nonzero AND leave no record behind."""
+    repo, _base = _throwaway_gate_repo(tmp_path)
+    (repo / "tests" / "test_a.py").write_text(
+        "def test_one():\n    pass\n\ndef test_two():\n    assert False\n", encoding="utf-8")
+    base = _commit_all(repo, "a failing test")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", 3)
+    out = tmp_path / "shard-out"
+    statuses = {index: gate.main(["--repo", str(repo), "ci", "--base", base, "--shard",
+                                  str(index), "--shard-out", str(out)])
+                for index in (1, 2, 3)}
+    capsys.readouterr()
+    red = [index for index, status in statuses.items() if status != 0]
+    assert red, "the failing test must turn its share red, or this proves nothing"
+    assert len(red) < 3, "the other shares must stay green, or this proves nothing"
+    for index, status in statuses.items():
+        assert (out / gate._shard_record_name(index)).exists() == (status == 0), statuses

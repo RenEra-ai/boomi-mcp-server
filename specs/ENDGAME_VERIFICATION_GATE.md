@@ -52,6 +52,7 @@ runtime.
 
 ```
 python scripts/wave_gate.py ci   (--base COMMIT | --github-event PATH)
+                                 [--shard K --shard-out DIR | --shard-reports DIR]
 python scripts/wave_gate.py wave --base COMMIT [--bootstrap] [--require-plan-fingerprint]
 python scripts/wave_gate.py manifests (--base COMMIT | --github-event PATH) [--bootstrap]
 ```
@@ -71,6 +72,28 @@ node assigned elsewhere or lost one fails the suite. The skip cap applies to the
 whole suite, not per child, and a failed launch reaps the children already
 started. `wave` uses the same split. Measured on the hosted runner (2026-11-08):
 the required check fell from about 5 h 50 min to 3 h 04 min.
+
+In CI the suite then outgrew one runner's 6-hour cap (#159 S3: the same four
+shares on four SEPARATE runners took 194–322 min each), so it runs across
+**`SUITE_RUNNERS` separate runners** (8, a committed constant, pinned equal to the
+workflow's matrix). `ci --shard K --shard-out DIR` runs the whole `ci` flow up to
+collection, then ONLY share K of `plan_suite_partition(order, weights,
+SUITE_RUNNERS)` as one pytest child, holds that child to the per-child bar (exit 0,
+one summary, no failure, junit identity equal to its assigned nodes), and creates
+`DIR/shard-K.json` exclusively (DIR must be outside the repository) — a record of
+HEAD, baseline, K, the runner count, the digest of the share's node list, the
+child's status and summary, and its junit report. A shard prints no verdict and
+runs no fingerprint phase; a red shard writes no record. `ci --shard-reports DIR`
+is the required check: the same flow, with the suite phase replaced by loading
+EXACTLY `shard-1.json` … `shard-<SUITE_RUNNERS>.json` (missing, extra, symlinked,
+unparseable, mis-indexed records refused; each must name this HEAD, this baseline
+and this runner count, and its node-list digest must match the share the
+aggregate's OWN plan assigns it) and reconciling them through the same
+`reconcile_suite` the in-process split uses: every share's status and summary,
+the skip cap and passed floor over the SUM, per-share junit identity, and the
+accounting identity against the whole collection. Every refusal of a record is
+`PYTEST_EXECUTION_UNRECONCILED` unless the shared reconciliation names a more
+specific code (`PYTEST_FAILED`, `PYTEST_SKIPPED_EXCEEDS_CAP`, …).
 
 `ci` takes **exactly one** baseline selector, the same shape `manifests` uses:
 `--github-event` is the workflow's `dev` arm (the platform supplies the

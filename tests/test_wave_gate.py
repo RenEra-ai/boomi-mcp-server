@@ -1853,8 +1853,8 @@ assert _FINDING_ID_RE.endswith("[a-z]?"), _FINDING_ID_RE
 
 
 
-def _split_out_gate_step(workflow):
-    """Split a workflow into (the named Wave-gate step, everything else).
+def _split_out_gate_step(workflow, name="Wave gate"):
+    """Split a workflow into (the step whose name starts with ``name``, everything else).
 
     The step ends at the first NONBLANK DEDENT — any line indented at or below the
     step's own `- name:` line — not merely at the next sibling `- ` item. A later
@@ -1865,7 +1865,7 @@ def _split_out_gate_step(workflow):
     the exact workflow it swallowed.
     """
     lines = workflow.splitlines()
-    heads = [i for i, ln in enumerate(lines) if ln.strip().startswith("- name: Wave gate")]
+    heads = [i for i, ln in enumerate(lines) if ln.strip().startswith("- name: " + name)]
     assert len(heads) == 1, heads
     top = heads[0]
     indent = len(lines[top]) - len(lines[top].lstrip())
@@ -1933,6 +1933,15 @@ def test_the_step_slice_ends_at_a_dedented_second_job():
     assert "wave_gate.py" not in outside
 
 
+def _case_arms(step):
+    """The step's `case ... esac` block, line continuations joined and whitespace collapsed."""
+    import re as _re
+
+    body = step[step.index('case "${event}:${ref}" in'):step.index("esac") + len("esac")]
+    body = _re.sub(r"\\\n\s*", " ", body)
+    return " ".join(body.split())
+
+
 def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     """The workflow is part of the contract, so pin the parts that fail open.
 
@@ -1943,14 +1952,20 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
       `scratch/**` — never `github.event.before` (the zero sha on branch
       creation, and only the latest increment afterwards) and never a merge-base
       (a diverged branch would preflight green).
-    * ONE step, no step-level `if:`, and an unrecognized context REFUSES: two
-      conditional steps could both skip and leave a green job that checked
+    * ONE step per job, no step-level `if:`, and an unrecognized context REFUSES:
+      two conditional steps could both skip and leave a green job that checked
       nothing.
     * Nothing may soften a failure.
     * No `pull_request` trigger (#171 criterion 7a) and no `concurrency` block —
       a per-SHA group would make the same candidate SHA collide between its
       scratch preflight and its `dev` push, which is exactly the sequence the
       preflight route creates.
+    * #159 S3: the suite runs as `SUITE_RUNNERS` matrix shards plus ONE aggregate
+      job carrying the required name. The shard step and the aggregate's gate step
+      carry the SAME two-arm case statement (only the shard/aggregate flags differ),
+      the matrix is exactly 1..SUITE_RUNNERS, and the aggregate `needs` the shards
+      and runs under exactly `if: ${{ !cancelled() }}` — without it a failed shard
+      SKIPS the aggregate, and a skipped required check satisfies the ruleset.
     """
     raw = (_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
     # Comments legitimately NAME the removed triggers and the softeners in order
@@ -1963,41 +1978,93 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
                    "cancel-in-progress", "github.event.before", "merge-base"):
         assert absent not in workflow, absent
 
-    # ONE step carrying BOTH arms. Asserting the strings against the whole file
-    # would be VACUOUS: the scratch arm could sit in a second step while the named
-    # one rejected scratch, and every count below would still hold. So isolate the
-    # named step and assert INSIDE it — then assert the gate is invoked nowhere
-    # else. (Sliced textually rather than parsed. PyYAML IS importable here — the
-    # pinned `fastmcp` declares it unconditionally — so this is a preference, not
-    # a necessity: the slice asserts the block boundary directly instead of
-    # reconstructing it from parsed structure. An earlier revision of this comment
-    # claimed PyYAML was absent and that importing it would break CI collection;
-    # that was false and is withdrawn.)
+    # ONE gate step per job carrying BOTH arms. Asserting the strings against the
+    # whole file would be VACUOUS: a scratch arm could sit in a third step while a
+    # named one rejected scratch, and every count below would still hold. So isolate
+    # each named step and assert INSIDE it — then assert the gate is invoked nowhere
+    # else. (Sliced textually; the job STRUCTURE is then checked on the parsed YAML.)
     step, outside = _split_out_gate_step(workflow)
+    shard_step, outside = _split_out_gate_step(outside, "Shard of the non-KB suite")
 
-    # Both routes, both refusals, inside the ONE step.
-    assert step.count("scripts/wave_gate.py") == 2
-    assert 'ci \\\n                --github-event "$GITHUB_EVENT_PATH"' in step
-    assert 'ci --base "$base"' in step
-    assert "push:refs/heads/dev)" in step
-    assert "push:refs/heads/scratch/*)" in step
-    assert "refs/remotes/origin/dev^{commit}" in step
-    # The two fail-closed arms: an unresolvable baseline, and any other context.
-    assert "BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev" in step
-    assert "BASELINE_EVENT_INVALID unsupported event/ref" in step
-    assert step.count("exit 2") == 2
-    # ...and NOTHING outside it invokes the gate, so the step really is the whole
-    # story rather than merely one telling of it.
+    for one in (step, shard_step):
+        # Both routes, both refusals, inside each ONE step.
+        assert one.count("scripts/wave_gate.py") == 2, one
+        assert 'ci \\\n                --github-event "$GITHUB_EVENT_PATH"' in one
+        assert 'ci --base "$base"' in one
+        assert "push:refs/heads/dev)" in one
+        assert "push:refs/heads/scratch/*)" in one
+        assert "refs/remotes/origin/dev^{commit}" in one
+        # The two fail-closed arms: an unresolvable baseline, and any other context.
+        assert "BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev" in one
+        assert "BASELINE_EVENT_INVALID unsupported event/ref" in one
+        assert one.count("exit 2") == 2
+        assert "GITHUB_SHA: ${{ github.sha }}" in one
+    # The aggregate reconciles the records in BOTH arms and never runs a share...
+    assert step.count('--shard-reports "$RUNNER_TEMP/shards"') == 2
+    assert "--shard " not in step and "--shard-out" not in step
+    # ...each shard runs its share in BOTH arms and never aggregates...
+    assert shard_step.count('--shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"') == 2
+    assert "--shard-reports" not in shard_step
+    assert "SHARD: ${{ matrix.shard }}" in shard_step
+    # ...and apart from those flags the two case statements are IDENTICAL, so the
+    # shards cannot bind to a baseline the aggregate would not.
+    assert _case_arms(step).replace(' --shard-reports "$RUNNER_TEMP/shards"', "") == \
+        _case_arms(shard_step).replace(' --shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"', "")
+    # ...and NOTHING outside the two steps invokes the gate.
     assert "wave_gate.py" not in outside, outside
 
-    assert "python-version: \"3.11\"" in workflow
-    assert "requirements-dev.txt" in workflow
-    # Full ancestry: the preflight resolves origin/dev and proves descent from it.
-    assert "fetch-depth: 0" in workflow
-    for softener in ("continue-on-error", "|| true", "if: always()", "if: "):
+    for softener in ("continue-on-error", "|| true", "always()"):
         assert softener not in workflow, softener
-    assert "name: Python 3.11 non-KB" in workflow
-    assert "GITHUB_SHA: ${{ github.sha }}" in workflow
+    # EXACTLY ONE conditional in the file, and it is the aggregate's `!cancelled()`.
+    conditionals = [line for line in workflow.splitlines() if line.strip().startswith("if:")]
+    assert conditionals == ["    if: ${{ !cancelled() }}"], conditionals
+
+    # A plain import, never `importorskip`: these structural pins must FAIL, not skip,
+    # if the parser is missing (PyYAML ships with the pinned `fastmcp`).
+    import yaml
+
+    jobs = yaml.safe_load(raw)["jobs"]
+    assert sorted(jobs) == ["non-kb-python311", "non-kb-shard"], sorted(jobs)
+    shard, aggregate = jobs["non-kb-shard"], jobs["non-kb-python311"]
+    assert aggregate["name"] == "Python 3.11 non-KB"
+    assert aggregate["needs"] == "non-kb-shard"
+    assert aggregate["if"] == "${{ !cancelled() }}"
+    assert "if" not in shard
+    assert shard["name"] == "Python 3.11 non-KB shard ${{ matrix.shard }}"
+    # The matrix is EXACTLY 1..SUITE_RUNNERS, read from the gate so the two cannot drift.
+    assert shard["strategy"] == {"fail-fast": False,
+                                 "matrix": {"shard": list(range(1, gate.SUITE_RUNNERS + 1))}}
+    assert shard["timeout-minutes"] == 360
+    assert 0 < aggregate["timeout-minutes"] <= 360
+    # The same environment in both jobs: the aggregate re-collects what the shards ran.
+    assert shard["env"] == aggregate["env"]
+    assert shard["env"]["PYTHONPATH"] == "src"
+    for job in (shard, aggregate):
+        steps = job["steps"]
+        for one in steps:
+            assert "if" not in one and "continue-on-error" not in one, one
+        checkout = [one for one in steps if one.get("uses", "").startswith("actions/checkout@")]
+        assert len(checkout) == 1 and checkout[0]["with"]["fetch-depth"] == 0, checkout
+        python = [one for one in steps if one.get("uses", "").startswith("actions/setup-python@")]
+        assert len(python) == 1 and python[0]["with"]["python-version"] == "3.11", python
+        assert any("requirements-dev.txt" in one.get("run", "") for one in steps)
+        gate_steps = [one for one in steps if "scripts/wave_gate.py" in one.get("run", "")]
+        assert len(gate_steps) == 1 and gate_steps[0]["env"]["GITHUB_SHA"] == "${{ github.sha }}"
+    # The shard's record is uploaded only after its gate step (no conditional: a red
+    # share uploads nothing), and an empty upload is an error, not an empty artifact.
+    upload = shard["steps"][-1]
+    assert upload["uses"] == "actions/upload-artifact@v4", upload
+    assert upload["with"]["name"] == "non-kb-shard-${{ matrix.shard }}"
+    assert upload["with"]["path"] == "${{ runner.temp }}/shard"
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["overwrite"] is True
+    assert "scripts/wave_gate.py" in shard["steps"][-2]["run"]
+    # The aggregate downloads every shard's record of THIS run, then runs the gate last.
+    download = aggregate["steps"][-2]
+    assert download["uses"] == "actions/download-artifact@v4", download
+    assert download["with"] == {"pattern": "non-kb-shard-*", "merge-multiple": True,
+                                "path": "${{ runner.temp }}/shards"}
+    assert aggregate["steps"][-1]["name"].startswith("Wave gate")
 
 
 # ===========================================================================

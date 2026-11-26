@@ -25,6 +25,10 @@ WHAT IT CHECKS
            workflow: a ``[skip ci]`` head commit starts no run at all.
            See spec §10.  Baseline + manifest transition, then collection
            (floor, required nodes, reconciliation), then the full non-KB suite.
+           In CI the suite is spread over ``SUITE_RUNNERS`` separate runners:
+           ``ci --shard K --shard-out DIR`` runs one share and writes a record
+           (not a verdict), and ``ci --shard-reports DIR`` — the required check —
+           reconciles every record as one suite through the same checks.
 ``wave`` — everything ``ci`` does, plus the per-wave obligations: every ACTIVE
            golden-manifest entry rendered TWICE in isolated child processes and
            compared byte-for-byte (determinism), then compared against its
@@ -501,6 +505,9 @@ def check_checkout_matches_event(repo, context, *, ci_mode=False):
     claims to integrate onto. The authority for both facts lives outside this
     process (git's ancestry graph; the runner's ``GITHUB_SHA``), so the invariant
     is derived from them rather than hand-modelled here.
+
+    Returns the HEAD sha it bound, so a caller that names the tree under test (a
+    runner shard's record) names exactly the commit these checks proved.
     """
     if ci_mode or context["kind"] in ("push", "pull_request"):
         # Comparing only the HEAD COMMIT would accept a runner whose worktree had
@@ -529,9 +536,9 @@ def check_checkout_matches_event(repo, context, *, ci_mode=False):
 
     if context["kind"] == "local":
         if not ci_mode:
-            return
+            return head
         _refuse_baseline_off_this_history(repo, context["sha"], head)
-        return
+        return head
     if context["kind"] == "push":
         expected = context.get("after")
         if expected and head != expected:
@@ -541,14 +548,14 @@ def check_checkout_matches_event(repo, context, *, ci_mode=False):
                     head[:12], expected[:12]
                 ),
             )
-        return
+        return head
     if context["kind"] != "pull_request":
-        return
+        return head
 
     event_head = context.get("event_head")
     target = context.get("target")
     if head == event_head:
-        return
+        return head
     # GitHub names the test-merge commit it built; when it is present, require
     # HEAD to BE that commit. Parentage alone proves only the shape: a commit with
     # exactly {head, target} as parents but the TARGET's tree — omitting every
@@ -576,7 +583,7 @@ def check_checkout_matches_event(repo, context, *, ci_mode=False):
             ),
         )
     if head == merge_sha:
-        return
+        return head
     raise _contract(
         "CHECKOUT_EVENT_MISMATCH",
         "the checkout at {0} is neither the PR head {1} nor the merge commit {2} "
@@ -1631,6 +1638,16 @@ def _executed_projections(report_fd):
 #: suite peaks under 1 GB.
 SUITE_PROCESSES = 4
 
+#: How many SEPARATE CI runners the required check spreads the suite over (`ci --shard K`,
+#: then `ci --shard-reports` on the job carrying the required name). A CONSTANT, committed
+#: here, for the same reason as :data:`SUITE_PROCESSES`: the partition is then a function of
+#: the committed tree alone, so every runner and the aggregate group the same nodes into the
+#: same shares. Eight because one runner is killed at 6 hours and the four in-process shares
+#: measured 194-322 min EACH on separate runners (runner speed varies ~1.5x): eight shares
+#: leave each well inside the cap. `.github/workflows/tests.yml` lists exactly 1..this, and
+#: `tests/test_wave_gate.py` pins the two equal. `wave` and a plain `ci` do not use it.
+SUITE_RUNNERS = 8
+
 #: Measured per-node durations, in seconds, used ONLY to balance the partition. Nothing
 #: about what runs or what is accepted depends on it: every collected node is assigned to
 #: exactly one child whatever the weights say, and the union is reconciled against the
@@ -1839,6 +1856,22 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
     else:
         plan = [{"args": None, "nodes": list(collected)}]
 
+    children = _run_suite_children(repo, plan, tmpdir)
+    summary = reconcile_suite(nodes_manifest, collected, children, tmpdir)
+    if len(children) > 1:
+        _emit("wave_gate: suite ran as {0} pytest children ({1})".format(
+            len(children), ", ".join(str(len(child["nodes"])) for child in children)))
+    return summary
+
+
+def _run_suite_children(repo, plan, tmpdir):
+    """Launch one pytest child per share of ``plan``, stream their output, and reap them.
+
+    Returns the children, each with its exit ``status``, the summary candidates seen
+    WHILE STREAMING, a bounded ``tail`` and — when ``tmpdir`` is given — the owned junit
+    report it wrote. Nothing is judged here: :func:`reconcile_suite` (or, for one runner
+    shard, its per-child checks) decides what the results mean.
+    """
     children = []
     for index, share in enumerate(plan, 1):
         child = {"index": index, "nodes": share["nodes"], "report_fd": None,
@@ -1931,34 +1964,87 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
         _reap(child["proc"] for child in children if "proc" in child)
         raise
 
+    return children
+
+
+def _check_child_outcome(child, where):
+    """ONE child's own result: readable output, exit 0, exactly one summary, no failure.
+
+    ``where`` labels the child in a diagnostic ("" for a lone process). Returns its counts.
+    Shared by the whole-suite reconciliation and by a runner shard, which applies the
+    per-child half of the bar to its one child before it writes a record.
+    """
+    if "reader_error" in child:
+        raise _invalid(
+            "PYTEST_FAILED",
+            "{0}the suite's output could not be read ({1}: {2}); its result cannot be "
+            "accounted for".format(where, type(child["reader_error"]).__name__,
+                                   child["reader_error"]),
+        )
+    counts = _summary_from_candidates(child["summaries"])
+    if child["status"] != 0:
+        detail = "\n" + "".join(child["tail"][-40:]) if where and child["tail"] else ""
+        raise _invalid(
+            "PYTEST_FAILED",
+            "{0}the non-KB suite exited {1} ({2}){3}".format(
+                where, child["status"], counts, detail),
+        )
+    if counts["failed"] or counts["errors"]:
+        raise _invalid(
+            "PYTEST_FAILED",
+            "{0}the non-KB suite exited 0 but reported {1} failed / {2} errors".format(
+                where, counts["failed"], counts["errors"]
+            ),
+        )
+    return counts
+
+
+def _check_child_identity(tmpdir, child, where):
+    """What ONE child's junit says RAN must equal, by identity, the nodes it was ASSIGNED.
+
+    The report read must be the owned file that was created, and a selection the gate
+    wrote must be unreplaced — then the multisets are compared, which catches a missing
+    node and a doubled one alike.
+    """
+    _refuse_unowned_report(tmpdir, child["report_fd"], child["report_name"])
+    if "args_fd" in child:
+        _refuse_replaced_selection(tmpdir, child)
+    executed = _executed_projections(child["report_fd"])
+    expected = sorted(_junit_projection(n) for n in child["nodes"])
+    if executed != expected:
+        missing = sorted(set(expected) - set(executed))
+        extra = sorted(set(executed) - set(expected))
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "{0}the tests that RAN do not match the tests that were COLLECTED "
+            "({1} executed records vs {2} collected). Missing: {3}. "
+            "Unexpected: {4}.".format(
+                where, len(executed), len(expected), missing[:10], extra[:10]
+            ),
+        )
+
+
+def reconcile_suite(nodes_manifest, collected, children, tmpdir, unit="pytest child"):
+    """Hold the WHOLE suite to every bound, whatever ran it.
+
+    THE one post-run reconciliation. :func:`run_suite` calls it on the children it just
+    reaped; the ``Python 3.11 non-KB`` aggregate calls it on the runner-shard records it
+    loaded (:func:`reconcile_shard_records`). Two copies of these checks would be two
+    gates that can drift apart, and the weaker one is the one that decides.
+
+    Each child must have exited 0 with exactly one parseable summary and no failure;
+    the counts are SUMMED before the skip cap, the passed floor and the accounting
+    identity are applied; and each child's junit report must equal, by identity, the
+    nodes it was assigned — the shares partition the collection, so equality in every
+    child is equality of the union.
+    """
     def where(child):
-        return "" if len(children) == 1 else "pytest child {0}/{1}: ".format(
-            child["index"], len(children))
+        return "" if len(children) == 1 else "{0} {1}/{2}: ".format(
+            unit, child["index"], len(children))
 
     summary = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
     for child in children:
-        if "reader_error" in child:
-            raise _invalid(
-                "PYTEST_FAILED",
-                "{0}the suite's output could not be read ({1}: {2}); its result cannot be "
-                "accounted for".format(where(child), type(child["reader_error"]).__name__,
-                                       child["reader_error"]),
-            )
-        counts = _summary_from_candidates(child["summaries"])
-        if child["status"] != 0:
-            detail = "" if len(children) == 1 else "\n" + "".join(child["tail"][-40:])
-            raise _invalid(
-                "PYTEST_FAILED",
-                "{0}the non-KB suite exited {1} ({2}){3}".format(
-                    where(child), child["status"], counts, detail),
-            )
-        if counts["failed"] or counts["errors"]:
-            raise _invalid(
-                "PYTEST_FAILED",
-                "{0}the non-KB suite exited 0 but reported {1} failed / {2} errors".format(
-                    where(child), counts["failed"], counts["errors"]
-                ),
-            )
+        counts = _check_child_outcome(child, where(child))
         for key in summary:
             summary[key] += counts[key]
 
@@ -2008,22 +2094,7 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
                 "be reconciled by identity while they do".format(sorted(collided)[:5]),
             )
         for child in children:
-            _refuse_unowned_report(tmpdir, child["report_fd"], child["report_name"])
-            if "args_fd" in child:
-                _refuse_replaced_selection(tmpdir, child)
-            executed = _executed_projections(child["report_fd"])
-            expected = sorted(_junit_projection(n) for n in child["nodes"])
-            if executed != expected:
-                missing = sorted(set(expected) - set(executed))
-                extra = sorted(set(executed) - set(expected))
-                raise _invalid(
-                    "PYTEST_EXECUTION_UNRECONCILED",
-                    "{0}the tests that RAN do not match the tests that were COLLECTED "
-                    "({1} executed records vs {2} collected). Missing: {3}. "
-                    "Unexpected: {4}.".format(
-                        where(child), len(executed), len(expected), missing[:10], extra[:10]
-                    ),
-                )
+            _check_child_identity(tmpdir, child, where(child))
 
     # ACCOUNTING IDENTITY: every collected test is either a pass or a permitted
     # skip. Without it a collected-but-never-executed test simply vanishes from
@@ -2041,9 +2112,6 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
                 len(collected), accounted, summary["passed"], summary["skipped"]
             ),
         )
-    if len(children) > 1:
-        _emit("wave_gate: suite ran as {0} pytest children ({1})".format(
-            len(children), ", ".join(str(len(child["nodes"])) for child in children)))
     return summary
 
 
@@ -2079,6 +2147,365 @@ def _refuse_replaced_selection(tmpdir, child):
             "the selection {0} was rewritten during the run; what the child was told to "
             "run cannot be established".format(child["args_name"]),
         )
+
+
+# --------------------------------------------------------------------------
+# Runner shards — the suite across SUITE_RUNNERS separate CI runners
+# --------------------------------------------------------------------------
+#
+# One hosted runner is killed at 6 hours and the in-process split outgrew it. So CI
+# runs each share of `plan_suite_partition(order, weights, SUITE_RUNNERS)` on its own
+# runner (`ci --shard K --shard-out DIR`), which writes a RECORD of what that share
+# did, and the job carrying the required check name loads every record
+# (`ci --shard-reports DIR`) and holds the WHOLE to the same bar through
+# `reconcile_suite`. A shard is never a verdict; the aggregate is the gate.
+#
+# What a record cannot be trusted for, the aggregate does not take from it: the nodes
+# a share was ASSIGNED come from the aggregate's own collection and its own plan, and
+# the record's digest of its node list must match them. A record supplies only what
+# ran there — the exit status, the summary line, the junit report — and the identity
+# of the run it belongs to (head, baseline, runner count, share index).
+
+SHARD_RECORD_KIND = "wave-gate-shard"
+_SHARD_RECORD_KEYS = frozenset({
+    "kind", "schema_version", "head", "baseline", "shard", "runners", "nodes_sha256",
+    "node_count", "status", "summaries", "junit_sha256", "junit_b64",
+})
+_HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+
+
+def _runner_plan(collected, weights):
+    """The ``SUITE_RUNNERS`` shares, every one of them non-empty — or a refusal.
+
+    :func:`plan_suite_partition` drops an empty share, which would SHIFT every later
+    index: "share K" must mean the same nodes on the runner that ran it and on the
+    aggregate that checks it, so a plan that does not fill every runner is refused
+    rather than re-indexed. (The real suite fills eight shares many times over.)
+    """
+    order = getattr(collected, "order", None) or sorted(collected)
+    plan = plan_suite_partition(order, weights or {}, SUITE_RUNNERS)
+    if len(plan) != SUITE_RUNNERS:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "the suite partition has {0} non-empty share(s) for {1} runners; every "
+            "runner shard must own a share, or share indexes stop naming the same "
+            "nodes everywhere".format(len(plan), SUITE_RUNNERS),
+        )
+    return plan
+
+
+def _shard_record_name(shard):
+    return "shard-{0}.json".format(shard)
+
+
+def _nodes_digest(nodes):
+    """sha256 of the share's node ids, newline-joined, in collection order."""
+    return hashlib.sha256("\n".join(nodes).encode("utf-8")).hexdigest()
+
+
+def _shard_record(shard, nodes, status, summaries, junit, *, head, baseline):
+    """The record a runner shard writes — the ONE builder of the format."""
+    return {
+        "kind": SHARD_RECORD_KIND,
+        "schema_version": SCHEMA_VERSION,
+        "head": head,
+        "baseline": baseline,
+        "shard": shard,
+        "runners": SUITE_RUNNERS,
+        "nodes_sha256": _nodes_digest(nodes),
+        "node_count": len(nodes),
+        "status": status,
+        "summaries": list(summaries),
+        "junit_sha256": hashlib.sha256(junit).hexdigest(),
+        "junit_b64": base64.b64encode(junit).decode("ascii"),
+    }
+
+
+def _shard_record_bytes(record):
+    return (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _read_all(fd):
+    os.lseek(fd, 0, os.SEEK_SET)
+    chunks = []
+    while True:
+        chunk = os.read(fd, 1 << 20)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def run_suite_shard(repo, collected, tmpdir, shard, weights, *, head, baseline):
+    """Run share ``shard`` of the runner plan as ONE pytest child; return its record.
+
+    The same child mechanism :func:`run_suite` uses (owned selection file, owned junit
+    report), held to the PER-CHILD half of the bar: exit 0, exactly one summary, no
+    failure, and junit identity equal to the assigned nodes. The whole-suite bounds —
+    the summed skip cap, the passed floor, the accounting identity — cannot be judged
+    from one share; the aggregate applies them to all of them.
+    """
+    if tmpdir is None:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "a runner shard needs the gate's scratch directory for its selection and "
+            "execution report",
+        )
+    share = _runner_plan(collected, weights)[shard - 1]
+    child = _run_suite_children(repo, [share], tmpdir)[0]
+    where = "runner shard {0}/{1}: ".format(shard, SUITE_RUNNERS)
+    counts = _check_child_outcome(child, where)
+    _check_child_identity(tmpdir, child, where)
+    record = _shard_record(
+        shard, share["nodes"], child["status"], child["summaries"],
+        _read_all(child["report_fd"]), head=head, baseline=baseline,
+    )
+    return record, counts
+
+
+def _refuse_shard_out_inside_repo(fd, repo):
+    try:
+        _refuse_scratch_inside_repo(fd, repo)
+    except GateFailure as failure:
+        if failure.code != "SCRATCH_INSIDE_REPO":
+            raise
+        raise _contract(
+            "SCRATCH_INSIDE_REPO",
+            "the --shard-out directory resolves inside the repository {0}; the gate "
+            "must not write into the tree it is validating".format(repo),
+        )
+
+
+def open_shard_out(repo, path, shard):
+    """The directory a shard record will be written to, proven usable BEFORE the suite.
+
+    A share takes hours; an output directory that cannot hold its record should fail in
+    seconds. It must be a real directory (not a symlink), OUTSIDE the repository — the
+    same reasoning as :func:`make_scratch_dir`: the closing worktree fingerprint is only
+    evidence while the gate writes nothing inside the tree — and must not already hold
+    this share's record, because a record is created exclusively, never overwritten.
+    Returns the held directory descriptor; the record is written through it.
+
+    A directory this call CREATED is removed again if it is then refused: `mkdir` runs
+    before containment can be proved, and an empty directory left inside the worktree is
+    invisible to the `git status` fingerprint — exactly the unseen write it exists to catch.
+    """
+    created = False
+    try:
+        os.mkdir(path, 0o700)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise _contract(
+            "GATE_USAGE_INVALID",
+            "cannot create the --shard-out directory {0} ({1})".format(path, exc),
+        )
+    try:
+        fd = os.open(path, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW)
+    except OSError as exc:
+        raise _contract(
+            "GATE_USAGE_INVALID",
+            "--shard-out {0} is not a directory the gate can use ({1}); it must be a "
+            "real directory, not a symlink".format(path, exc),
+        )
+    try:
+        _refuse_shard_out_inside_repo(fd, repo)
+        name = _shard_record_name(shard)
+        try:
+            os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return fd
+        except OSError as exc:
+            raise _contract(
+                "GATE_USAGE_INVALID",
+                "cannot inspect {0} in --shard-out {1} ({2})".format(name, path, exc),
+            )
+        raise _contract(
+            "GATE_USAGE_INVALID",
+            "--shard-out {0} already holds {1}; a shard record is created exclusively, "
+            "never overwritten".format(path, name),
+        )
+    except BaseException:
+        if created:
+            # Through the held descriptor, never the name: `_discard_scratch_at` removes
+            # the directory the descriptor denotes (still empty — nothing was written)
+            # and closes it.
+            _discard_scratch_at(fd)
+        else:
+            _close_quietly(fd)
+        raise
+
+
+def write_shard_record(fd, repo, record):
+    """Create the record EXCLUSIVELY through the held directory; return its name."""
+    _refuse_shard_out_inside_repo(fd, repo)
+    name = _shard_record_name(record["shard"])
+    try:
+        out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o644,
+                      dir_fd=fd)
+    except OSError as exc:
+        raise _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "cannot create the shard record {0} exclusively ({1}); something else wrote "
+            "to the --shard-out directory during the run".format(name, exc),
+        )
+    try:
+        payload = memoryview(_shard_record_bytes(record))
+        while payload:
+            payload = payload[os.write(out, payload):]
+    finally:
+        os.close(out)
+    return name
+
+
+def _parse_shard_record(raw, name):
+    """One record, strictly: exact keys, exact types, the junit decoded and digest-checked.
+
+    ``type(x) is int`` throughout, because ``True == 1``: a JSON ``true`` must not pass as
+    share 1 or as exit status 1-vs-0 arithmetic.
+    """
+    def bad(detail):
+        return _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "shard record {0}: {1}; what that runner executed cannot be "
+            "established".format(name, detail),
+        )
+
+    try:
+        record = _strict_json_loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise bad("not strict UTF-8 JSON ({0})".format(exc))
+    if not isinstance(record, dict) or set(record) != _SHARD_RECORD_KEYS:
+        raise bad("expected exactly the keys {0}".format(", ".join(sorted(_SHARD_RECORD_KEYS))))
+    if record["kind"] != SHARD_RECORD_KIND:
+        raise bad("kind must be {0!r}".format(SHARD_RECORD_KIND))
+    for key in ("schema_version", "shard", "runners", "node_count", "status"):
+        if type(record[key]) is not int:
+            raise bad("{0} must be an integer".format(key))
+    if record["schema_version"] != SCHEMA_VERSION:
+        raise bad("schema_version must be {0}".format(SCHEMA_VERSION))
+    for key in ("head", "baseline"):
+        if type(record[key]) is not str or not _SHA_RE.match(record[key]):
+            raise bad("{0} must be a 40-character lowercase sha".format(key))
+    for key in ("nodes_sha256", "junit_sha256"):
+        if type(record[key]) is not str or not _HEX64_RE.match(record[key]):
+            raise bad("{0} must be a lowercase sha256".format(key))
+    summaries = record["summaries"]
+    if type(summaries) is not list or any(type(line) is not str for line in summaries):
+        raise bad("summaries must be a list of strings")
+    if type(record["junit_b64"]) is not str:
+        raise bad("junit_b64 must be a string")
+    try:
+        junit = base64.b64decode(record["junit_b64"].encode("ascii"), validate=True)
+    except (binascii.Error, UnicodeEncodeError, ValueError) as exc:
+        raise bad("junit_b64 is not base64 ({0})".format(exc))
+    if hashlib.sha256(junit).hexdigest() != record["junit_sha256"]:
+        raise bad("the junit report does not match its recorded sha256")
+    return record, junit
+
+
+def load_shard_records(path):
+    """EXACTLY ``shard-1.json`` .. ``shard-<SUITE_RUNNERS>.json`` from ``path``.
+
+    ``{K: (record, junit bytes)}``. Missing, extra, foreign, symlinked, non-regular or
+    unparseable entries are refused, as is a record whose own index or runner count is
+    not the one its name and this gate's constant say. The directory is opened without
+    following a symlink and read through that descriptor, so the listing and the files
+    read are one directory.
+    """
+    def bad(detail):
+        return _invalid(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "--shard-reports {0}: {1}; the suite's execution cannot be "
+            "reconciled".format(path, detail),
+        )
+
+    try:
+        fd = os.open(path, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW)
+    except OSError as exc:
+        raise bad("not a readable real directory ({0})".format(exc))
+    try:
+        expected = {_shard_record_name(k): k for k in range(1, SUITE_RUNNERS + 1)}
+        present = set(os.listdir(fd))
+        missing = sorted(set(expected) - present, key=expected.get)
+        extra = sorted(present - set(expected))
+        if missing or extra:
+            raise bad("expected exactly {0} shard records; missing {1}, unexpected "
+                      "{2}".format(SUITE_RUNNERS, missing, extra[:10]))
+        records = {}
+        for name, index in sorted(expected.items(), key=lambda item: item[1]):
+            try:
+                # O_NONBLOCK so a FIFO planted under a record's name cannot hang the
+                # gate before the regular-file check refuses it.
+                held = os.open(name, os.O_RDONLY | _O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            except OSError as exc:
+                raise bad("cannot open {0} without following a link ({1})".format(name, exc))
+            try:
+                if not stat.S_ISREG(os.fstat(held).st_mode):
+                    raise bad("{0} is not a regular file".format(name))
+                raw = _read_all(held)
+            finally:
+                _close_quietly(held)
+            record, junit = _parse_shard_record(raw, name)
+            if record["shard"] != index:
+                raise bad("{0} records share {1}; every share must be recorded exactly "
+                          "once, under its own name".format(name, record["shard"]))
+            if record["runners"] != SUITE_RUNNERS:
+                raise bad("{0} was written for {1} runners, not {2}".format(
+                    name, record["runners"], SUITE_RUNNERS))
+            records[index] = (record, junit)
+        return records
+    finally:
+        _close_quietly(fd)
+
+
+def reconcile_shard_records(nodes_manifest, collected, tmpdir, path, weights, *, head,
+                            baseline):
+    """The aggregate: every runner shard's record, reconciled as ONE suite.
+
+    Each record must belong to THIS run — this HEAD, this baseline — and to the share
+    the aggregate's OWN plan assigns its index: the node-list digest is recomputed here
+    from this collection, never taken on the record's word. Its junit report is then
+    written into the gate's scratch as an owned file, and the whole goes through
+    :func:`reconcile_suite`, exactly as the in-process children's reports do.
+    """
+    plan = _runner_plan(collected, weights)
+    records = load_shard_records(path)
+    children = []
+    for index, share in enumerate(plan, 1):
+        record, junit = records[index]
+        name = _shard_record_name(index)
+        for key, want in (("head", head), ("baseline", baseline)):
+            if record[key] != want:
+                raise _invalid(
+                    "PYTEST_EXECUTION_UNRECONCILED",
+                    "shard record {0} names {1} {2}, but this run's {1} is {3}; a record "
+                    "from another run is not evidence for this one".format(
+                        name, key, record[key][:12], want[:12]),
+                )
+        if (record["nodes_sha256"] != _nodes_digest(share["nodes"])
+                or record["node_count"] != len(share["nodes"])):
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "shard record {0} ran a different node list ({1} nodes) than this "
+                "collection's share {2} ({3} nodes)".format(
+                    name, record["node_count"], index, len(share["nodes"])),
+            )
+        report_name = "shard-junit-{0}.xml".format(index)
+        report_fd = tmpdir.create_owned(report_name)
+        payload = memoryview(junit)
+        while payload:
+            payload = payload[os.write(report_fd, payload):]
+        children.append({
+            "index": index, "nodes": share["nodes"], "status": record["status"],
+            "summaries": list(record["summaries"]), "tail": [],
+            "report_fd": report_fd, "report_name": report_name,
+        })
+    summary = reconcile_suite(nodes_manifest, collected, children, tmpdir,
+                              unit="runner shard")
+    _emit("wave_gate: suite reconciled from {0} runner shards ({1})".format(
+        len(children), ", ".join(str(len(child["nodes"])) for child in children)))
+    return summary
 
 
 # A pytest summary is a comma-separated list of `<n> <outcome>` clauses, then
@@ -2981,7 +3408,7 @@ def execute(args):
         base=explicit_base,
     )
     baseline = context["sha"]
-    check_checkout_matches_event(repo, context, ci_mode=args.command == "ci")
+    head = check_checkout_matches_event(repo, context, ci_mode=args.command == "ci")
     _emit("wave_gate: baseline {0} ({1})".format(baseline, context["kind"]))
 
     current, bootstrapping = run_manifest_phase(
@@ -3010,34 +3437,56 @@ def execute(args):
     failure = None
     unexpected = False
     tmpdir = None
+    # Runner-shard mode (`ci` only; see "Runner shards"). A SHARD runs one share and
+    # leaves a record for the aggregate; it is not a verdict, so it prints none and runs
+    # no fingerprint phase. `--shard-reports` is the aggregate: the same flow, with the
+    # suite phase replaced by reconciling every shard's record as one suite.
+    shard = getattr(args, "shard", None)
+    shard_reports = getattr(args, "shard_reports", None)
+    shard_out_fd = None
+    shard_record = None
     try:
         # Inside the boundary: a scratch that cannot be created safely is a gate
         # failure like any other, and still gets the closing fingerprint.
         tmpdir = make_scratch_dir(repo)
+        if shard is not None:
+            shard_out_fd = open_shard_out(repo, args.shard_out, shard)
         collected = collect_nodes(repo, tmpdir)
         check_collection(current["pytest-nodes"], collected)
         _emit("wave_gate: collection ok ({0} tests)".format(len(collected)))
 
-        summary = run_suite(repo, current["pytest-nodes"], collected, tmpdir,
-                            processes=SUITE_PROCESSES, weights=load_suite_weights(repo))
-        _emit(
-            "wave_gate: non-KB suite green ({0} passed, {1} skipped, cap {2})".format(
-                summary["passed"], summary["skipped"],
-                current["pytest-nodes"].header["maximum_skipped"],
+        if shard is not None:
+            shard_record, shard_counts = run_suite_shard(
+                repo, collected, tmpdir, shard, load_suite_weights(repo),
+                head=head, baseline=baseline,
             )
-        )
-
-        if args.command == "wave":
-            rendered = check_goldens(repo, current["goldens"], tmpdir)
+        else:
+            if shard_reports is not None:
+                summary = reconcile_shard_records(
+                    current["pytest-nodes"], collected, tmpdir, shard_reports,
+                    load_suite_weights(repo), head=head, baseline=baseline,
+                )
+            else:
+                summary = run_suite(repo, current["pytest-nodes"], collected, tmpdir,
+                                    processes=SUITE_PROCESSES, weights=load_suite_weights(repo))
             _emit(
-                "wave_gate: {0} active goldens deterministic and byte-exact".format(rendered)
+                "wave_gate: non-KB suite green ({0} passed, {1} skipped, cap {2})".format(
+                    summary["passed"], summary["skipped"],
+                    current["pytest-nodes"].header["maximum_skipped"],
+                )
             )
 
-        # BOTH `ci` and `wave` run the #153 seam and emit its contract line —
-        # a machine-readable token, not prose, because #153 activates against
-        # this exact string.
-        status = run_fingerprint_phase(getattr(args, "require_plan_fingerprint", False))
-        _emit(_fingerprint_line(status))
+            if args.command == "wave":
+                rendered = check_goldens(repo, current["goldens"], tmpdir)
+                _emit(
+                    "wave_gate: {0} active goldens deterministic and byte-exact".format(rendered)
+                )
+
+            # BOTH `ci` and `wave` run the #153 seam and emit its contract line —
+            # a machine-readable token, not prose, because #153 activates against
+            # this exact string.
+            status = run_fingerprint_phase(getattr(args, "require_plan_fingerprint", False))
+            _emit(_fingerprint_line(status))
     except GateFailure as exc:
         failure = exc
     except BaseException:  # noqa: BLE001
@@ -3092,6 +3541,27 @@ def execute(args):
         # step exited GREEN after everything else had passed.
         unexpected = True
 
+    # The shard record is written LAST, only when everything above — the share's own
+    # checks, scratch disposal and the closing worktree fingerprint — passed. A record
+    # therefore exists only for a shard run that exits 0, and the aggregate's refusal of
+    # a MISSING record is how a red share reaches the required check.
+    if shard_record is not None and failure is None and not unexpected:
+        try:
+            name = write_shard_record(shard_out_fd, repo, shard_record)
+            _emit(
+                "wave_gate: SHARD {0}/{1} recorded ({2} assigned nodes: {3} passed, {4} "
+                "skipped) as {5} in {6} — NOT the gate's verdict; the `Python 3.11 "
+                "non-KB` aggregate reconciles all {1} shards".format(
+                    shard, SUITE_RUNNERS, shard_record["node_count"],
+                    shard_counts["passed"], shard_counts["skipped"], name, args.shard_out,
+                )
+            )
+        except GateFailure as exc:
+            failure = exc
+        except BaseException:  # noqa: BLE001 - normalized below, like every other escape
+            unexpected = True
+    if shard_out_fd is not None:
+        _close_quietly(shard_out_fd)
 
     if unexpected:
         # NORMALIZED, not re-raised. `main()` catches only `GateFailure`, so
@@ -3802,6 +4272,19 @@ def build_parser():
                            help="path to the GitHub event payload ($GITHUB_EVENT_PATH)")
     ci.add_argument("--event-name", default=None,
                     help="override GITHUB_EVENT_NAME (tests only)")
+    # Runner shards (`SUITE_RUNNERS`). At most one mode; neither is the plain one-runner
+    # gate. Range and pairing are checked by `_check_shard_arguments`, against the
+    # constant, so the refusal carries GATE_USAGE_INVALID like every usage error.
+    ci_shard = ci.add_mutually_exclusive_group()
+    ci_shard.add_argument("--shard", type=int, metavar="K",
+                          help="run ONLY share K (1..SUITE_RUNNERS) and write its record to "
+                               "--shard-out; not a verdict")
+    ci_shard.add_argument("--shard-reports", metavar="DIR",
+                          help="the aggregate: reconcile every shard record in DIR as one "
+                               "suite instead of running it")
+    ci.add_argument("--shard-out", metavar="DIR",
+                    help="with --shard: the directory (outside the repository) the shard "
+                         "record is created in")
 
     wave = subparsers.add_parser(
         "wave", help="the per-wave gate: ci + every active golden, twice, plus the "
@@ -3825,6 +4308,26 @@ def build_parser():
     manifests.add_argument("--event-name", default=None)
     manifests.add_argument("--bootstrap", action="store_true")
     return parser
+
+
+def _check_shard_arguments(args):
+    """``--shard K`` needs ``--shard-out`` and a K in 1..SUITE_RUNNERS; nothing else
+    takes ``--shard-out``."""
+    shard = getattr(args, "shard", None)
+    shard_out = getattr(args, "shard_out", None)
+    if shard is None and shard_out is None:
+        return
+    if shard is None:
+        raise _contract("GATE_USAGE_INVALID",
+                        "--shard-out is only meaningful with --shard; see --help")
+    if shard_out is None:
+        raise _contract("GATE_USAGE_INVALID",
+                        "--shard {0} needs --shard-out DIR for its record; see --help"
+                        .format(shard))
+    if type(shard) is not int or not 1 <= shard <= SUITE_RUNNERS:
+        raise _contract("GATE_USAGE_INVALID",
+                        "--shard must be an integer in 1..{0}, not {1!r}; see --help"
+                        .format(SUITE_RUNNERS, shard))
 
 
 def exit_status_for(failure):
@@ -4028,6 +4531,7 @@ def main(argv=None):
                 "GATE_USAGE_INVALID",
                 "{0}; see --help".format(exc.detail),
             )
+        _check_shard_arguments(args)
         # Every subcommand passes here, and nothing has run yet: no git, no pytest.
         if DEFER_ENV in os.environ:
             raise _contract(

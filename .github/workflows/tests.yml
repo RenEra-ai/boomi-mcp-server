@@ -38,12 +38,43 @@
 # that skew is deliberate and this job is what stops it hiding a defect that
 # only appears on the deployment interpreter. (It found seven on its first run.)
 #
-# Everything this job asserts lives in `scripts/wave_gate.py`, invoked once. The
-# job deliberately does NOT run `pytest` itself: a workflow that shells out to
+# Everything this workflow asserts lives in `scripts/wave_gate.py`. It
+# deliberately does NOT run `pytest` itself: a workflow that shells out to
 # pytest directly can go green on a partial collection, which is the exact
 # failure mode this whole slice exists to make impossible. The gate asserts a
 # committed floor and a committed set of required node ids before it believes
 # any result.
+#
+# WHY TWO JOBS. A GitHub-hosted job is killed at 6 hours, and one runner running
+# the suite as four in-process children outgrew it (#159 S3: the four-way split
+# took ~3 h at dev 9d0e82d and then crossed the 360-minute cap; the same four
+# shares run on four SEPARATE runners took 194-322 min EACH, the spread being the
+# ~1.5x runner-speed variance). So the suite now runs across `SUITE_RUNNERS`
+# separate runners (`non-kb-shard`, a matrix), and one aggregate job carries the
+# required name:
+#
+#   * Each shard job runs the SAME gate flow — baseline, checkout binding,
+#     manifests, collection floor and required nodes — then runs exactly share K
+#     of the committed partition and writes a shard RECORD (head, baseline, a
+#     digest of the share's node list, the exit status, the summary line, the
+#     junit report). A shard job is NOT a verdict and does not print one.
+#   * The aggregate job (`Python 3.11 non-KB`, the ruleset's context) runs the
+#     gate flow again on its own checkout, recomputes the partition from its own
+#     collection, loads EXACTLY one record per share, and reconciles the whole
+#     through the same code the in-process split uses: every share exited 0 with
+#     one summary and no failure, the skip cap and passed floor over the SUM, the
+#     junit identity of every share against the nodes the aggregate itself
+#     assigned it, and the accounting identity against the whole collection. A
+#     shard job's green proves nothing to the ruleset; only this job does.
+#
+# The junit evidence now crosses a JOB boundary, as a run-scoped artifact,
+# instead of being held by descriptor inside one process. That is the same trust:
+# the same workflow run, the same commit (`GITHUB_SHA`, which every job binds its
+# HEAD to and which each record must name), the same workflow file. A record
+# bound to another commit, another baseline, another runner count or another
+# share is refused. On `scratch/**` a shard and the aggregate each fetch
+# `origin/dev`; if `dev` moves between their checkouts the baselines differ and
+# the aggregate refuses — fail-closed; re-run the workflow.
 #
 # See `specs/ENDGAME_VERIFICATION_GATE.md`.
 name: Python tests
@@ -56,33 +87,39 @@ permissions:
   contents: read
 
 jobs:
-  non-kb-python311:
-    # This display name is the STABLE check name that #153 and #154 cite as
-    # their "full non-KB Python 3.11 suite in CI" gate item. Since #172 the `dev`
-    # ruleset ALSO requires this exact context string, so renaming this job does
-    # not merely break those citations — it makes the required check unobtainable
-    # and every push to `dev` is refused until an admin edits or deletes the rule.
-    # Rename only together with the ruleset's `context`.
-    name: Python 3.11 non-KB
+  non-kb-shard:
+    # NOT the required check, and deliberately not named like it: a shard's green
+    # is evidence for the aggregate below, never a verdict on its own.
+    name: Python 3.11 non-KB shard ${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # MEASURED budget, not a guess (#184, raised with the owner's approval): at the
-    # landing base `cbab28f` the pytest span was 38.3 min, 32.6 of them the #149
+    strategy:
+      # Every share runs to completion even when another fails, so one red run
+      # reports every failing share instead of the first.
+      fail-fast: false
+      matrix:
+        # EXACTLY 1..SUITE_RUNNERS (`scripts/wave_gate.py`). The aggregate demands one
+        # record per share, so a list that drifted from the constant goes red there —
+        # and `tests/test_wave_gate.py` pins the two equal so it never gets that far.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    # MEASURED budget history (#184 and #186 raised it with the owner's approval). At the landing
+    # base `cbab28f` the pytest span was 38.3 min, 32.6 of them the #149
     # legacy-reachability freeze module alone, so 60 left ~20 min of headroom. #184's
     # tests outgrew it — its first preflight (run 35571464519) was cancelled at 60 min
     # having finished 44% of the suite. The cap exists to kill a hung job, not to bound
     # a healthy suite; 120 does the first while leaving room for the rest of M12.
-    # #186 outgrew 120 (raised with the owner's approval): its preflight (run 39531483740)
-    # was cancelled at 120 min, and the same suite on Python 3.11 locally took 114.6 min
-    # (14,507 passed, 20 skipped) against #184's 52.5 min. 240 kills a hung job and leaves
-    # headroom; the suite-time growth itself is a separate follow-up.
-    # 240 was not enough either: runner speed varies ~1.6x between runs — run 39544667083
-    # finished the suite in 192 min, run 39567844156 reached 45% at 216 min and was cancelled
-    # at 240 (one module between 45% and 46% alone took 85 min on the faster runner). 360
-    # covers the slower runner with headroom while still killing a hung job.
-    # Since the four-way suite split (dev 9d0e82d, 2026-11-08) the job takes about 3 h 04 min;
-    # 360 is kept as headroom for the ~1.6x runner-speed spread, not lowered.
+    # #186 outgrew 120: its preflight (run 39531483740) was cancelled at 120 min, and the
+    # same suite on Python 3.11 locally took 114.6 min (14,507 passed, 20 skipped) against
+    # #184's 52.5 min. 240 was not enough either: runner speed varies ~1.6x between runs —
+    # run 39544667083 finished the suite in 192 min, run 39567844156 reached 45% at 216 min
+    # and was cancelled at 240. 360 covered the slower runner. The four-way in-process split
+    # (dev 9d0e82d, 2026-11-08) brought the job to about 3 h 04 min, and the suite then
+    # outgrew even that on one runner (#159 S3). 360 is the hosted-runner maximum; it is kept
+    # PER SHARD as the hang-killer — one share of eight is expected to take well under it.
     timeout-minutes: 360
 
+    # The SAME environment in both jobs — the shard runs the suite and the aggregate
+    # re-collects it, and a collection under a different environment is a different
+    # node set (`tests/test_wave_gate.py` pins the two blocks equal).
     env:
       PYTHONPATH: src
       PYTHONDONTWRITEBYTECODE: "1"
@@ -103,16 +140,14 @@ jobs:
       BOOMI_DOCS_ENABLED: "false"
       BOOMI_GOTCHAS_ENABLED: "false"
       # BOOMI_DEFER_REVISION_GATES is deliberately NOT set, here or anywhere in CI:
-      # it is the development-only revision-freshness deferral, and the gate below
+      # it is the development-only revision-freshness deferral, and the gate
       # refuses to run at all while it is present (REVISION_DEFERRAL_PRESENT).
 
     steps:
-      # fetch-depth: 0 is REQUIRED, not tidiness. The scratch preflight resolves
-      # `refs/remotes/origin/dev` and the gate then proves the candidate descends
-      # from it, which needs the full remote ref set and complete ancestry — a
-      # shallow checkout has neither. (The `pull_request` merge-base path that
-      # originally motivated it is no longer triggered, but the requirement is
-      # unchanged and stricter.)
+      # fetch-depth: 0 is REQUIRED, not tidiness, in EVERY job. The scratch preflight
+      # resolves `refs/remotes/origin/dev` and the gate then proves the candidate
+      # descends from it, which needs the full remote ref set and complete ancestry —
+      # a shallow checkout has neither.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -142,15 +177,134 @@ jobs:
       - name: Install the non-KB test environment
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
-      # The single gate. No `continue-on-error`, no `|| true`, no step-level
+      # ONE share of the suite, through the gate. The SAME two-arm case statement as
+      # the aggregate's step — the shard binds to the same baseline the aggregate will
+      # demand — plus `--shard K --shard-out DIR`. No `continue-on-error`, no
+      # `|| true`, no step-level conditional: a red share fails this job, writes no
+      # record, and the aggregate then refuses the missing record.
+      - name: Shard of the non-KB suite (manifests, collection floor, required nodes, one share)
+        # GITHUB_SHA is the commit Actions checked out; the gate binds HEAD to it and
+        # the record names it, so the aggregate can refuse a record from another commit.
+        # SHARD reaches the script through the environment, never by expression
+        # interpolation into the script text.
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          event="${GITHUB_EVENT_NAME-}"
+          ref="${GITHUB_REF-}"
+
+          case "${event}:${ref}" in
+            push:refs/heads/dev)
+              exec python scripts/wave_gate.py ci \
+                --github-event "$GITHUB_EVENT_PATH" \
+                --shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"
+              ;;
+            push:refs/heads/scratch/*)
+              if ! base="$(git rev-parse --verify \
+                  'refs/remotes/origin/dev^{commit}' 2>/dev/null)"; then
+                printf '%s\n' \
+                  'BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev' >&2
+                exit 2
+              fi
+              exec python scripts/wave_gate.py ci --base "$base" \
+                --shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"
+              ;;
+            *)
+              printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \
+                "$event" "$ref" >&2
+              exit 2
+              ;;
+          esac
+
+      # Runs only after the step above exited 0 (the default), so a record is
+      # uploaded only by a share that passed. A missing record is an ERROR here, not
+      # an empty artifact. The artifact is scoped to this workflow run; it is kept
+      # briefly because nothing outside the run reads it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: non-kb-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard
+          if-no-files-found: error
+          # A re-run of a failed share must be able to replace its record under the same
+          # name; within one attempt only this matrix job ever writes it.
+          overwrite: true
+          retention-days: 3
+
+  non-kb-python311:
+    # This display name is the STABLE check name that #153 and #154 cite as
+    # their "full non-KB Python 3.11 suite in CI" gate item. Since #172 the `dev`
+    # ruleset ALSO requires this exact context string, so renaming this job does
+    # not merely break those citations — it makes the required check unobtainable
+    # and every push to `dev` is refused until an admin edits or deletes the rule.
+    # Rename only together with the ruleset's `context`.
+    name: Python 3.11 non-KB
+    runs-on: ubuntu-24.04
+    needs: non-kb-shard
+    # REQUIRED, and the only conditional in this workflow. Without it a failed shard
+    # makes this job SKIPPED — and a skipped required check SATISFIES a ruleset, so a
+    # red share would land on `dev`. `!cancelled()` runs this job whatever the shards
+    # concluded, and the gate below then refuses the record a failed share never wrote.
+    # NEVER `always()`: that would also run it in a cancelled workflow. (A cancelled run
+    # is expected to conclude this check `cancelled`, not success — not yet observed
+    # live; verify by cancelling a scratch run and reading this check's conclusion.)
+    if: ${{ !cancelled() }}
+    # The aggregate re-collects the suite and reconciles one record per share; it runs no
+    # tests. 60 minutes kills a hung job with ample room for the collection.
+    timeout-minutes: 60
+
+    env:
+      PYTHONPATH: src
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      BOOMI_LOCAL: "true"
+      BOOMI_DOCS_ENABLED: "false"
+      BOOMI_GOTCHAS_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Assert the interpreter is 3.11
+        run: |
+          python - <<'PY'
+          import sys
+          assert sys.version_info[:2] == (3, 11), sys.version
+          print("interpreter ok:", sys.version)
+          PY
+
+      - name: Install the non-KB test environment
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      # Every shard record of THIS run, flattened into one directory (the record names
+      # are distinct per share). Whatever is missing, extra or foreign is the gate's to
+      # refuse, not this step's to filter.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: non-kb-shard-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/shards
+
+      # The single gate verdict. No `continue-on-error`, no `|| true`, no step-level
       # conditional: any non-zero exit fails the job, and an unrecognized context
       # REFUSES rather than skipping — two conditional steps could both skip and
       # leave a green job that checked nothing.
       - name: Wave gate (manifests, collection floor, required nodes, full suite)
         # GITHUB_SHA is the commit Actions checked out. The gate binds HEAD to it
         # for every `ci` context, so a step that edited the tree cannot pass its
-        # own bytes off as the candidate. Passed explicitly so the binding does
-        # not depend on ambient environment.
+        # own bytes off as the candidate, and every shard record must name it.
+        # Passed explicitly so the binding does not depend on ambient environment.
         env:
           GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -161,7 +315,8 @@ jobs:
           case "${event}:${ref}" in
             push:refs/heads/dev)
               exec python scripts/wave_gate.py ci \
-                --github-event "$GITHUB_EVENT_PATH"
+                --github-event "$GITHUB_EVENT_PATH" \
+                --shard-reports "$RUNNER_TEMP/shards"
               ;;
             push:refs/heads/scratch/*)
               if ! base="$(git rev-parse --verify \
@@ -170,7 +325,8 @@ jobs:
                   'BASELINE_UNAVAILABLE cannot resolve refs/remotes/origin/dev' >&2
                 exit 2
               fi
-              exec python scripts/wave_gate.py ci --base "$base"
+              exec python scripts/wave_gate.py ci --base "$base" \
+                --shard-reports "$RUNNER_TEMP/shards"
               ;;
             *)
               printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \
