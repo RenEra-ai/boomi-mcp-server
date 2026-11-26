@@ -64,8 +64,12 @@
 #     through the same code the in-process split uses: every share exited 0 with
 #     one summary and no failure, the skip cap and passed floor over the SUM, the
 #     junit identity of every share against the nodes the aggregate itself
-#     assigned it, and the accounting identity against the whole collection. A
-#     shard job's green proves nothing to the ruleset; only this job does.
+#     assigned it, and the accounting identity against the whole collection. It is
+#     also told the shard jobs' combined result (`--shard-jobs`, from
+#     `needs.non-kb-shard.result`, `success` only when every leg of the latest
+#     attempt succeeded) and refuses anything else, so a record uploaded by a
+#     job that then failed proves nothing. A shard job's green proves nothing to
+#     the ruleset; only this job does.
 #
 # The junit evidence now crosses a JOB boundary, as a run-scoped artifact,
 # instead of being held by descriptor inside one process. That is the same trust:
@@ -245,7 +249,8 @@ jobs:
     # REQUIRED, and the only conditional in this workflow. Without it a failed shard
     # makes this job SKIPPED — and a skipped required check SATISFIES a ruleset, so a
     # red share would land on `dev`. `!cancelled()` runs this job whatever the shards
-    # concluded, and the gate below then refuses the record a failed share never wrote.
+    # concluded, and the gate below then refuses: the missing record a failed share never wrote,
+    # and (via `--shard-jobs`) any shard job result but `success`.
     # NEVER `always()`: that would also run it in a cancelled workflow. (A cancelled run
     # is expected to conclude this check `cancelled`, not success — not yet observed
     # live; verify by cancelling a scratch run and reading this check's conclusion.)
@@ -305,8 +310,13 @@ jobs:
         # for every `ci` context, so a step that edited the tree cannot pass its
         # own bytes off as the candidate, and every shard record must name it.
         # Passed explicitly so the binding does not depend on ambient environment.
+        # SHARD_JOBS is `needs.non-kb-shard.result`: `success` only when EVERY matrix
+        # leg of the LATEST attempt succeeded. The gate refuses anything else before
+        # any work, so a shard that failed after uploading its record (or an earlier
+        # attempt's artifact masking a failed retry) cannot make this job green.
         env:
           GITHUB_SHA: ${{ github.sha }}
+          SHARD_JOBS: ${{ needs.non-kb-shard.result }}
         run: |
           set -euo pipefail
           event="${GITHUB_EVENT_NAME-}"
@@ -316,7 +326,8 @@ jobs:
             push:refs/heads/dev)
               exec python scripts/wave_gate.py ci \
                 --github-event "$GITHUB_EVENT_PATH" \
-                --shard-reports "$RUNNER_TEMP/shards"
+                --shard-reports "$RUNNER_TEMP/shards" \
+                --shard-jobs "$SHARD_JOBS"
               ;;
             push:refs/heads/scratch/*)
               if ! base="$(git rev-parse --verify \
@@ -326,7 +337,8 @@ jobs:
                 exit 2
               fi
               exec python scripts/wave_gate.py ci --base "$base" \
-                --shard-reports "$RUNNER_TEMP/shards"
+                --shard-reports "$RUNNER_TEMP/shards" \
+                --shard-jobs "$SHARD_JOBS"
               ;;
             *)
               printf 'BASELINE_EVENT_INVALID unsupported event/ref: %s %s\n' \

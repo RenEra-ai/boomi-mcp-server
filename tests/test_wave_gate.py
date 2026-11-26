@@ -2000,7 +2000,9 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
         assert one.count("exit 2") == 2
         assert "GITHUB_SHA: ${{ github.sha }}" in one
     # The aggregate reconciles the records in BOTH arms and never runs a share...
-    assert step.count('--shard-reports "$RUNNER_TEMP/shards"') == 2
+    assert step.count('--shard-reports "$RUNNER_TEMP/shards" \\\n                --shard-jobs "$SHARD_JOBS"') == 2
+    assert step.count('--shard-jobs "$SHARD_JOBS"') == 2
+    assert "SHARD_JOBS: ${{ needs.non-kb-shard.result }}" in step
     assert "--shard " not in step and "--shard-out" not in step
     # ...each shard runs its share in BOTH arms and never aggregates...
     assert shard_step.count('--shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"') == 2
@@ -2008,7 +2010,8 @@ def test_the_workflow_invokes_the_real_gate_and_isolates_push_runs():
     assert "SHARD: ${{ matrix.shard }}" in shard_step
     # ...and apart from those flags the two case statements are IDENTICAL, so the
     # shards cannot bind to a baseline the aggregate would not.
-    assert _case_arms(step).replace(' --shard-reports "$RUNNER_TEMP/shards"', "") == \
+    assert _case_arms(step).replace(
+        ' --shard-reports "$RUNNER_TEMP/shards" --shard-jobs "$SHARD_JOBS"', "") == \
         _case_arms(shard_step).replace(' --shard "$SHARD" --shard-out "$RUNNER_TEMP/shard"', "")
     # ...and NOTHING outside the two steps invokes the gate.
     assert "wave_gate.py" not in outside, outside

@@ -2314,17 +2314,33 @@ def open_shard_out(repo, path, shard):
         try:
             os.stat(name, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
-            return fd
+            pass
         except OSError as exc:
             raise _contract(
                 "GATE_USAGE_INVALID",
                 "cannot inspect {0} in --shard-out {1} ({2})".format(name, path, exc),
             )
-        raise _contract(
-            "GATE_USAGE_INVALID",
-            "--shard-out {0} already holds {1}; a shard record is created exclusively, "
-            "never overwritten".format(path, name),
-        )
+        else:
+            raise _contract(
+                "GATE_USAGE_INVALID",
+                "--shard-out {0} already holds {1}; a shard record is created "
+                "exclusively, never overwritten".format(path, name),
+            )
+        # Writable, proven NOW: a read-only directory must fail in seconds, not after the
+        # share's hours of pytest. A uniquely named probe, through the held descriptor.
+        probe = ".wave-gate-probe-{0}-{1}".format(os.getpid(), os.urandom(6).hex())
+        try:
+            probe_fd = os.open(
+                probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_NOFOLLOW, 0o600, dir_fd=fd)
+            os.close(probe_fd)
+            os.unlink(probe, dir_fd=fd)
+        except OSError as exc:
+            raise _contract(
+                "GATE_USAGE_INVALID",
+                "--shard-out {0} is not writable ({1}); the shard record could not be "
+                "created after the run".format(path, exc),
+            )
+        return fd
     except BaseException:
         if created:
             # Through the held descriptor, never the name: `_discard_scratch_at` removes
@@ -4285,6 +4301,9 @@ def build_parser():
     ci.add_argument("--shard-out", metavar="DIR",
                     help="with --shard: the directory (outside the repository) the shard "
                          "record is created in")
+    ci.add_argument("--shard-jobs", metavar="RESULT",
+                    help="with --shard-reports (required there): the shard jobs' combined "
+                         "result (`needs.<job>.result`); anything but `success` is refused")
 
     wave = subparsers.add_parser(
         "wave", help="the per-wave gate: ci + every active golden, twice, plus the "
@@ -4315,6 +4334,20 @@ def _check_shard_arguments(args):
     takes ``--shard-out``."""
     shard = getattr(args, "shard", None)
     shard_out = getattr(args, "shard_out", None)
+    shard_reports = getattr(args, "shard_reports", None)
+    shard_jobs = getattr(args, "shard_jobs", None)
+    if (shard_reports is None) != (shard_jobs is None):
+        raise _contract("GATE_USAGE_INVALID",
+                        "--shard-reports and --shard-jobs go together (the aggregate must "
+                        "be told the shard jobs' result); see --help")
+    if shard_jobs is not None and shard_jobs != "success":
+        # Before any collection or suite work: a record uploaded by a job that then
+        # failed (or by an earlier attempt of a retried job) is not evidence.
+        raise _contract(
+            "PYTEST_EXECUTION_UNRECONCILED",
+            "the shard jobs' combined result was {0!r}, not 'success'; their records "
+            "cannot be trusted".format(shard_jobs),
+        )
     if shard is None and shard_out is None:
         return
     if shard is None:

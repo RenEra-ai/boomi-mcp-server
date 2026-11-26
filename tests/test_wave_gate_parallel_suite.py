@@ -864,13 +864,13 @@ def test_real_runner_shards_then_the_aggregate_reconcile_green(tmp_path, monkeyp
     assert gate.main(ci + ["--shard", "1", "--shard-out", str(out)]) == 2
     assert _failure_code(capsys.readouterr().err) == "GATE_USAGE_INVALID"
 
-    assert gate.main(ci + ["--shard-reports", str(out)]) == 0
+    assert gate.main(ci + ["--shard-reports", str(out), "--shard-jobs", "success"]) == 0
     err = capsys.readouterr().err
     assert "non-KB suite green (5 passed, 1 skipped, cap 1)" in err, err
     assert fingerprints == [False]
 
     (out / "shard-2.json").unlink()
-    assert gate.main(ci + ["--shard-reports", str(out)]) == 1
+    assert gate.main(ci + ["--shard-reports", str(out), "--shard-jobs", "success"]) == 1
     assert _failure_code(capsys.readouterr().err) == "PYTEST_EXECUTION_UNRECONCILED"
 
 
@@ -881,8 +881,12 @@ def test_real_runner_shards_then_the_aggregate_reconcile_green(tmp_path, monkeyp
     ["--shard", "9", "--shard-out", "/tmp/x"],
     ["--shard", "one", "--shard-out", "/tmp/x"],
     ["--shard", "1", "--shard-out", "/tmp/x", "--shard-reports", "/tmp/y"],
+    ["--shard-reports", "/tmp/y"],
+    ["--shard-jobs", "success"],
+    ["--shard", "1", "--shard-out", "/tmp/x", "--shard-jobs", "success"],
 ], ids=["shard-without-out", "out-without-shard", "shard-zero", "shard-above-runners",
-        "shard-not-an-integer", "shard-and-reports"])
+        "shard-not-an-integer", "shard-and-reports", "reports-without-jobs",
+        "jobs-without-reports", "jobs-with-a-shard"])
 def test_malformed_shard_arguments_are_a_usage_error(argv, capsys):
     assert gate.main(["ci", "--base", "HEAD"] + argv) == 2
     assert capsys.readouterr().err.split()[0] == "GATE_USAGE_INVALID"
@@ -919,3 +923,39 @@ def test_a_red_shard_writes_no_record(tmp_path, monkeypatch, capsys):
     assert len(red) < 3, "the other shares must stay green, or this proves nothing"
     for index, status in statuses.items():
         assert (out / gate._shard_record_name(index)).exists() == (status == 0), statuses
+
+
+@pytest.mark.parametrize("result", ["failure", "skipped", "cancelled", "", "Success"])
+def test_the_aggregate_refuses_any_shard_jobs_result_but_success(result, tmp_path, monkeypatch,
+                                                                capsys):
+    """Records uploaded by a job that then failed (or an earlier attempt's artifact masking a
+    failed retry) prove nothing: the aggregate refuses before it loads or runs anything."""
+    def _boom(*args, **kwargs):
+        raise AssertionError("the refusal must come before any collection or record loading")
+    monkeypatch.setattr(gate, "collect_nodes", _boom)
+    monkeypatch.setattr(gate, "load_shard_records", _boom)
+    assert gate.main(["ci", "--base", "HEAD", "--shard-reports", str(tmp_path),
+                      "--shard-jobs", result]) == 2
+    err = capsys.readouterr().err
+    assert _failure_code(err) == "PYTEST_EXECUTION_UNRECONCILED", err
+    assert "not 'success'" in err and repr(result) in err, err
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory mode bits")
+def test_a_read_only_shard_output_directory_is_refused_at_preflight(tmp_path, monkeypatch,
+                                                                    capsys):
+    repo, base = _throwaway_gate_repo(tmp_path)
+    monkeypatch.setattr(gate, "SUITE_RUNNERS", 3)
+    out = tmp_path / "shard-out"
+    out.mkdir()
+    out.chmod(0o500)
+    try:
+        status = gate.main(["--repo", str(repo), "ci", "--base", base, "--shard", "1",
+                            "--shard-out", str(out)])
+    finally:
+        out.chmod(0o700)
+    assert status == 2
+    err = capsys.readouterr().err
+    assert _failure_code(err) == "GATE_USAGE_INVALID", err
+    assert "not writable" in err, err
+    assert list(out.iterdir()) == []

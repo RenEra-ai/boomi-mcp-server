@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15111, "minimum_collected": 15111, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15120, "minimum_collected": 15120, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16092,3 +16092,12 @@
 {"kind": "test", "id": "pytest-016091", "node_id": "tests/test_wave_gate_parallel_suite.py::test_malformed_shard_arguments_are_a_usage_error[shard-and-reports]", "state": "active"}
 {"kind": "test", "id": "pytest-016092", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_shard_output_directory_inside_the_repository_is_refused", "state": "active"}
 {"kind": "test", "id": "pytest-016093", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_red_shard_writes_no_record", "state": "active"}
+{"kind": "test", "id": "pytest-016094", "node_id": "tests/test_wave_gate_parallel_suite.py::test_malformed_shard_arguments_are_a_usage_error[reports-without-jobs]", "state": "active"}
+{"kind": "test", "id": "pytest-016095", "node_id": "tests/test_wave_gate_parallel_suite.py::test_malformed_shard_arguments_are_a_usage_error[jobs-without-reports]", "state": "active"}
+{"kind": "test", "id": "pytest-016096", "node_id": "tests/test_wave_gate_parallel_suite.py::test_malformed_shard_arguments_are_a_usage_error[jobs-with-a-shard]", "state": "active"}
+{"kind": "test", "id": "pytest-016097", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_aggregate_refuses_any_shard_jobs_result_but_success[failure]", "state": "active"}
+{"kind": "test", "id": "pytest-016098", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_aggregate_refuses_any_shard_jobs_result_but_success[skipped]", "state": "active"}
+{"kind": "test", "id": "pytest-016099", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_aggregate_refuses_any_shard_jobs_result_but_success[cancelled]", "state": "active"}
+{"kind": "test", "id": "pytest-016100", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_aggregate_refuses_any_shard_jobs_result_but_success[]", "state": "active"}
+{"kind": "test", "id": "pytest-016101", "node_id": "tests/test_wave_gate_parallel_suite.py::test_the_aggregate_refuses_any_shard_jobs_result_but_success[Success]", "state": "active"}
+{"kind": "test", "id": "pytest-016102", "node_id": "tests/test_wave_gate_parallel_suite.py::test_a_read_only_shard_output_directory_is_refused_at_preflight", "state": "active"}

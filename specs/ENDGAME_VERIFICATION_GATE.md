@@ -52,7 +52,7 @@ runtime.
 
 ```
 python scripts/wave_gate.py ci   (--base COMMIT | --github-event PATH)
-                                 [--shard K --shard-out DIR | --shard-reports DIR]
+                                 [--shard K --shard-out DIR | --shard-reports DIR --shard-jobs RESULT]
 python scripts/wave_gate.py wave --base COMMIT [--bootstrap] [--require-plan-fingerprint]
 python scripts/wave_gate.py manifests (--base COMMIT | --github-event PATH) [--bootstrap]
 ```
@@ -83,8 +83,8 @@ one summary, no failure, junit identity equal to its assigned nodes), and create
 `DIR/shard-K.json` exclusively (DIR must be outside the repository) — a record of
 HEAD, baseline, K, the runner count, the digest of the share's node list, the
 child's status and summary, and its junit report. A shard prints no verdict and
-runs no fingerprint phase; a red shard writes no record. `ci --shard-reports DIR`
-is the required check: the same flow, with the suite phase replaced by loading
+runs no fingerprint phase; a red shard writes no record. `ci --shard-reports DIR --shard-jobs RESULT`
+is the required check (RESULT is the shard jobs' combined `needs.<job>.result`; anything but `success` is refused before any work): the same flow, with the suite phase replaced by loading
 EXACTLY `shard-1.json` … `shard-<SUITE_RUNNERS>.json` (missing, extra, symlinked,
 unparseable, mis-indexed records refused; each must name this HEAD, this baseline
 and this runner count, and its node-list digest must match the share the
