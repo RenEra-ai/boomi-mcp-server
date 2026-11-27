@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15183, "minimum_collected": 15183, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15187, "minimum_collected": 15187, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16158,9 +16158,13 @@
 {"kind": "test", "id": "pytest-016157", "node_id": "tests/test_regen_baselines.py::test_the_cli_stages_then_installs_from_the_bundle", "state": "active"}
 {"kind": "test", "id": "pytest-016158", "node_id": "tests/test_regen_baselines.py::test_a_bundle_destination_inside_the_checkout_is_refused_before_any_producer", "state": "active"}
 {"kind": "test", "id": "pytest-016159", "node_id": "tests/test_regen_baselines.py::test_the_printed_install_command_runs_as_written", "state": "active"}
-{"kind": "test", "id": "pytest-016160", "node_id": "tests/test_regen_baselines.py::test_weights_without_a_durations_record_are_a_usage_error", "state": "active"}
-{"kind": "test", "id": "pytest-016161", "node_id": "tests/test_regen_baselines.py::test_the_producers_run_in_dependency_order_and_declare_the_committed_artifacts", "state": "active"}
-{"kind": "test", "id": "pytest-016162", "node_id": "tests/test_regen_baselines.py::test_the_snapshot_renderer_spells_the_plugins_paths", "state": "active"}
-{"kind": "test", "id": "pytest-016163", "node_id": "tests/test_regen_baselines.py::test_the_corpus_diff_reports_decoded_inputs", "state": "active"}
-{"kind": "test", "id": "pytest-016164", "node_id": "tests/test_regen_baselines.py::test_a_usage_error_leads_with_its_code", "state": "active"}
-{"kind": "test", "id": "pytest-016165", "node_id": "tests/test_regen_baselines.py::test_no_run_leaves_a_temporary_holder_behind", "state": "active"}
+{"kind": "test", "id": "pytest-016160", "node_id": "tests/test_regen_baselines.py::test_a_bundle_with_malformed_producer_names_is_refused_with_a_code[producers0]", "state": "active"}
+{"kind": "test", "id": "pytest-016161", "node_id": "tests/test_regen_baselines.py::test_a_bundle_with_malformed_producer_names_is_refused_with_a_code[producers1]", "state": "active"}
+{"kind": "test", "id": "pytest-016162", "node_id": "tests/test_regen_baselines.py::test_a_bundle_with_malformed_producer_names_is_refused_with_a_code[nodes]", "state": "active"}
+{"kind": "test", "id": "pytest-016163", "node_id": "tests/test_regen_baselines.py::test_a_bundle_with_malformed_producer_names_is_refused_with_a_code[None]", "state": "active"}
+{"kind": "test", "id": "pytest-016164", "node_id": "tests/test_regen_baselines.py::test_weights_without_a_durations_record_are_a_usage_error", "state": "active"}
+{"kind": "test", "id": "pytest-016165", "node_id": "tests/test_regen_baselines.py::test_the_producers_run_in_dependency_order_and_declare_the_committed_artifacts", "state": "active"}
+{"kind": "test", "id": "pytest-016166", "node_id": "tests/test_regen_baselines.py::test_the_snapshot_renderer_spells_the_plugins_paths", "state": "active"}
+{"kind": "test", "id": "pytest-016167", "node_id": "tests/test_regen_baselines.py::test_the_corpus_diff_reports_decoded_inputs", "state": "active"}
+{"kind": "test", "id": "pytest-016168", "node_id": "tests/test_regen_baselines.py::test_a_usage_error_leads_with_its_code", "state": "active"}
+{"kind": "test", "id": "pytest-016169", "node_id": "tests/test_regen_baselines.py::test_no_run_leaves_a_temporary_holder_behind", "state": "active"}
