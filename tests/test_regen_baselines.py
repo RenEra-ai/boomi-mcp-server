@@ -454,6 +454,7 @@ def test_the_printed_install_command_runs_as_written(tmp_path, capsys):
     err = capsys.readouterr().err
     (line,) = [l for l in err.splitlines() if "dry run" in l]
     command = line.split("install with: ", 1)[1]
+    own_manifest = (_ROOT / gate.NODES_MANIFEST).read_bytes()  # may be uncommitted: compare bytes
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     env = dict(regen.os.environ)
@@ -462,7 +463,7 @@ def test_the_printed_install_command_runs_as_written(tmp_path, capsys):
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert _git(repo, "status", "--porcelain").split() == ["M", gate.NODES_MANIFEST]
-    assert _git(_ROOT, "status", "--porcelain", "--", gate.NODES_MANIFEST) == "", \
+    assert (_ROOT / gate.NODES_MANIFEST).read_bytes() == own_manifest, \
         "this script's own checkout is never the target"
 
 
