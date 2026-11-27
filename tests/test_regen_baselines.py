@@ -607,15 +607,38 @@ def test_a_bundle_index_with_a_duplicate_member_is_refused(tmp_path):
     assert refused.value.code == "REGEN_BUNDLE_INVALID"
 
 
-def test_every_producer_set_the_validator_accepts_is_one_the_cli_can_run():
+def test_every_producer_set_the_validator_accepts_is_one_the_cli_can_run(tmp_path, monkeypatch):
     """The coverage claim, from the authority's full case set: over EVERY ordered subset of
-    the producers, the index validator's producer rule and the CLI's selection rule agree."""
+    the producers, the CLI (`main`, with otherwise valid inputs) and the bundle validator
+    (`check_bundle_index`, with an otherwise valid index) accept exactly the same sets."""
     import itertools
 
+    repo, base = _toy_repo(tmp_path)
+    candidate = _candidate(repo)
+    durations = _durations(tmp_path / "d.json", candidate)
+    ran = []
+    monkeypatch.setattr(regen, "prepare", lambda *a, **k: ran.append(a[2]))
+    outputs_of = {name: paths for name, paths, _r, _w in regen.PRODUCERS}
+    verdicts = {}
     for size in range(1, len(regen.NAMES) + 1):
         for combo in itertools.combinations(regen.NAMES, size):
-            assert (regen.selection_problem(list(combo)) is None) == (
-                "weights" not in combo or "nodes" in combo), combo
+            del ran[:]
+            status = regen.main(["--repo", str(repo), "--base", base, "--only", ",".join(combo),
+                                 "--durations", durations])
+            cli = status == 0 and ran == [list(combo)]
+            assert cli or status == 2, (combo, status)
+            index = {"kind": regen.BUNDLE_KIND, "schema_version": 1, "candidate": candidate,
+                     "base": base, "producers": list(combo),
+                     "outputs": {outputs_of[combo[-1]][0]: "0" * 64}}
+            try:
+                regen.check_bundle_index(index, str(repo))
+                reader = True
+            except regen.Refusal:
+                reader = False
+            assert cli == reader, (combo, cli, reader)
+            verdicts[combo] = cli
+    assert set(verdicts.values()) == {True, False}, "the matrix must contain both outcomes"
+    assert verdicts[("snapshots", "weights")] is False and verdicts[("nodes", "weights")] is True
 
 
 def test_a_weights_only_bundle_is_refused_by_the_dependency_rule_alone(tmp_path):
