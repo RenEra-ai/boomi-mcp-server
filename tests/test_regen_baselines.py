@@ -176,6 +176,25 @@ def test_a_skip_cap_the_candidate_tightened_stays_tightened(tmp_path):
     assert header["maximum_skipped"] == 3, "regenerating from the base must not restore 5"
 
 
+def test_a_refresh_never_moves_an_id_the_candidate_already_appended(tmp_path):
+    """A second refresh in the same slice: the row appended by the first keeps its id even
+    though a node added later collects before it, and the new node goes at the end."""
+    repo, base = _toy_repo(tmp_path)
+    _tests(repo, test_c="def test_z():\n    pass\n")
+    (repo / gate.NODES_MANIFEST).write_text(_manifest([
+        ("tests/test_a.py::test_one", "active"), ("tests/test_a.py::test_two", "active"),
+        ("tests/test_c.py::test_z", "active")]), encoding="utf-8")
+    _commit_all(repo, "first refresh")
+    _tests(repo, test_b="def test_three():\n    pass\n")  # collects before test_c
+    _commit_all(repo, "a later test, manifest stale")
+    bundle = _prepare(repo, base, tmp_path)
+    regen.install(str(repo), bundle, emit=lambda _line: None)
+    rows = _rows((repo / gate.NODES_MANIFEST).read_text())[1:]
+    assert [(r["id"], r["node_id"]) for r in rows[2:]] == [
+        ("pytest-000003", "tests/test_c.py::test_z"),
+        ("pytest-000004", "tests/test_b.py::test_three")]
+
+
 def test_a_test_added_and_removed_inside_the_range_gets_no_row(tmp_path):
     repo, base = _toy_repo(tmp_path)
     _tests(repo, test_c="def test_transient():\n    pass\n")

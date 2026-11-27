@@ -101,7 +101,8 @@ def _script(*argv):
 
 
 def produce_nodes(ctx):
-    """The node manifest: the base's rows, then one appended active row per newly collected
+    """The node manifest: the base's rows; then the rows the candidate already appended in the
+    range, in their order, while they still collect; then one active row per remaining new
     node in collection order. Rebuilt from the BASE, never from the working file, so a test
     added and removed within the range has no row at all (a born tombstone is illegal).
 
@@ -147,10 +148,19 @@ def produce_nodes(ctx):
                     "{0} collected node(s) were retired by a tombstone at the base; a retired "
                     "identity cannot return. Rename the test. First 10: {1}".format(
                         len(revived), revived[:10]))
-    for node in collected.order:
-        if node not in known:
-            rows.append({"kind": "test", "id": "pytest-{0:06d}".format(len(rows) + 1),
-                         "node_id": node, "state": "active"})
+    # Rows the candidate already appended inside the range keep their order — and so their
+    # ids — while they still collect, so successive refreshes of one slice never move an id
+    # (an earlier slice's per-round rebuild moved 254 ids between commits). A row appended and
+    # retired inside the range has no row at all. Only when the candidate's file carries the
+    # base's rows verbatim at the front is its tail an in-range append to keep.
+    aligned = [r["node_id"] for r in own.rows[:len(base.rows)]] == [r["node_id"] for r in base.rows]
+    in_range = [r["node_id"] for r in own.rows[len(base.rows):]] if aligned else []
+    appended = [n for n in in_range if n in collected and n not in known]
+    seen = set(appended)
+    appended += [n for n in collected.order if n not in known and n not in seen]
+    for node in appended:
+        rows.append({"kind": "test", "id": "pytest-{0:06d}".format(len(rows) + 1),
+                     "node_id": node, "state": "active"})
     header = dict(own.header)
     header["minimum_active"] = sum(1 for row in rows if row["state"] == "active")
     header["minimum_collected"] = len(collected)
