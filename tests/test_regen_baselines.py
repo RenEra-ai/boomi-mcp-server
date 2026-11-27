@@ -636,6 +636,9 @@ def test_every_producer_set_the_validator_accepts_is_one_the_cli_can_run(tmp_pat
             except regen.Refusal:
                 reader = False
             assert cli == reader, (combo, cli, reader)
+            # and both against the dependency contract itself, stated independently of the
+            # shared rule: weights need nodes, and nothing else needs anything.
+            assert cli == ("weights" not in combo or "nodes" in combo), combo
             verdicts[combo] = cli
     assert set(verdicts.values()) == {True, False}, "the matrix must contain both outcomes"
     assert verdicts[("snapshots", "weights")] is False and verdicts[("nodes", "weights")] is True
