@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15188, "minimum_collected": 15188, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15205, "minimum_collected": 15205, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16169,3 +16169,20 @@
 {"kind": "test", "id": "pytest-016168", "node_id": "tests/test_regen_baselines.py::test_a_usage_error_leads_with_its_code", "state": "active"}
 {"kind": "test", "id": "pytest-016169", "node_id": "tests/test_regen_baselines.py::test_no_run_leaves_a_temporary_holder_behind", "state": "active"}
 {"kind": "test", "id": "pytest-016170", "node_id": "tests/test_regen_baselines.py::test_a_refresh_never_moves_an_id_the_candidate_already_appended", "state": "active"}
+{"kind": "test", "id": "pytest-016171", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-boolean-schema]", "state": "active"}
+{"kind": "test", "id": "pytest-016172", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-future-schema]", "state": "active"}
+{"kind": "test", "id": "pytest-016173", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-malformed-digest]", "state": "active"}
+{"kind": "test", "id": "pytest-016174", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-missing-field]", "state": "active"}
+{"kind": "test", "id": "pytest-016175", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-non-string-base]", "state": "active"}
+{"kind": "test", "id": "pytest-016176", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-short-candidate]", "state": "active"}
+{"kind": "test", "id": "pytest-016177", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[an-extra-field]", "state": "active"}
+{"kind": "test", "id": "pytest-016178", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[an-output-of-another-producer]", "state": "active"}
+{"kind": "test", "id": "pytest-016179", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[an-unknown-producer]", "state": "active"}
+{"kind": "test", "id": "pytest-016180", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[an-uppercase-base]", "state": "active"}
+{"kind": "test", "id": "pytest-016181", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[another-kind]", "state": "active"}
+{"kind": "test", "id": "pytest-016182", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[duplicate-producers]", "state": "active"}
+{"kind": "test", "id": "pytest-016183", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[no-outputs]", "state": "active"}
+{"kind": "test", "id": "pytest-016184", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[no-producers]", "state": "active"}
+{"kind": "test", "id": "pytest-016185", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[outputs-not-a-mapping]", "state": "active"}
+{"kind": "test", "id": "pytest-016186", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[producers-out-of-order]", "state": "active"}
+{"kind": "test", "id": "pytest-016187", "node_id": "tests/test_regen_baselines.py::test_the_bundle_index_fields_are_the_ones_the_writer_emits", "state": "active"}
