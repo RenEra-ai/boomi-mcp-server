@@ -366,6 +366,8 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
     """Freeze HEAD, run ``selected`` producers on it, show diffs, stage a bundle.
 
     Returns the bundle directory (``None`` when nothing differs)."""
+    if selection_problem(selected):
+        raise Refusal("REGEN_USAGE_INVALID", selection_problem(selected))
     candidate = _clean_head(repo)
     base_sha = gate._resolve_commit(repo, base)
     if subprocess.run(["git", "merge-base", "--is-ancestor", base_sha, candidate],
@@ -447,6 +449,22 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
                     pass  # it holds the default bundle
 
 
+#: Producers that consume another producer's result in the same run: weights are filtered by
+#: the collection the nodes producer takes. The ONE statement of that dependency — the CLI,
+#: `prepare` and the bundle validator all ask :func:`selection_problem`, so a reader never
+#: accepts a producer set the writer cannot run.
+REQUIRES = {"weights": ("nodes",)}
+
+
+def selection_problem(selected):
+    """Why ``selected`` cannot run together, or ``None``."""
+    for name in selected:
+        for needed in REQUIRES.get(name, ()):
+            if needed not in selected:
+                return "{0} need the {1} producer in the same run".format(name, needed)
+    return None
+
+
 def _is_hex(value, length):
     return (isinstance(value, str) and len(value) == length
             and all(c in "0123456789abcdef" for c in value))
@@ -466,7 +484,7 @@ def check_bundle_index(index, repo):
     if index["kind"] != BUNDLE_KIND:
         raise bad("is not a regeneration bundle (kind {0!r})".format(index["kind"]))
     version = index["schema_version"]
-    if isinstance(version, bool) or version != BUNDLE_SCHEMA_VERSION:
+    if type(version) is not int or version != BUNDLE_SCHEMA_VERSION:
         raise bad("has schema_version {0!r}, not {1}".format(version, BUNDLE_SCHEMA_VERSION))
     for field in ("candidate", "base"):
         if not _is_hex(index[field], 40):
@@ -477,6 +495,9 @@ def check_bundle_index(index, repo):
             or producers != [name for name in NAMES if name in producers]):
         raise bad("names producers {0!r}, not a non-empty subset of {1} in that order".format(
             producers, list(NAMES)))
+    if selection_problem(producers):
+        raise bad("names producers {0!r} that cannot run together: {1}".format(
+            producers, selection_problem(producers)))
     outputs = index["outputs"]
     if not isinstance(outputs, dict) or not outputs:
         raise bad("stages no outputs")
@@ -496,7 +517,9 @@ def install(repo, bundle_dir, emit=gate._emit):
     """Copy a staged bundle into the checkout — only while its inputs still match."""
     try:
         with open(os.path.join(bundle_dir, BUNDLE_INDEX), encoding="utf-8") as handle:
-            index = json.load(handle)
+            # Strict: a duplicate member would let the validator see one value and a reader
+            # keeping the other see another.
+            index = gate._strict_json_loads(handle.read())
     except (OSError, ValueError) as exc:
         raise Refusal("REGEN_BUNDLE_INVALID", "cannot read the bundle index: {0}".format(exc))
     check_bundle_index(index, repo)  # before anything is read or written
@@ -612,8 +635,8 @@ def main(argv=None):
                     unknown, ", ".join(NAMES)))
         else:
             selected = [name for name in NAMES if name != "weights" or args.durations]
-        if "weights" in selected and "nodes" not in selected:
-            raise Refusal("REGEN_USAGE_INVALID", "weights need the nodes producer in the same run")
+        if selection_problem(selected):
+            raise Refusal("REGEN_USAGE_INVALID", selection_problem(selected))
         if "weights" in selected and not args.durations:
             raise Refusal("REGEN_USAGE_INVALID", "weights need --durations")
         if args.bundle is not None:

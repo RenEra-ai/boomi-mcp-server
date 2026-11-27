@@ -548,6 +548,8 @@ _INDEX_MUTATIONS = {
     "another-kind": lambda i: i.update(kind="something-else"),
     "a-future-schema": lambda i: i.update(schema_version=2),
     "a-boolean-schema": lambda i: i.update(schema_version=True),
+    "a-float-schema": lambda i: i.update(schema_version=1.0),
+    "weights-without-nodes": lambda i: i.update(producers=["weights"]),
     "a-short-candidate": lambda i: i.update(candidate=i["candidate"][:12]),
     "an-uppercase-base": lambda i: i.update(base=i["base"].upper()),
     "a-non-string-base": lambda i: i.update(base=None),
@@ -588,3 +590,41 @@ def test_the_bundle_index_fields_are_the_ones_the_writer_emits(tmp_path):
     bundle = Path(_prepare(repo, base, tmp_path))
     index = json.loads((bundle / regen.BUNDLE_INDEX).read_text())
     assert tuple(sorted(index)) == regen.BUNDLE_FIELDS
+
+
+def test_a_bundle_index_with_a_duplicate_member_is_refused(tmp_path):
+    """`json.load` keeps the last of two members silently; the reader must refuse the
+    ambiguity rather than validate one value and install another."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    text = (bundle / regen.BUNDLE_INDEX).read_text()
+    duplicated = text.replace('"outputs":', '"outputs": {}, "outputs":', 1)
+    assert duplicated != text
+    (bundle / regen.BUNDLE_INDEX).write_text(duplicated, encoding="utf-8")
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), str(bundle), emit=lambda _line: None)
+    assert refused.value.code == "REGEN_BUNDLE_INVALID"
+
+
+def test_every_producer_set_the_validator_accepts_is_one_the_cli_can_run():
+    """The coverage claim, from the authority's full case set: over EVERY ordered subset of
+    the producers, the index validator's producer rule and the CLI's selection rule agree."""
+    import itertools
+
+    for size in range(1, len(regen.NAMES) + 1):
+        for combo in itertools.combinations(regen.NAMES, size):
+            assert (regen.selection_problem(list(combo)) is None) == (
+                "weights" not in combo or "nodes" in combo), combo
+
+
+def test_a_weights_only_bundle_is_refused_by_the_dependency_rule_alone(tmp_path):
+    """Isolated witness: a weights-only index whose one output IS a weights output, so only
+    the shared producer dependency can refuse it."""
+    index = {"kind": regen.BUNDLE_KIND, "schema_version": 1, "candidate": "a" * 40,
+             "base": "b" * 40, "producers": ["weights"],
+             "outputs": {gate.SUITE_WEIGHTS: "0" * 64}}
+    with pytest.raises(regen.Refusal) as refused:
+        regen.check_bundle_index(index, str(tmp_path))
+    assert refused.value.code == "REGEN_BUNDLE_INVALID" and "nodes" in refused.value.message
+    regen.check_bundle_index(dict(index, producers=["nodes", "weights"]), str(tmp_path))
