@@ -793,6 +793,15 @@ value, and the pytest and golden-render children are built without it. The corpu
 refuses it on its own under `GITHUB_ACTIONS=true`, so a direct pytest step in a workflow
 cannot carry it either.
 
+The gate's partitioned suite has one caller that is not a gate: `scripts/correction_suite.py`,
+the full local non-KB run for a correction loop. It reuses the collection, the node-manifest
+checks, the partition and the one shared reconciliation, and runs no baseline, manifest
+transition, golden or fingerprint phase. It is the local correction run the deferral is for:
+it may hand its children the variable explicitly, and then reconciles the skips it causes by
+identity against the tests the corpus plugin marks, outside the unchanged skip cap. Every run
+on a dirty tree or under the deferral is labelled partial. None of this reaches a gate path:
+the gate's own child environment never carries the variable.
+
 ## 10. What enforces the check, and what does not
 
 This repository integrates by fast-forward **push** to `dev`; it does not use pull

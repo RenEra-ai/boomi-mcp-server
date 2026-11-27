@@ -29,6 +29,7 @@ if _src not in sys.path:
     sys.path.insert(0, _src)
 
 import _revision_corpus  # noqa: E402 - the plugin `tests/conftest.py` registers
+import _authoring_contract_snapshots  # noqa: E402 - the snapshot renderer
 
 from boomi_mcp.authoring.process_ir_projection import (  # noqa: E402
     AUTHORING_LAYERS,
@@ -738,12 +739,8 @@ def test_state_mappings_cover_every_projected_source_state():
 # ---------------------------------------------------------------------------
 
 def _render_contract():
-    return json.dumps(
-        process_ir_authoring_revision_payload(),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
+    # One renderer for this test and the producer `scripts/regen_baselines.py` runs.
+    return _authoring_contract_snapshots.render_contract()
 
 
 @pytest.mark.revision_freshness(artifact=_revision_corpus.CONTRACT_SNAPSHOT)
@@ -798,12 +795,13 @@ def test_the_page_schema_is_frozen_in_a_committed_snapshot():
     )
 
     committed = _revision_corpus.committed_artifact(_revision_corpus.SCHEMA_SNAPSHOT)
-    rendered = json.dumps(
+    rendered = _authoring_contract_snapshots.render_schema()
+    assert rendered == json.dumps(
         process_ir_authoring_contract_v1_json_schema(),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
-    )
+    ), "the shared renderer must render the schema this test always compared"
     assert rendered == committed
 
 

@@ -1,0 +1,359 @@
+"""`scripts/regen_baselines.py` — one locked refresh of the derived baselines per candidate.
+
+Driven end to end over a throwaway repository with the producers that need no Boomi
+package (the node manifest and the weights), plus the real producers' wiring and the
+shared snapshot renderer checked against this repository:
+
+* the candidate is a clean HEAD, produced in a detached worktree; the checkout is untouched;
+* the node manifest is rebuilt from the base: removed tests tombstoned, new tests appended,
+  a test added and removed inside the range gets no row, a retired identity cannot return;
+* outputs install only while the inputs still match — a changed input refuses the install
+  (the planted failure), and so does a moved HEAD or a tampered bundle;
+* weights only from a clean, strict durations record of the candidate;
+* the deferral is refused, and a producer that writes outside its outputs fails the run.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load(name, relative):
+    spec = importlib.util.spec_from_file_location(name, _ROOT / relative)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+regen = _load("_regen_baselines_under_test", "scripts/regen_baselines.py")
+gate = regen.gate
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv(gate.DEFER_ENV, raising=False)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", *args], cwd=str(repo), check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _commit_all(repo, message="c"):
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+         "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _jsonl(objects):
+    return "".join(json.dumps(o) + "\n" for o in objects)
+
+
+def _manifest(rows, cap=5):
+    active = sum(1 for _n, state in rows if state == "active")
+    header = {"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes",
+              "minimum_active": active, "minimum_collected": active, "maximum_skipped": cap,
+              "bootstrap_base": "1" * 40}
+    return _jsonl([header] + [
+        {"kind": "test", "id": "pytest-{0:06d}".format(i), "node_id": n, "state": s}
+        for i, (n, s) in enumerate(rows, 1)])
+
+
+def _tests(repo, **bodies):
+    for name, body in bodies.items():
+        path = repo / "tests" / "{0}.py".format(name)
+        if body is None:
+            path.unlink()
+        else:
+            path.write_text(body, encoding="utf-8")
+
+
+def _toy_repo(tmp_path, base_rows=None):
+    """Base commit: tests/test_a.py (one, two) and a matching manifest."""
+    repo = tmp_path / "repo"
+    (repo / "tests" / "fixtures" / "wave_gate").mkdir(parents=True)
+    (repo / "src").mkdir()
+    (repo / "src" / ".keep").write_text("", encoding="utf-8")
+    (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    _tests(repo, test_a="def test_one():\n    pass\n\ndef test_two():\n    pass\n")
+    rows = base_rows or [("tests/test_a.py::test_one", "active"),
+                         ("tests/test_a.py::test_two", "active")]
+    (repo / gate.NODES_MANIFEST).write_text(_manifest(rows), encoding="utf-8")
+    (repo / gate.SUITE_WEIGHTS).write_text(json.dumps(
+        {"kind": "suite-weights", "schema_version": 1, "weights": {}}, indent=0) + "\n",
+        encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    return repo, _commit_all(repo, "base")
+
+
+def _candidate(repo):
+    """Remove test_two, add test_b.py::test_three."""
+    _tests(repo, test_a="def test_one():\n    pass\n",
+           test_b="def test_three():\n    pass\n")
+    return _commit_all(repo, "candidate")
+
+
+def _rows(text):
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def _prepare(repo, base, tmp_path, selected=("nodes",), **kwargs):
+    return regen.prepare(str(repo), base, list(selected), bundle_dir=str(tmp_path / "bundle"),
+                         emit=lambda _line: None, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# the node manifest, rebuilt from the base
+# ---------------------------------------------------------------------------
+
+def test_the_node_manifest_is_rebuilt_from_the_base_and_installed(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    candidate = _candidate(repo)
+    before = (repo / gate.NODES_MANIFEST).read_text(encoding="utf-8")
+
+    bundle = _prepare(repo, base, tmp_path)
+    assert bundle is not None
+    assert (repo / gate.NODES_MANIFEST).read_text(encoding="utf-8") == before, \
+        "producing must never touch the checkout"
+    assert not any(line for line in _git(repo, "worktree", "list").splitlines()[1:]), \
+        "the candidate worktree is removed"
+
+    installed = regen.install(str(repo), bundle, emit=lambda _line: None)
+    assert installed == [gate.NODES_MANIFEST]
+    text = (repo / gate.NODES_MANIFEST).read_text(encoding="utf-8")
+    header, *rows = _rows(text)
+    assert [(r["id"], r["node_id"], r["state"]) for r in rows] == [
+        ("pytest-000001", "tests/test_a.py::test_one", "active"),
+        ("pytest-000002", "tests/test_a.py::test_two", "tombstone"),
+        ("pytest-000003", "tests/test_b.py::test_three", "active"),
+    ]
+    assert (header["minimum_active"], header["minimum_collected"]) == (2, 2)
+    base_manifest = gate.parse_manifest(_git(repo, "show", base + ":" + gate.NODES_MANIFEST)
+                                        .encode("utf-8") + b"\n", "pytest-nodes")
+    gate.validate_transition(base_manifest, gate.parse_manifest(text.encode("utf-8"), "pytest-nodes"),
+                             "pytest-nodes")
+    assert _git(repo, "rev-parse", "HEAD") == candidate
+
+
+def test_a_test_added_and_removed_inside_the_range_gets_no_row(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _tests(repo, test_c="def test_transient():\n    pass\n")
+    _commit_all(repo, "add transient")
+    _tests(repo, test_c=None)
+    (repo / gate.NODES_MANIFEST).write_text(_manifest([
+        ("tests/test_a.py::test_one", "active"), ("tests/test_a.py::test_two", "active"),
+        ("tests/test_c.py::test_transient", "active")]), encoding="utf-8")
+    _commit_all(repo, "remove transient, stale manifest")
+    bundle = _prepare(repo, base, tmp_path)
+    regen.install(str(repo), bundle, emit=lambda _line: None)
+    nodes = [r["node_id"] for r in _rows((repo / gate.NODES_MANIFEST).read_text())[1:]]
+    assert "tests/test_c.py::test_transient" not in nodes
+
+
+def test_a_current_manifest_needs_no_refresh(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    assert _prepare(repo, base, tmp_path) is None
+
+
+def test_a_retired_identity_cannot_return(tmp_path):
+    repo, base = _toy_repo(tmp_path, base_rows=[
+        ("tests/test_a.py::test_one", "active"), ("tests/test_a.py::test_two", "active"),
+        ("tests/test_a.py::test_gone", "tombstone")])
+    _tests(repo, test_a="def test_one():\n    pass\n\ndef test_two():\n    pass\n\n"
+                        "def test_gone():\n    pass\n")
+    _commit_all(repo, "revive")
+    with pytest.raises(regen.Refusal) as refused:
+        _prepare(repo, base, tmp_path)
+    assert refused.value.code == "REGEN_NODE_REVIVED"
+
+
+# ---------------------------------------------------------------------------
+# install only while the inputs still match
+# ---------------------------------------------------------------------------
+
+def test_a_changed_input_refuses_the_install(tmp_path):
+    """The planted failure: an input edited after production. Nothing is written."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = _prepare(repo, base, tmp_path)
+    before = (repo / gate.NODES_MANIFEST).read_bytes()
+    _tests(repo, test_b="def test_three():\n    pass\n\ndef test_four():\n    pass\n")
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), bundle, emit=lambda _line: None)
+    assert refused.value.code == "REGEN_INPUTS_CHANGED"
+    assert (repo / gate.NODES_MANIFEST).read_bytes() == before
+
+
+def test_a_moved_head_refuses_the_install(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = _prepare(repo, base, tmp_path)
+    _tests(repo, test_b="def test_three():\n    pass\n\ndef test_four():\n    pass\n")
+    _commit_all(repo, "a later correction")
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), bundle, emit=lambda _line: None)
+    assert refused.value.code == "REGEN_INPUTS_CHANGED"
+
+
+def test_a_tampered_bundle_refuses_the_install(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    staged = bundle / "files" / gate.NODES_MANIFEST
+    staged.write_text(staged.read_text() + "\n", encoding="utf-8")
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), str(bundle), emit=lambda _line: None)
+    assert refused.value.code == "REGEN_BUNDLE_INVALID"
+
+
+def test_an_install_is_refused_while_a_suite_holds_the_lock(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = _prepare(repo, base, tmp_path)
+    suite_lock = regen.correction_suite.tree_lock(str(repo), exclusive=False)
+    try:
+        with pytest.raises(regen.correction_suite.Refusal) as refused:
+            regen.install(str(repo), bundle, emit=lambda _line: None)
+    finally:
+        suite_lock.close()
+    assert refused.value.code == "CORRECTION_LOCK_HELD"
+
+
+def test_a_dirty_checkout_is_not_a_candidate(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _tests(repo, test_b="def test_three():\n    pass\n")
+    with pytest.raises(regen.Refusal) as refused:
+        _prepare(repo, base, tmp_path)
+    assert refused.value.code == "REGEN_CHECKOUT_DIRTY"
+
+
+def test_a_base_off_the_candidate_history_is_refused(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "side")
+    side = _candidate(repo)
+    _git(repo, "checkout", "-q", "main")
+    with pytest.raises(regen.Refusal) as refused:
+        _prepare(repo, side, tmp_path)
+    assert refused.value.code == "REGEN_BASE_INVALID"
+
+
+def test_a_producer_writing_outside_its_outputs_fails_the_run(tmp_path, monkeypatch):
+    repo, base = _toy_repo(tmp_path)
+
+    def sneaky(ctx):
+        (Path(ctx["worktree"]) / "tests" / "test_a.py").write_text("x = 1\n", encoding="utf-8")
+        return []
+
+    monkeypatch.setattr(regen, "PRODUCERS", (("sneaky", ("tests/fixtures/x.json",), sneaky, "test"),))
+    with pytest.raises(regen.Refusal) as refused:
+        _prepare(repo, base, tmp_path, selected=("sneaky",))
+    assert refused.value.code == "REGEN_UNDECLARED_WRITE"
+
+
+# ---------------------------------------------------------------------------
+# weights, the deferral, the CLI
+# ---------------------------------------------------------------------------
+
+def _durations(path, head, dirty=False, deferred=False):
+    path.write_text(json.dumps({
+        "kind": "suite-durations", "schema_version": 1, "head": head, "dirty": dirty,
+        "deferred": deferred, "processes": 4, "tree": "0" * 64,
+        "durations": {"tests/test_a.py::test_one": 1.234, "tests/test_b.py::test_three": 0.01,
+                      "tests/test_a.py::test_two": 9.0}}), encoding="utf-8")
+    return str(path)
+
+
+def test_weights_come_from_a_clean_strict_run_of_the_candidate(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    candidate = _candidate(repo)
+    durations = regen.load_durations(_durations(tmp_path / "d.json", candidate), candidate)
+    bundle = _prepare(repo, base, tmp_path, selected=("nodes", "weights"), durations=durations)
+    regen.install(str(repo), bundle, emit=lambda _line: None)
+    text = (repo / gate.SUITE_WEIGHTS).read_text(encoding="utf-8")
+    assert json.loads(text)["weights"] == {"tests/test_a.py::test_one": 1.23}, \
+        "below the floor and no-longer-collected nodes are dropped"
+    assert text == json.dumps(json.loads(text), indent=0) + "\n"
+
+
+@pytest.mark.parametrize("field", ["head", "dirty", "deferred"])
+def test_weights_from_any_other_run_are_refused(tmp_path, field):
+    candidate = "c" * 40
+    kwargs = {"head": "d" * 40} if field == "head" else {"head": candidate, field: True}
+    with pytest.raises(regen.Refusal) as refused:
+        regen.load_durations(_durations(tmp_path / "d.json", **kwargs), candidate)
+    assert refused.value.code == "REGEN_DURATIONS_INVALID"
+
+
+@pytest.mark.parametrize("value", ["1", "", "0"])
+def test_the_deferral_is_refused_whatever_its_value(tmp_path, monkeypatch, capsys, value):
+    monkeypatch.setenv(gate.DEFER_ENV, value)
+    assert regen.main(["--repo", str(tmp_path), "--base", "HEAD"]) == 2
+    assert capsys.readouterr().err.split()[0] == "REVISION_DEFERRAL_PRESENT"
+
+
+def test_producers_never_inherit_the_deferral(monkeypatch):
+    monkeypatch.setenv(gate.DEFER_ENV, "1")
+    assert gate.DEFER_ENV not in regen._producer_env()
+
+
+def test_the_cli_stages_then_installs_from_the_bundle(tmp_path, capsys):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    out = tmp_path / "staged"
+    assert regen.main(["--repo", str(repo), "--base", base, "--only", "nodes",
+                       "--bundle", str(out)]) == 0
+    err = capsys.readouterr().err
+    assert "dry run" in err and "1 rows appended, 1 tombstoned" in err, err
+    assert _git(repo, "status", "--porcelain") == ""
+    assert regen.main(["--repo", str(repo), "--install-from", str(out)]) == 0
+    assert _git(repo, "status", "--porcelain").split() == ["M", gate.NODES_MANIFEST]
+
+
+def test_weights_without_a_durations_record_are_a_usage_error(tmp_path, capsys):
+    repo, base = _toy_repo(tmp_path)
+    assert regen.main(["--repo", str(repo), "--base", base, "--only", "nodes,weights"]) == 2
+    assert capsys.readouterr().err.split()[0] == "REGEN_USAGE_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# the real producers' wiring, against this repository
+# ---------------------------------------------------------------------------
+
+def test_the_producers_run_in_dependency_order_and_declare_the_committed_artifacts():
+    import _revision_corpus as plugin
+
+    assert regen.NAMES == ("corpus", "snapshots", "inventory", "nodes", "weights")
+    outputs = {path for _n, paths, _r, _w in regen.PRODUCERS for path in paths}
+    assert set(plugin.FRESHNESS_ARTIFACTS) <= outputs
+    assert (_ROOT / regen.CORPUS) == plugin.CORPUS_PATH
+    assert all((_ROOT / path).is_file() for path in outputs)
+
+
+def test_the_snapshot_renderer_spells_the_plugins_paths():
+    import _authoring_contract_snapshots as snapshots
+    import _revision_corpus as plugin
+
+    assert snapshots.CONTRACT_SNAPSHOT == plugin.CONTRACT_SNAPSHOT == regen.CONTRACT_SNAPSHOT
+    assert snapshots.SCHEMA_SNAPSHOT == plugin.SCHEMA_SNAPSHOT == regen.SCHEMA_SNAPSHOT
+    assert set(snapshots.RENDERERS) == {plugin.CONTRACT_SNAPSHOT, plugin.SCHEMA_SNAPSHOT}
+
+
+def test_the_corpus_diff_reports_decoded_inputs(tmp_path):
+    from boomi_mcp.authoring import revision_corpus as corpus
+
+    old = corpus.serialize_corpus([{"entry": "compile", "n": 1}, {"entry": "compile", "n": 2}])
+    new = corpus.serialize_corpus([{"entry": "compile", "n": 2}, {"entry": "resolve", "n": 3}])
+    ctx = {"worktree": str(_ROOT), "env": regen._producer_env()}
+    lines = regen.semantic_diff(ctx, regen.CORPUS, old, new, 50)
+    assert lines[0] == "decoded inputs: 2 -> 2 records, 1 added, 1 removed", lines
+    assert "{'resolve': 1}" in lines[1] and "{'compile': 1}" in lines[2], lines

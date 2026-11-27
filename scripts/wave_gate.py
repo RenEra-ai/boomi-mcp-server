@@ -1609,8 +1609,8 @@ def _refuse_unowned_report(tmpdir, report_fd, name="junit.xml"):
         )
 
 
-def _executed_projections(report_fd):
-    """Every `(classname, name)` junit recorded, as a sorted list (duplicates kept).
+def _junit_testcases(report_fd):
+    """Every ``<testcase>`` element junit recorded, in report order (duplicates kept).
 
     Read through the HELD DESCRIPTOR, never the pathname, so the parse cannot be
     redirected after the ownership proof.
@@ -1624,10 +1624,33 @@ def _executed_projections(report_fd):
             "cannot read the junit execution report ({0}); what actually ran "
             "cannot be established".format(exc),
         )
+    return list(tree.iter("testcase"))
+
+
+def _executed_projections(report_fd):
+    """Every `(classname, name)` junit recorded, as a sorted list (duplicates kept)."""
     return sorted(
         (case.get("classname") or "", case.get("name") or "")
-        for case in tree.iter("testcase")
+        for case in _junit_testcases(report_fd)
     )
+
+
+#: The reason the corpus plugin gives a test it skips under :data:`DEFER_ENV`
+#: (`tests/_revision_corpus.py::pytest_collection_modifyitems`), up to its first variable
+#: part. Spelled here because this module cannot import the plugin;
+#: `tests/test_correction_suite.py` pins it to the reason a real deferred child reports.
+DEFERRAL_SKIP_PREFIX = "deferred by {0}=1".format(DEFER_ENV)
+
+
+def _deferral_skipped_projections(report_fd):
+    """The `(classname, name)` of every testcase junit reports SKIPPED by the deferral."""
+    found = []
+    for case in _junit_testcases(report_fd):
+        for skipped in case.iter("skipped"):
+            if (skipped.get("message") or "").startswith(DEFERRAL_SKIP_PREFIX):
+                found.append((case.get("classname") or "", case.get("name") or ""))
+                break
+    return sorted(found)
 
 
 #: How many pytest children the full suite is split across. A CONSTANT, committed here,
@@ -1864,14 +1887,20 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
     return summary
 
 
-def _run_suite_children(repo, plan, tmpdir):
+def _run_suite_children(repo, plan, tmpdir, env=None):
     """Launch one pytest child per share of ``plan``, stream their output, and reap them.
 
     Returns the children, each with its exit ``status``, the summary candidates seen
     WHILE STREAMING, a bounded ``tail`` and — when ``tmpdir`` is given — the owned junit
     report it wrote. Nothing is judged here: :func:`reconcile_suite` (or, for one runner
     shard, its per-child checks) decides what the results mean.
+
+    ``env`` is the children's environment, :func:`_pytest_env` when omitted. Every gate
+    path omits it. The one caller that passes it is the correction-run entry
+    (`scripts/correction_suite.py`), which is not a gate and may hand its children the
+    revision-freshness deferral; the gate itself never can (`REVISION_DEFERRAL_PRESENT`).
     """
+    child_env = _pytest_env() if env is None else dict(env)
     children = []
     for index, share in enumerate(plan, 1):
         child = {"index": index, "nodes": share["nodes"], "report_fd": None,
@@ -1945,7 +1974,7 @@ def _run_suite_children(repo, plan, tmpdir):
     try:
         for child in children:
             child["proc"] = subprocess.Popen(
-                child["argv"], cwd=str(repo), env=_pytest_env(),
+                child["argv"], cwd=str(repo), env=child_env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
             )
         if len(children) == 1:
@@ -2024,7 +2053,8 @@ def _check_child_identity(tmpdir, child, where):
         )
 
 
-def reconcile_suite(nodes_manifest, collected, children, tmpdir, unit="pytest child"):
+def reconcile_suite(nodes_manifest, collected, children, tmpdir, unit="pytest child",
+                    deferred=None):
     """Hold the WHOLE suite to every bound, whatever ran it.
 
     THE one post-run reconciliation. :func:`run_suite` calls it on the children it just
@@ -2037,6 +2067,12 @@ def reconcile_suite(nodes_manifest, collected, children, tmpdir, unit="pytest ch
     identity are applied; and each child's junit report must equal, by identity, the
     nodes it was assigned — the shares partition the collection, so equality in every
     child is equality of the union.
+
+    ``deferred`` is for the correction-run entry only, never a gate (every gate path
+    leaves it None): the set of collected node ids the revision-freshness deferral
+    marks. Those skips are then reconciled BY IDENTITY — every child's junit must report
+    exactly its share of them skipped with the deferral's reason, no more and no fewer —
+    and only they are kept outside the committed skip cap. The cap itself never moves.
     """
     def where(child):
         return "" if len(children) == 1 else "{0} {1}/{2}: ".format(
@@ -2048,22 +2084,54 @@ def reconcile_suite(nodes_manifest, collected, children, tmpdir, unit="pytest ch
         for key in summary:
             summary[key] += counts[key]
 
+    deferred_count = 0
+    if deferred is not None:
+        if tmpdir is None:
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "deferred skips are reconciled from the junit reports, which need the "
+                "scratch directory",
+            )
+        stray = sorted(set(deferred) - set(collected))
+        if stray:
+            raise _invalid(
+                "PYTEST_EXECUTION_UNRECONCILED",
+                "{0} node(s) marked for deferral are not in the collection: {1}".format(
+                    len(stray), stray[:10]),
+            )
+        for child in children:
+            _refuse_unowned_report(tmpdir, child["report_fd"], child["report_name"])
+            reported = _deferral_skipped_projections(child["report_fd"])
+            expected = sorted(_junit_projection(n) for n in child["nodes"] if n in deferred)
+            if reported != expected:
+                raise _invalid(
+                    "PYTEST_EXECUTION_UNRECONCILED",
+                    "{0}the tests skipped by the deferral do not match the tests it marks "
+                    "({1} reported vs {2} marked). Missing: {3}. Unexpected: {4}.".format(
+                        where(child), len(reported), len(expected),
+                        sorted(set(expected) - set(reported))[:10],
+                        sorted(set(reported) - set(expected))[:10]),
+                )
+            deferred_count += len(reported)
+        summary["deferred"] = deferred_count
+
     cap = nodes_manifest.header["maximum_skipped"]
-    if summary["skipped"] > cap:
+    if summary["skipped"] - deferred_count > cap:
         raise _invalid(
             "PYTEST_SKIPPED_EXCEEDS_CAP",
             "{0} tests skipped, above the committed cap of {1}. A test that is "
             "collected but never runs is not evidence of anything; if this rise "
             "is deliberate, raise maximum_skipped in {2} in the same change."
-            .format(summary["skipped"], cap, NODES_MANIFEST),
+            .format(summary["skipped"] - deferred_count, cap, NODES_MANIFEST),
         )
 
-    floor = len(collected) - cap
+    floor = len(collected) - deferred_count - cap
     if summary["passed"] < floor:
         raise _invalid(
             "PYTEST_PASSED_BELOW_FLOOR",
             "{0} tests passed, below the floor of {1} ({2} collected - {3} "
-            "permitted skips)".format(summary["passed"], floor, len(collected), cap),
+            "permitted skips)".format(summary["passed"], floor, len(collected),
+                                      cap + deferred_count),
         )
     # IDENTITY, not just arithmetic. The count identity below is necessary but
     # NOT sufficient: a `pytest_collection_modifyitems` hook that replaces node B
