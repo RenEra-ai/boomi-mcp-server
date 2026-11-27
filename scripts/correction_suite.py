@@ -57,6 +57,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -71,6 +72,10 @@ PROG = "correction_suite"
 
 _FRESHNESS_LINE = "freshness check skipped: "
 _PENDING_LINE = "not yet in the packaged corpus (deferred)"
+#: The input identity in a pending line (`tests/_revision_corpus.py` writes
+#: "... (deferred): a <kind> input (<digest>) from <node>"); two children reaching the same
+#: input report it twice, so the count is by identity, never by line.
+_PENDING_IDENTITY = re.compile(r"\(deferred\): a (\S+) input \(([^)]*)\)")
 
 
 class Refusal(Exception):
@@ -187,17 +192,38 @@ def durations(children, collected):
     return out
 
 
+def require_outside_repo(path, repo, flag):
+    """The ONE containment check for every output destination these commands are given.
+
+    Called at entry, before any collection, producer or directory creation, so a bad
+    destination neither touches the checkout nor wastes a multi-hour run. ``realpath`` follows
+    the part of ``path`` that exists, so a symlink into the checkout is refused too. Returns
+    the absolute path."""
+    absolute = os.path.abspath(path)
+    real = os.path.realpath(absolute)
+    real_repo = os.path.realpath(repo)
+    if real == real_repo or real.startswith(real_repo + os.sep):
+        raise Refusal("SCRATCH_INSIDE_REPO",
+                      "{0} {1} is inside the repository; these commands never write "
+                      "there".format(flag, absolute))
+    return absolute
+
+
+def durations_name(record):
+    """A strict clean record is named for its commit alone; any other run also names its mode
+    and tree, so a partial run never replaces the strict record of the same commit."""
+    if not record["dirty"] and not record["deferred"]:
+        return "suite-durations-{0}.json".format(record["head"][:12])
+    mode = "-".join(m for m, on in (("dirty", record["dirty"]), ("deferred", record["deferred"])) if on)
+    return "suite-durations-{0}-{1}-{2}.json".format(record["head"][:12], mode, record["tree"][:12])
+
+
 def write_durations(directory, repo, record):
     """Write the durations record into ``directory`` (created if absent), never inside the
     repository. Returns the path written."""
-    directory = os.path.abspath(directory)
-    real_repo = os.path.realpath(repo) + os.sep
+    directory = require_outside_repo(directory, repo, "--durations-out")
     os.makedirs(directory, exist_ok=True)
-    if (os.path.realpath(directory) + os.sep).startswith(real_repo):
-        raise Refusal("SCRATCH_INSIDE_REPO",
-                      "--durations-out {0} is inside the repository; the run never writes "
-                      "there".format(directory))
-    path = os.path.join(directory, "suite-durations-{0}.json".format(record["head"][:12]))
+    path = os.path.join(directory, durations_name(record))
     tmp = path + ".partial-{0}".format(os.getpid())
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(record, handle, indent=0, sort_keys=True)
@@ -206,8 +232,22 @@ def write_durations(directory, repo, record):
     return path
 
 
+def pending_inputs(children):
+    """The distinct corpus inputs the children reported pending, from the lines captured
+    while streaming (never the bounded tail), one entry per ``(kind, digest)``."""
+    found = {}
+    for child in children:
+        for line in child.get("captured", ()):
+            match = _PENDING_IDENTITY.search(line)
+            key = match.groups() if match else ("?", line.strip())
+            found.setdefault(key, line.strip())
+    return [found[key] for key in sorted(found)]
+
+
 def run(repo, *, defer, durations_out=None, emit=gate._emit):
     """One correction run. Returns ``(verdict line, summary)``; raises on failure."""
+    if durations_out is not None:
+        require_outside_repo(durations_out, repo, "--durations-out")
     before = gate._status(repo)
     head = _head(repo)
     dirty = _dirty(repo)
@@ -225,11 +265,10 @@ def run(repo, *, defer, durations_out=None, emit=gate._emit):
         env = gate._pytest_env()
         if defer:
             env[DEFER_ENV] = "1"
-        children = gate._run_suite_children(repo, plan, tmpdir, env=env)
+        children = gate._run_suite_children(repo, plan, tmpdir, env=env, capture=_PENDING_LINE)
         summary = gate.reconcile_suite(nodes_manifest, collected, children, tmpdir,
                                        deferred=marked)
-        pending = sorted({line.strip() for child in children for line in child["tail"]
-                          if _PENDING_LINE in line})
+        pending = pending_inputs(children)
         measured = durations(children, collected)
     except BaseException as exc:  # noqa: BLE001 - re-raised after the closing fingerprint
         failure = exc

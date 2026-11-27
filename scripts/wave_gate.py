@@ -1887,7 +1887,7 @@ def run_suite(repo, nodes_manifest, collected, tmpdir=None, processes=1, weights
     return summary
 
 
-def _run_suite_children(repo, plan, tmpdir, env=None):
+def _run_suite_children(repo, plan, tmpdir, env=None, capture=None):
     """Launch one pytest child per share of ``plan``, stream their output, and reap them.
 
     Returns the children, each with its exit ``status``, the summary candidates seen
@@ -1899,12 +1899,17 @@ def _run_suite_children(repo, plan, tmpdir, env=None):
     path omits it. The one caller that passes it is the correction-run entry
     (`scripts/correction_suite.py`), which is not a gate and may hand its children the
     revision-freshness deferral; the gate itself never can (`REVISION_DEFERRAL_PRESENT`).
+
+    ``capture``, when given, is a substring: every streamed line containing it is kept in the
+    child's ``captured`` list WHILE STREAMING, so a caller that must count such lines never
+    reads them from the bounded ``tail`` (which a long output evicts). Every gate path omits
+    it; it judges nothing.
     """
     child_env = _pytest_env() if env is None else dict(env)
     children = []
     for index, share in enumerate(plan, 1):
         child = {"index": index, "nodes": share["nodes"], "report_fd": None,
-                 "report_name": None, "summaries": [], "tail": []}
+                 "report_name": None, "summaries": [], "tail": [], "captured": []}
         if share["args"] is None:
             argv = _pytest_argv("-q", "-rs")
         else:
@@ -1956,6 +1961,8 @@ def _run_suite_children(repo, plan, tmpdir, env=None):
                     sys.stderr.write(prefix + line)
                     if _is_summary_line(stripped):
                         child["summaries"].append(stripped)
+                if capture is not None and capture in line:
+                    child["captured"].append(line)
                 child["tail"].append(line)
                 if len(child["tail"]) > 400:
                     del child["tail"][0]

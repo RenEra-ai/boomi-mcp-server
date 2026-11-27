@@ -221,6 +221,68 @@ def test_the_durations_record_is_written_outside_the_repository_only(tmp_path, c
     assert refused.value.code == "SCRATCH_INSIDE_REPO"
 
 
+def test_a_durations_destination_inside_the_repository_is_refused_before_collection(
+        tmp_path, capsys, monkeypatch):
+    repo = _toy_repo(tmp_path)
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("collection ran before the destination was checked")
+
+    monkeypatch.setattr(gate, "collect_nodes", never)
+    status, err = _main(repo, capsys, "--durations-out", str(repo / "timings"))
+    assert status == 2, err
+    assert err.split()[0] == "SCRATCH_INSIDE_REPO"
+    assert not (repo / "timings").exists(), "the refusal creates nothing"
+
+
+def test_a_partial_run_never_replaces_the_strict_record_of_the_same_commit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out = tmp_path / "durations"
+    base = {"kind": suite.DURATIONS_KIND, "schema_version": 1, "head": "a" * 40,
+            "processes": 4, "durations": {}}
+    strict = dict(base, dirty=False, deferred=False, tree="1" * 64)
+    deferred = dict(base, dirty=False, deferred=True, tree="1" * 64)
+    dirty = dict(base, dirty=True, deferred=False, tree="2" * 64)
+    paths = {suite.write_durations(str(out), str(repo), r) for r in (strict, deferred, dirty)}
+    assert len(paths) == 3
+    assert json.loads((out / suite.durations_name(strict)).read_text())["deferred"] is False
+
+
+def test_pending_inputs_are_counted_by_identity_from_the_streamed_capture():
+    line = ("  not yet in the packaged corpus (deferred): a compile input (sha256:{0}) "
+            "from tests/test_{1}.py::t")
+    children = [
+        {"captured": [line.format("aa", 1), line.format("bb", 1)], "tail": []},
+        {"captured": [line.format("aa", 2)], "tail": []},
+    ]
+    assert [p.split("(sha256:")[1][:2] for p in suite.pending_inputs(children)] == ["aa", "bb"]
+
+
+def test_the_capture_survives_a_tail_that_evicts_it(tmp_path):
+    """The planted case the bounded tail loses: a pending line followed by more output than
+    the tail keeps. It is captured while streaming, so the count still sees it."""
+    repo = _toy_repo(tmp_path)
+    marker = "not yet in the packaged corpus (deferred): a compile input (sha256:feed) from x"
+    (repo / "tests" / "test_a.py").write_text(
+        "def test_one():\n    pass\n\ndef test_two():\n    pass\n\n"
+        "def pytest_terminal_summary_marker():\n    pass\n", encoding="utf-8")
+    with (repo / "tests" / "conftest.py").open("a", encoding="utf-8") as handle:
+        handle.write("\n\ndef pytest_terminal_summary(terminalreporter):\n"
+                     "    terminalreporter.write_line({0!r})\n"
+                     "    for i in range(600):\n"
+                     "        terminalreporter.write_line('filler %d' % i)\n".format(marker))
+    tmpdir = gate.make_scratch_dir(str(repo))
+    try:
+        plan = [{"args": None, "nodes": []}]
+        (child,) = gate._run_suite_children(str(repo), plan, None, capture=suite._PENDING_LINE)
+    finally:
+        tmpdir.dispose()
+    assert not any(marker in line for line in child["tail"]), "the tail must have evicted it"
+    assert [line.strip() for line in child["captured"]] == [marker]
+    assert len(suite.pending_inputs([child])) == 1
+
+
 # ---------------------------------------------------------------------------
 # refusals
 # ---------------------------------------------------------------------------

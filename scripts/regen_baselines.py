@@ -45,6 +45,7 @@ import difflib
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -100,23 +101,44 @@ def _script(*argv):
 
 
 def produce_nodes(ctx):
-    """The node manifest: the base's rows, tombstoning every active row the candidate no
-    longer collects, then one appended active row per newly collected node in collection
-    order. Rebuilt from the BASE, never from the working file, so a test added and removed
-    within the range has no row at all (a born tombstone is illegal)."""
-    base_raw = gate._git(ctx["repo"], "show", "{0}:{1}".format(ctx["base"], gate.NODES_MANIFEST)).stdout
-    base = gate.parse_manifest(base_raw.encode("utf-8"), "pytest-nodes")
+    """The node manifest: the base's rows, then one appended active row per newly collected
+    node in collection order. Rebuilt from the BASE, never from the working file, so a test
+    added and removed within the range has no row at all (a born tombstone is illegal).
+
+    A required node that no longer collects is NOT a regeneration outcome
+    (`specs/ENDGAME_VERIFICATION_GATE.md`): it is an explicit ``active → tombstone`` edit by
+    the change that deletes the test. So a missing node is tombstoned only when the
+    candidate's own committed manifest already tombstones it; any other missing node fails the
+    run (``REGEN_NODE_MISSING``) — a module skipped at import time, say, is not a deletion.
+    The header is the CANDIDATE's, so a skip cap the candidate tightened stays tightened; only
+    the two derived floors are recomputed."""
+    def committed(sha):
+        raw = gate._git(ctx["repo"], "show", "{0}:{1}".format(sha, gate.NODES_MANIFEST)).stdout
+        return gate.parse_manifest(raw.encode("utf-8"), "pytest-nodes")
+
+    base = committed(ctx["base"])
+    own = committed(ctx["candidate"])
+    retired = {row["node_id"] for row in own.rows if row["state"] == "tombstone"}
     scratch = gate.make_scratch_dir(ctx["worktree"])
     try:
         collected = gate.collect_nodes(ctx["worktree"], scratch)
     finally:
         scratch.dispose()
+    missing = sorted(row["node_id"] for row in base.rows
+                     if row["state"] == "active" and row["node_id"] not in collected
+                     and row["node_id"] not in retired)
+    if missing:
+        raise _fail("REGEN_NODE_MISSING",
+                    "{0} required node(s) no longer collect and the candidate's manifest does "
+                    "not tombstone them. Retiring a test is an explicit edit in the change that "
+                    "deletes it; a test that merely failed to collect must be fixed. First 10: "
+                    "{1}".format(len(missing), missing[:10]))
     rows, known = [], {}
     for row in base.rows:
         row = dict(row)
         known[row["node_id"]] = row
         if row["state"] == "active" and row["node_id"] not in collected:
-            row["state"] = "tombstone"
+            row["state"] = "tombstone"  # explicitly retired by the candidate (checked above)
         rows.append(row)
     # A collected node is never flipped above, so a tombstone here is one the BASE recorded.
     revived = sorted(n for n in collected if n in known and known[n]["state"] == "tombstone")
@@ -129,7 +151,7 @@ def produce_nodes(ctx):
         if node not in known:
             rows.append({"kind": "test", "id": "pytest-{0:06d}".format(len(rows) + 1),
                          "node_id": node, "state": "active"})
-    header = dict(base.header)
+    header = dict(own.header)
     header["minimum_active"] = sum(1 for row in rows if row["state"] == "active")
     header["minimum_collected"] = len(collected)
     text = "".join(json.dumps(obj) + "\n" for obj in [header] + rows)
@@ -334,7 +356,14 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
                       cwd=str(repo)).returncode != 0:
         raise Refusal("REGEN_BASE_INVALID", "--base {0} is not an ancestor of the candidate {1}".format(
             base_sha, candidate))
+    if bundle_dir is not None:
+        bundle_dir = correction_suite.require_outside_repo(bundle_dir, repo, "--bundle")
     holder = tempfile.mkdtemp(prefix="regen-baselines-")
+    try:
+        correction_suite.require_outside_repo(holder, repo, "the temporary directory")
+    except correction_suite.Refusal:
+        shutil.rmtree(holder, ignore_errors=True)
+        raise
     worktree = os.path.join(holder, "candidate")
     gate._git(repo, "worktree", "add", "--detach", worktree, candidate)
     ctx = {"repo": repo, "worktree": worktree, "base": base_sha, "candidate": candidate,
@@ -370,9 +399,7 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
             if not keep_worktree:
                 ctx["discard_holder"] = True
             return None
-        bundle_dir = os.path.abspath(bundle_dir or os.path.join(holder, "bundle"))
-        if (os.path.realpath(bundle_dir) + os.sep).startswith(os.path.realpath(repo) + os.sep):
-            raise Refusal("SCRATCH_INSIDE_REPO", "the bundle never goes inside the repository")
+        bundle_dir = bundle_dir or os.path.join(holder, "bundle")
         os.makedirs(os.path.join(bundle_dir, "files"), exist_ok=True)
         index = {"kind": BUNDLE_KIND, "schema_version": 1, "candidate": candidate,
                  "base": base_sha, "producers": [n for n in NAMES if n in selected], "outputs": {}}
@@ -397,6 +424,12 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
                 shutil.rmtree(holder, ignore_errors=True)
 
 
+def installable_outputs(producers):
+    """The paths a bundle staged by ``producers`` may install: their declared outputs only."""
+    names = set(producers) if isinstance(producers, list) else set()
+    return {path for name, outputs, _run, _why in PRODUCERS if name in names for path in outputs}
+
+
 def install(repo, bundle_dir, emit=gate._emit):
     """Copy a staged bundle into the checkout — only while its inputs still match."""
     try:
@@ -406,6 +439,19 @@ def install(repo, bundle_dir, emit=gate._emit):
         raise Refusal("REGEN_BUNDLE_INVALID", "cannot read the bundle index: {0}".format(exc))
     if index.get("kind") != BUNDLE_KIND or not isinstance(index.get("outputs"), dict):
         raise Refusal("REGEN_BUNDLE_INVALID", "{0} is not a regeneration bundle".format(bundle_dir))
+    allowed = installable_outputs(index.get("producers"))
+    real_repo = os.path.realpath(repo)
+    for path in index["outputs"]:
+        # The bundle names its destinations, so they are checked against what the named
+        # producers declare BEFORE anything is read or written: the digests only prove the
+        # bytes match the same index, never that the index is honest.
+        if path not in allowed:
+            raise Refusal("REGEN_BUNDLE_INVALID",
+                          "{0!r} is not an output of the bundle's producers {1}; nothing was "
+                          "installed".format(path, index.get("producers")))
+        if not os.path.realpath(os.path.join(repo, path)).startswith(real_repo + os.sep):
+            raise Refusal("REGEN_BUNDLE_INVALID",
+                          "{0!r} resolves outside the checkout; nothing was installed".format(path))
     lock = correction_suite.tree_lock(repo, exclusive=True)
     try:
         head = correction_suite._head(repo)
@@ -435,12 +481,16 @@ def install(repo, bundle_dir, emit=gate._emit):
                 if os.path.exists(target):
                     shutil.copymode(target, temps[path])
             for path in staged:
-                os.replace(temps.pop(path), os.path.join(repo, path))
+                os.replace(temps[path], os.path.join(repo, path))
+                del temps[path]  # registered until the rename has succeeded
                 replaced.append(path)
         except BaseException:
             for path in replaced:  # all or none
-                if originals.get(path) is not None:
-                    with open(os.path.join(repo, path), "wb") as handle:
+                target = os.path.join(repo, path)
+                if originals.get(path) is None:
+                    os.unlink(target)  # an output HEAD does not have: remove it again
+                else:
+                    with open(target, "wb") as handle:
                         handle.write(originals[path])
             for temp in temps.values():
                 if os.path.exists(temp):
@@ -453,6 +503,13 @@ def install(repo, bundle_dir, emit=gate._emit):
     emit("{0}: {1} output(s) installed on {2}; review and commit them.".format(
         PROG, len(staged), index["candidate"]))
     return sorted(staged)
+
+
+def install_command(bundle):
+    """The runnable command that installs ``bundle``: the script is not executable in git, so
+    it goes through this interpreter, and every path is shell-quoted."""
+    return " ".join(shlex.quote(part) for part in (
+        sys.executable, os.path.abspath(__file__), "--install-from", bundle))
 
 
 def build_parser():
@@ -503,6 +560,8 @@ def main(argv=None):
             raise Refusal("REGEN_USAGE_INVALID", "weights need the nodes producer in the same run")
         if "weights" in selected and not args.durations:
             raise Refusal("REGEN_USAGE_INVALID", "weights need --durations")
+        if args.bundle is not None:
+            args.bundle = correction_suite.require_outside_repo(args.bundle, repo, "--bundle")
         regen_lock = _lock(repo, REGEN_LOCK_NAME)
         try:
             candidate = _clean_head(repo)
@@ -517,8 +576,8 @@ def main(argv=None):
                 if args.install:
                     install(repo, bundle)
                 else:
-                    gate._emit("{0}: dry run — install with: scripts/regen_baselines.py "
-                               "--install-from {1}".format(PROG, bundle))
+                    gate._emit("{0}: dry run — install with: {1}".format(
+                        PROG, install_command(bundle)))
         finally:
             regen_lock.close()
         return 0

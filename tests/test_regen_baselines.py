@@ -5,10 +5,14 @@ package (the node manifest and the weights), plus the real producers' wiring and
 shared snapshot renderer checked against this repository:
 
 * the candidate is a clean HEAD, produced in a detached worktree; the checkout is untouched;
-* the node manifest is rebuilt from the base: removed tests tombstoned, new tests appended,
-  a test added and removed inside the range gets no row, a retired identity cannot return;
+* the node manifest is rebuilt from the base: new tests appended, a removed test tombstoned
+  only when the candidate's manifest retires it explicitly (otherwise the run fails), the
+  candidate's tightened skip cap kept, a test added and removed inside the range gets no
+  row, a retired identity cannot return;
 * outputs install only while the inputs still match — a changed input refuses the install
-  (the planted failure), and so does a moved HEAD or a tampered bundle;
+  (the planted failure), and so does a moved HEAD or a tampered bundle; a bundle installs
+  only its producers' declared outputs, and a failed install leaves the checkout as it was;
+* an output destination inside the checkout is refused before any producer runs;
 * weights only from a clean, strict durations record of the candidate;
 * the deferral is refused, and a producer that writes outside its outputs fails the run.
 """
@@ -96,10 +100,16 @@ def _toy_repo(tmp_path, base_rows=None):
     return repo, _commit_all(repo, "base")
 
 
-def _candidate(repo):
-    """Remove test_two, add test_b.py::test_three."""
+def _candidate(repo, retire=True, cap=5):
+    """Remove test_two, add test_b.py::test_three. With ``retire``, the change also makes
+    the owning edit to the manifest — test_two tombstoned — leaving the floors stale for the
+    regeneration to recompute."""
     _tests(repo, test_a="def test_one():\n    pass\n",
            test_b="def test_three():\n    pass\n")
+    if retire:
+        (repo / gate.NODES_MANIFEST).write_text(_manifest([
+            ("tests/test_a.py::test_one", "active"),
+            ("tests/test_a.py::test_two", "tombstone")], cap=cap), encoding="utf-8")
     return _commit_all(repo, "candidate")
 
 
@@ -143,6 +153,27 @@ def test_the_node_manifest_is_rebuilt_from_the_base_and_installed(tmp_path):
     gate.validate_transition(base_manifest, gate.parse_manifest(text.encode("utf-8"), "pytest-nodes"),
                              "pytest-nodes")
     assert _git(repo, "rev-parse", "HEAD") == candidate
+
+
+def test_a_node_that_stops_collecting_without_a_retirement_fails_the_run(tmp_path):
+    """The gate spec: a node that no longer collects is an explicit tombstone by the change
+    that deletes it, never a regeneration outcome. A module skipped at import time looks
+    exactly like this, and must not lower the floor."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo, retire=False)
+    with pytest.raises(regen.Refusal) as refused:
+        _prepare(repo, base, tmp_path)
+    assert refused.value.code == "REGEN_NODE_MISSING"
+    assert "tests/test_a.py::test_two" in refused.value.message
+
+
+def test_a_skip_cap_the_candidate_tightened_stays_tightened(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo, cap=3)
+    bundle = _prepare(repo, base, tmp_path)
+    regen.install(str(repo), bundle, emit=lambda _line: None)
+    header = _rows((repo / gate.NODES_MANIFEST).read_text(encoding="utf-8"))[0]
+    assert header["maximum_skipped"] == 3, "regenerating from the base must not restore 5"
 
 
 def test_a_test_added_and_removed_inside_the_range_gets_no_row(tmp_path):
@@ -214,6 +245,59 @@ def test_a_tampered_bundle_refuses_the_install(tmp_path):
     with pytest.raises(regen.Refusal) as refused:
         regen.install(str(repo), str(bundle), emit=lambda _line: None)
     assert refused.value.code == "REGEN_BUNDLE_INVALID"
+
+
+@pytest.mark.parametrize("path", ["tests/test_a.py", "../escaped.json"])
+def test_a_bundle_installs_only_its_producers_declared_outputs(tmp_path, path):
+    """The digests prove only that the bytes match the same index; the index names the
+    destinations, so a destination outside the producers' declared outputs is refused before
+    anything is written."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    index = json.loads((bundle / regen.BUNDLE_INDEX).read_text())
+    staged = bundle / "files" / path
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_text("x = 1\n", encoding="utf-8")
+    index["outputs"][path] = regen._sha256(b"x = 1\n")
+    (bundle / regen.BUNDLE_INDEX).write_text(json.dumps(index), encoding="utf-8")
+    before = {p: (repo / p).read_bytes() for p in ("tests/test_a.py", gate.NODES_MANIFEST)}
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), str(bundle), emit=lambda _line: None)
+    assert refused.value.code == "REGEN_BUNDLE_INVALID"
+    assert {p: (repo / p).read_bytes() for p in before} == before
+    assert not (tmp_path / "escaped.json").exists()
+
+
+def test_a_failed_install_leaves_the_checkout_as_it_was(tmp_path, monkeypatch):
+    """All or none: an output replaced before the failure is restored, an output HEAD does
+    not have is removed again, and no temporary file is left behind."""
+    repo, base = _toy_repo(tmp_path)
+    _tests(repo, test_a="def test_one():\n    pass\n",
+           test_b="def test_three():\n    pass\n")
+    (repo / gate.NODES_MANIFEST).write_text(_manifest([
+        ("tests/test_a.py::test_one", "active"),
+        ("tests/test_a.py::test_two", "tombstone")]), encoding="utf-8")
+    (repo / gate.SUITE_WEIGHTS).unlink()  # the candidate carries no weights file
+    candidate = _commit_all(repo, "candidate without weights")
+    durations = regen.load_durations(_durations(tmp_path / "d.json", candidate), candidate)
+    bundle = _prepare(repo, base, tmp_path, selected=("nodes", "weights"), durations=durations)
+    manifest_before = (repo / gate.NODES_MANIFEST).read_bytes()
+
+    real_replace = regen.os.replace
+
+    def failing(src, dst):
+        if dst.endswith(gate.NODES_MANIFEST):  # sorted after suite_weights.json
+            raise OSError("disk full")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(regen.os, "replace", failing)
+    with pytest.raises(OSError):
+        regen.install(str(repo), bundle, emit=lambda _line: None)
+    monkeypatch.setattr(regen.os, "replace", real_replace)
+    assert not (repo / gate.SUITE_WEIGHTS).exists(), "a newly created output is removed again"
+    assert (repo / gate.NODES_MANIFEST).read_bytes() == manifest_before
+    assert _git(repo, "status", "--porcelain", "--untracked-files=all") == ""
 
 
 def test_an_install_is_refused_while_a_suite_holds_the_lock(tmp_path):
@@ -313,10 +397,39 @@ def test_the_cli_stages_then_installs_from_the_bundle(tmp_path, capsys):
     assert regen.main(["--repo", str(repo), "--base", base, "--only", "nodes",
                        "--bundle", str(out)]) == 0
     err = capsys.readouterr().err
-    assert "dry run" in err and "1 rows appended, 1 tombstoned" in err, err
+    assert "dry run" in err and "1 appended, 1 tombstoned against base" in err, err
+    assert "1 rows appended, 0 tombstoned" in err, "the diff is against the candidate's own file"
     assert _git(repo, "status", "--porcelain") == ""
     assert regen.main(["--repo", str(repo), "--install-from", str(out)]) == 0
     assert _git(repo, "status", "--porcelain").split() == ["M", gate.NODES_MANIFEST]
+
+
+def test_a_bundle_destination_inside_the_checkout_is_refused_before_any_producer(
+        tmp_path, capsys, monkeypatch):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    ran = []
+    monkeypatch.setattr(regen, "PRODUCERS", (
+        ("nodes", (gate.NODES_MANIFEST,), lambda ctx: ran.append(1) or [], "test"),))
+    assert regen.main(["--repo", str(repo), "--base", base, "--only", "nodes",
+                       "--bundle", str(repo / "staged")]) == 2
+    assert capsys.readouterr().err.split()[0] == "SCRATCH_INSIDE_REPO"
+    assert ran == [] and not (repo / "staged").exists()
+    with pytest.raises(regen.correction_suite.Refusal) as refused:
+        regen.prepare(str(repo), base, ["nodes"], bundle_dir=str(repo / "staged"),
+                      emit=lambda _line: None)
+    assert refused.value.code == "SCRATCH_INSIDE_REPO"
+    assert ran == [] and not any(
+        line for line in _git(repo, "worktree", "list").splitlines()[1:])
+
+
+def test_the_printed_install_command_runs_as_written(tmp_path):
+    import shlex
+
+    bundle = str(tmp_path / "a bundle")
+    argv = shlex.split(regen.install_command(bundle))
+    assert argv[:2] == [regen.sys.executable, str(_ROOT / "scripts" / "regen_baselines.py")]
+    assert argv[2:] == ["--install-from", bundle]
 
 
 def test_weights_without_a_durations_record_are_a_usage_error(tmp_path, capsys):
