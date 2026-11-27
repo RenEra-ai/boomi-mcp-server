@@ -1,4 +1,4 @@
-{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15205, "minimum_collected": 15205, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
+{"kind": "manifest", "schema_version": 1, "manifest": "pytest-nodes", "minimum_active": 15210, "minimum_collected": 15210, "maximum_skipped": 30, "bootstrap_base": "9080e3c2d0fcc82b01f781b2352d60995ba58ad8"}
 {"kind": "test", "id": "pytest-000001", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_get_returns_strict_schema_without_xml", "state": "active"}
 {"kind": "test", "id": "pytest-000002", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_list_includes_api_to_api_sync", "state": "active"}
 {"kind": "test", "id": "pytest-000003", "node_id": "tests/patterns/test_api_to_api_sync_e2e.py::TestCatalogAndSchema::test_schema_template_resolves", "state": "active"}
@@ -16186,3 +16186,8 @@
 {"kind": "test", "id": "pytest-016185", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[outputs-not-a-mapping]", "state": "active"}
 {"kind": "test", "id": "pytest-016186", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[producers-out-of-order]", "state": "active"}
 {"kind": "test", "id": "pytest-016187", "node_id": "tests/test_regen_baselines.py::test_the_bundle_index_fields_are_the_ones_the_writer_emits", "state": "active"}
+{"kind": "test", "id": "pytest-016188", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[a-float-schema]", "state": "active"}
+{"kind": "test", "id": "pytest-016189", "node_id": "tests/test_regen_baselines.py::test_every_field_of_the_bundle_index_is_validated_before_anything_is_written[weights-without-nodes]", "state": "active"}
+{"kind": "test", "id": "pytest-016190", "node_id": "tests/test_regen_baselines.py::test_a_bundle_index_with_a_duplicate_member_is_refused", "state": "active"}
+{"kind": "test", "id": "pytest-016191", "node_id": "tests/test_regen_baselines.py::test_every_producer_set_the_validator_accepts_is_one_the_cli_can_run", "state": "active"}
+{"kind": "test", "id": "pytest-016192", "node_id": "tests/test_regen_baselines.py::test_a_weights_only_bundle_is_refused_by_the_dependency_rule_alone", "state": "active"}
