@@ -423,13 +423,41 @@ def test_a_bundle_destination_inside_the_checkout_is_refused_before_any_producer
         line for line in _git(repo, "worktree", "list").splitlines()[1:])
 
 
-def test_the_printed_install_command_runs_as_written(tmp_path):
-    import shlex
+def test_the_printed_install_command_runs_as_written(tmp_path, capsys):
+    """The witness: stage a bundle for a checkout that is NOT this script's own, with a space
+    in the bundle path, then execute the printed line verbatim through a shell from an
+    unrelated directory. It must install into that checkout."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    out = tmp_path / "a bundle"
+    assert regen.main(["--repo", str(repo), "--base", base, "--only", "nodes",
+                       "--bundle", str(out)]) == 0
+    err = capsys.readouterr().err
+    (line,) = [l for l in err.splitlines() if "dry run" in l]
+    command = line.split("install with: ", 1)[1]
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = dict(regen.os.environ)
+    env.pop(gate.DEFER_ENV, None)
+    proc = subprocess.run(command, shell=True, cwd=str(elsewhere), env=env,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert _git(repo, "status", "--porcelain").split() == ["M", gate.NODES_MANIFEST]
+    assert _git(_ROOT, "status", "--porcelain", "--", gate.NODES_MANIFEST) == "", \
+        "this script's own checkout is never the target"
 
-    bundle = str(tmp_path / "a bundle")
-    argv = shlex.split(regen.install_command(bundle))
-    assert argv[:2] == [regen.sys.executable, str(_ROOT / "scripts" / "regen_baselines.py")]
-    assert argv[2:] == ["--install-from", bundle]
+
+@pytest.mark.parametrize("producers", [[{"nodes": 1}], [["nodes"]], "nodes", None])
+def test_a_bundle_with_malformed_producer_names_is_refused_with_a_code(tmp_path, producers):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    index = json.loads((bundle / regen.BUNDLE_INDEX).read_text())
+    index["producers"] = producers
+    (bundle / regen.BUNDLE_INDEX).write_text(json.dumps(index), encoding="utf-8")
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), str(bundle), emit=lambda _line: None)
+    assert refused.value.code == "REGEN_BUNDLE_INVALID"
 
 
 def test_weights_without_a_durations_record_are_a_usage_error(tmp_path, capsys):

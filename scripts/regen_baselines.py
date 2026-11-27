@@ -431,7 +431,11 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
 
 def installable_outputs(producers):
     """The paths a bundle staged by ``producers`` may install: their declared outputs only."""
-    names = set(producers) if isinstance(producers, list) else set()
+    if not isinstance(producers, list) or not all(isinstance(n, str) for n in producers):
+        raise Refusal("REGEN_BUNDLE_INVALID",
+                      "the bundle's producers {0!r} are not a list of names; nothing was "
+                      "installed".format(producers))
+    names = set(producers)
     return {path for name, outputs, _run, _why in PRODUCERS if name in names for path in outputs}
 
 
@@ -510,11 +514,15 @@ def install(repo, bundle_dir, emit=gate._emit):
     return sorted(staged)
 
 
-def install_command(bundle):
-    """The runnable command that installs ``bundle``: the script is not executable in git, so
-    it goes through this interpreter, and every path is shell-quoted."""
+def install_command(repo, bundle):
+    """The runnable command that installs ``bundle`` into ``repo``, derived from every input
+    that selects the install: the interpreter (the script is not executable in git), this
+    script, the checkout as RESOLVED (``--repo``, always — the command may be pasted from any
+    directory, and the script's own checkout need not be the target), and the bundle. Every
+    part is shell-quoted. Nothing else in the printed line is free text."""
     return " ".join(shlex.quote(part) for part in (
-        sys.executable, os.path.abspath(__file__), "--install-from", bundle))
+        sys.executable, os.path.abspath(__file__), "--repo", os.path.abspath(str(repo)),
+        "--install-from", os.path.abspath(bundle)))
 
 
 class _Parser(correction_suite.CodedParser):
@@ -586,7 +594,7 @@ def main(argv=None):
                     install(repo, bundle)
                 else:
                     gate._emit("{0}: dry run — install with: {1}".format(
-                        PROG, install_command(bundle)))
+                        PROG, install_command(repo, bundle)))
         finally:
             regen_lock.close()
         return 0
