@@ -540,3 +540,51 @@ def test_no_run_leaves_a_temporary_holder_behind(tmp_path, monkeypatch):
     _candidate(repo)
     assert _prepare(repo, base, tmp_path) is not None  # explicit bundle_dir
     assert list(scratch.iterdir()) == []
+
+
+_INDEX_MUTATIONS = {
+    "an-extra-field": lambda i: i.update(note="x"),
+    "a-missing-field": lambda i: i.pop("base"),
+    "another-kind": lambda i: i.update(kind="something-else"),
+    "a-future-schema": lambda i: i.update(schema_version=2),
+    "a-boolean-schema": lambda i: i.update(schema_version=True),
+    "a-short-candidate": lambda i: i.update(candidate=i["candidate"][:12]),
+    "an-uppercase-base": lambda i: i.update(base=i["base"].upper()),
+    "a-non-string-base": lambda i: i.update(base=None),
+    "an-unknown-producer": lambda i: i.update(producers=["nodes", "goldens"]),
+    "producers-out-of-order": lambda i: i.update(producers=["weights", "nodes"]),
+    "duplicate-producers": lambda i: i.update(producers=["nodes", "nodes"]),
+    "no-producers": lambda i: i.update(producers=[]),
+    "no-outputs": lambda i: i.update(outputs={}),
+    "outputs-not-a-mapping": lambda i: i.update(outputs=[gate.NODES_MANIFEST]),
+    "a-malformed-digest": lambda i: i["outputs"].update({gate.NODES_MANIFEST: "abc"}),
+    "an-output-of-another-producer": lambda i: i["outputs"].update({regen.INVENTORY: "0" * 64}),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(_INDEX_MUTATIONS))
+def test_every_field_of_the_bundle_index_is_validated_before_anything_is_written(
+        tmp_path, mutation):
+    """The structural fix for the trusted-bundle-index class: one validator over the whole
+    index (`check_bundle_index`), so every field the writer emits is checked by the reader.
+    Each case is a concrete index the validator must exclude."""
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    index = json.loads((bundle / regen.BUNDLE_INDEX).read_text())
+    regen.check_bundle_index(dict(index, outputs=dict(index["outputs"])), str(repo))  # genuine: passes
+    _INDEX_MUTATIONS[mutation](index)
+    (bundle / regen.BUNDLE_INDEX).write_text(json.dumps(index), encoding="utf-8")
+    before = (repo / gate.NODES_MANIFEST).read_bytes()
+    with pytest.raises(regen.Refusal) as refused:
+        regen.install(str(repo), str(bundle), emit=lambda _line: None)
+    assert refused.value.code == "REGEN_BUNDLE_INVALID"
+    assert (repo / gate.NODES_MANIFEST).read_bytes() == before
+
+
+def test_the_bundle_index_fields_are_the_ones_the_writer_emits(tmp_path):
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo)
+    bundle = Path(_prepare(repo, base, tmp_path))
+    index = json.loads((bundle / regen.BUNDLE_INDEX).read_text())
+    assert tuple(sorted(index)) == regen.BUNDLE_FIELDS

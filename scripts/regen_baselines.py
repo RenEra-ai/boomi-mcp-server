@@ -60,6 +60,12 @@ PROG = "regen_baselines"
 REGEN_LOCK_NAME = "boomi-regen.lock"
 BUNDLE_KIND = "regen-baselines-bundle"
 BUNDLE_INDEX = "bundle.json"
+BUNDLE_SCHEMA_VERSION = 1
+#: Every field of the bundle index, exactly. `prepare` writes these and nothing else, and
+#: passes what it wrote through :func:`check_bundle_index` before writing it; `install` reads
+#: only through that function. One validator over the whole index, not a check per field
+#: at each point of use.
+BUNDLE_FIELDS = ("base", "candidate", "kind", "outputs", "producers", "schema_version")
 
 CORPUS = "src/boomi_mcp/authoring/revision_corpus_v1.json.gz"
 CONTRACT_SNAPSHOT = "tests/fixtures/authoring_contract/process_ir_authoring_v1.contract.json"
@@ -411,14 +417,16 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
             return None
         bundle_dir = bundle_dir or os.path.join(holder, "bundle")
         os.makedirs(os.path.join(bundle_dir, "files"), exist_ok=True)
-        index = {"kind": BUNDLE_KIND, "schema_version": 1, "candidate": candidate,
-                 "base": base_sha, "producers": [n for n in NAMES if n in selected], "outputs": {}}
+        index = {"kind": BUNDLE_KIND, "schema_version": BUNDLE_SCHEMA_VERSION,
+                 "candidate": candidate, "base": base_sha,
+                 "producers": [n for n in NAMES if n in selected],
+                 "outputs": {path: _sha256(blob) for path, blob in outputs.items()}}
+        check_bundle_index(index, repo)  # the writer's output must pass the reader
         for path, blob in sorted(outputs.items()):
             target = os.path.join(bundle_dir, "files", path)
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as handle:
                 handle.write(blob)
-            index["outputs"][path] = _sha256(blob)
         with open(os.path.join(bundle_dir, BUNDLE_INDEX), "w", encoding="utf-8") as handle:
             json.dump(index, handle, indent=1, sort_keys=True)
             handle.write("\n")
@@ -439,14 +447,49 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
                     pass  # it holds the default bundle
 
 
-def installable_outputs(producers):
-    """The paths a bundle staged by ``producers`` may install: their declared outputs only."""
-    if not isinstance(producers, list) or not all(isinstance(n, str) for n in producers):
-        raise Refusal("REGEN_BUNDLE_INVALID",
-                      "the bundle's producers {0!r} are not a list of names; nothing was "
-                      "installed".format(producers))
-    names = set(producers)
-    return {path for name, outputs, _run, _why in PRODUCERS if name in names for path in outputs}
+def _is_hex(value, length):
+    return (isinstance(value, str) and len(value) == length
+            and all(c in "0123456789abcdef" for c in value))
+
+
+def check_bundle_index(index, repo):
+    """The whole bundle index, validated against the format `prepare` writes, or
+    ``REGEN_BUNDLE_INVALID``. Returns ``index``. Nothing about a bundle is trusted until it
+    passes: the digests prove only that the staged bytes match the SAME index, so the index
+    itself must be the shape this command writes — and its destinations exactly the declared
+    outputs of the producers it names, inside the checkout."""
+    def bad(detail):
+        return Refusal("REGEN_BUNDLE_INVALID", "the bundle index {0}; nothing was installed".format(detail))
+
+    if not isinstance(index, dict) or tuple(sorted(index)) != BUNDLE_FIELDS:
+        raise bad("must carry exactly the fields {0}".format(list(BUNDLE_FIELDS)))
+    if index["kind"] != BUNDLE_KIND:
+        raise bad("is not a regeneration bundle (kind {0!r})".format(index["kind"]))
+    version = index["schema_version"]
+    if isinstance(version, bool) or version != BUNDLE_SCHEMA_VERSION:
+        raise bad("has schema_version {0!r}, not {1}".format(version, BUNDLE_SCHEMA_VERSION))
+    for field in ("candidate", "base"):
+        if not _is_hex(index[field], 40):
+            raise bad("has a {0} that is not a full commit id: {1!r}".format(field, index[field]))
+    producers = index["producers"]
+    if (not isinstance(producers, list) or not producers
+            or not all(isinstance(name, str) for name in producers)
+            or producers != [name for name in NAMES if name in producers]):
+        raise bad("names producers {0!r}, not a non-empty subset of {1} in that order".format(
+            producers, list(NAMES)))
+    outputs = index["outputs"]
+    if not isinstance(outputs, dict) or not outputs:
+        raise bad("stages no outputs")
+    allowed = {path for name, paths, _run, _why in PRODUCERS if name in producers for path in paths}
+    real_repo = os.path.realpath(repo)
+    for path, digest in outputs.items():
+        if path not in allowed:
+            raise bad("stages {0!r}, which is not an output of its producers {1}".format(path, producers))
+        if not os.path.realpath(os.path.join(repo, path)).startswith(real_repo + os.sep):
+            raise bad("stages {0!r}, which resolves outside the checkout".format(path))
+        if not _is_hex(digest, 64):
+            raise bad("has a digest for {0!r} that is not a sha256: {1!r}".format(path, digest))
+    return index
 
 
 def install(repo, bundle_dir, emit=gate._emit):
@@ -456,21 +499,7 @@ def install(repo, bundle_dir, emit=gate._emit):
             index = json.load(handle)
     except (OSError, ValueError) as exc:
         raise Refusal("REGEN_BUNDLE_INVALID", "cannot read the bundle index: {0}".format(exc))
-    if index.get("kind") != BUNDLE_KIND or not isinstance(index.get("outputs"), dict):
-        raise Refusal("REGEN_BUNDLE_INVALID", "{0} is not a regeneration bundle".format(bundle_dir))
-    allowed = installable_outputs(index.get("producers"))
-    real_repo = os.path.realpath(repo)
-    for path in index["outputs"]:
-        # The bundle names its destinations, so they are checked against what the named
-        # producers declare BEFORE anything is read or written: the digests only prove the
-        # bytes match the same index, never that the index is honest.
-        if path not in allowed:
-            raise Refusal("REGEN_BUNDLE_INVALID",
-                          "{0!r} is not an output of the bundle's producers {1}; nothing was "
-                          "installed".format(path, index.get("producers")))
-        if not os.path.realpath(os.path.join(repo, path)).startswith(real_repo + os.sep):
-            raise Refusal("REGEN_BUNDLE_INVALID",
-                          "{0!r} resolves outside the checkout; nothing was installed".format(path))
+    check_bundle_index(index, repo)  # before anything is read or written
     lock = correction_suite.tree_lock(repo, exclusive=True)
     try:
         head = correction_suite._head(repo)
