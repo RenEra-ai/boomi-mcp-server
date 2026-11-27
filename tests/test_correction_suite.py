@@ -287,6 +287,12 @@ def test_the_capture_survives_a_tail_that_evicts_it(tmp_path):
 # refusals
 # ---------------------------------------------------------------------------
 
+def test_a_usage_error_leads_with_its_code(tmp_path, capsys):
+    status, err = _main(tmp_path, capsys, "--bogus")
+    assert status == 2
+    assert err.split()[0] == "CORRECTION_USAGE_INVALID", err
+
+
 @pytest.mark.parametrize("value", ["", "0", "true", " 1"])
 def test_only_the_exact_value_1_defers(value, tmp_path, capsys, monkeypatch):
     monkeypatch.setenv(gate.DEFER_ENV, value)

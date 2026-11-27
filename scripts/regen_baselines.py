@@ -422,6 +422,11 @@ def prepare(repo, base, selected, *, durations=None, bundle_dir=None, diff_lines
                            capture_output=True)
             if ctx.get("discard_holder"):
                 shutil.rmtree(holder, ignore_errors=True)
+            else:
+                try:  # a failed run, or one staged to an explicit --bundle, leaves it empty
+                    os.rmdir(holder)
+                except OSError:
+                    pass  # it holds the default bundle
 
 
 def installable_outputs(producers):
@@ -512,8 +517,12 @@ def install_command(bundle):
         sys.executable, os.path.abspath(__file__), "--install-from", bundle))
 
 
+class _Parser(correction_suite.CodedParser):
+    usage_code = "REGEN_USAGE_INVALID"
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(prog="regen_baselines.py", description=__doc__.split("\n")[0])
+    parser = _Parser(prog="regen_baselines.py", description=__doc__.split("\n")[0])
     parser.add_argument("--repo", default=None)
     parser.add_argument("--base", help="the dev commit the slice started from (node manifest base)")
     parser.add_argument("--only", default=None,
@@ -532,10 +541,10 @@ def build_parser():
 
 def main(argv=None):
     try:
-        args = build_parser().parse_args(argv)
-    except SystemExit as exc:
-        return 0 if exc.code in (0, None) else 2
-    try:
+        try:
+            args = build_parser().parse_args(argv)
+        except SystemExit as exc:  # --help
+            return 0 if exc.code in (0, None) else 2
         if DEFER_ENV in os.environ:
             raise Refusal("REVISION_DEFERRAL_PRESENT",
                           "{0} is set; producers are where deferred freshness debt is paid, so "

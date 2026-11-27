@@ -316,8 +316,19 @@ def run(repo, *, defer, durations_out=None, emit=gate._emit):
     return verdict, summary
 
 
+class CodedParser(argparse.ArgumentParser):
+    """An argument parser whose usage errors are refusals: argparse's own ``error()`` prints
+    ``usage:`` and exits, which would make the first stderr token something other than the
+    failure's code. This raises instead, so the caller reports the code first."""
+
+    usage_code = "CORRECTION_USAGE_INVALID"
+
+    def error(self, message):
+        raise Refusal(self.usage_code, "{0} (see --help)".format(message))
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(prog="correction_suite.py", description=__doc__.split("\n")[0])
+    parser = CodedParser(prog="correction_suite.py", description=__doc__.split("\n")[0])
     parser.add_argument("--repo", default=None, help="repository (default: the one holding this script)")
     parser.add_argument("--durations-out", metavar="DIR", default=None,
                         help="write the run's per-node durations record here (outside the repo)")
@@ -326,10 +337,10 @@ def build_parser():
 
 def main(argv=None):
     try:
-        args = build_parser().parse_args(argv)
-    except SystemExit as exc:
-        return 0 if exc.code in (0, None) else 2
-    try:
+        try:
+            args = build_parser().parse_args(argv)
+        except SystemExit as exc:  # --help
+            return 0 if exc.code in (0, None) else 2
         defer = deferral_mode(os.environ)
         repo = gate._repo_root(args.repo)
         lock = tree_lock(repo, exclusive=False)

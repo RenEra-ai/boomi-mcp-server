@@ -470,3 +470,25 @@ def test_the_corpus_diff_reports_decoded_inputs(tmp_path):
     lines = regen.semantic_diff(ctx, regen.CORPUS, old, new, 50)
     assert lines[0] == "decoded inputs: 2 -> 2 records, 1 added, 1 removed", lines
     assert "{'resolve': 1}" in lines[1] and "{'compile': 1}" in lines[2], lines
+
+
+def test_a_usage_error_leads_with_its_code(tmp_path, capsys):
+    assert regen.main(["--repo", str(tmp_path), "--bogus"]) == 2
+    assert capsys.readouterr().err.split()[0] == "REGEN_USAGE_INVALID"
+
+
+def test_no_run_leaves_a_temporary_holder_behind(tmp_path, monkeypatch):
+    """A failed run and a run staged to an explicit --bundle both leave nothing in the
+    temporary directory."""
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(regen.tempfile, "tempdir", str(scratch))
+    repo, base = _toy_repo(tmp_path)
+    _candidate(repo, retire=False)
+    with pytest.raises(regen.Refusal):
+        _prepare(repo, base, tmp_path)  # REGEN_NODE_MISSING
+    assert list(scratch.iterdir()) == []
+    _git(repo, "reset", "-q", "--hard", base)
+    _candidate(repo)
+    assert _prepare(repo, base, tmp_path) is not None  # explicit bundle_dir
+    assert list(scratch.iterdir()) == []
